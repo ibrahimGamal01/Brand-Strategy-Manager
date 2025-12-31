@@ -1,0 +1,373 @@
+{
+    "name": "Step 3: Competitor Scraping - 5-Service Rotation",
+    "description": "Routes competitor scraping through one of 5 services based on rotation index",
+    "nodes": [
+        {
+            "parameters": {
+                "rules": {
+                    "values": [
+                        {
+                            "conditions": {
+                                "options": {
+                                    "caseSensitive": true
+                                },
+                                "conditions": [
+                                    {
+                                        "leftValue": "={{ $json.currentService }}",
+                                        "rightValue": "apify",
+                                        "operator": {
+                                            "type": "string",
+                                            "operation": "equals"
+                                        }
+                                    }
+                                ]
+                            },
+                            "renameOutput": true,
+                            "outputKey": "apify"
+                        },
+                        {
+                            "conditions": {
+                                "options": {
+                                    "caseSensitive": true
+                                },
+                                "conditions": [
+                                    {
+                                        "leftValue": "={{ $json.currentService }}",
+                                        "rightValue": "brightdata",
+                                        "operator": {
+                                            "type": "string",
+                                            "operation": "equals"
+                                        }
+                                    }
+                                ]
+                            },
+                            "renameOutput": true,
+                            "outputKey": "brightdata"
+                        },
+                        {
+                            "conditions": {
+                                "options": {
+                                    "caseSensitive": true
+                                },
+                                "conditions": [
+                                    {
+                                        "leftValue": "={{ $json.currentService }}",
+                                        "rightValue": "sociavault",
+                                        "operator": {
+                                            "type": "string",
+                                            "operation": "equals"
+                                        }
+                                    }
+                                ]
+                            },
+                            "renameOutput": true,
+                            "outputKey": "sociavault"
+                        },
+                        {
+                            "conditions": {
+                                "options": {
+                                    "caseSensitive": true
+                                },
+                                "conditions": [
+                                    {
+                                        "leftValue": "={{ $json.currentService }}",
+                                        "rightValue": "scrapeless",
+                                        "operator": {
+                                            "type": "string",
+                                            "operation": "equals"
+                                        }
+                                    }
+                                ]
+                            },
+                            "renameOutput": true,
+                            "outputKey": "scrapeless"
+                        },
+                        {
+                            "conditions": {
+                                "options": {
+                                    "caseSensitive": true
+                                },
+                                "conditions": [
+                                    {
+                                        "leftValue": "={{ $json.currentService }}",
+                                        "rightValue": "scrapingbot",
+                                        "operator": {
+                                            "type": "string",
+                                            "operation": "equals"
+                                        }
+                                    }
+                                ]
+                            },
+                            "renameOutput": true,
+                            "outputKey": "scrapingbot"
+                        }
+                    ]
+                }
+            },
+            "id": "competitor-scraper-router",
+            "name": "Route: Competitor Scraper",
+            "type": "n8n-nodes-base.switch",
+            "typeVersion": 3.2,
+            "position": [
+                1000,
+                700
+            ],
+            "notes": "Routes to one of 5 scraping services based on rotation"
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.apify.com/v2/acts/apify~instagram-scraper/run-sync-get-dataset-items",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "token",
+                            "value": "={{$env.APIFY_TOKEN}}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={{ JSON.stringify({ directUrls: $('Setup Competitors').first().json.competitorUrls, resultsType: 'posts', resultsLimit: 12 }) }}",
+                "options": {
+                    "timeout": 600000
+                }
+            },
+            "id": "competitor-apify",
+            "name": "Apify: Competitor",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                1200,
+                600
+            ],
+            "notes": "Apify Instagram Scraper - Free tier: $5/month credits"
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.brightdata.com/dca/trigger",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization",
+                            "value": "Bearer {{$env.BRIGHTDATA_TOKEN}}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={{ JSON.stringify({ urls: $('Setup Competitors').first().json.competitorUrls }) }}",
+                "options": {
+                    "timeout": 600000
+                }
+            },
+            "id": "competitor-brightdata",
+            "name": "BrightData: Competitor",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                1200,
+                700
+            ],
+            "notes": "Bright Data - Free trial credits, $0.001/record"
+        },
+        {
+            "parameters": {
+                "method": "GET",
+                "url": "https://api.sociavault.com/instagram/user",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "usernames",
+                            "value": "={{ $('Setup Competitors').first().json.competitors.map(c => c.username).join(',') }}"
+                        },
+                        {
+                            "name": "api_key",
+                            "value": "={{$env.SOCIAVAULT_TOKEN}}"
+                        }
+                    ]
+                },
+                "options": {
+                    "timeout": 300000
+                }
+            },
+            "id": "competitor-sociavault",
+            "name": "SociaVault: Competitor",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                1200,
+                800
+            ],
+            "notes": "SociaVault - 50 free credits (no expiry!)"
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.scrapeless.com/task",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "x-api-key",
+                            "value": "={{$env.SCRAPELESS_TOKEN}}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={{ JSON.stringify({ targets: $('Setup Competitors').first().json.competitors.map(c => c.username), type: 'instagram_profile' }) }}",
+                "options": {
+                    "timeout": 300000
+                }
+            },
+            "id": "competitor-scrapeless",
+            "name": "Scrapeless: Competitor",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                1200,
+                900
+            ],
+            "notes": "Scrapeless - Free trial (no CC required)"
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.scraping-bot.io/scrape/raw-html",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpBasicAuth",
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={{ JSON.stringify({ urls: $('Setup Competitors').first().json.competitorUrls }) }}",
+                "options": {
+                    "timeout": 300000
+                }
+            },
+            "id": "competitor-scrapingbot",
+            "name": "ScrapingBot: Competitor",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                1200,
+                1000
+            ],
+            "notes": "ScrapingBot - Limited free requests"
+        },
+        {
+            "parameters": {
+                "mode": "combine",
+                "combinationMode": "multiplex"
+            },
+            "id": "competitor-merge",
+            "name": "Merge: Competitor Data",
+            "type": "n8n-nodes-base.merge",
+            "typeVersion": 3,
+            "position": [
+                1400,
+                700
+            ],
+            "notes": "Merges output from whichever scraper was used"
+        }
+    ],
+    "connections": {
+        "Route: Competitor Scraper": {
+            "main": [
+                [
+                    {
+                        "node": "Apify: Competitor",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "BrightData: Competitor",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "SociaVault: Competitor",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Scrapeless: Competitor",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "ScrapingBot: Competitor",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Apify: Competitor": {
+            "main": [
+                [
+                    {
+                        "node": "Merge: Competitor Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "BrightData: Competitor": {
+            "main": [
+                [
+                    {
+                        "node": "Merge: Competitor Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "SociaVault: Competitor": {
+            "main": [
+                [
+                    {
+                        "node": "Merge: Competitor Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Scrapeless: Competitor": {
+            "main": [
+                [
+                    {
+                        "node": "Merge: Competitor Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "ScrapingBot: Competitor": {
+            "main": [
+                [
+                    {
+                        "node": "Merge: Competitor Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    }
+}

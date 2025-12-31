@@ -1,0 +1,76 @@
+{
+    "name": "Step 7: Content Calendar & Output",
+    "description": "Generates a formatted content calendar and prepares final output for the production team",
+    "nodes": [
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.openai.com/v1/chat/completions",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpHeaderAuth",
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={\n  \"model\": \"gpt-4o\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a content calendar specialist for Ummahpreneur. Your job is to organize the production briefs into a strategic weekly posting schedule.\\n\\nConsider:\\n- Optimal posting times for the Muslim entrepreneur audience (prayer times, business hours)\\n- Content variety across the week\\n- Building narrative momentum\\n- Engagement peaks and valleys\\n\\nCreate a calendar that maximizes reach and engagement while maintaining quality.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Create the final content calendar from these production briefs:\\n\\n{{ JSON.stringify($json.productionBriefs) }}\\n\\nFormat as JSON:\\n{\\n  \\\"contentCalendar\\\": {\\n    \\\"weekStart\\\": \\\"date\\\",\\n    \\\"schedule\\\": [\\n      {\\n        \\\"date\\\": \\\"YYYY-MM-DD\\\",\\n        \\\"dayOfWeek\\\": \\\"Monday\\\",\\n        \\\"posts\\\": [\\n          {\\n            \\\"postingTime\\\": \\\"HH:MM\\\",\\n            \\\"timezone\\\": \\\"UTC\\\",\\n            \\\"contentType\\\": \\\"video|carousel|image\\\",\\n            \\\"briefTitle\\\": \\\"reference to brief\\\",\\n            \\\"caption\\\": \\\"full caption with hashtags\\\",\\n            \\\"status\\\": \\\"pending_production\\\",\\n            \\\"priority\\\": \\\"high|medium|low\\\",\\n            \\\"productionDeadline\\\": \\\"date before posting\\\"\\n          }\\n        ]\\n      }\\n    ]\\n  },\\n  \\\"weeklyGoals\\\": {\\n    \\\"totalPosts\\\": 7,\\n    \\\"engagementTarget\\\": \\\"percentage\\\",\\n    \\\"focusThemes\\\": [\\\"themes\\\"]\\n  },\\n  \\\"productionTimeline\\\": [\\n    {\\\"task\\\": \\\"what to do\\\", \\\"deadline\\\": \\\"when\\\", \\\"priority\\\": \\\"level\\\"}\\n  ]\\n}\"\n    }\n  ],\n  \"temperature\": 0.6,\n  \"max_tokens\": 3000,\n  \"response_format\": { \"type\": \"json_object\" }\n}",
+                "options": {
+                    "timeout": 120000
+                }
+            },
+            "id": "create-calendar-openai",
+            "name": "OpenAI: Create Content Calendar",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                2400,
+                400
+            ],
+            "notes": "Organizes briefs into a strategic posting schedule",
+            "credentials": {
+                "httpHeaderAuth": {
+                    "id": "OPENAI_CREDENTIAL_ID",
+                    "name": "OpenAI API Key"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "// Parse and finalize the content calendar\nconst response = $input.first().json;\nconst calendarContent = response.choices?.[0]?.message?.content;\n\nlet contentCalendar;\ntry {\n  contentCalendar = JSON.parse(calendarContent);\n} catch (e) {\n  contentCalendar = { error: 'Failed to parse AI response', raw: calendarContent };\n}\n\n// Get all previous data from earlier nodes\nconst allData = $('Merge All Analyses').all()[0]?.json || {};\n\nreturn [{\n  json: {\n    finalOutput: {\n      contentCalendar: contentCalendar,\n      productionBriefs: allData.productionBriefs || {},\n      clientAnalysis: allData.clientAnalysis || {},\n      competitorAnalysis: allData.competitorAnalysis || {},\n      generatedAt: new Date().toISOString(),\n      status: 'ready_for_production'\n    }\n  }\n}];"
+            },
+            "id": "finalize-output",
+            "name": "Finalize Output",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                2600,
+                400
+            ],
+            "notes": "Combines all outputs into final deliverable"
+        },
+        {
+            "parameters": {
+                "content": "=## 📅 Content Calendar Generated\\n\\n**Week Starting:** {{ $json.finalOutput.contentCalendar.contentCalendar?.weekStart || 'This Week' }}\\n\\n**Total Briefs:** {{ $json.finalOutput.productionBriefs.weeklyContentPlan?.length || 7 }}\\n\\n### Summary:\\n- Videos: {{ $json.finalOutput.productionBriefs.contentMix?.videos || 'N/A' }}\\n- Carousels: {{ $json.finalOutput.productionBriefs.contentMix?.carousels || 'N/A' }}\\n- Single Images: {{ $json.finalOutput.productionBriefs.contentMix?.singleImages || 'N/A' }}\\n\\n---\\n**Generated:** {{ $json.finalOutput.generatedAt }}\\n**Status:** {{ $json.finalOutput.status }}"
+            },
+            "id": "output-summary",
+            "name": "Sticky Note: Output Summary",
+            "type": "n8n-nodes-base.stickyNote",
+            "typeVersion": 1,
+            "position": [
+                2600,
+                200
+            ],
+            "notes": "Visual summary of generated content"
+        }
+    ],
+    "connections": {
+        "OpenAI: Create Content Calendar": {
+            "main": [
+                [
+                    {
+                        "node": "Finalize Output",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    }
+}
