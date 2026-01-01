@@ -1,36 +1,63 @@
-# Instagram Agency AI Workflow - Step Files
+# Instagram Agency AI Workflow - Step Files (Updated)
 
-This folder contains modular workflow steps that you can review and modify individually. Each file represents a phase of the workflow.
+This folder contains modular workflow steps. The main workflow has been updated for sequential scraping.
 
-## Files
+## Updated Workflow Structure
 
-| File | Description |
+| Step | Description |
 |------|-------------|
-| `step-1-input-config.json` | Input configuration with client + competitor accounts |
-| `step-2-scrape-client.json` | Apify scraper for @ummahpreneur posts |
-| `step-3-scrape-competitors.json` | Apify scraper for all 7 competitor accounts |
-| `step-4-analyze-client.json` | OpenAI GPT-4o client brand analysis |
-| `step-5-analyze-competitors.json` | OpenAI GPT-4o competitive intelligence |
-| `step-6-production-briefs.json` | Production brief generator (videos, carousels, images) |
-| `step-7-content-calendar.json` | Final content calendar with posting schedule |
+| 1. Input Config | Client + competitor accounts with API keys |
+| 2. Scrape Client | @ummahpreneur → Save immediately |
+| 3. Scrape Comp 1 | @_amrouz (TOP priority) → Save |
+| 4. Scrape Comp 2 | @islam4everyone_ → Save |
+| 5. Scrape Comp 3 | @thesunnahguy → Save |
+| 6. Scrape Comp 4 | @taemann__ → Save |
+| 7. AI Analysis | OpenAI GPT-4o brand & competitor analysis |
+| 8. Production Briefs | 7 production-ready content briefs |
+| 9. Content Calendar | Weekly posting schedule |
+| 10. Final Export | All data in structured JSON |
+
+## Key Features
+
+✅ **Sequential Scraping**: Each account is scraped and saved before moving to the next  
+✅ **Error Handling**: If any scrape fails, workflow continues with available data  
+✅ **Hardcoded API Keys**: No n8n credentials needed (tokens in Input Config)  
+✅ **Extractable Data**: Final output has separate sections for raw data and AI outputs
+
+## API Keys (already in workflow)
+
+- **Apify Token**: For Instagram scraping
+- **OpenAI Key**: For AI analysis and content generation
 
 ## How to Use
 
-1. **Review each step** - Open each file to see the node configuration
-2. **Modify prompts** - Edit the OpenAI system/user prompts as needed
-3. **Import main workflow** - Use `../Instagram Agency AI Workflow.json` to import the complete workflow into n8n
+1. Import `../Instagram Agency AI Workflow.json` into n8n
+2. Click "Execute Workflow"
+3. Wait for completion (may take 5-10 minutes due to API timeouts)
+4. Check "Final Export" node for complete output
 
-## Credentials Required
+## Output Structure
 
-Before running the workflow in n8n, configure:
+```json
+{
+  "status": "COMPLETE",
+  "rawData": {
+    "client": { /* scraped posts */ },
+    "competitors": [ /* array of competitor data */ ]
+  },
+  "aiOutputs": {
+    "analysis": { /* brand DNA + competitor intel */ },
+    "productionBriefs": { /* 7 content briefs */ },
+    "contentCalendar": { /* weekly schedule */ }
+  }
+}
+```
 
-- **Apify API Token**: Already included in workflow URLs
-- **OpenAI API Key**: Already included in Authorization headers
+## Competitor List (Updated)
 
-## Output
+1. **@_amrouz** - TOP priority, premium aesthetic
+2. **@islam4everyone_** - Strong educational content  
+3. **@thesunnahguy** - Viral hooks, relatable style
+4. **@taemann__** - Storytelling mastery
 
-The workflow produces:
-- 7 production-ready content briefs
-- Weekly content calendar
-- Client brand analysis
-- Competitor intelligence report
+Note: The Reel URL (DSaICfjDFE8) was not included as it's a single post, not a profile.
