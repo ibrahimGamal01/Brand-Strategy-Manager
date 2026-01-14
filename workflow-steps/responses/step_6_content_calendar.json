@@ -1,0 +1,167 @@
+{
+  "timestamp": 1767284265970,
+  "savedAt": "2026-01-01T16:17:45.970Z",
+  "stepName": "step_6_content_calendar",
+  "response": {
+    "contentCalendar": {
+      "weekOf": "2023-10-02",
+      "timezone": "UTC+3 (Arabia Standard Time)",
+      "schedule": [
+        {
+          "dayOfWeek": "Friday",
+          "posts": [
+            {
+              "day": 1,
+              "contentType": "video",
+              "title": "Jummah Reflection: Balancing Faith and Business",
+              "concept": "A motivational and reflective video that aligns the spiritual significance of Jummah with the entrepreneurial journey.",
+              "targetEmotion": "Inspiration and motivation",
+              "time": "13:00"
+            }
+          ]
+        },
+        {
+          "dayOfWeek": "Saturday",
+          "posts": [
+            {
+              "day": 2,
+              "contentType": "carousel",
+              "title": "5 Tips for Managing Work and Ramadan",
+              "concept": "A step-by-step guide to help entrepreneurs balance their business responsibilities and spiritual obligations during Ramadan.",
+              "targetEmotion": "Hope and optimism",
+              "time": "12:00"
+            }
+          ]
+        },
+        {
+          "dayOfWeek": "Sunday",
+          "posts": [
+            {
+              "day": 3,
+              "contentType": "single_image",
+              "title": "The Power of Community in Entrepreneurship",
+              "concept": "A powerful image with a quote emphasizing the importance of community support in the entrepreneurial journey.",
+              "targetEmotion": "Community and belonging",
+              "time": "18:00"
+            }
+          ]
+        },
+        {
+          "dayOfWeek": "Monday",
+          "posts": [
+            {
+              "day": 4,
+              "contentType": "video",
+              "title": "Success Story: From Struggle to Triumph",
+              "concept": "A short video featuring a success story of a Muslim entrepreneur who overcame challenges to achieve success in their halal business.",
+              "targetEmotion": "Inspiration and motivation",
+              "time": "18:00"
+            }
+          ]
+        },
+        {
+          "dayOfWeek": "Tuesday",
+          "posts": [
+            {
+              "day": 5,
+              "contentType": "carousel",
+              "title": "The Importance of Mental Health in Entrepreneurship",
+              "concept": "A detailed guide on the importance of mental health and well-being in the entrepreneurial journey.",
+              "targetEmotion": "Confidence and self-belief",
+              "time": "12:00"
+            }
+          ]
+        },
+        {
+          "dayOfWeek": "Wednesday",
+          "posts": [
+            {
+              "day": 6,
+              "contentType": "video",
+              "title": "Q&A: Your Questions on Islamic Entrepreneurship",
+              "concept": "A live Q&A session where followers can ask questions about Islamic entrepreneurship, halal business, and personal development.",
+              "targetEmotion": "Community and belonging",
+              "time": "18:00"
+            }
+          ]
+        },
+        {
+          "dayOfWeek": "Thursday",
+          "posts": [
+            {
+              "day": 7,
+              "contentType": "single_image",
+              "title": "Eid al-Fitr: Celebrating Success and Gratitude",
+              "concept": "A visually appealing post with a quote and image celebrating the end of Ramadan and the start of Eid al-Fitr.",
+              "targetEmotion": "Gratitude and celebration",
+              "time": "18:00"
+            }
+          ]
+        }
+      ]
+    },
+    "productionTimeline": {
+      "phases": [
+        {
+          "phase": "Planning and Research",
+          "deadline": "2023-09-25",
+          "tasks": [
+            "Identify key themes and topics for the week",
+            "Conduct research on relevant Islamic values and business practices",
+            "Outline the content for each post"
+          ]
+        },
+        {
+          "phase": "Content Creation",
+          "deadline": "2023-09-28",
+          "tasks": [
+            "Script and storyboard for videos",
+            "Design graphics for carousels and single images",
+            "Gather success stories and prepare for Q&A session"
+          ]
+        },
+        {
+          "phase": "Review and Feedback",
+          "deadline": "2023-09-30",
+          "tasks": [
+            "Review all content for accuracy and alignment with brand values",
+            "Gather feedback from team members and make necessary adjustments",
+            "Finalize all content and prepare for scheduling"
+          ]
+        },
+        {
+          "phase": "Scheduling and Posting",
+          "deadline": "2023-10-02",
+          "tasks": [
+            "Schedule all posts in the content management system",
+            "Monitor and engage with the community during live sessions",
+            "Track engagement and performance metrics"
+          ]
+        }
+      ]
+    },
+    "weeklyGoals": {
+      "reach": "10,000",
+      "engagement": "500 likes, 200 comments, 100 shares",
+      "followers": "1,000 new followers"
+    },
+    "successMetrics": {
+      "kpis": [
+        "Increase in reach by 20%",
+        "Engagement rate (likes, comments, shares) of 5%",
+        "Follower growth of 10%"
+      ],
+      "benchmarks": [
+        "Previous week's reach: 8,000",
+        "Previous week's engagement: 400 likes, 150 comments, 80 shares",
+        "Previous week's follower growth: 800"
+      ],
+      "optimizationNotes": [
+        "Monitor the performance of each post and adjust the timing if necessary",
+        "Engage with the community by responding to comments and questions promptly",
+        "Use relevant hashtags and tags to increase visibility",
+        "Consider running a small ad campaign to boost reach and engagement"
+      ]
+    }
+  }
+}

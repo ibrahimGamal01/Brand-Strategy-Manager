@@ -1,6 +1,10 @@
 # Instagram Agency AI Workflow - Step Files (Updated)
 
+
 This folder contains modular workflow steps. The main workflow has been updated for sequential scraping.
+
+> **[View the Brand Strategy Template](../BRAND_STRATEGY.md)** for the complete strategic framework.
+
 
 ## Updated Workflow Structure
 

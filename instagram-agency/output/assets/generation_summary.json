@@ -1,0 +1,52 @@
+{
+  "totalPosts": 3,
+  "successful": 3,
+  "partial": 0,
+  "failed": 0,
+  "totalImages": 3,
+  "assetsPath": "/Users/ibrahimgamal/Downloads/ali/upwork/n8n-agency/instagram-agency/output/assets",
+  "results": [
+    {
+      "postNumber": 1,
+      "contentType": "reel",
+      "images": [
+        {
+          "url": "https://oaidalleapiprodscus.blob.core.windows.net/private/org-b4LfVlBhy8gYpRoS0yJEPCCf/user-J3YPWkPwxIW5YUOl56hupGVv/img-T09ozBgBh3cZkjSh4nNJJ4DW.png?st=2026-01-02T19%3A11%3A31Z&se=2026-01-02T21%3A11%3A31Z&sp=r&sv=2024-08-04&sr=b&rscd=inline&rsct=image/png&skoid=13da7400-b3f7-4f8c-9cba-908fecbd114c&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-01-02T18%3A18%3A10Z&ske=2026-01-03T18%3A18%3A10Z&sks=b&skv=2024-08-04&sig=Yd0Qh3zLzCFF4BtM0VHanSSx6akCcnZ7ckd3I74PNA4%3D",
+          "localPath": "/Users/ibrahimgamal/Downloads/ali/upwork/n8n-agency/instagram-agency/output/assets/post_1_reel/frame_1.png",
+          "prompt": "Silhouette of woman adjusting hijab in front of a rising sun. Style: Professional with Arabian atmosphere. Color palette: Desert Warm Tones - Golden Sand (#D4A574), Terracotta (#8B4513), Sunset Orange (#C45D3C). Maintain a warm, Arabian desert atmosphere.. Lighting: Soft natural light. Composition: Rule of thirds. modern, minimalist, elegant, clean, professional. professional, high detail, instagram-ready. vertical format, 9:16 aspect ratio, clean edges for text overlay. People should be shown from the BACK or side, wearing traditional Arabian/Islamic clothing (thobe, abaya, hijab). NO faces visible.. Environment: Desert landscape, warm golden lighting, sand dunes, Arabian architecture, mosque silhouettes.. Do NOT include any text or writing in the image. The image must be text-free.. Avoid: text, writing, letters, words, typography, watermarks, logos, signatures, human faces, eyes, mouth, nose, facial features, front facing people, blurry, low quality, distorted",
+          "aspectRatio": "9:16",
+          "size": "1024x1792"
+        }
+      ],
+      "status": "success"
+    },
+    {
+      "postNumber": 2,
+      "contentType": "carousel",
+      "images": [
+        {
+          "url": "https://oaidalleapiprodscus.blob.core.windows.net/private/org-b4LfVlBhy8gYpRoS0yJEPCCf/user-J3YPWkPwxIW5YUOl56hupGVv/img-yPhQHon6Mp0E79p3jfQaOOl6.png?st=2026-01-02T19%3A12%3A01Z&se=2026-01-02T21%3A12%3A01Z&sp=r&sv=2024-08-04&sr=b&rscd=inline&rsct=image/png&skoid=7daae675-7b42-4e2e-ab4c-8d8419a28d99&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-01-02T18%3A22%3A34Z&ske=2026-01-03T18%3A22%3A34Z&sks=b&skv=2024-08-04&sig=artZt0k9bfWR9xoqyHbsOSunIUAvxWC1oxglm/x9sUc%3D",
+          "localPath": "/Users/ibrahimgamal/Downloads/ali/upwork/n8n-agency/instagram-agency/output/assets/post_2_carousel/slide_1.png",
+          "prompt": "Infographic of finance growth. featuring headline \"Understanding Islamic Finance\". Use clear icons and bold headings. Style: Minimalistic with infographics. Color palette: Desert Warm Tones - Golden Sand (#D4A574), Terracotta (#8B4513), Sunset Orange (#C45D3C). Maintain a warm, Arabian desert atmosphere.. Lighting: Natural. Composition: Centered. modern, minimalist, elegant, clean, professional. professional, high detail, instagram-ready. square or 4:5 format, consistent style for series. People should be shown from the BACK or side, wearing traditional Arabian/Islamic clothing (thobe, abaya, hijab). NO faces visible.. Environment: Desert landscape, warm golden lighting, sand dunes, Arabian architecture, mosque silhouettes.. Do NOT include any text or writing in the image. The image must be text-free.. Avoid: text, writing, letters, words, typography, watermarks, logos, signatures, human faces, eyes, mouth, nose, facial features, front facing people, blurry, low quality, distorted",
+          "aspectRatio": "1:1",
+          "size": "1024x1024"
+        }
+      ],
+      "status": "success"
+    },
+    {
+      "postNumber": 3,
+      "contentType": "image",
+      "images": [
+        {
+          "url": "https://oaidalleapiprodscus.blob.core.windows.net/private/org-b4LfVlBhy8gYpRoS0yJEPCCf/user-J3YPWkPwxIW5YUOl56hupGVv/img-BLCZdBQl0IflKaNQmhYykARD.png?st=2026-01-02T19%3A12%3A32Z&se=2026-01-02T21%3A12%3A32Z&sp=r&sv=2024-08-04&sr=b&rscd=inline&rsct=image/png&skoid=35890473-cca8-4a54-8305-05a39e0bc9c3&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-01-02T18%3A45%3A14Z&ske=2026-01-03T18%3A45%3A14Z&sks=b&skv=2024-08-04&sig=9mXBUs2IiXtRtZ/19GRxdCymBDHTN5Zj%2BBVktpQhnOI%3D",
+          "localPath": "/Users/ibrahimgamal/Downloads/ali/upwork/n8n-agency/instagram-agency/output/assets/post_3_image/final.png",
+          "prompt": "Sunset over dunes, soft silhouettes, no faces, capturing tranquility. Style: Serene and atmospheric. Color palette: Desert Warm Tones - Golden Sand (#D4A574), Terracotta (#8B4513), Sunset Orange (#C45D3C). Maintain a warm, Arabian desert atmosphere.. Lighting: Golden hour. Composition: Centered text. modern, minimalist, elegant, clean, professional. professional, high detail, instagram-ready. standalone impactful visual, square format. People should be shown from the BACK or side, wearing traditional Arabian/Islamic clothing (thobe, abaya, hijab). NO faces visible.. Environment: Desert landscape, warm golden lighting, sand dunes, Arabian architecture, mosque silhouettes.. Do NOT include any text or writing in the image. The image must be text-free.. Avoid: text, writing, letters, words, typography, watermarks, logos, signatures, human faces, eyes, mouth, nose, facial features, front facing people, blurry, low quality, distorted",
+          "aspectRatio": "1:1",
+          "size": "1024x1024"
+        }
+      ],
+      "status": "success"
+    }
+  ]
+}

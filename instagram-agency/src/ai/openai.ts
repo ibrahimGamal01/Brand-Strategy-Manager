@@ -6,7 +6,7 @@ import { logger } from '../utils/logger';
 
 const openai = new OpenAI({
   apiKey: config.openaiKey,
-  baseURL: 'https://openrouter.ai/api/v1',
+  // Using direct OpenAI API (no baseURL override needed)
 });
 
 // Direct file-based cache for AI responses
@@ -27,7 +27,7 @@ interface ChatCompletionOptions {
 }
 
 const DEFAULT_OPTIONS = {
-  model: 'qwen/qwen-2.5-72b-instruct',
+  model: 'gpt-4o',
   temperature: 0.7,
   maxTokens: 6000,
   retries: 5,
@@ -175,7 +175,7 @@ export async function callOpenAIMini(
 ): Promise<unknown> {
   return callOpenAI(systemPrompt, userPrompt, {
     ...options,
-    model: 'qwen/qwen-2.5-72b-instruct',
+    model: 'gpt-4o-mini',
     maxTokens: options.maxTokens || 4000,
     // gpt-4o-mini has higher rate limits, can use shorter delay
     initialRetryDelayMs: 60000,

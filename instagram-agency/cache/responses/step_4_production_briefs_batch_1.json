@@ -1,0 +1,706 @@
+{
+  "timestamp": 1767384002534,
+  "savedAt": "2026-01-02T20:00:02.534Z",
+  "stepName": "step_4_production_briefs_batch_1",
+  "response": {
+    "weeklyContentPlan": [
+      {
+        "postNumber": 1,
+        "dayOfWeek": "Monday",
+        "postingTime": "11:00 UTC",
+        "contentType": "reel",
+        "brandFingerprint": {
+          "mustInclude": [
+            "Islamic values",
+            "Entrepreneurial tips",
+            "Community engagement"
+          ],
+          "tonalMarkers": [
+            "Inspirational",
+            "Motivational",
+            "Community-focused"
+          ],
+          "visualSignature": "Desert tones with professional, polished visuals"
+        },
+        "brief": {
+          "internalTitle": "Spiritual Business Start",
+          "concept": "Empowering message on integrating faith into business",
+          "angle": "Highlight personal stories of success through faith",
+          "targetEmotion": "Inspiration",
+          "hook": {
+            "type": "statement",
+            "exactContent": "Are you ready to take your business to the next level?",
+            "whyItWorks": "Creates curiosity and sets an aspirational tone"
+          }
+        },
+        "visualDirection": {
+          "overallStyle": "Professional with Arabian atmosphere",
+          "colorPalette": [
+            "#D9CAB3",
+            "#E8E1D3",
+            "#F0E9D2"
+          ],
+          "lighting": "Soft natural light",
+          "composition": "Rule of thirds",
+          "aiImagePrompt": "Faceless Muslim entrepreneurs in desert, traditional clothing, atmospheric business setting"
+        },
+        "sceneBreakdown": [
+          {
+            "scene": 1,
+            "timeRange": "0:00-0:03",
+            "visual": "Silhouette of woman adjusting hijab in front of a rising sun",
+            "textOverlay": {
+              "text": "Ready to take the plunge?",
+              "font": "Sans-serif",
+              "size": "large",
+              "position": "center",
+              "animation": "pop"
+            },
+            "audio": "Trending inspirational sound",
+            "transition": "fade"
+          }
+        ],
+        "captionVariants": {
+          "engaging": {
+            "caption": "🌟 Are you ready to integrate your faith into your business journey? Comment below! 🌟",
+            "hashtags": [
+              "#MuslimEntrepreneurs",
+              "#FaithDrivenBusiness",
+              "#HalalBusiness"
+            ]
+          },
+          "educational": {
+            "caption": "Discover how integrating Islamic values can lead to business success. Let us know your thoughts!",
+            "hashtags": [
+              "#HalalBusiness",
+              "#IslamicFinance",
+              "#Entrepreneurship"
+            ]
+          },
+          "inspirational": {
+            "caption": "Believe in yourself and trust the process as you embark on your spiritual business journey.",
+            "hashtags": [
+              "#Inspiration",
+              "#MuslimEntrepreneurs",
+              "#FaithAndBusiness"
+            ]
+          },
+          "recommended": "inspirational"
+        },
+        "technicalSpecs": {
+          "aspectRatio": "9:16",
+          "duration": "15 seconds",
+          "slideCount": null,
+          "fileFormat": "MP4"
+        },
+        "engagementStrategy": {
+          "primaryCTA": "comment",
+          "ctaPlacement": "End of reel",
+          "firstComment": "Share your journey with us! 🕌✨",
+          "replyStrategy": "Acknowledge personal stories and encourage more sharing"
+        },
+        "storyElements": {
+          "interactiveType": "none",
+          "interactiveContent": null,
+          "seriesPart": "standalone"
+        }
+      },
+      {
+        "postNumber": 2,
+        "dayOfWeek": "Tuesday",
+        "postingTime": "11:00 UTC",
+        "contentType": "carousel",
+        "brandFingerprint": {
+          "mustInclude": [
+            "Islamic finance advice",
+            "Niche market insights",
+            "Community engagement"
+          ],
+          "tonalMarkers": [
+            "Educational",
+            "Supportive",
+            "Formal yet approachable"
+          ],
+          "visualSignature": "Clean and minimalistic with a hint of green and gold"
+        },
+        "brief": {
+          "internalTitle": "Islamic Finance Basics",
+          "concept": "Educate on key principles of Islamic finance",
+          "angle": "Simplify complex concepts for small business owners",
+          "targetEmotion": "Confidence",
+          "hook": {
+            "type": "question",
+            "exactContent": "Ever wondered how Islamic finance can boost your business?",
+            "whyItWorks": "Challenges the audience to learn and see benefits"
+          }
+        },
+        "visualDirection": {
+          "overallStyle": "Minimalistic with infographics",
+          "colorPalette": [
+            "#FFFFFF",
+            "#8DC63F",
+            "#FFD700"
+          ],
+          "lighting": "Natural",
+          "composition": "Centered",
+          "aiImagePrompt": "Abstract visuals of finance symbols, no faces, Islamic motifs"
+        },
+        "slideBreakdown": [
+          {
+            "slideNumber": 1,
+            "headline": "Understanding Islamic Finance",
+            "body": "Discover the fundamentals and benefits.",
+            "visualElement": "Infographic of finance growth",
+            "layout": "Centered",
+            "designNotes": "Use clear icons and bold headings"
+          }
+        ],
+        "captionVariants": {
+          "engaging": {
+            "caption": "💡 Discover how Islamic finance can transform your business! Swipe to learn more! 💡",
+            "hashtags": [
+              "#IslamicFinance",
+              "#HalalBusiness",
+              "#FinancialSuccess"
+            ]
+          },
+          "educational": {
+            "caption": "Learn the basics of Islamic finance and unlock the potential for your business growth.",
+            "hashtags": [
+              "#IslamicFinance",
+              "#BusinessGrowth",
+              "#HalalProducts"
+            ]
+          },
+          "inspirational": {
+            "caption": "Unlock a new realm of business possibilities with Islamic finance. Join the movement!",
+            "hashtags": [
+              "#BusinessInnovation",
+              "#IslamicFinance",
+              "#FaithDrivenBusiness"
+            ]
+          },
+          "recommended": "educational"
+        },
+        "technicalSpecs": {
+          "aspectRatio": "4:5",
+          "duration": null,
+          "slideCount": 5,
+          "fileFormat": "JPG"
+        },
+        "engagementStrategy": {
+          "primaryCTA": "save",
+          "ctaPlacement": "Last slide",
+          "firstComment": "Which principle resonates with you the most? 🌿💰",
+          "replyStrategy": "Ask follow-up questions to deepen discussion"
+        },
+        "storyElements": {
+          "interactiveType": "none",
+          "interactiveContent": null,
+          "seriesPart": "standalone"
+        }
+      },
+      {
+        "postNumber": 3,
+        "dayOfWeek": "Wednesday",
+        "postingTime": "11:00 UTC",
+        "contentType": "image",
+        "brandFingerprint": {
+          "mustInclude": [
+            "Inspirational quotes",
+            "Islamic themes",
+            "Professional visuals"
+          ],
+          "tonalMarkers": [
+            "Inspirational",
+            "Uplifting",
+            "Formal yet warm"
+          ],
+          "visualSignature": "Powerful quote overlaid on serene, atmospheric background"
+        },
+        "brief": {
+          "internalTitle": "Quote of Faith",
+          "concept": "Share a powerful quote that resonates with Muslim entrepreneurs",
+          "angle": "Use a quote that ties faith to entrepreneurial success",
+          "targetEmotion": "Motivation",
+          "hook": {
+            "type": "relatability",
+            "exactContent": "Believe in yourself and trust the process",
+            "whyItWorks": "Encourages self-belief and persistence"
+          }
+        },
+        "visualDirection": {
+          "overallStyle": "Serene and atmospheric",
+          "colorPalette": [
+            "#8C8C8C",
+            "#D9CAB3",
+            "#FFFFFF"
+          ],
+          "lighting": "Golden hour",
+          "composition": "Centered text",
+          "aiImagePrompt": "Sunset over dunes, soft silhouettes, no faces, capturing tranquility"
+        },
+        "captionVariants": {
+          "engaging": {
+            "caption": "✨ Trust the process and let your faith lead the way. ✨",
+            "hashtags": [
+              "#Inspiration",
+              "#MuslimEntrepreneurs",
+              "#FaithDriven"
+            ]
+          },
+          "educational": {
+            "caption": "A gentle reminder to align your faith with your business journey. 🌟",
+            "hashtags": [
+              "#FaithAndBusiness",
+              "#Entrepreneurship",
+              "#MuslimBiz"
+            ]
+          },
+          "inspirational": {
+            "caption": "Faith is the bridge between where you are and the wisdom to carry on. 💫",
+            "hashtags": [
+              "#Believe",
+              "#Motivation",
+              "#MuslimInspiration"
+            ]
+          },
+          "recommended": "inspirational"
+        },
+        "technicalSpecs": {
+          "aspectRatio": "1:1",
+          "duration": null,
+          "slideCount": null,
+          "fileFormat": "PNG"
+        },
+        "engagementStrategy": {
+          "primaryCTA": "share",
+          "ctaPlacement": "Post",
+          "firstComment": "What does this quote mean to you? 🌙",
+          "replyStrategy": "Engage with personal interpretations and expand on them"
+        },
+        "storyElements": {
+          "interactiveType": "none",
+          "interactiveContent": null,
+          "seriesPart": "standalone"
+        }
+      },
+      {
+        "postNumber": 4,
+        "dayOfWeek": "Thursday",
+        "postingTime": "11:00 UTC",
+        "contentType": "reel",
+        "brandFingerprint": {
+          "mustInclude": [
+            "Success stories",
+            "Islamic principles",
+            "Community focus"
+          ],
+          "tonalMarkers": [
+            "Supportive",
+            "Motivational",
+            "Empowering"
+          ],
+          "visualSignature": "Desert tones and narrative-driven visuals"
+        },
+        "brief": {
+          "internalTitle": "Stories of Success",
+          "concept": "A reel showcasing a Muslim entrepreneur's journey to success",
+          "angle": "Highlight the role of faith and community support",
+          "targetEmotion": "Empowerment",
+          "hook": {
+            "type": "story",
+            "exactContent": "Unlocking the secrets to success",
+            "whyItWorks": "Creates intrigue and a personal connection"
+          }
+        },
+        "visualDirection": {
+          "overallStyle": "Narrative-driven with emotional undertones",
+          "colorPalette": [
+            "#D9CAB3",
+            "#F0E9D2",
+            "#8C8C8C"
+          ],
+          "lighting": "Dramatic",
+          "composition": "Dynamic",
+          "aiImagePrompt": "Faceless Muslim entrepreneur in a bustling market, vibrant but muted colors"
+        },
+        "sceneBreakdown": [
+          {
+            "scene": 1,
+            "timeRange": "0:00-0:03",
+            "visual": "Back of a young woman's head as she walks through a vibrant market",
+            "textOverlay": {
+              "text": "Unlocking the secrets to success",
+              "font": "Sans-serif",
+              "size": "medium",
+              "position": "bottom",
+              "animation": "slide"
+            },
+            "audio": "Voiceover: 'In the heart of community lies strength...'",
+            "transition": "cut"
+          }
+        ],
+        "captionVariants": {
+          "engaging": {
+            "caption": "🌟 Our community is our strength. Discover how faith can propel you forward! 🌟",
+            "hashtags": [
+              "#MuslimEntrepreneurs",
+              "#SuccessStories",
+              "#CommunitySupport"
+            ]
+          },
+          "educational": {
+            "caption": "Explore the powerful impact of faith and community in entrepreneurial journeys.",
+            "hashtags": [
+              "#IslamicEntrepreneurs",
+              "#FaithDriven",
+              "#EntrepreneurialSpirit"
+            ]
+          },
+          "inspirational": {
+            "caption": "Let faith fuel your success story. Together, we rise. 🌞",
+            "hashtags": [
+              "#Inspiration",
+              "#Entrepreneurship",
+              "#FaithAndBusiness"
+            ]
+          },
+          "recommended": "engaging"
+        },
+        "technicalSpecs": {
+          "aspectRatio": "9:16",
+          "duration": "30 seconds",
+          "slideCount": null,
+          "fileFormat": "MP4"
+        },
+        "engagementStrategy": {
+          "primaryCTA": "comment",
+          "ctaPlacement": "Middle of reel",
+          "firstComment": "Share your success story with us! 🕌✨",
+          "replyStrategy": "Celebrate accomplishments and provide encouragement"
+        },
+        "storyElements": {
+          "interactiveType": "none",
+          "interactiveContent": null,
+          "seriesPart": "standalone"
+        }
+      },
+      {
+        "postNumber": 5,
+        "dayOfWeek": "Thursday",
+        "postingTime": "19:00 UTC",
+        "contentType": "carousel",
+        "brandFingerprint": {
+          "mustInclude": [
+            "Step-by-step guides",
+            "Entrepreneurial tips",
+            "Clear visuals"
+          ],
+          "tonalMarkers": [
+            "Educational",
+            "Practical",
+            "Empowering"
+          ],
+          "visualSignature": "Professional, clean layouts with step-by-step clarity"
+        },
+        "brief": {
+          "internalTitle": "Starting a Halal Business",
+          "concept": "Step-by-step guide to launching a halal business",
+          "angle": "Breakdown into simple, clear steps for beginners",
+          "targetEmotion": "Confidence",
+          "hook": {
+            "type": "statement",
+            "exactContent": "Unlock the secrets to success with these simple steps",
+            "whyItWorks": "Provides clear value and actionable insights"
+          }
+        },
+        "visualDirection": {
+          "overallStyle": "Clean, minimalistic with clear visuals",
+          "colorPalette": [
+            "#FFFFFF",
+            "#8DC63F",
+            "#FFD700"
+          ],
+          "lighting": "Natural",
+          "composition": "Text-left",
+          "aiImagePrompt": "Faceless individuals at work desk, traditional elements, abstract business icons"
+        },
+        "slideBreakdown": [
+          {
+            "slideNumber": 1,
+            "headline": "How to Launch a Halal Business",
+            "body": "Begin your journey with confidence.",
+            "visualElement": "Clean infographic",
+            "layout": "Text-left",
+            "designNotes": "Use steps and clear icons for guidance"
+          }
+        ],
+        "captionVariants": {
+          "engaging": {
+            "caption": "🚀 Ready to launch your own halal business? Swipe through our guide! 🚀",
+            "hashtags": [
+              "#HalalBusiness",
+              "#EntrepreneurialJourney",
+              "#BusinessTips"
+            ]
+          },
+          "educational": {
+            "caption": "Follow our simple guide to start your halal business journey today.",
+            "hashtags": [
+              "#HalalProducts",
+              "#IslamicEntrepreneurs",
+              "#BusinessLaunch"
+            ]
+          },
+          "inspirational": {
+            "caption": "Every big journey begins with a single step. Are you ready to start yours? 🌟",
+            "hashtags": [
+              "#Inspiration",
+              "#Entrepreneurship",
+              "#HalalBusiness"
+            ]
+          },
+          "recommended": "educational"
+        },
+        "technicalSpecs": {
+          "aspectRatio": "4:5",
+          "duration": null,
+          "slideCount": 7,
+          "fileFormat": "JPG"
+        },
+        "engagementStrategy": {
+          "primaryCTA": "comment",
+          "ctaPlacement": "Last slide",
+          "firstComment": "What's your first step going to be? 📈",
+          "replyStrategy": "Encourage detailed plans and provide feedback"
+        },
+        "storyElements": {
+          "interactiveType": "none",
+          "interactiveContent": null,
+          "seriesPart": "standalone"
+        }
+      },
+      {
+        "postNumber": 6,
+        "dayOfWeek": "Friday",
+        "postingTime": "11:00 UTC",
+        "contentType": "story",
+        "brandFingerprint": {
+          "mustInclude": [
+            "Community interaction",
+            "Islamic values",
+            "Simple visuals"
+          ],
+          "tonalMarkers": [
+            "Interactive",
+            "Community-focused",
+            "Supportive"
+          ],
+          "visualSignature": "Casual, engaging with interactive elements"
+        },
+        "brief": {
+          "internalTitle": "Friday Poll",
+          "concept": "Engage with the community through a poll about business challenges",
+          "angle": "Use Jummah as a hook for discussion",
+          "targetEmotion": "Belonging",
+          "hook": {
+            "type": "question",
+            "exactContent": "What’s your biggest business challenge this week?",
+            "whyItWorks": "Encourages participation and shares personal insights"
+          }
+        },
+        "visualDirection": {
+          "overallStyle": "Simple and casual with Islamic motifs",
+          "colorPalette": [
+            "#FFFFFF",
+            "#D9CAB3",
+            "#8DC63F"
+          ],
+          "lighting": "Natural",
+          "composition": "Centered",
+          "aiImagePrompt": "Simple Islamic motifs with polls, no faces, engaging"
+        },
+        "storyElements": {
+          "interactiveType": "poll",
+          "interactiveContent": "What’s your biggest business challenge this week?",
+          "seriesPart": "standalone"
+        },
+        "captionVariants": {
+          "engaging": {
+            "caption": "🕌 Jummah Mubarak! Join our Friday discussion and let’s tackle challenges together! 🌟",
+            "hashtags": [
+              "#JummahMubarak",
+              "#EntrepreneurialChallenges",
+              "#CommunitySupport"
+            ]
+          },
+          "educational": {
+            "caption": "Share your business challenges and let's find solutions together!",
+            "hashtags": [
+              "#BusinessSupport",
+              "#Entrepreneurship",
+              "#CommunityBuilding"
+            ]
+          },
+          "inspirational": {
+            "caption": "Together, we can overcome any business challenge. 🌟",
+            "hashtags": [
+              "#Inspiration",
+              "#Community",
+              "#Entrepreneurship"
+            ]
+          },
+          "recommended": "engaging"
+        },
+        "technicalSpecs": {
+          "aspectRatio": "9:16",
+          "duration": null,
+          "slideCount": null,
+          "fileFormat": "JPG"
+        },
+        "engagementStrategy": {
+          "primaryCTA": "comment",
+          "ctaPlacement": "Poll",
+          "firstComment": "Let’s share and solve together! 💪",
+          "replyStrategy": "Acknowledge every response and provide supportive comments"
+        }
+      },
+      {
+        "postNumber": 7,
+        "dayOfWeek": "Saturday",
+        "postingTime": "11:00 UTC",
+        "contentType": "reel",
+        "brandFingerprint": {
+          "mustInclude": [
+            "Motivational content",
+            "User stories",
+            "Islamic principles"
+          ],
+          "tonalMarkers": [
+            "Inspirational",
+            "Reflective",
+            "Community-driven"
+          ],
+          "visualSignature": "Warm tones with a focus on storytelling"
+        },
+        "brief": {
+          "internalTitle": "Weekend Wisdom",
+          "concept": "Share a user-generated story of growth and faith",
+          "angle": "Highlight community stories to inspire others",
+          "targetEmotion": "Hope",
+          "hook": {
+            "type": "story",
+            "exactContent": "This is how our community member achieved success",
+            "whyItWorks": "Personal stories build relatability and community spirit"
+          }
+        },
+        "visualDirection": {
+          "overallStyle": "Inviting with narrative focus",
+          "colorPalette": [
+            "#D9CAB3",
+            "#8C8C8C",
+            "#FFFFFF"
+          ],
+          "lighting": "Soft",
+          "composition": "Dynamic",
+          "aiImagePrompt": "Faceless person in reflective pose, traditional elements around, abstract storytelling"
+        },
+        "sceneBreakdown": [
+          {
+            "scene": 1,
+            "timeRange": "0:00-0:03",
+            "visual": "Abstract silhouette of person facing bright horizon",
+            "textOverlay": {
+              "text": "This is how our community member achieved success",
+              "font": "Sans-serif",
+              "size": "large",
+              "position": "top",
+              "animation": "fade-in"
+            },
+            "audio": "Inspirational background score",
+            "transition": "swipe"
+          }
+        ],
+        "captionVariants": {
+          "engaging": {
+            "caption": "💫 Discover how faith and community can empower business success! 💫",
+            "hashtags": [
+              "#MuslimEntrepreneurs",
+              "#SuccessStories",
+              "#FaithDriven"
+            ]
+          },
+          "educational": {
+            "caption": "Learn from the experiences of our community and find your path to success.",
+            "hashtags": [
+              "#CommunityStories",
+              "#Entrepreneurship",
+              "#BusinessInspiration"
+            ]
+          },
+          "inspirational": {
+            "caption": "Your story is powerful. Share it and inspire others in our community. 🌟",
+            "hashtags": [
+              "#Inspiration",
+              "#CommunitySupport",
+              "#FaithAndBusiness"
+            ]
+          },
+          "recommended": "inspirational"
+        },
+        "technicalSpecs": {
+          "aspectRatio": "9:16",
+          "duration": "20 seconds",
+          "slideCount": null,
+          "fileFormat": "MP4"
+        },
+        "engagementStrategy": {
+          "primaryCTA": "comment",
+          "ctaPlacement": "End of reel",
+          "firstComment": "What's your story? Let us know below! 🌟",
+          "replyStrategy": "Feature select stories in future posts to enhance community feel"
+        },
+        "storyElements": {
+          "interactiveType": "none",
+          "interactiveContent": null,
+          "seriesPart": "standalone"
+        }
+      }
+    ],
+    "weeklyStrategy": {
+      "overarchingTheme": "Integrating Faith and Business: Stories and Strategies from Muslim Entrepreneurs",
+      "emotionalArc": "Builds from inspiration to empowerment, closing with community-centric hopeful stories",
+      "contentMix": {
+        "reels": 3,
+        "carousels": 2,
+        "images": 1,
+        "stories": 1
+      },
+      "islamicContext": "Focus on faith and community ties, with Jummah and Ramadan preparation themes",
+      "competitiveEdge": "Enhanced personal storytelling and community engagement, with polished visuals"
+    },
+    "productionNotes": {
+      "brandNonNegotiables": [
+        "Islamic values",
+        "High-quality visuals",
+        "Community engagement"
+      ],
+      "commonMistakes": [
+        "Avoid generic business advice",
+        "Ensure consistency across posts"
+      ],
+      "proTips": [
+        "Use user stories for authenticity",
+        "Incorporate interactive elements in stories"
+      ],
+      "qualityChecklist": [
+        "Consistent visual theme",
+        "Clear and concise text",
+        "Engaging CTAs",
+        "Authentic Islamic integration",
+        "High production quality"
+      ]
+    }
+  }
+}

@@ -6,6 +6,10 @@ import { processClientData, processCompetitorData, combineData, ProcessedData } 
 import { runAIPipeline } from './ai/pipeline';
 import { formatOutput, saveOutputs } from './output/formatter';
 
+// Parse command line arguments
+const args = process.argv.slice(2);
+const generateImages = args.includes('--generate-images') || args.includes('-g');
+
 async function main(): Promise<void> {
   console.log('\n');
   console.log('╔════════════════════════════════════════════════════════════╗');
@@ -14,6 +18,9 @@ async function main(): Promise<void> {
   console.log(`║  Client: @${config.client.username.padEnd(48)}║`);
   console.log(`║  Competitors: ${config.competitors.length} accounts${' '.repeat(40)}║`);
   console.log(`║  Rate Limit: ${config.rateLimitMs / 1000}s between API calls${' '.repeat(28)}║`);
+  if (generateImages) {
+    console.log('║  🎨 Image Generation: ENABLED                              ║');
+  }
   console.log('╚════════════════════════════════════════════════════════════╝');
   console.log('\n');
 
@@ -46,8 +53,8 @@ async function main(): Promise<void> {
     
     logger.info(`Data ready: ${scrapedData.clientPosts.length} client posts, ${scrapedData.competitorPosts.length} competitor posts`);
     
-    // Step 2: Run AI Pipeline
-    const pipelineResult = await runAIPipeline(scrapedData);
+    // Step 2: Run AI Pipeline (with optional image generation)
+    const pipelineResult = await runAIPipeline(scrapedData, { generateImages });
     
     // Step 3: Format and save outputs
     const deliverable = formatOutput(pipelineResult, scrapedData, config.client.username);
@@ -62,6 +69,9 @@ async function main(): Promise<void> {
     console.log(`║  Total Time: ${elapsedMinutes} minutes${' '.repeat(42 - elapsedMinutes.length)}║`);
     console.log(`║  Quality Score: ${deliverable.executiveSummary.qualityScore}/10${' '.repeat(38)}║`);
     console.log('║  Outputs saved to: ./output/                               ║');
+    if (generateImages && pipelineResult.contentGeneration) {
+      console.log(`║  Images Generated: ${pipelineResult.contentGeneration.totalImages}${' '.repeat(38 - String(pipelineResult.contentGeneration.totalImages).length)}║`);
+    }
     console.log('╚════════════════════════════════════════════════════════════╝');
     console.log('\n');
     
@@ -73,3 +83,4 @@ async function main(): Promise<void> {
 
 // Run if executed directly
 main().catch(console.error);
+

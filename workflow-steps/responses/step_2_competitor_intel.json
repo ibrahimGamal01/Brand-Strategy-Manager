@@ -1,0 +1,113 @@
+{
+  "timestamp": 1767283731704,
+  "savedAt": "2026-01-01T16:08:51.704Z",
+  "stepName": "step_2_competitor_intel",
+  "response": {
+    "competitorRankings": [
+      {
+        "username": "_amrouz",
+        "score": 90,
+        "strengths": [
+          "High engagement on spiritual and thought-provoking content",
+          "Consistent and high-quality video production"
+        ],
+        "weaknesses": [
+          "Lack of product promotion or direct calls to action",
+          "Occasional generic content that may not resonate with all followers"
+        ],
+        "stealThis": [
+          "Focus on deep, spiritual content that resonates with the Islamic community",
+          "Use of visually engaging and high-quality videos"
+        ]
+      },
+      {
+        "username": "growrizq",
+        "score": 85,
+        "strengths": [
+          "Strong emphasis on personal development and business tips",
+          "Engaging and educational content that provides value"
+        ],
+        "weaknesses": [
+          "Low comment engagement compared to likes",
+          "Occasional long-form captions that may deter quick scrolling"
+        ],
+        "stealThis": [
+          "Educational and motivational content that targets the Islamic entrepreneur",
+          "Use of clear and concise calls to action"
+        ]
+      },
+      {
+        "username": "taemann__",
+        "score": 80,
+        "strengths": [
+          "Diverse content that includes product promotions and personal reflections",
+          "High engagement on personal and emotional posts"
+        ],
+        "weaknesses": [
+          "Inconsistent posting schedule",
+          "Occasional overly promotional content that may feel inauthentic"
+        ],
+        "stealThis": [
+          "Mix of personal and product-related content to build trust and loyalty",
+          "Use of emotional and relatable captions to drive engagement"
+        ]
+      }
+    ],
+    "viralPatterns": {
+      "hooks": [
+        "Spiritual and motivational messages that resonate with Islamic values",
+        "Personal stories and reflections that create emotional connections",
+        "Clear and actionable calls to action, such as product promotions"
+      ],
+      "formats": [
+        "Short, engaging videos that are visually appealing and well-produced",
+        "Carousel posts that provide detailed information or step-by-step guides",
+        "Single image posts with powerful quotes or visuals"
+      ],
+      "captionFormulas": [
+        "Start with a strong, relatable statement or question",
+        "Provide context or a personal story to engage the audience",
+        "End with a call to action or a question to encourage comments"
+      ]
+    },
+    "contentGaps": [
+      {
+        "gap": "Lack of community engagement and interaction",
+        "opportunity": "Create more interactive content such as polls, Q&A sessions, and challenges",
+        "priority": "High",
+        "contentIdea": "Weekly Q&A sessions where followers can ask questions about Islamic entrepreneurship"
+      },
+      {
+        "gap": "Limited focus on specific Islamic business niches",
+        "opportunity": "Develop content that targets specific areas of Islamic entrepreneurship, such as halal products or Islamic finance",
+        "priority": "Medium",
+        "contentIdea": "Case studies and success stories of Islamic entrepreneurs in niche markets"
+      },
+      {
+        "gap": "Insufficient user-generated content",
+        "opportunity": "Encourage followers to share their own stories or experiences",
+        "priority": "Medium",
+        "contentIdea": "Monthly user-generated content contests with prizes for the best submissions"
+      }
+    ],
+    "strategicRecommendations": {
+      "immediate": [
+        "Increase the frequency of spiritual and motivational content to boost engagement",
+        "Implement more interactive elements like polls and Q&As"
+      ],
+      "shortTerm": [
+        "Develop a content calendar to ensure consistent posting and cover a variety of topics",
+        "Collaborate with other Islamic entrepreneurs to expand reach and credibility"
+      ],
+      "longTerm": [
+        "Create a community platform or forum for Islamic entrepreneurs to share resources and support each other",
+        "Develop a content series that dives deep into specific aspects of Islamic entrepreneurship, such as marketing, finance, and legal considerations"
+      ],
+      "avoid": [
+        "Overly promotional content that lacks value or authenticity",
+        "Neglecting to engage with the community and respond to comments and messages",
+        "Posting generic or low-quality content that does not align with the brand's values"
+      ]
+    }
+  }
+}

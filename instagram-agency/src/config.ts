@@ -3,6 +3,14 @@ import path from 'path';
 
 dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
+export interface ContentMixConfig {
+  postsPerWeek: number;
+  reelsPercentage: number;
+  carouselsPercentage: number;
+  imagesPercentage: number;
+  storiesPercentage: number;
+}
+
 export interface Config {
   openaiKey: string;
   apifyToken: string;
@@ -14,6 +22,7 @@ export interface Config {
     audience: string;
   };
   competitors: string[];
+  contentMix: ContentMixConfig;
 }
 
 function getEnvOrThrow(key: string): string {
@@ -41,4 +50,11 @@ export const config: Config = {
   competitors: getEnvOrDefault('COMPETITORS', '_amrouz,islam4everyone_,thesunnahguy,taemann__')
     .split(',')
     .map(c => c.trim()),
+  contentMix: {
+    postsPerWeek: parseInt(getEnvOrDefault('POSTS_PER_WEEK', '14'), 10),
+    reelsPercentage: parseInt(getEnvOrDefault('REELS_PERCENTAGE', '40'), 10),
+    carouselsPercentage: parseInt(getEnvOrDefault('CAROUSELS_PERCENTAGE', '30'), 10),
+    imagesPercentage: parseInt(getEnvOrDefault('IMAGES_PERCENTAGE', '20'), 10),
+    storiesPercentage: parseInt(getEnvOrDefault('STORIES_PERCENTAGE', '10'), 10),
+  },
 };
