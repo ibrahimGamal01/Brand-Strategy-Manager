@@ -1,0 +1,94 @@
+{
+  "timestamp": 1767370582820,
+  "savedAt": "2026-01-02T16:16:22.820Z",
+  "stepName": "step_3_trend_analysis",
+  "response": {
+    "trendingTopics": [
+      {
+        "topic": "Spiritual Entrepreneurial Journey",
+        "momentum": "hot",
+        "relevanceToClient": "High - aligns with brand focus on faith and entrepreneurship",
+        "contentAngle": "Share stories that highlight the integration of Islamic values in business success"
+      },
+      {
+        "topic": "Balancing Life and Business as a Muslim Woman",
+        "momentum": "rising",
+        "relevanceToClient": "High - directly targets audience of Muslim women entrepreneurs",
+        "contentAngle": "Provide tips and shared experiences on maintaining harmony between professional and personal life"
+      },
+      {
+        "topic": "Islamic Finance Basics",
+        "momentum": "stable",
+        "relevanceToClient": "Medium - offers educational value in a niche area",
+        "contentAngle": "Explain key concepts and benefits of Islamic finance for small business owners"
+      }
+    ],
+    "viralFormats": [
+      {
+        "format": "Short, Engaging Videos",
+        "whyItWorks": "Captures attention quickly and keeps viewers engaged with high-quality visuals",
+        "exampleHook": "Are you ready to take your business to the next level?",
+        "adaptationForClient": "Create videos that combine motivational messages with practical business tips"
+      },
+      {
+        "format": "Carousel Posts with Step-by-Step Guides",
+        "whyItWorks": "Allows for detailed information sharing in an easily digestible format",
+        "exampleHook": "Unlock the secrets to success with these simple steps",
+        "adaptationForClient": "Design carousels to guide followers through starting a halal business"
+      },
+      {
+        "format": "Single Image Quotes",
+        "whyItWorks": "Quickly communicates an inspirational message, encouraging shares and saves",
+        "exampleHook": "Believe in yourself and trust the process",
+        "adaptationForClient": "Use powerful quotes that resonate with Muslim entrepreneurs"
+      }
+    ],
+    "hashtagStrategy": {
+      "recommended": [
+        "#MuslimEntrepreneurs",
+        "#HalalBusiness",
+        "#IslamicFinance"
+      ],
+      "emerging": [
+        "#FaithDrivenBusiness",
+        "#SpiritualGrowthInBusiness"
+      ],
+      "niche": [
+        "#HalalProducts",
+        "#IslamicStartup"
+      ],
+      "avoid": [
+        "#GenericBusinessHashtags",
+        "#NonIslamicFinance"
+      ]
+    },
+    "timingInsights": {
+      "bestDays": [
+        "Monday",
+        "Thursday"
+      ],
+      "bestTimes": [
+        "11:00 AM",
+        "7:00 PM"
+      ],
+      "avoidTimes": [
+        "Late Night (after 10:00 PM)"
+      ]
+    },
+    "islamicCalendar": {
+      "upcomingEvents": [
+        "Jummah (every Friday)",
+        "Preparations for Ramadan"
+      ],
+      "contentOpportunities": [
+        "Discuss the importance of Jummah in balancing work and faith",
+        "Tips for entrepreneurs on preparing their businesses for Ramadan"
+      ],
+      "specialHashtags": [
+        "#JummahMubarak",
+        "#RamadanPrep"
+      ]
+    },
+    "weeklyThemeRecommendation": "Integrating Faith and Business: Stories and Strategies from Muslim Entrepreneurs"
+  }
+}

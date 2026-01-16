@@ -1,0 +1,62 @@
+{
+    "name": "Step 5: Analyze Competitors with AI",
+    "description": "Uses OpenAI GPT-4 Vision to analyze competitor content and identify winning strategies",
+    "nodes": [
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.openai.com/v1/chat/completions",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpHeaderAuth",
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={\n  \"model\": \"gpt-4o\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are an elite Instagram competitive intelligence analyst specializing in the Islamic entrepreneurship and lifestyle niche. Your analysis will be used to help @ummahpreneur outperform their competitors.\\n\\nYour job is to:\\n1. Identify what makes top-performing competitor content successful\\n2. Find gaps and opportunities competitors are missing\\n3. Extract replicable patterns and tactics\\n4. Understand the audience's preferences in this niche\\n\\nBe CREATIVE in finding non-obvious insights. Look for:\\n- Emotional triggers that resonate with Muslim entrepreneurs\\n- Content formats that get unusually high engagement\\n- Posting patterns and timing insights\\n- Visual and narrative techniques unique to successful accounts\\n\\nRemember: @ummahpreneur needs to stand out, not just copy. Find what to adopt AND what to do differently.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Analyze these competitor posts and provide strategic insights for @ummahpreneur.\\n\\nTop Performing Competitor Posts:\\n{{ JSON.stringify($json.topPerformers) }}\\n\\nAll Competitor Videos:\\n{{ JSON.stringify($json.byType.videos.slice(0, 5)) }}\\n\\nAll Competitor Carousels:\\n{{ JSON.stringify($json.byType.carousels.slice(0, 5)) }}\\n\\nProvide your analysis in this exact JSON format:\\n{\\n  \\\"competitorRankings\\\": [\\n    {\\\"username\\\": \\\"account\\\", \\\"score\\\": 1-10, \\\"strength\\\": \\\"what they do best\\\", \\\"weakness\\\": \\\"where they fall short\\\"}\\n  ],\\n  \\\"winningPatterns\\\": {\\n    \\\"contentFormats\\\": [\\n      {\\\"format\\\": \\\"type\\\", \\\"whyItWorks\\\": \\\"explanation\\\", \\\"exampleCaption\\\": \\\"example\\\"}\\n    ],\\n    \\\"hookTechniques\\\": [\\n      {\\\"technique\\\": \\\"name\\\", \\\"example\\\": \\\"how it's used\\\", \\\"effectiveness\\\": \\\"why it works\\\"}\\n    ],\\n    \\\"visualTrends\\\": [\\n      {\\\"trend\\\": \\\"description\\\", \\\"adoptionRate\\\": \\\"how common\\\", \\\"recommendation\\\": \\\"should ummahpreneur use it\\\"}\\n    ],\\n    \\\"captionFormulas\\\": [\\n      {\\\"formula\\\": \\\"structure\\\", \\\"example\\\": \\\"real example\\\", \\\"engagementImpact\\\": \\\"expected result\\\"}\\n    ]\\n  },\\n  \\\"gaps\\\": [\\n    {\\\"gap\\\": \\\"what competitors miss\\\", \\\"opportunity\\\": \\\"how ummahpreneur can fill it\\\", \\\"priority\\\": \\\"high/medium/low\\\"}\\n  ],\\n  \\\"topicIdeas\\\": [\\n    {\\\"topic\\\": \\\"content idea\\\", \\\"format\\\": \\\"video/carousel/image\\\", \\\"angle\\\": \\\"unique approach\\\", \\\"hook\\\": \\\"opening line/visual\\\"}\\n  ],\\n  \\\"strategicRecommendations\\\": {\\n    \\\"immediateActions\\\": [\\\"things to start doing now\\\"],\\n    \\\"longtermPlays\\\": [\\\"building for future\\\"],\\n    \\\"risksTooAvoid\\\": [\\\"what NOT to copy from competitors\\\"]\\n  },\\n  \\\"engagementTactics\\\": [\\n    {\\\"tactic\\\": \\\"technique\\\", \\\"implementation\\\": \\\"how to do it\\\", \\\"expectedLift\\\": \\\"% improvement\\\"}\\n  ]\\n}\\n\\nBe specific, creative, and actionable. Every insight should help @ummahpreneur create better content.\"\n    }\n  ],\n  \"temperature\": 0.8,\n  \"max_tokens\": 4000,\n  \"response_format\": { \"type\": \"json_object\" }\n}",
+                "options": {
+                    "timeout": 120000
+                }
+            },
+            "id": "analyze-competitors-openai",
+            "name": "OpenAI: Competitor Analysis",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                1400,
+                500
+            ],
+            "notes": "Strategic analysis of competitor content using GPT-4o",
+            "credentials": {
+                "httpHeaderAuth": {
+                    "id": "OPENAI_CREDENTIAL_ID",
+                    "name": "OpenAI API Key"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "// Extract and structure the competitor analysis\nconst response = $input.first().json;\nconst analysisContent = response.choices?.[0]?.message?.content;\n\nlet competitorAnalysis;\ntry {\n  competitorAnalysis = JSON.parse(analysisContent);\n} catch (e) {\n  competitorAnalysis = { error: 'Failed to parse AI response', raw: analysisContent };\n}\n\nreturn [{\n  json: {\n    competitorAnalysis: competitorAnalysis,\n    analysisTimestamp: new Date().toISOString(),\n    analysisModel: 'gpt-4o'\n  }\n}];"
+            },
+            "id": "parse-competitor-analysis",
+            "name": "Parse Competitor Analysis",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1600,
+                500
+            ],
+            "notes": "Structures the competitor analysis output"
+        }
+    ],
+    "connections": {
+        "OpenAI: Competitor Analysis": {
+            "main": [
+                [
+                    {
+                        "node": "Parse Competitor Analysis",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    }
+}

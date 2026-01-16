@@ -1,0 +1,90 @@
+{
+  "timestamp": 1767284136309,
+  "savedAt": "2026-01-01T16:15:36.309Z",
+  "stepName": "step_5_qa_check",
+  "response": {
+    "overallQualityScore": 8.5,
+    "briefReviews": [
+      {
+        "day": 1,
+        "title": "Jummah Reflection: Balancing Faith and Business",
+        "brandAlignmentScore": 9,
+        "engagementPotential": 9,
+        "improvements": [
+          "Consider adding a short testimonial or personal anecdote from a community member to make the content more relatable.",
+          "Ensure the music is uplifting but not too distracting, as it should complement the reflective nature of the content."
+        ],
+        "approved": true
+      },
+      {
+        "day": 2,
+        "title": "5 Tips for Managing Work and Ramadan",
+        "brandAlignmentScore": 8.5,
+        "engagementPotential": 8,
+        "improvements": [
+          "In slide 3, consider adding a specific example of a break activity that aligns with Islamic values, such as reciting Quran or performing Salah.",
+          "In slide 5, include a more detailed example of how to stay connected with the community, such as joining online forums or attending local events."
+        ],
+        "approved": true
+      },
+      {
+        "day": 3,
+        "title": "The Power of Community in Entrepreneurship",
+        "brandAlignmentScore": 9,
+        "engagementPotential": 8.5,
+        "improvements": [
+          "Consider adding a short video clip or animation to the image to make it more engaging and dynamic.",
+          "In the caption, ask followers to tag friends who have supported them in their entrepreneurial journey to increase interaction."
+        ],
+        "approved": true
+      },
+      {
+        "day": 4,
+        "title": "Success Story: From Struggle to Triumph",
+        "brandAlignmentScore": 9,
+        "engagementPotential": 9,
+        "improvements": [
+          "Ensure the success story is relatable and highlights specific challenges and solutions to provide actionable insights for the audience.",
+          "Consider including a short testimonial from the entrepreneur's customers or mentors to add credibility and depth to the story."
+        ],
+        "approved": true
+      },
+      {
+        "day": 5,
+        "title": "The Importance of Mental Health in Entrepreneurship",
+        "brandAlignmentScore": 8.5,
+        "engagementPotential": 8,
+        "improvements": [
+          "In slide 4, include a specific example of a mentor or support group that can provide guidance and support.",
+          "In slide 6, suggest a specific activity or practice to stay positive, such as writing a gratitude journal or setting daily intentions."
+        ],
+        "approved": true
+      },
+      {
+        "day": 6,
+        "title": "Q&A: Your Questions on Islamic Entrepreneurship",
+        "brandAlignmentScore": 8.5,
+        "engagementPotential": 9,
+        "improvements": [
+          "Consider adding a countdown timer or reminder in the days leading up to the Q&A session to build anticipation and increase participation.",
+          "In the caption, encourage followers to share the post with friends who might have questions about Islamic entrepreneurship."
+        ],
+        "approved": true
+      },
+      {
+        "day": 7,
+        "title": "Eid al-Fitr: Celebrating Success and Gratitude",
+        "brandAlignmentScore": 9,
+        "engagementPotential": 9,
+        "improvements": [
+          "Consider adding a short video clip of a family celebrating Eid to make the post more engaging.",
+          "In the caption, ask followers to share their favorite Eid traditions or memories to foster a sense of community and belonging."
+        ],
+        "approved": true
+      }
+    ],
+    "generalFeedback": "The content plan is well-aligned with the brand DNA and effectively balances faith, community, and entrepreneurship. Each brief is thoughtful and engaging, with a strong focus on providing value and fostering community interaction. The visual direction and emotional arc are consistent and resonate well with the target audience. However, there are a few areas where adding more personal anecdotes, specific examples, and interactive elements could further enhance the content and engagement potential.",
+    "topPerformerPrediction": "The 'Success Story: From Struggle to Triumph' video on Day 4 is likely to perform the best. It combines a personal and relatable story with a strong emotional appeal, which can inspire and motivate the audience. The use of a real-life example and the emphasis on overcoming challenges align well with the brand's mission of empowering and inspiring Muslim entrepreneurs.",
+    "riskyContent": "None of the briefs are particularly risky, but the '5 Tips for Managing Work and Ramadan' carousel on Day 2 might benefit from more specific and actionable tips. The content is valuable, but it could be more engaging if it includes more detailed and practical examples that directly address the challenges faced by Muslim entrepreneurs during Ramadan."
+  }
+}

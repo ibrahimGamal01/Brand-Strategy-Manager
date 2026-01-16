@@ -1,0 +1,373 @@
+{
+    "name": "Step 2: Client Scraping - 5-Service Rotation",
+    "description": "Routes client scraping through one of 5 services based on rotation index",
+    "nodes": [
+        {
+            "parameters": {
+                "rules": {
+                    "values": [
+                        {
+                            "conditions": {
+                                "options": {
+                                    "caseSensitive": true
+                                },
+                                "conditions": [
+                                    {
+                                        "leftValue": "={{ $json.currentService }}",
+                                        "rightValue": "apify",
+                                        "operator": {
+                                            "type": "string",
+                                            "operation": "equals"
+                                        }
+                                    }
+                                ]
+                            },
+                            "renameOutput": true,
+                            "outputKey": "apify"
+                        },
+                        {
+                            "conditions": {
+                                "options": {
+                                    "caseSensitive": true
+                                },
+                                "conditions": [
+                                    {
+                                        "leftValue": "={{ $json.currentService }}",
+                                        "rightValue": "brightdata",
+                                        "operator": {
+                                            "type": "string",
+                                            "operation": "equals"
+                                        }
+                                    }
+                                ]
+                            },
+                            "renameOutput": true,
+                            "outputKey": "brightdata"
+                        },
+                        {
+                            "conditions": {
+                                "options": {
+                                    "caseSensitive": true
+                                },
+                                "conditions": [
+                                    {
+                                        "leftValue": "={{ $json.currentService }}",
+                                        "rightValue": "sociavault",
+                                        "operator": {
+                                            "type": "string",
+                                            "operation": "equals"
+                                        }
+                                    }
+                                ]
+                            },
+                            "renameOutput": true,
+                            "outputKey": "sociavault"
+                        },
+                        {
+                            "conditions": {
+                                "options": {
+                                    "caseSensitive": true
+                                },
+                                "conditions": [
+                                    {
+                                        "leftValue": "={{ $json.currentService }}",
+                                        "rightValue": "scrapeless",
+                                        "operator": {
+                                            "type": "string",
+                                            "operation": "equals"
+                                        }
+                                    }
+                                ]
+                            },
+                            "renameOutput": true,
+                            "outputKey": "scrapeless"
+                        },
+                        {
+                            "conditions": {
+                                "options": {
+                                    "caseSensitive": true
+                                },
+                                "conditions": [
+                                    {
+                                        "leftValue": "={{ $json.currentService }}",
+                                        "rightValue": "scrapingbot",
+                                        "operator": {
+                                            "type": "string",
+                                            "operation": "equals"
+                                        }
+                                    }
+                                ]
+                            },
+                            "renameOutput": true,
+                            "outputKey": "scrapingbot"
+                        }
+                    ]
+                }
+            },
+            "id": "client-scraper-router",
+            "name": "Route: Client Scraper",
+            "type": "n8n-nodes-base.switch",
+            "typeVersion": 3.2,
+            "position": [
+                1000,
+                300
+            ],
+            "notes": "Routes to one of 5 scraping services based on rotation"
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.apify.com/v2/acts/apify~instagram-scraper/run-sync-get-dataset-items",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "token",
+                            "value": "={{$env.APIFY_TOKEN}}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={{ JSON.stringify({ directUrls: [$json.client_url], resultsType: 'posts', resultsLimit: $json.posts_limit }) }}",
+                "options": {
+                    "timeout": 300000
+                }
+            },
+            "id": "client-apify",
+            "name": "Apify: Client",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                1200,
+                100
+            ],
+            "notes": "Apify Instagram Scraper - Free tier: $5/month credits"
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.brightdata.com/dca/trigger",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization",
+                            "value": "Bearer {{$env.BRIGHTDATA_TOKEN}}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={{ JSON.stringify({ url: $json.client_url }) }}",
+                "options": {
+                    "timeout": 300000
+                }
+            },
+            "id": "client-brightdata",
+            "name": "BrightData: Client",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                1200,
+                200
+            ],
+            "notes": "Bright Data - Free trial credits, $0.001/record"
+        },
+        {
+            "parameters": {
+                "method": "GET",
+                "url": "https://api.sociavault.com/instagram/user",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "username",
+                            "value": "={{ $json.client_username }}"
+                        },
+                        {
+                            "name": "api_key",
+                            "value": "={{$env.SOCIAVAULT_TOKEN}}"
+                        }
+                    ]
+                },
+                "options": {
+                    "timeout": 120000
+                }
+            },
+            "id": "client-sociavault",
+            "name": "SociaVault: Client",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                1200,
+                300
+            ],
+            "notes": "SociaVault - 50 free credits (no expiry!)"
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.scrapeless.com/task",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "x-api-key",
+                            "value": "={{$env.SCRAPELESS_TOKEN}}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={{ JSON.stringify({ target: $json.client_username, type: 'instagram_profile' }) }}",
+                "options": {
+                    "timeout": 120000
+                }
+            },
+            "id": "client-scrapeless",
+            "name": "Scrapeless: Client",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                1200,
+                400
+            ],
+            "notes": "Scrapeless - Free trial (no CC required)"
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.scraping-bot.io/scrape/raw-html",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpBasicAuth",
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={{ JSON.stringify({ url: $json.client_url }) }}",
+                "options": {
+                    "timeout": 120000
+                }
+            },
+            "id": "client-scrapingbot",
+            "name": "ScrapingBot: Client",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                1200,
+                500
+            ],
+            "notes": "ScrapingBot - Limited free requests"
+        },
+        {
+            "parameters": {
+                "mode": "combine",
+                "combinationMode": "multiplex"
+            },
+            "id": "client-merge",
+            "name": "Merge: Client Data",
+            "type": "n8n-nodes-base.merge",
+            "typeVersion": 3,
+            "position": [
+                1400,
+                300
+            ],
+            "notes": "Merges output from whichever scraper was used"
+        }
+    ],
+    "connections": {
+        "Route: Client Scraper": {
+            "main": [
+                [
+                    {
+                        "node": "Apify: Client",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "BrightData: Client",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "SociaVault: Client",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Scrapeless: Client",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "ScrapingBot: Client",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Apify: Client": {
+            "main": [
+                [
+                    {
+                        "node": "Merge: Client Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "BrightData: Client": {
+            "main": [
+                [
+                    {
+                        "node": "Merge: Client Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "SociaVault: Client": {
+            "main": [
+                [
+                    {
+                        "node": "Merge: Client Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Scrapeless: Client": {
+            "main": [
+                [
+                    {
+                        "node": "Merge: Client Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "ScrapingBot: Client": {
+            "main": [
+                [
+                    {
+                        "node": "Merge: Client Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    }
+}

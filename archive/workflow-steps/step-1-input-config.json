@@ -1,0 +1,72 @@
+{
+    "name": "Step 1: Input Configuration",
+    "description": "Defines all input parameters including client account, competitors list, and scraping settings",
+    "nodes": [
+        {
+            "parameters": {},
+            "id": "trigger-manual",
+            "name": "Start Workflow",
+            "type": "n8n-nodes-base.manualTrigger",
+            "typeVersion": 1,
+            "position": [
+                200,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "values": {
+                    "string": [
+                        {
+                            "name": "client_username",
+                            "value": "ummahpreneur"
+                        },
+                        {
+                            "name": "client_url",
+                            "value": "https://www.instagram.com/ummahpreneur/"
+                        }
+                    ],
+                    "object": [
+                        {
+                            "name": "competitors",
+                            "value": "=[{\"username\": \"_amrouz\", \"priority\": \"high\", \"note\": \"Really good content\"}, {\"username\": \"islam4everyone_\", \"priority\": \"medium\"}, {\"username\": \"thesunnahguy\", \"priority\": \"medium\"}, {\"username\": \"taemann__\", \"priority\": \"medium\"}, {\"username\": \"bepositive_bedifferent\", \"priority\": \"medium\"}, {\"username\": \"zeemrc\", \"priority\": \"medium\"}, {\"username\": \"harristory_\", \"priority\": \"medium\"}]"
+                        }
+                    ],
+                    "number": [
+                        {
+                            "name": "posts_limit",
+                            "value": 12
+                        },
+                        {
+                            "name": "days_back",
+                            "value": 30
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "input-config",
+            "name": "Input Configuration",
+            "type": "n8n-nodes-base.set",
+            "typeVersion": 3.4,
+            "position": [
+                400,
+                300
+            ],
+            "notes": "Configure client account, competitors list, and scraping parameters"
+        }
+    ],
+    "connections": {
+        "Start Workflow": {
+            "main": [
+                [
+                    {
+                        "node": "Input Configuration",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    }
+}

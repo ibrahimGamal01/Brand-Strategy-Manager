@@ -1,0 +1,802 @@
+{
+  "timestamp": 1767384222796,
+  "savedAt": "2026-01-02T20:03:42.796Z",
+  "stepName": "step_4_production_briefs_batch_2",
+  "response": {
+    "weeklyContentPlan": [
+      {
+        "postNumber": 8,
+        "dayOfWeek": "Monday",
+        "postingTime": "11:00 UTC",
+        "contentType": "reel",
+        "brandFingerprint": {
+          "mustInclude": [
+            "Islamic values",
+            "Motivational message",
+            "High-quality visuals"
+          ],
+          "tonalMarkers": [
+            "Inspiration",
+            "Community",
+            "Confidence"
+          ],
+          "visualSignature": "Desert tones with an Arabian atmosphere, faceless traditional clothing visuals"
+        },
+        "brief": {
+          "internalTitle": "Spiritual Entrepreneurial Insights",
+          "concept": "Sharing powerful insights for integrating faith and entrepreneurship.",
+          "angle": "Using the desert as a symbolic backdrop for spiritual growth.",
+          "targetEmotion": "Inspiration",
+          "hook": {
+            "type": "statement",
+            "exactContent": "Unlock the secrets to success with faith at the forefront.",
+            "whyItWorks": "It speaks directly to the core desires of the audience: success and spiritual fulfillment."
+          }
+        },
+        "visualDirection": {
+          "overallStyle": "Natural and soft with desert tones",
+          "colorPalette": [
+            "#D4A373",
+            "#A68A64",
+            "#8C7563"
+          ],
+          "lighting": "Golden hour",
+          "composition": "Rule of thirds",
+          "aiImagePrompt": "A vast desert landscape at sunset with a lone figure walking away, dressed in traditional Muslim clothing, capturing an aura of solitude and reflection."
+        },
+        "sceneBreakdown": [
+          {
+            "scene": 1,
+            "timeRange": "0:00-0:03",
+            "visual": "A wide shot of a desert landscape with a figure walking into the distance.",
+            "textOverlay": {
+              "text": "Unlock the secrets to success",
+              "font": "Sans-serif",
+              "size": "large",
+              "position": "center",
+              "animation": "fade-in"
+            },
+            "audio": "Inspirational instrumental music",
+            "transition": "fade"
+          }
+        ],
+        "captionVariants": {
+          "engaging": {
+            "caption": "Are you ready to take your business to the next level? #SpiritualGrowthInBusiness",
+            "hashtags": [
+              "#MuslimEntrepreneurs",
+              "#HalalBusiness",
+              "#FaithDrivenBusiness",
+              "#Inspiration",
+              "#DesertDiaries",
+              "#IslamicValues",
+              "#EntrepreneurLife",
+              "#Success",
+              "#Motivation",
+              "#GrowthJourney"
+            ]
+          },
+          "educational": {
+            "caption": "Integrate faith into your business model and see the transformation. #IslamicEntrepreneurship",
+            "hashtags": [
+              "#MuslimEntrepreneurs",
+              "#HalalBusiness",
+              "#FaithDrivenBusiness",
+              "#BusinessTips",
+              "#IslamicValues",
+              "#Entrepreneurship",
+              "#Growth",
+              "#SuccessTips",
+              "#BusinessGrowth",
+              "#FaithDriven"
+            ]
+          },
+          "inspirational": {
+            "caption": "The journey of entrepreneurship is spiritual and transformative. Embrace it with faith. #BelieveInYourself",
+            "hashtags": [
+              "#MuslimEntrepreneurs",
+              "#HalalBusiness",
+              "#FaithDrivenBusiness",
+              "#BelieveInYourself",
+              "#DesertPath",
+              "#SuccessJourney",
+              "#Motivation",
+              "#InspirationDaily",
+              "#GrowthMindset",
+              "#IslamicValues"
+            ]
+          },
+          "recommended": "inspirational"
+        },
+        "technicalSpecs": {
+          "aspectRatio": "9:16",
+          "duration": "15 seconds",
+          "fileFormat": "MP4"
+        },
+        "engagementStrategy": {
+          "primaryCTA": "share",
+          "ctaPlacement": "End of the video",
+          "firstComment": "What's the biggest challenge you're facing on your entrepreneurial journey? Let's discuss below! 🌟",
+          "replyStrategy": "Acknowledge each comment with a personal note and invite further discussion."
+        }
+      },
+      {
+        "postNumber": 9,
+        "dayOfWeek": "Tuesday",
+        "postingTime": "11:00 UTC",
+        "contentType": "carousel",
+        "brandFingerprint": {
+          "mustInclude": [
+            "Islamic business principles",
+            "Step-by-step guide",
+            "Engaging visuals"
+          ],
+          "tonalMarkers": [
+            "Educational",
+            "Supportive",
+            "Empowering"
+          ],
+          "visualSignature": "Clean and minimalistic layout with infographics"
+        },
+        "brief": {
+          "internalTitle": "Halal Business Setup Guide",
+          "concept": "A detailed guide on starting a halal business.",
+          "angle": "Breaking down complex steps into easy-to-follow instructions.",
+          "targetEmotion": "Empowerment",
+          "hook": {
+            "type": "question",
+            "exactContent": "Ready to start your halal business?",
+            "whyItWorks": "It directly involves the audience and encourages them to take action."
+          }
+        },
+        "visualDirection": {
+          "overallStyle": "Professional and polished with a focus on clarity",
+          "colorPalette": [
+            "#FFFFFF",
+            "#4CAF50",
+            "#FFD700"
+          ],
+          "lighting": "Soft",
+          "composition": "Centered with clear hierarchy",
+          "aiImagePrompt": "A series of faceless hands arranging small business-related items like a notebook, calculator, and halal certificate, symbolizing organization and preparation."
+        },
+        "slideBreakdown": [
+          {
+            "slideNumber": 1,
+            "headline": "Step 1: Research the Market",
+            "body": "Understand the demand for halal products/services.",
+            "visualElement": "Graphic of a magnifying glass over a market chart",
+            "layout": "Text-left",
+            "designNotes": "Use a magnifying glass icon to emphasize research"
+          }
+        ],
+        "captionVariants": {
+          "engaging": {
+            "caption": "Thinking of starting a halal business? 🕌 Here's your step-by-step guide! Dive in and get started today. 💼 #IslamicStartup",
+            "hashtags": [
+              "#MuslimEntrepreneurs",
+              "#HalalBusiness",
+              "#StartYourBusiness",
+              "#EntrepreneurGuide",
+              "#BusinessSteps",
+              "#IslamicValues",
+              "#Empowerment",
+              "#BusinessTips",
+              "#StartupJourney",
+              "#Entrepreneurship"
+            ]
+          },
+          "educational": {
+            "caption": "Unlock the potential of halal entrepreneurship! This guide walks you through each step. #HalalBusinessSetup",
+            "hashtags": [
+              "#MuslimEntrepreneurs",
+              "#HalalBusiness",
+              "#BusinessGuide",
+              "#StartUpTips",
+              "#IslamicValues",
+              "#BusinessEducation",
+              "#Empowerment",
+              "#EntrepreneurTips",
+              "#StepByStep",
+              "#Growth"
+            ]
+          },
+          "inspirational": {
+            "caption": "Every great business starts with a single step. Take yours today with our halal business guide. 🌟 #BelieveInYourBusiness",
+            "hashtags": [
+              "#MuslimEntrepreneurs",
+              "#HalalBusiness",
+              "#BelieveInYourBusiness",
+              "#GuidedSteps",
+              "#SuccessJourney",
+              "#BusinessStartup",
+              "#Motivation",
+              "#BusinessGrowth",
+              "#EntrepreneurMindset",
+              "#IslamicValues"
+            ]
+          },
+          "recommended": "educational"
+        },
+        "technicalSpecs": {
+          "aspectRatio": "4:5",
+          "slideCount": "7",
+          "fileFormat": "JPG"
+        },
+        "engagementStrategy": {
+          "primaryCTA": "save",
+          "ctaPlacement": "Last slide",
+          "firstComment": "Which step are you most excited to tackle? Share your thoughts! 🗣️",
+          "replyStrategy": "Respond with encouragement and additional tips related to each comment."
+        }
+      },
+      {
+        "postNumber": 10,
+        "dayOfWeek": "Wednesday",
+        "postingTime": "11:00 UTC",
+        "contentType": "reel",
+        "brandFingerprint": {
+          "mustInclude": [
+            "Islamic finance",
+            "Educational content",
+            "Professional visuals"
+          ],
+          "tonalMarkers": [
+            "Informative",
+            "Trustworthy",
+            "Supportive"
+          ],
+          "visualSignature": "Professional tone with clean layouts"
+        },
+        "brief": {
+          "internalTitle": "Islamic Finance Basics",
+          "concept": "Exploring key benefits of Islamic finance for entrepreneurs.",
+          "angle": "Simplifying complex financial concepts.",
+          "targetEmotion": "Understanding",
+          "hook": {
+            "type": "curiosity",
+            "exactContent": "Did you know Islamic finance can boost your business?",
+            "whyItWorks": "It sparks curiosity about a niche topic, encouraging viewers to learn more."
+          }
+        },
+        "visualDirection": {
+          "overallStyle": "Sleek and modern with a focus on clarity",
+          "colorPalette": [
+            "#234F1E",
+            "#A9B5AB",
+            "#E1E5E4"
+          ],
+          "lighting": "Natural",
+          "composition": "Dynamic with key points highlighted",
+          "aiImagePrompt": "A collection of traditional Islamic financial symbols like gold coins, scales, and a compass, arranged aesthetically to represent balance and direction."
+        },
+        "sceneBreakdown": [
+          {
+            "scene": 1,
+            "timeRange": "0:00-0:03",
+            "visual": "A close-up shot of gold coins and a balance scale.",
+            "textOverlay": {
+              "text": "Boost your business with Islamic finance!",
+              "font": "Sans-serif",
+              "size": "medium",
+              "position": "bottom",
+              "animation": "slide"
+            },
+            "audio": "Calm and informative background music",
+            "transition": "swipe"
+          }
+        ],
+        "captionVariants": {
+          "engaging": {
+            "caption": "Explore how Islamic finance principles can transform your business finances! 💸 #IslamicFinance",
+            "hashtags": [
+              "#MuslimEntrepreneurs",
+              "#IslamicFinance",
+              "#BusinessFinances",
+              "#HalalBusiness",
+              "#FinanceTips",
+              "#UnderstandingFinance",
+              "#Growth",
+              "#Entrepreneurship",
+              "#FinancialWisdom",
+              "#BusinessSuccess"
+            ]
+          },
+          "educational": {
+            "caption": "Financial literacy is the key to sustainable business growth. Discover the principles of Islamic finance! #FinanceForEntrepreneurs",
+            "hashtags": [
+              "#MuslimEntrepreneurs",
+              "#IslamicFinance",
+              "#BusinessEducation",
+              "#FinancialLiteracy",
+              "#HalalBusiness",
+              "#EntrepreneurialGrowth",
+              "#FinanceTips",
+              "#BusinessGrowth",
+              "#IslamicPrinciples",
+              "#Entrepreneurship"
+            ]
+          },
+          "inspirational": {
+            "caption": "Build a financially sustainable future with Islamic finance. Trust the process. 🌟 #FaithAndFinance",
+            "hashtags": [
+              "#MuslimEntrepreneurs",
+              "#IslamicFinance",
+              "#TrustTheProcess",
+              "#FinancialGrowth",
+              "#BusinessSuccess",
+              "#Motivation",
+              "#IslamicValues",
+              "#EntrepreneurialJourney",
+              "#Growth",
+              "#BusinessWisdom"
+            ]
+          },
+          "recommended": "educational"
+        },
+        "technicalSpecs": {
+          "aspectRatio": "9:16",
+          "duration": "20 seconds",
+          "fileFormat": "MP4"
+        },
+        "engagementStrategy": {
+          "primaryCTA": "comment",
+          "ctaPlacement": "Middle of the video",
+          "firstComment": "Have you ever considered Islamic finance for your business? 🤔 Let's chat in the comments!",
+          "replyStrategy": "Provide insights and answer questions to create a dialogue."
+        }
+      },
+      {
+        "postNumber": 11,
+        "dayOfWeek": "Thursday",
+        "postingTime": "11:00 UTC",
+        "contentType": "carousel",
+        "brandFingerprint": {
+          "mustInclude": [
+            "Female empowerment",
+            "Actionable tips",
+            "Engaging design"
+          ],
+          "tonalMarkers": [
+            "Motivational",
+            "Supportive",
+            "Empowering"
+          ],
+          "visualSignature": "Bright and inviting, with a focus on personal growth"
+        },
+        "brief": {
+          "internalTitle": "Balancing Life and Business",
+          "concept": "Tips for Muslim women to balance life and business.",
+          "angle": "Practical advice from real experiences.",
+          "targetEmotion": "Empowerment",
+          "hook": {
+            "type": "relatability",
+            "exactContent": "Struggling to balance family and work?",
+            "whyItWorks": "It connects with the daily challenges faced by the audience, making it highly relatable."
+          }
+        },
+        "visualDirection": {
+          "overallStyle": "Bright with accents of green and gold",
+          "colorPalette": [
+            "#E8F5E9",
+            "#FFD700",
+            "#FFC107"
+          ],
+          "lighting": "Natural with a slight glow",
+          "composition": "Dynamic with personal touches",
+          "aiImagePrompt": "A scene of a traditional Muslim living room, warm and inviting, with faceless women organizing work and family life, symbolizing harmony and balance."
+        },
+        "slideBreakdown": [
+          {
+            "slideNumber": 1,
+            "headline": "Tip 1: Set Clear Boundaries",
+            "body": "Define your work and personal time clearly.",
+            "visualElement": "Graphic of a calendar with time blocks",
+            "layout": "Text-left",
+            "designNotes": "Use a calendar icon to symbolize organization"
+          }
+        ],
+        "captionVariants": {
+          "engaging": {
+            "caption": "Balancing family and business can be challenging. Here are some tips to make it easier! 👩‍💼👪 #WorkLifeBalance",
+            "hashtags": [
+              "#MuslimEntrepreneurs",
+              "#WorkLifeBalance",
+              "#WomenEmpowerment",
+              "#BusinessTips",
+              "#FamilyAndCareer",
+              "#Growth",
+              "#Empowerment",
+              "#LifeBalance",
+              "#Entrepreneurship",
+              "#IslamicValues"
+            ]
+          },
+          "educational": {
+            "caption": "Learn how to maintain harmony between professional and personal life. These tips can help! #BalanceYourLife",
+            "hashtags": [
+              "#MuslimEntrepreneurs",
+              "#WorkLifeBalance",
+              "#BusinessEducation",
+              "#IslamicValues",
+              "#EntrepreneurialGrowth",
+              "#Balance",
+              "#Empowerment",
+              "#Growth",
+              "#LifeTips",
+              "#Success"
+            ]
+          },
+          "inspirational": {
+            "caption": "You can succeed in both business and family life. Here’s how to balance your journey. 🌟 #EmpowerYourself",
+            "hashtags": [
+              "#MuslimEntrepreneurs",
+              "#WorkLifeBalance",
+              "#BelieveInYourself",
+              "#SuccessJourney",
+              "#InspirationDaily",
+              "#Empowerment",
+              "#GrowthMindset",
+              "#IslamicValues",
+              "#LifeBalance",
+              "#Entrepreneurship"
+            ]
+          },
+          "recommended": "engaging"
+        },
+        "technicalSpecs": {
+          "aspectRatio": "4:5",
+          "slideCount": "8",
+          "fileFormat": "JPG"
+        },
+        "engagementStrategy": {
+          "primaryCTA": "comment",
+          "ctaPlacement": "Last slide",
+          "firstComment": "How do you balance your work and family life? Share your tips below! 👇",
+          "replyStrategy": "Engage with personal anecdotes and encouragement."
+        }
+      },
+      {
+        "postNumber": 12,
+        "dayOfWeek": "Friday",
+        "postingTime": "11:00 UTC",
+        "contentType": "story",
+        "brandFingerprint": {
+          "mustInclude": [
+            "Community engagement",
+            "Jummah focus",
+            "Interactive element"
+          ],
+          "tonalMarkers": [
+            "Communal",
+            "Reflective",
+            "Spiritual"
+          ],
+          "visualSignature": "Warm and inviting, with a focus on reflection"
+        },
+        "brief": {
+          "internalTitle": "Jummah Reflections",
+          "concept": "Sharing reflections and prompting community engagement on Jummah.",
+          "angle": "Using stories to create a dialogue with followers.",
+          "targetEmotion": "Community Belonging",
+          "hook": {
+            "type": "question",
+            "exactContent": "How do you prepare for Jummah?",
+            "whyItWorks": "It invites participation and shares community experiences."
+          }
+        },
+        "visualDirection": {
+          "overallStyle": "Warm and inviting with a communal feel",
+          "colorPalette": [
+            "#FFF8E1",
+            "#8D6E63",
+            "#FFCC80"
+          ],
+          "lighting": "Natural and soft",
+          "composition": "Centered with focus on interaction",
+          "aiImagePrompt": "A mosque interior during Jummah, with soft lighting and a sense of peace and gathering, faceless individuals in prayer."
+        },
+        "storyElements": {
+          "interactiveType": "poll",
+          "interactiveContent": "Do you attend Jummah prayers at the mosque or at home?",
+          "seriesPart": "Standalone"
+        },
+        "captionVariants": {
+          "engaging": {
+            "caption": "Join us for Jummah reflections and share your preparation tips! 🕌 #JummahMubarak",
+            "hashtags": [
+              "#JummahMubarak",
+              "#MuslimEntrepreneurs",
+              "#CommunityEngagement",
+              "#IslamicValues",
+              "#SpiritualGrowth",
+              "#Faith",
+              "#JummahPreparation",
+              "#Community",
+              "#Reflection",
+              "#IslamicCommunity"
+            ]
+          },
+          "educational": {
+            "caption": "Jummah is a time for community and reflection. How do you prepare for this blessed day? #SpiritualReflections",
+            "hashtags": [
+              "#JummahMubarak",
+              "#MuslimEntrepreneurs",
+              "#CommunityEngagement",
+              "#IslamicValues",
+              "#IslamicTeachings",
+              "#Faith",
+              "#JummahPreparation",
+              "#Community",
+              "#Reflection",
+              "#IslamicCommunity"
+            ]
+          },
+          "inspirational": {
+            "caption": "Jummah is a day of unity and reflection. Let's come together and share how we prepare our hearts. 🌟 #CommunitySpirit",
+            "hashtags": [
+              "#JummahMubarak",
+              "#MuslimEntrepreneurs",
+              "#CommunityEngagement",
+              "#IslamicValues",
+              "#SpiritualGrowth",
+              "#Faith",
+              "#JummahPreparation",
+              "#Community",
+              "#Reflection",
+              "#IslamicCommunity"
+            ]
+          },
+          "recommended": "engaging"
+        },
+        "technicalSpecs": {
+          "aspectRatio": "9:16",
+          "fileFormat": "MP4"
+        },
+        "engagementStrategy": {
+          "primaryCTA": "comment",
+          "ctaPlacement": "End of story",
+          "firstComment": "Tell us how Jummah inspires your week! 💬 We love hearing from you.",
+          "replyStrategy": "Respond to comments personally to build a sense of community."
+        }
+      },
+      {
+        "postNumber": 13,
+        "dayOfWeek": "Saturday",
+        "postingTime": "11:00 UTC",
+        "contentType": "image",
+        "brandFingerprint": {
+          "mustInclude": [
+            "Strong visual",
+            "Inspirational quote",
+            "Islamic values"
+          ],
+          "tonalMarkers": [
+            "Motivational",
+            "Uplifting",
+            "Hopeful"
+          ],
+          "visualSignature": "Bold and simplistic with a focus on the quote"
+        },
+        "brief": {
+          "internalTitle": "Inspirational Quote",
+          "concept": "Sharing a powerful quote to inspire and motivate.",
+          "angle": "Using the visual power of concise wording.",
+          "targetEmotion": "Hope and Motivation",
+          "hook": {
+            "type": "statement",
+            "exactContent": "Believe in yourself and trust the process.",
+            "whyItWorks": "The quote is concise, relatable, and encourages self-reflection."
+          }
+        },
+        "visualDirection": {
+          "overallStyle": "Bold and simplistic",
+          "colorPalette": [
+            "#FFFFFF",
+            "#FF5722",
+            "#795548"
+          ],
+          "lighting": "Soft with bold contrasts",
+          "composition": "Centered with the quote as the main focus",
+          "aiImagePrompt": "A single, glowing lantern in a desert night setting, symbolizing guidance and hope. Faceless and atmospheric."
+        },
+        "captionVariants": {
+          "engaging": {
+            "caption": "A simple reminder to keep pushing forward. Trust in your journey. 🌟 #BelieveInYourself",
+            "hashtags": [
+              "#MuslimEntrepreneurs",
+              "#Motivation",
+              "#Inspiration",
+              "#BelieveInYourself",
+              "#EntrepreneurJourney",
+              "#IslamicValues",
+              "#Growth",
+              "#Success",
+              "#Hope",
+              "#Faith"
+            ]
+          },
+          "educational": {
+            "caption": "Trusting the process is essential in entrepreneurship. Every step counts. #EntrepreneurialGrowth",
+            "hashtags": [
+              "#MuslimEntrepreneurs",
+              "#Motivation",
+              "#EntrepreneurJourney",
+              "#IslamicValues",
+              "#Growth",
+              "#SuccessTips",
+              "#BusinessGrowth",
+              "#FaithDriven",
+              "#Journey",
+              "#Success"
+            ]
+          },
+          "inspirational": {
+            "caption": "Your journey is unique, and trusting in every moment brings you closer to success. ✨ #TrustTheProcess",
+            "hashtags": [
+              "#MuslimEntrepreneurs",
+              "#Motivation",
+              "#Faith",
+              "#BelieveInYourself",
+              "#EntrepreneurJourney",
+              "#Inspiration",
+              "#Growth",
+              "#Success",
+              "#Hope",
+              "#IslamicValues"
+            ]
+          },
+          "recommended": "inspirational"
+        },
+        "technicalSpecs": {
+          "aspectRatio": "1:1",
+          "fileFormat": "JPG"
+        },
+        "engagementStrategy": {
+          "primaryCTA": "share",
+          "ctaPlacement": "In the caption",
+          "firstComment": "What do you trust most in your entrepreneurial journey? Share your insights! 🌟",
+          "replyStrategy": "Engage with comments by acknowledging shared insights and stories."
+        }
+      },
+      {
+        "postNumber": 14,
+        "dayOfWeek": "Sunday",
+        "postingTime": "11:00 UTC",
+        "contentType": "reel",
+        "brandFingerprint": {
+          "mustInclude": [
+            "Personal story",
+            "Islamic values",
+            "High-quality visuals"
+          ],
+          "tonalMarkers": [
+            "Inspirational",
+            "Personal",
+            "Community"
+          ],
+          "visualSignature": "Intimate and immersive with desert tones"
+        },
+        "brief": {
+          "internalTitle": "Personal Entrepreneurial Journey",
+          "concept": "Showcasing a personal story of balancing faith and business.",
+          "angle": "A narrative journey through the lens of a Muslim entrepreneur.",
+          "targetEmotion": "Inspiration and Connection",
+          "hook": {
+            "type": "statement",
+            "exactContent": "Every journey has its trials, but faith keeps us moving.",
+            "whyItWorks": "It connects on a personal level, relating to the challenges and victories of the audience."
+          }
+        },
+        "visualDirection": {
+          "overallStyle": "Immersive and personal",
+          "colorPalette": [
+            "#D4A373",
+            "#A68A64",
+            "#FFCC80"
+          ],
+          "lighting": "Natural with warm highlights",
+          "composition": "Dynamic storytelling with close-ups",
+          "aiImagePrompt": "A faceless Muslim woman entrepreneur, captured in a cozy workspace with a view of the desert sunset, symbolizing hard work and contemplation."
+        },
+        "sceneBreakdown": [
+          {
+            "scene": 1,
+            "timeRange": "0:00-0:03",
+            "visual": "A close-up of hands writing in a journal, with a view of the desert in the background.",
+            "textOverlay": {
+              "text": "Every journey has its trials",
+              "font": "Sans-serif",
+              "size": "medium",
+              "position": "top",
+              "animation": "fade-in"
+            },
+            "audio": "Narrative voiceover about the balance of faith and business",
+            "transition": "fade"
+          }
+        ],
+        "captionVariants": {
+          "engaging": {
+            "caption": "Balancing business and faith isn't always easy, but it's always rewarding. 📖✨ #FaithAndBusiness",
+            "hashtags": [
+              "#MuslimEntrepreneurs",
+              "#FaithAndBusiness",
+              "#EntrepreneurJourney",
+              "#IslamicValues",
+              "#Inspiration",
+              "#Growth",
+              "#Success",
+              "#PersonalStory",
+              "#Community",
+              "#Resilience"
+            ]
+          },
+          "educational": {
+            "caption": "Explore the balance of faith and entrepreneurship through real stories. Every challenge is a step forward. #EntrepreneurialGrowth",
+            "hashtags": [
+              "#MuslimEntrepreneurs",
+              "#FaithAndBusiness",
+              "#EntrepreneurJourney",
+              "#IslamicValues",
+              "#Growth",
+              "#BusinessInsights",
+              "#Balance",
+              "#BusinessGrowth",
+              "#FaithDriven",
+              "#Success"
+            ]
+          },
+          "inspirational": {
+            "caption": "Your path is unique, and with faith as your guide, every step becomes meaningful. 🌟 #JourneyWithFaith",
+            "hashtags": [
+              "#MuslimEntrepreneurs",
+              "#FaithAndBusiness",
+              "#BelieveInYourPath",
+              "#EntrepreneurJourney",
+              "#Inspiration",
+              "#Growth",
+              "#Success",
+              "#Hope",
+              "#IslamicValues",
+              "#Community"
+            ]
+          },
+          "recommended": "inspirational"
+        },
+        "technicalSpecs": {
+          "aspectRatio": "9:16",
+          "duration": "30 seconds",
+          "fileFormat": "MP4"
+        },
+        "engagementStrategy": {
+          "primaryCTA": "comment",
+          "ctaPlacement": "End of the video",
+          "firstComment": "What's your biggest lesson on your entrepreneurial journey with faith? Let's connect!",
+          "replyStrategy": "Engage with comments by sharing personal insights and encouraging others to share their journeys."
+        }
+      }
+    ],
+    "productionNotes": {
+      "brandNonNegotiables": [
+        "High-quality visuals",
+        "Islamic values",
+        "Community engagement"
+      ],
+      "commonMistakes": [
+        "Overly promotional content",
+        "Neglecting community interaction"
+      ],
+      "proTips": [
+        "Use trending topics related to Islamic entrepreneurship",
+        "Incorporate interactive elements"
+      ],
+      "qualityChecklist": [
+        "Verify visual consistency",
+        "Ensure high-quality audio",
+        "Check for grammatical accuracy",
+        "Align content with Islamic values",
+        "Include engaging CTA"
+      ]
+    }
+  }
+}

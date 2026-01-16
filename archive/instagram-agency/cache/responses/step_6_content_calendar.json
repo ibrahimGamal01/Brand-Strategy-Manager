@@ -1,0 +1,195 @@
+{
+  "timestamp": 1767371313533,
+  "savedAt": "2026-01-02T16:28:33.533Z",
+  "stepName": "step_6_content_calendar",
+  "response": {
+    "contentCalendar": {
+      "weekOf": "2023-10-09",
+      "timezone": "GMT+3",
+      "schedule": [
+        {
+          "dayOfWeek": "Monday",
+          "posts": [
+            {
+              "contentType": "reel",
+              "title": "Integration of Faith in Business Success",
+              "concept": "Highlight the integration of faith in business success",
+              "targetEmotion": "Inspiration"
+            },
+            {
+              "contentType": "carousel",
+              "title": "Guide to Starting a Halal Business",
+              "concept": "Guide followers through starting a halal business",
+              "targetEmotion": "Empowerment"
+            }
+          ]
+        },
+        {
+          "dayOfWeek": "Tuesday",
+          "posts": [
+            {
+              "contentType": "image",
+              "title": "Powerful Quote",
+              "concept": "Share a powerful quote that resonates with Muslim entrepreneurs",
+              "targetEmotion": "Motivation"
+            },
+            {
+              "contentType": "story",
+              "title": "Community Engagement",
+              "concept": "An interactive story to engage the community and gather insights",
+              "targetEmotion": "Connection"
+            }
+          ]
+        },
+        {
+          "dayOfWeek": "Wednesday",
+          "posts": [
+            {
+              "contentType": "reel",
+              "title": "Importance of Jummah",
+              "concept": "Reflect on the importance of Jummah in balancing work and faith",
+              "targetEmotion": "Contemplation"
+            },
+            {
+              "contentType": "carousel",
+              "title": "Islamic Finance Basics",
+              "concept": "Educate followers on Islamic finance basics",
+              "targetEmotion": "Confidence"
+            }
+          ]
+        },
+        {
+          "dayOfWeek": "Thursday",
+          "posts": [
+            {
+              "contentType": "reel",
+              "title": "Weekend Growth Story",
+              "concept": "Share a personal story that motivates weekend growth",
+              "targetEmotion": "Empowerment"
+            },
+            {
+              "contentType": "reel",
+              "title": "Islamic Values in Business",
+              "concept": "Highlight the integration of Islamic values in business success",
+              "targetEmotion": "Inspiration"
+            }
+          ]
+        },
+        {
+          "dayOfWeek": "Friday",
+          "posts": [
+            {
+              "contentType": "carousel",
+              "title": "Tips for Muslim Women Entrepreneurs",
+              "concept": "Provide tips for Muslim women entrepreneurs to balance personal and professional life",
+              "targetEmotion": "Empowerment"
+            },
+            {
+              "contentType": "image",
+              "title": "Inspiring Jummah Quote",
+              "concept": "Provide an inspiring Islamic quote to reflect on during Jummah",
+              "targetEmotion": "Reflection"
+            },
+            {
+              "contentType": "story",
+              "title": "Reflect on Wins",
+              "concept": "Encourage followers to reflect on their week and share their wins",
+              "targetEmotion": "Gratitude"
+            }
+          ]
+        },
+        {
+          "dayOfWeek": "Saturday",
+          "posts": [
+            {
+              "contentType": "reel",
+              "title": "Power of Community",
+              "concept": "Highlight the power of community in business success",
+              "targetEmotion": "Hope"
+            },
+            {
+              "contentType": "carousel",
+              "title": "Step-by-Step Guide to Halal Business",
+              "concept": "Step-by-step guide to starting a halal business",
+              "targetEmotion": "Confidence"
+            }
+          ]
+        },
+        {
+          "dayOfWeek": "Sunday",
+          "posts": [
+            {
+              "contentType": "reel",
+              "title": "Islamic Finance Concepts",
+              "concept": "Introduce key concepts of Islamic finance for small business owners",
+              "targetEmotion": "Curiosity"
+            }
+          ]
+        }
+      ]
+    },
+    "productionTimeline": {
+      "phases": [
+        {
+          "phase": "Planning",
+          "deadline": "2023-10-01",
+          "tasks": [
+            "Brainstorm content ideas",
+            "Finalize content concepts",
+            "Create a content schedule"
+          ]
+        },
+        {
+          "phase": "Content Creation",
+          "deadline": "2023-10-05",
+          "tasks": [
+            "Record reels",
+            "Design carousels",
+            "Create images and quotes",
+            "Draft stories"
+          ]
+        },
+        {
+          "phase": "Review and Edit",
+          "deadline": "2023-10-07",
+          "tasks": [
+            "Edit videos",
+            "Proofread captions",
+            "Finalize graphics"
+          ]
+        },
+        {
+          "phase": "Scheduling",
+          "deadline": "2023-10-08",
+          "tasks": [
+            "Schedule posts on social media platforms",
+            "Set reminders for engagement activities"
+          ]
+        }
+      ]
+    },
+    "weeklyGoals": {
+      "reach": "5000",
+      "engagement": "800",
+      "followers": "200"
+    },
+    "successMetrics": {
+      "kpis": [
+        "Post Reach",
+        "Engagement Rate",
+        "Follower Growth",
+        "Comments and Shares"
+      ],
+      "benchmarks": {
+        "reach": "10% increase from last week",
+        "engagement": "5% engagement rate",
+        "followers": "50 new followers weekly"
+      },
+      "optimizationNotes": [
+        "Analyze best-performing content for future planning",
+        "Adjust posting times based on engagement patterns",
+        "Encourage user-generated content to boost community involvement"
+      ]
+    }
+  }
+}
