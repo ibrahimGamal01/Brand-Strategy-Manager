@@ -37,6 +37,16 @@ export default function ResearchPage() {
     const data = job as any;
     const client = data.client || {};
 
+    // Get input data from research job for handle and niche
+    const inputData = data.inputData || {};
+
+    // Extract Instagram handle from clientAccounts or inputData
+    const instagramAccount = client.clientAccounts?.find((acc: any) => acc.platform === 'instagram');
+    const primaryHandle = instagramAccount?.handle || inputData.handle || inputData.handles?.instagram || '';
+
+    // Add handle to client object for backward compatibility
+    client.handle = primaryHandle;
+
     // Flatten nested data for easier consumption
     const clientPosts = client.clientAccounts?.flatMap((acc: any) => acc.clientPosts || []) || [];
     const rawSearchResults = data.rawSearchResults || [];
@@ -46,8 +56,20 @@ export default function ResearchPage() {
     const searchTrends = data.searchTrends || [];
     const competitors = data.discoveredCompetitors || [];
     const communityInsights = data.communityInsights || [];
-    const mediaAssets = data.mediaAssets || []; // Backend might validly optionally return this top-level or derived
+    const mediaAssets = data.mediaAssets || [];
     const aiQuestions = data.aiQuestions || [];
+
+    // Build socialProfiles from clientAccounts if not provided
+    const socialProfiles = data.socialProfiles?.length > 0
+        ? data.socialProfiles
+        : (client.clientAccounts || []).map((acc: any) => ({
+            platform: acc.platform,
+            handle: acc.handle,
+            followers: acc.followerCount || 0,
+            following: acc.followingCount || 0,
+            bio: acc.bio || '',
+            profileImageUrl: acc.profileImageUrl,
+        }));
 
     // Combine all data into one object
     const researchData = {
@@ -60,7 +82,8 @@ export default function ResearchPage() {
         competitors,
         communityInsights,
         mediaAssets,
-        aiQuestions
+        aiQuestions,
+        socialProfiles, // Use the fallback-aware variable
     };
 
     return (

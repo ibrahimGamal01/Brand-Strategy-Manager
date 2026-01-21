@@ -21,15 +21,107 @@ import subprocess
 import re
 from datetime import datetime
 
+def check_ytdlp_installed() -> bool:
+    """Check if yt-dlp is installed and accessible."""
+    try:
+        result = subprocess.run(['yt-dlp', '--version'], capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            print(f"[TikTok] yt-dlp version: {result.stdout.strip()}", file=sys.stderr)
+            return True
+        return False
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
+def search_tiktok_profile_ddg(handle: str) -> dict:
+    """
+    Fallback: Use DuckDuckGo to find TikTok profile info when yt-dlp fails.
+    Returns basic profile info from search results.
+    """
+    from ddgs import DDGS
+    
+    handle = handle.replace('@', '')
+    print(f"[TikTok] Fallback: Searching DDG for @{handle}...", file=sys.stderr)
+    
+    try:
+        ddgs = DDGS()
+        queries = [
+            f'site:tiktok.com/@{handle}',
+            f'"{handle}" tiktok profile',
+        ]
+        
+        profile_info = {'handle': handle, 'profile_url': f"https://www.tiktok.com/@{handle}"}
+        found_data = False
+        
+        for query in queries:
+            results = list(ddgs.text(query, max_results=10))
+            for r in results:
+                href = r.get('href', '')
+                body = r.get('body', '')
+                title = r.get('title', '')
+                
+                # Check if we found the profile
+                if f'tiktok.com/@{handle.lower()}' in href.lower():
+                    found_data = True
+                    
+                    # Try to extract follower count from snippet
+                    import re
+                    follower_match = re.search(r'(\d+(?:\.\d+)?[KMB]?)\s*(?:followers?|fans?)', body, re.IGNORECASE)
+                    if follower_match:
+                        count_str = follower_match.group(1)
+                        # Convert K/M/B to numbers
+                        multiplier = 1
+                        if 'K' in count_str.upper():
+                            multiplier = 1000
+                            count_str = count_str.upper().replace('K', '')
+                        elif 'M' in count_str.upper():
+                            multiplier = 1000000
+                            count_str = count_str.upper().replace('M', '')
+                        elif 'B' in count_str.upper():
+                            multiplier = 1000000000
+                            count_str = count_str.upper().replace('B', '')
+                        try:
+                            profile_info['follower_count'] = int(float(count_str) * multiplier)
+                        except:
+                            pass
+                    
+                    # Extract display name from title
+                    if ' (@' in title or ' |' in title:
+                        profile_info['display_name'] = title.split(' (@')[0].split(' |')[0].strip()
+                    
+                    break
+            if found_data:
+                break
+        
+        return {
+            'success': found_data,
+            'profile': profile_info,
+            'videos': [],  # Cannot get videos from search
+            'total_videos': 0,
+            'fallback_used': 'ddg_search',
+            'note': 'Video data not available via fallback. Only profile info retrieved.'
+        }
+        
+    except ImportError:
+        return {"error": "DDG fallback requires 'duckduckgo-search' package"}
+    except Exception as e:
+        return {"error": f"DDG fallback failed: {str(e)}"}
+
+
 def get_profile_and_videos(handle: str, max_videos: int = 30) -> dict:
     """
     Scrape TikTok profile and recent videos using yt-dlp.
-    yt-dlp can extract playlist info from TikTok user pages.
+    Falls back to DDG search if yt-dlp is unavailable or fails.
     """
     handle = handle.replace('@', '')
     profile_url = f"https://www.tiktok.com/@{handle}"
     
     print(f"[TikTok] Scraping @{handle}...", file=sys.stderr)
+    
+    # Check if yt-dlp is available
+    if not check_ytdlp_installed():
+        print("[TikTok] yt-dlp not installed, using DDG fallback...", file=sys.stderr)
+        return search_tiktok_profile_ddg(handle)
     
     try:
         # Use yt-dlp to get playlist info (user's videos)
@@ -40,15 +132,19 @@ def get_profile_and_videos(handle: str, max_videos: int = 30) -> dict:
             '--playlist-items', f'1-{max_videos}',
             '--no-warnings',
             '--ignore-errors',
+            '--no-check-certificate',  # Avoid SSL issues
+            '--user-agent', 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)',
             profile_url
         ]
         
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         
         if result.returncode != 0 and not result.stdout:
-            # Try alternative approach - get single video info to at least get channel info
-            print(f"[TikTok] Playlist extraction failed, trying single video approach...", file=sys.stderr)
-            return {"error": "Could not extract TikTok data. Account may be private or rate-limited."}
+            # yt-dlp failed, try DDG fallback
+            print(f"[TikTok] yt-dlp failed (exit {result.returncode}), using DDG fallback...", file=sys.stderr)
+            if result.stderr:
+                print(f"[TikTok] yt-dlp error: {result.stderr[:200]}", file=sys.stderr)
+            return search_tiktok_profile_ddg(handle)
         
         # Parse the JSON lines output
         videos = []
@@ -66,7 +162,6 @@ def get_profile_and_videos(handle: str, max_videos: int = 30) -> dict:
                         'handle': data.get('uploader_id', handle),
                         'display_name': data.get('uploader', ''),
                         'profile_url': f"https://www.tiktok.com/@{data.get('uploader_id', handle)}",
-                        # Note: yt-dlp doesn't always give follower counts from playlist
                         'follower_count': data.get('channel_follower_count', 0),
                     }
                 
@@ -89,6 +184,11 @@ def get_profile_and_videos(handle: str, max_videos: int = 30) -> dict:
             except json.JSONDecodeError:
                 continue
         
+        if not videos and not profile_info:
+            # yt-dlp returned empty, try DDG fallback
+            print(f"[TikTok] yt-dlp returned no data, using DDG fallback...", file=sys.stderr)
+            return search_tiktok_profile_ddg(handle)
+        
         print(f"[TikTok] Found {len(videos)} videos for @{handle}", file=sys.stderr)
         
         return {
@@ -99,9 +199,11 @@ def get_profile_and_videos(handle: str, max_videos: int = 30) -> dict:
         }
         
     except subprocess.TimeoutExpired:
-        return {"error": "TikTok scraping timed out"}
+        print("[TikTok] yt-dlp timed out, using DDG fallback...", file=sys.stderr)
+        return search_tiktok_profile_ddg(handle)
     except Exception as e:
-        return {"error": str(e)}
+        print(f"[TikTok] Error: {e}, using DDG fallback...", file=sys.stderr)
+        return search_tiktok_profile_ddg(handle)
 
 
 def download_video(video_url: str, output_path: str) -> dict:

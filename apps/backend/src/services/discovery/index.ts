@@ -7,6 +7,7 @@
  * 3. Competitor Discovery (DDG Python -> Old Python -> Puppeteer Google -> Direct OpenAI)
  * 4. Brand Context Search (DDG Python + Puppeteer fallback)
  * 
+ * NEW: Resume Logic - checks DB for existing data and skips completed gatherers
  * GUARANTEE: Never returns empty results - AI generates minimum data
  */
 
@@ -17,7 +18,8 @@ import {
   validateHandleDDG, 
   GatherAllResult, 
   gatherAllDDG, 
-  saveRawResultsToDB 
+  saveRawResultsToDB,
+  scrapeSocialContent
 } from './duckduckgo-search.js';
 import { SmartQueryBuilder } from './smart-query-builder.js';
 import { aiCompetitorFinder, enrichTargetProfile, synthesizeBrandContext, type TargetIntel, type Competitor } from './ai-intel.js';
@@ -26,6 +28,9 @@ import { askAllDeepQuestions } from '../ai/deep-questions';
 import { scrapeProfileIncrementally } from '../social/scraper';
 import { analyzeSearchTrends } from './google-trends';
 import { runCommunityDetective } from '../social/community-detective';
+import { PrismaClient } from '@prisma/client';
+
+const prisma = new PrismaClient();
 
 export interface InformationGatheringResult {
   targetIntel: TargetIntel;
@@ -44,10 +49,67 @@ export interface GatheringInput {
   followerCount?: number;
   posts?: Array<{ caption: string; likes: number; comments: number }>;
   researchJobId?: string; // For saving raw results to DB
+  handles?: Record<string, string>; // Multi-platform handles: { instagram: 'x', tiktok: 'y' }
+}
+
+/**
+ * Check which gatherers have already completed for this research job
+ */
+export interface CompletedGatherers {
+  hasDDGSearch: boolean;
+  hasCompetitors: boolean;
+  hasSocialProfiles: boolean;
+  hasAIQuestions: boolean;
+  hasSearchTrends: boolean;
+  hasCommunityInsights: boolean;
+  counts: {
+    rawSearchResults: number;
+    competitors: number;
+    socialProfiles: number;
+    aiQuestions: number;
+    searchTrends: number;
+    communityInsights: number;
+  };
+}
+
+export async function getCompletedGatherers(researchJobId: string): Promise<CompletedGatherers> {
+  const [
+    rawSearchCount,
+    competitorCount,
+    socialProfileCount,
+    aiQuestionCount,
+    searchTrendCount,
+    communityInsightCount,
+  ] = await Promise.all([
+    prisma.rawSearchResult.count({ where: { researchJobId } }),
+    prisma.discoveredCompetitor.count({ where: { researchJobId } }),
+    prisma.socialProfile.count({ where: { researchJobId } }),
+    prisma.aiQuestion.count({ where: { researchJobId, isAnswered: true } }),
+    prisma.searchTrend.count({ where: { researchJobId } }),
+    prisma.communityInsight.count({ where: { researchJobId } }),
+  ]);
+
+  return {
+    hasDDGSearch: rawSearchCount > 10, // At least 10 results means DDG ran
+    hasCompetitors: competitorCount > 3, // At least 3 competitors found
+    hasSocialProfiles: socialProfileCount > 0,
+    hasAIQuestions: aiQuestionCount >= 10, // At least 10 of 12 questions answered
+    hasSearchTrends: searchTrendCount > 0,
+    hasCommunityInsights: communityInsightCount > 0,
+    counts: {
+      rawSearchResults: rawSearchCount,
+      competitors: competitorCount,
+      socialProfiles: socialProfileCount,
+      aiQuestions: aiQuestionCount,
+      searchTrends: searchTrendCount,
+      communityInsights: communityInsightCount,
+    },
+  };
 }
 
 /**
  * Main entry point - gathers all intel with guaranteed results
+ * NOW WITH RESUME LOGIC: Checks what has already been gathered and skips those steps
  */
 export async function gatherInformation(input: GatheringInput): Promise<InformationGatheringResult> {
   const errors: string[] = [];
@@ -58,17 +120,34 @@ export async function gatherInformation(input: GatheringInput): Promise<Informat
 
   console.log(`[InfoGather] Starting robust information gathering for @${input.handle}`);
 
+  // === NEW: Check what has already been gathered ===
+  let completed: CompletedGatherers | null = null;
+  if (input.researchJobId && input.researchJobId !== 'temp-job') {
+    completed = await getCompletedGatherers(input.researchJobId);
+    console.log(`[InfoGather] Resume check: DDG=${completed.hasDDGSearch}, Competitors=${completed.hasCompetitors}, Social=${completed.hasSocialProfiles}, AI=${completed.hasAIQuestions}, Trends=${completed.hasSearchTrends}, Community=${completed.hasCommunityInsights}`);
+    console.log(`[InfoGather] Existing counts: ${JSON.stringify(completed.counts)}`);
+  }
+
+
   // === STEP 1: Robust Context Gathering (Smart Pipeline) ===
   console.log(`[InfoGather] Step 1: Starting Smart Gathering Pipeline...`);
   
-  // A. Initial Comprehensive Search
-  try {
-    const researchJobId = input.researchJobId || 'temp-job';
-    const ddgResult = await gatherAllDDG(
-      input.brandName || input.handle, 
-      input.niche || 'business',
-      researchJobId
-    );
+  // A. Initial Comprehensive Search (skip if already done)
+  const shouldSkipDDGSearch = completed?.hasDDGSearch;
+  
+  if (shouldSkipDDGSearch) {
+    console.log(`[InfoGather] ✓ SKIPPING DDG Search (already have ${completed!.counts.rawSearchResults} results)`);
+    layersUsed.push('DDG_SEARCH_SKIPPED_RESUME');
+  }
+  
+  if (!shouldSkipDDGSearch) {
+    try {
+      const researchJobId = input.researchJobId || 'temp-job';
+      const ddgResult = await gatherAllDDG(
+        input.brandName || input.handle, 
+        input.niche || 'business',
+        researchJobId
+      );
     
     // B. Smart Query Analysis
     const queryBuilder = new SmartQueryBuilder();
@@ -125,6 +204,28 @@ export async function gatherInformation(input: GatheringInput): Promise<Informat
     } catch (err: any) {
         console.error(`[InfoGather] Puppeteer fallback failed:`, err.message);
     }
+    }
+  }
+
+  // === STEP 1.5: Scrape Social Content (Images/Videos) via Site-Limited Search ===
+  // This is the ONLY approved media source alongside authenticated Instagram scraper
+  console.log(`[InfoGather] Step 1.5: Scraping social media content via site-limited search...`);
+  try {
+    // Use all handles from input, or fallback to primary handle
+    const handles: Record<string, string> = input.handles && Object.keys(input.handles).length > 0
+      ? input.handles
+      : { instagram: input.handle };
+    
+    console.log(`[InfoGather] Using ${Object.keys(handles).length} platform handles: ${Object.entries(handles).map(([p, h]) => `${p}:@${h}`).join(', ')}`);
+    
+    const researchJobId = input.researchJobId || 'temp-job';
+    const socialContent = await scrapeSocialContent(handles, 30, researchJobId);
+    
+    console.log(`[InfoGather] Scraped ${socialContent.totals.images} images and ${socialContent.totals.videos} videos from social handles`);
+    layersUsed.push('SITE_LIMITED_SOCIAL_CONTENT');
+  } catch (error: any) {
+    console.error(`[InfoGather] Social content scrape failed:`, error.message);
+    errors.push(`Social Content Scrape: ${error.message}`);
   }
 
   // === STEP 2: Enrich Target Profile (Use Context if available) ===
@@ -147,20 +248,67 @@ export async function gatherInformation(input: GatheringInput): Promise<Informat
   console.log(`[InfoGather] Step 3: Discovering competitors...`);
   const effectiveNiche = targetIntel.suggestedNiche || input.niche || 'business';
 
-  // Layer 0: DDG Python Library (Fastest, no browser needed)
+  // Layer -1: Site-Limited Social Search (NEW - most accurate for social handles)
+  try {
+    console.log(`[InfoGather] Layer -1: Site-Limited Social Search...`);
+    const { searchSocialProfiles } = await import('./duckduckgo-search.js');
+    const socialResult = await searchSocialProfiles(input.brandName || input.handle, input.researchJobId);
+    
+    // Add discovered Instagram handles
+    if (socialResult.instagram && socialResult.instagram.length > 0) {
+      const existingHandles = new Set(competitors.map(c => c.handle.toLowerCase()));
+      for (const handle of socialResult.instagram) {
+        if (!existingHandles.has(handle.toLowerCase()) && handle.toLowerCase() !== input.handle.toLowerCase()) {
+          competitors.push({
+            handle,
+            platform: 'instagram',
+            discoveryReason: 'Found via site-limited Instagram search',
+            relevanceScore: 0.85, // Higher score for direct platform search
+            competitorType: 'discovered',
+          });
+          existingHandles.add(handle.toLowerCase());
+        }
+      }
+    }
+    
+    // Add TikTok handles
+    if (socialResult.tiktok && socialResult.tiktok.length > 0) {
+      for (const handle of socialResult.tiktok) {
+        competitors.push({
+          handle,
+          platform: 'tiktok',
+          discoveryReason: 'Found via site-limited TikTok search',
+          relevanceScore: 0.85,
+          competitorType: 'discovered',
+        });
+      }
+    }
+    
+    layersUsed.push('SITE_LIMITED_SOCIAL_SEARCH');
+    console.log(`[InfoGather] ✅ Site-limited search found ${socialResult.totals?.total || 0} social handles`);
+  } catch (error: any) {
+    console.error(`[InfoGather] Site-limited social search failed:`, error.message);
+    errors.push(`Social Search: ${error.message}`);
+  }
+
+  // Layer 0: DDG Python Library (Generic niche-based search)
   try {
     console.log(`[InfoGather] Layer 0: DDG Python Library...`);
     const ddgCompetitors = await searchCompetitorsDDG(input.handle, effectiveNiche, 15);
     
     if (ddgCompetitors.length > 0) {
+      const existingHandles = new Set(competitors.map(c => c.handle.toLowerCase()));
       for (const handle of ddgCompetitors) {
-        competitors.push({
-          handle,
-          platform: 'instagram',
-          discoveryReason: 'Found via DuckDuckGo search',
-          relevanceScore: 0.75,
-          competitorType: 'discovered',
-        });
+        if (!existingHandles.has(handle.toLowerCase())) {
+          competitors.push({
+            handle,
+            platform: 'instagram',
+            discoveryReason: 'Found via DuckDuckGo search',
+            relevanceScore: 0.75,
+            competitorType: 'discovered',
+          });
+          existingHandles.add(handle.toLowerCase());
+        }
       }
       layersUsed.push('DDG_PYTHON_COMPETITORS');
       console.log(`[InfoGather] ✅ DDG found ${ddgCompetitors.length} competitors`);

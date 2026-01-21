@@ -57,8 +57,8 @@ export function buildFixedQueries(handle: string, niche?: string, brandName?: st
   ];
   
   const voc = [
-    `site:reddit.com "${h}"`,
-    `site:reddit.com "@${h}"`,
+    `site:www.reddit.com "${h}"`,
+    `site:www.reddit.com "@${h}"`,
     `"${h}" review`,
     `"${h}" worth it`,
     `"${h}" experience`,
@@ -108,7 +108,7 @@ export function buildFixedQueries(handle: string, niche?: string, brandName?: st
     `"${h}" sucks`,
     `"${h}" fake`,
     `"${h}" controversy`,
-    `site:reddit.com "${h}" problem`,
+    `site:www.reddit.com "${h}" problem`,
   ];
   
   // Combine all queries
@@ -146,16 +146,10 @@ export function buildRedditQueries(handle: string, niche?: string): string[] {
   const n = niche || 'business';
   
   return [
-    `site:reddit.com "${h}"`,
-    `site:reddit.com "@${h}"`,
-    `site:reddit.com "${h}" review`,
-    `site:reddit.com "${h}" worth it`,
-    `site:reddit.com "${h}" vs`,
-    `site:reddit.com "${h}" alternative`,
-    `site:reddit.com ${n} advice`,
-    `site:reddit.com best ${n}`,
+    `site:www.reddit.com "${h}"`
   ];
 }
+
 
 /**
  * Get platform-specific search queries

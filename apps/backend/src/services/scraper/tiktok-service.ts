@@ -23,8 +23,10 @@ export interface TikTokVideo {
   like_count: number;
   comment_count: number;
   share_count: number;
-  upload_date: string;
+  upload_date: string;  // YYYYMMDD format
+  timestamp?: number;   // Unix timestamp
   thumbnail: string;
+  thumbnails?: Array<{ id: string; url: string; preference: number }>;
 }
 
 export interface TikTokProfile {
@@ -32,6 +34,7 @@ export interface TikTokProfile {
   display_name: string;
   profile_url: string;
   follower_count: number;
+  bio?: string;
 }
 
 export interface TikTokScrapeResult {
@@ -97,31 +100,42 @@ export async function downloadTikTokVideo(
   videoUrl: string,
   outputPath: string
 ): Promise<{ success: boolean; path?: string; error?: string }> {
-  console.log(`[TikTok] Downloading: ${videoUrl}`);
+  console.log(`[TikTok] Downloading (Puppeteer): ${videoUrl}`);
   
   try {
-    const scriptPath = path.join(process.cwd(), 'scripts/tiktok_scraper.py');
+    // USE PUPPETEER SCRIPT INSTEAD OF PYTHON
+    const scriptPath = path.join(process.cwd(), 'scripts/tiktok_downloader.ts');
     
+    // Using npx tsx to execute the typescript file directly
     const { stdout, stderr } = await execAsync(
-      `python3 ${scriptPath} download "${videoUrl}" "${outputPath}"`,
+      `npx tsx ${scriptPath} "${videoUrl}" "${outputPath}"`,
       {
         cwd: process.cwd(),
-        timeout: 180000,
+        timeout: 300000, // 5 min timeout for headless browser
       }
     );
     
-    if (stderr) {
-      console.log(`[TikTok] ${stderr}`);
-    }
+    // Puppeteer output might be noisy, look for the JSON line
+    // The script prints JSON at the end
+    const lines = stdout.trim().split('\n');
+    const lastLine = lines[lines.length - 1];
     
-    const result = JSON.parse(stdout);
-    return result;
+    try {
+        const result = JSON.parse(lastLine);
+        return result;
+    } catch (e) {
+        console.error(`[TikTok] Failed to parse output: ${lastLine}`);
+        // If stderr has content, it might be an error from tsx or puppeteer
+        if (stderr) console.error(`[TikTok] Stderr: ${stderr}`);
+        return { success: false, error: 'Failed to parse downloader output' };
+    }
     
   } catch (error: any) {
     console.error(`[TikTok] Download failed:`, error.message);
     return { success: false, error: error.message };
   }
 }
+
 
 /**
  * Scrape TikTok and save to database

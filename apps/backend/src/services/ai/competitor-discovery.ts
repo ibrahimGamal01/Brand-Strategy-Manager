@@ -19,30 +19,33 @@ export async function suggestCompetitorsWithAI(
   niche: string,
   description?: string
 ): Promise<AICompetitorSuggestion[]> {
-  console.log(`[AI] Suggesting competitors for ${brandName} (${niche})`);
+    console.log(`[AI] Suggesting competitors for ${brandName} (${niche})`);
 
-  const prompt = `You are a strategic brand consultant. Identify 5-7 direct competitors for the brand "${brandName}" operating in the "${niche}" niche.
+  const prompt = `You are a strategic brand consultant. Identify exactly 3-5 top-tier, direct competitors for the brand "${brandName}" operating in the "${niche}" niche.
   ${description ? `Brand Description: ${description}` : ''}
 
-  Focus on finding active competitors on social media (prioritize Instagram).
-  For each competitor, provide:
-  1. Name
-  2. Estimated Handle (without @)
-  3. Platform (default to instagram)
-  4. Specific Reasoning (why are they a competitor?)
-  5. Relevance Score (0.0 - 1.0)
+  CRITICAL RULES:
+  1. ONLY suggest active, high-quality businesses with populated Instagram profiles.
+  2. DO NOT suggest "dead" accounts, personal blogs, or low-quality pages.
+  3. Suggest specific BRANDS, not just generic accounts.
+  4. If you cannot find 3 high-quality competitors, return fewer (e.g., 1 or 2) rather than making up bad ones.
 
-  Return ONLY a raw JSON array of objects. No markdown formatting.
+  For each competitor, provide:
+  1. Name (brand/account name)
+  2. Handle (Instagram handle without @)
+  3. Relevance (0-100%) - Be strict. Only give >80% to perfect matches.
+
+  Return a valid JSON object with a "competitors" key containing the array.
   Format:
-  [
-    {
-      "name": "Competitor Name",
-      "handle": "competitor_handle",
-      "platform": "instagram",
-      "reasoning": "Direct overlap in target audience...",
-      "relevanceScore": 0.95
-    }
-  ]`;
+  {
+    "competitors": [
+      {
+        "name": "Competitor Name",
+        "handle": "competitor_handle",
+        "relevance": 85
+      }
+    ]
+  }`;
 
   try {
     const response = await openai.chat.completions.create({
@@ -56,17 +59,30 @@ export async function suggestCompetitorsWithAI(
     });
 
     const content = response.choices[0].message.content || '{"competitors": []}';
-    const parsed = JSON.parse(content);
+    console.log(`[AI] Raw response for ${brandName}:`, content.substring(0, 100) + '...'); // Log preview
+    
+    let parsed;
+    try {
+        parsed = JSON.parse(content);
+    } catch (e) {
+        console.error('[AI] JSON Parse error:', e);
+        return [];
+    }
     
     // Handle potential wrapper keys like "competitors": [...]
     const results = Array.isArray(parsed) ? parsed : (parsed.competitors || []);
 
+    if (!Array.isArray(results)) {
+        console.error('[AI] Parsed result is not an array:', parsed);
+        return [];
+    }
+
     return results.map((c: any) => ({
       name: c.name,
       handle: c.handle,
-      platform: c.platform?.toLowerCase() || 'instagram',
-      reasoning: c.reasoning,
-      relevanceScore: c.relevanceScore || 0.8
+      platform: 'instagram', // Default to Instagram since we simplified prompt
+      reasoning: `${c.relevance}% relevance`, // Use relevance as reasoning
+      relevanceScore: (c.relevance || 80) / 100 // Convert percentage to 0-1 score
     }));
 
   } catch (error) {

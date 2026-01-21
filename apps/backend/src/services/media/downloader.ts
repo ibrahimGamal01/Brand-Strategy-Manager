@@ -3,6 +3,8 @@ import path from 'path';
 import { fileManager, STORAGE_PATHS } from '../storage/file-manager';
 import { prisma } from '../../lib/prisma';
 import sharp from 'sharp';
+import fs from 'fs'; 
+import { tiktokService } from '../scraper/tiktok-service';
 
 /**
  * Download media assets for a post and save to storage
@@ -10,29 +12,67 @@ import sharp from 'sharp';
 export async function downloadPostMedia(
   postId: string,
   mediaUrls: string[],
-  isClient: boolean,
-  clientOrCompetitorId: string
+  entityType: 'CLIENT' | 'COMPETITOR' | 'SOCIAL',
+  entityId: string
 ): Promise<string[]> {
   const mediaAssetIds: string[] = [];
 
   for (const url of mediaUrls) {
+    if (!url) continue;
+
     try {
       console.log(`[Downloader] Downloading: ${url}`);
 
       // Determine media type
-      const isVideo = url.includes('.mp4') || url.includes('video');
+      const isVideo = url.includes('.mp4') || url.includes('video') || url.includes('tiktok.com');
       const mediaType = isVideo ? 'VIDEO' : 'IMAGE';
 
       // Generate storage path
-      const extension = fileManager.getExtension(url);
+      // Generate storage path
+      let extension = fileManager.getExtension(url);
+      
+      // Fix: Ensure video platforms get mp4 extension even if getExtension defaults to jpg
+      if (isVideo) {
+          extension = 'mp4';
+      }
+      
+      if (!extension) extension = 'jpg';
+
       const filename = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${extension}`;
+      
+      // Logic for path construction
+      let storagePath = '';
+      if (entityType === 'CLIENT') {
+          storagePath = path.join(STORAGE_PATHS.clientMedia(entityId, postId), filename);
+      } else if (entityType === 'COMPETITOR') {
+          storagePath = path.join(STORAGE_PATHS.competitorMedia(entityId, postId), filename);
+      } else {
+          // SOCIAL
+          // Use competitor path logic for now as it groups by profileId
+          storagePath = path.join(STORAGE_PATHS.competitorMedia(entityId, postId), filename);
+      }
 
-      const storagePath = isClient
-        ? path.join(STORAGE_PATHS.clientMedia(clientOrCompetitorId, postId), filename)
-        : path.join(STORAGE_PATHS.competitorMedia(clientOrCompetitorId, postId), filename);
-
-      // Download file
-      await fileManager.downloadAndSave(url, storagePath);
+      // Download file with specific headers or specialized downlaoders
+      if (url.includes('tiktok.com')) {
+          // Use TikTok Python Downloader
+          const result = await tiktokService.downloadVideo(url, storagePath);
+          if (!result.success) {
+              throw new Error(`TikTok download failed: ${result.error}`);
+          }
+      } else if (url.includes('instagram.com')) {
+          // Instagram downloads often expire or need auth. 
+          // For now, try standard download with headers, if fails, we might need a python fallback.
+          await fileManager.downloadAndSave(url, storagePath, {
+            'Referer': 'https://www.instagram.com/',
+            'Origin': 'https://www.instagram.com'
+         });
+      } else {
+          // Standard download
+          await fileManager.downloadAndSave(url, storagePath, {
+            'Referer': 'https://www.instagram.com/',
+            'Origin': 'https://www.instagram.com'
+        });
+      }
 
       // Get file stats
       const stats = fileManager.getStats(storagePath);
@@ -45,16 +85,15 @@ export async function downloadPostMedia(
         const metadata = await extractImageMetadata(storagePath);
         width = metadata.width;
         height = metadata.height;
+        // Correctly set thumbnail path for images (same as source) so frontend picks it up preferentially
+        thumbnailPath = fileManager.toUrl(storagePath); 
       } else {
         // For videos, extract first frame as thumbnail
         thumbnailPath = await generateVideoThumbnail(storagePath);
       }
 
       // Create MEDIA_ASSET record
-      const mediaAsset = await prisma.mediaAsset.create({
-        data: {
-          clientPostId: isClient ? postId : undefined,
-          cleanedPostId: !isClient ? postId : undefined,
+      const mediaAssetData: any = {
           mediaType,
           originalUrl: url,
           blobStoragePath: storagePath,
@@ -65,7 +104,18 @@ export async function downloadPostMedia(
           thumbnailPath,
           isDownloaded: true,
           downloadedAt: new Date(),
-        },
+      };
+
+      if (entityType === 'CLIENT') {
+          mediaAssetData.clientPostId = postId;
+      } else if (entityType === 'COMPETITOR') {
+          mediaAssetData.cleanedPostId = postId;
+      } else if (entityType === 'SOCIAL') {
+          mediaAssetData.socialPostId = postId;
+      }
+
+      const mediaAsset = await prisma.mediaAsset.create({
+        data: mediaAssetData,
       });
 
       mediaAssetIds.push(mediaAsset.id);
@@ -101,7 +151,6 @@ async function extractImageMetadata(imagePath: string) {
 async function generateVideoThumbnail(videoPath: string): Promise<string> {
   // For now, return null
   // TODO: Implement ffmpeg thumbnail generation
-  // This requires ffmpeg to be installed and fluent-ffmpeg configuration
   console.log('[Downloader] Video thumbnail generation not yet implemented');
   return '';
 }
@@ -131,7 +180,7 @@ export async function downloadAllClientMedia(clientId: string) {
       const mediaUrls = extractMediaUrls(post.rawApiResponse);
 
       if (mediaUrls.length > 0) {
-        await downloadPostMedia(post.id, mediaUrls, true, clientId);
+        await downloadPostMedia(post.id, mediaUrls, 'CLIENT', clientId);
         downloadedCount += mediaUrls.length;
       }
     } catch (error: any) {
@@ -141,6 +190,52 @@ export async function downloadAllClientMedia(clientId: string) {
 
   console.log(`[Downloader] Downloaded ${downloadedCount} media assets for client ${clientId}`);
   return downloadedCount;
+}
+
+/**
+ * Download all media for a specific Social Profile (Research)
+ */
+export async function downloadSocialProfileMedia(profileId: string) {
+    console.log(`[Downloader] Downloading media for profile ${profileId}`);
+
+    // Get posts that don't have media assets yet
+    const posts = await prisma.socialPost.findMany({
+        where: {
+            socialProfileId: profileId,
+            mediaAssets: {
+                none: {}
+            }
+        }
+    });
+
+    let downloadedCount = 0;
+
+    for (const post of posts) {
+        try {
+            const urlsToDownload: string[] = [];
+            
+            // Prefer explicit URL from fields if available, otherwise heuristics
+            // For now, SocialPost URL is often the post URL itself (e.g. tiktok video link)
+            // or we might have a specific media URL in `thumbnailUrl` (which is often just a static image).
+            
+            if (post.url && post.url.includes('tiktok.com')) {
+                urlsToDownload.push(post.url);
+            } else if (post.thumbnailUrl) { // Often holds the media URL for Instagram
+                urlsToDownload.push(post.thumbnailUrl);
+            }
+
+            if (urlsToDownload.length > 0) {
+                 await downloadPostMedia(post.id, urlsToDownload, 'SOCIAL', profileId);
+                 downloadedCount++;
+            }
+            
+        } catch (error: any) {
+             console.error(`[Downloader] Error downloading media for social post ${post.id}:`, error.message);
+        }
+    }
+    
+    console.log(`[Downloader] Downloaded ${downloadedCount} new assets for profile ${profileId}`);
+    return downloadedCount;
 }
 
 /**
@@ -168,8 +263,6 @@ function extractMediaUrls(rawApiResponse: any): string[] {
   return urls.filter(Boolean);
 }
 
-
-
 /**
  * Download media from a generic URL (e.g. DDG Search Result)
  */
@@ -187,31 +280,8 @@ export async function downloadGenericMedia(
     const mediaType = isVideo ? 'VIDEO' : 'IMAGE';
 
     // Generate storage path
-    // We'll use a 'research_downloads' folder structure: storage/research_jobs/<job_id>/<filename>
     const extension = fileManager.getExtension(url) || (isVideo ? 'mp4' : 'jpg');
     const filename = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${extension}`;
-    
-    // Construct path manually since STORAGE_PATHS might not have a generic helper yet
-    // Assuming fileManager handles absolute paths if we give it one, or relative to storage root
-    const relativeStoragePath = path.join('research_jobs', researchJobId, filename);
-    
-    // Download file
-    // fileManager.downloadAndSave expects a full path or handles based on its config.
-    // Let's check fileManager usage in downloadPostMedia: 
-    // const storagePath = ... path.join(STORAGE_PATHS.clientMedia(...), filename)
-    // So we need to provide the full destination path likely.
-    
-    // We'll define a base storage path for research. 
-    // Ideally we should update STORAGE_PATHS in file-manager, but for now we construct it here to avoid circular deps or editing another file if not needed.
-    // IMPORTANT: fileManager.downloadAndSave likely wants an absolute path or relative to project root?
-    // Looking at downloadPostMedia, it uses path.join with STORAGE_PATHS.
-    // Let's rely on fileManager to be smart or pass a path consistent with existing usage.
-    // For safety, let's use a path that we know behaves well. 
-    
-    // Let's inspect STORAGE_PATHS.clientMedia implementation if we can, but assuming it returns a relative path from storage root is risky.
-    // Let's assume we can pass a path relative to the 'storage' directory if fileManager handles it, 
-    // OR we pass an absolute path.
-    // The previous code passed `path.join(STORAGE_PATHS.clientMedia(...), filename)`.
     
     // Check if it's a YouTube link
     const isYoutube = url.includes('youtube.com') || url.includes('youtu.be');
@@ -220,11 +290,7 @@ export async function downloadGenericMedia(
     let storagePath = '';
     
     if (isYoutube) {
-       // For YouTube, we don't download the video file (unless we add yt-dlp).
-       // We'll just define a "virtual" path or use the URL.
-       // We still need a path for the DB constraint if any, but let's just use a placeholder.
        storagePath = path.join(process.cwd(), 'storage', 'research', researchJobId, `youtube_${Date.now()}.txt`);
-       // We won't actually download, just proceed.
        console.log(`[Downloader] YouTube link detected, skipping file download: ${url}`);
     } else {
        const storagePathRaw = path.join(process.cwd(), 'storage', 'research', researchJobId, filename);
@@ -245,8 +311,6 @@ export async function downloadGenericMedia(
       height = metadata.height;
     } else {
       if (isYoutube) {
-         // Try to get YouTube thumbnail
-         // Format: https://img.youtube.com/vi/<video_id>/maxresdefault.jpg
          try {
              let videoId = '';
              if (url.includes('v=')) {
@@ -257,7 +321,6 @@ export async function downloadGenericMedia(
              
              if (videoId) {
                  thumbnailPath = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
-                 // Just simple width/height guess for embed
                  width = 1280;
                  height = 720; 
              }
@@ -314,6 +377,7 @@ export async function downloadGenericMedia(
 export const mediaDownloader = {
   downloadPostMedia,
   downloadAllClientMedia,
+  downloadSocialProfileMedia,
   downloadGenericMedia,
   extractMediaUrls,
 };

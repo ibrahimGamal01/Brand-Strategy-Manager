@@ -58,6 +58,28 @@ export interface HandleValidationResult {
   error?: string;
 }
 
+export interface SocialSearchResult {
+  brand_name: string;
+  instagram: string[];
+  tiktok: string[];
+  youtube: string[];
+  twitter: string[];
+  linkedin: string[];
+  facebook: string[];
+  raw_results: Array<RawSearchResult & { platform: string }>;
+  totals: {
+    instagram: number;
+    tiktok: number;
+    youtube: number;
+    twitter: number;
+    linkedin: number;
+    facebook: number;
+    total: number;
+    raw: number;
+  };
+  error?: string;
+}
+
 /**
  * Save raw search results to database for later processing
  */
@@ -329,6 +351,78 @@ export async function validateHandleDDG(
   }
 }
 
+/**
+ * Site-limited search for social media profiles
+ * Uses site: operator to find profiles on specific platforms
+ */
+export async function searchSocialProfiles(
+  brandName: string,
+  researchJobId?: string
+): Promise<SocialSearchResult> {
+  console.log(`[DDGSearch] Site-limited social search for: "${brandName}"`);
+  
+  try {
+    const scriptPath = path.join(process.cwd(), 'scripts/ddg_search.py');
+    
+    const { stdout, stderr } = await execAsync(
+      `python3 ${scriptPath} social_search "${brandName}"`,
+      {
+        cwd: process.cwd(),
+        timeout: 180000, // 3 min timeout for comprehensive search
+        maxBuffer: 50 * 1024 * 1024,
+      }
+    );
+    
+    if (stderr) {
+      console.log(`[DDGSearch] ${stderr}`);
+    }
+    
+    const result: SocialSearchResult = JSON.parse(stdout);
+    
+    console.log(`[DDGSearch] Social search found: Instagram=${result.instagram?.length || 0}, TikTok=${result.tiktok?.length || 0}, YouTube=${result.youtube?.length || 0}`);
+    
+    // Save raw results to DB if research job provided
+    if (researchJobId && result.raw_results?.length > 0) {
+      await saveRawResultsToDB(
+        researchJobId, 
+        result.raw_results.map(r => ({
+          query: r.query,
+          title: r.title,
+          href: r.href,
+          body: r.body,
+        })), 
+        'duckduckgo_social_search'
+      );
+    }
+    
+    return result;
+    
+  } catch (error: any) {
+    console.error(`[DDGSearch] Social search failed:`, error.message);
+    return {
+      brand_name: brandName,
+      instagram: [],
+      tiktok: [],
+      youtube: [],
+      twitter: [],
+      linkedin: [],
+      facebook: [],
+      raw_results: [],
+      totals: {
+        instagram: 0,
+        tiktok: 0,
+        youtube: 0,
+        twitter: 0,
+        linkedin: 0,
+        facebook: 0,
+        total: 0,
+        raw: 0,
+      },
+      error: error.message,
+    };
+  }
+}
+
 // Interfaces for gather_all results
 export interface NewsResult {
   query: string;
@@ -540,5 +634,177 @@ async function saveAllResultsToDB(researchJobId: string, result: GatherAllResult
   }
   
   console.log(`[DDGSearch] All results saved to DB`);
+}
+
+// Interfaces for scrape_social_content results
+export interface ScrapedSocialImage {
+  platform: string;
+  handle: string;
+  image_url: string;
+  thumbnail_url: string;
+  source_url: string;
+  title: string;
+  width: number | null;
+  height: number | null;
+}
+
+export interface ScrapedSocialVideo {
+  platform: string;
+  handle: string;
+  video_url: string;
+  embed_url: string;
+  thumbnail_url: string;
+  title: string;
+  description: string;
+  duration: string;
+  publisher: string;
+}
+
+export interface ScrapedSocialPost {
+  platform: string;
+  handle: string;
+  caption_snippet: string;
+  source_url: string;
+  has_media: boolean;
+  is_video?: boolean;
+}
+
+export interface ScrapeSocialContentResult {
+  handles: Record<string, string>;
+  images: ScrapedSocialImage[];
+  videos: ScrapedSocialVideo[];
+  posts: ScrapedSocialPost[];
+  platforms_searched: string[];
+  totals: {
+    images: number;
+    videos: number;
+    posts: number;
+    platforms: number;
+  };
+  error?: string;
+}
+
+/**
+ * Scrape images and videos for social handles using site-limited search
+ * This is the workaround for direct API access when rate-limited
+ * 
+ * IMPORTANT: This is the ONLY source for media alongside authenticated Instagram
+ */
+export async function scrapeSocialContent(
+  handles: Record<string, string>,
+  maxItems: number = 30,
+  researchJobId?: string
+): Promise<ScrapeSocialContentResult> {
+  // Build args string like: instagram:handle tiktok:handle
+  const handleArgs = Object.entries(handles)
+    .filter(([_, handle]) => handle)
+    .map(([platform, handle]) => `${platform}:${handle}`)
+    .join(' ');
+  
+  if (!handleArgs) {
+    return {
+      handles: {},
+      images: [],
+      videos: [],
+      posts: [],
+      platforms_searched: [],
+      totals: { images: 0, videos: 0, posts: 0, platforms: 0 },
+      error: 'No handles provided',
+    };
+  }
+  
+  console.log(`[DDGSearch] Scraping social content: ${handleArgs} (max ${maxItems})`);
+  
+  try {
+    const scriptPath = path.join(process.cwd(), 'scripts/ddg_search.py');
+    
+    const { stdout, stderr } = await execAsync(
+      `python3 ${scriptPath} scrape_content ${handleArgs} ${maxItems}`,
+      {
+        cwd: process.cwd(),
+        timeout: 180000, // 3 min timeout
+        maxBuffer: 50 * 1024 * 1024,
+      }
+    );
+    
+    if (stderr) {
+      console.log(`[DDGSearch] ${stderr}`);
+    }
+    
+    const result: ScrapeSocialContentResult = JSON.parse(stdout);
+    
+    console.log(`[DDGSearch] Scraped: ${result.totals.images} images, ${result.totals.videos} videos from ${result.platforms_searched.join(', ')}`);
+    
+    // Save to DB if researchJobId provided
+    if (researchJobId) {
+      await saveSocialContentToDB(researchJobId, result);
+    }
+    
+    return result;
+    
+  } catch (error: any) {
+    console.error(`[DDGSearch] Social content scrape failed:`, error.message);
+    return {
+      handles,
+      images: [],
+      videos: [],
+      posts: [],
+      platforms_searched: [],
+      totals: { images: 0, videos: 0, posts: 0, platforms: 0 },
+      error: error.message,
+    };
+  }
+}
+
+/**
+ * Save scraped social content to DB
+ * Marks source as 'site_limited_social' to distinguish from generic DDG
+ */
+async function saveSocialContentToDB(
+  researchJobId: string,
+  result: ScrapeSocialContentResult
+): Promise<void> {
+  console.log(`[DDGSearch] Saving ${result.totals.images} images and ${result.totals.videos} videos to DB...`);
+  
+  // Save images
+  if (result.images.length > 0) {
+    const imageData = result.images.map(img => ({
+      researchJobId,
+      query: `site:${img.platform}.com @${img.handle}`, // Reconstruct query for consistency
+      title: img.title,
+      imageUrl: img.image_url,
+      thumbnailUrl: img.thumbnail_url,
+      sourceUrl: img.source_url,
+      width: img.width,
+      height: img.height,
+    }));
+    
+    const created = await prisma.ddgImageResult.createMany({
+      data: imageData,
+      skipDuplicates: true,
+    });
+    console.log(`[DDGSearch] Saved ${created.count} social images`);
+  }
+  
+  // Save videos
+  if (result.videos.length > 0) {
+    const videoData = result.videos.map(vid => ({
+      researchJobId,
+      query: `site:${vid.platform}.com @${vid.handle}`,
+      title: vid.title,
+      description: vid.description,
+      url: vid.video_url,
+      embedUrl: vid.embed_url,
+      duration: vid.duration,
+      publisher: vid.publisher,
+      thumbnailUrl: vid.thumbnail_url,
+    }));
+    
+    const created = await prisma.ddgVideoResult.createMany({
+      data: videoData,
+      skipDuplicates: true,
+    });
+    console.log(`[DDGSearch] Saved ${created.count} social videos`);
+  }
 }
 

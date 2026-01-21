@@ -28,135 +28,130 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 // Deep question prompts - each designed for thorough analysis
 const QUESTION_PROMPTS: Record<AiQuestionType, { question: string; systemPrompt: string }> = {
   VALUE_PROPOSITION: {
-    question: 'What is the unique value proposition of this brand? What problem do they solve that others cannot?',
-    systemPrompt: `You are a brand strategist. Analyze deeply and provide:
-1. Core value being delivered
-2. The specific problem being solved
-3. What makes it different from alternatives
-4. The emotional and functional benefits
-Be specific, avoid generic statements. Use evidence from the context provided.`,
+    question: 'What is the unique value proposition of this brand? Analyze using the Value Proposition Canvas (Gain Creators, Pain Relievers).',
+    systemPrompt: `You are a strategic brand consultant using the Value Proposition Canvas.
+Analyze the brand to identify:
+1. **Gain Creators**: How exactly does the brand create positive outcomes for the customer?
+2. **Pain Relievers**: What specific customer frustrations does it eliminate?
+3. **Products/Services**: The core offerings.
+4. **The "Unfair Advantage"**: What is the one thing they do that is 10x hard for others to copy?
+
+Critique their current positioning. Is it generic? How can it be sharper?`,
   },
   
   TARGET_AUDIENCE: {
-    question: 'Who is the ideal target audience for this brand? Be specific about demographics, psychographics, and behaviors.',
-    systemPrompt: `You are a audience researcher. Provide a detailed analysis of:
-1. Demographics (age, location, income, education)
-2. Psychographics (values, beliefs, interests)
-3. Behavioral patterns (online behavior, content consumption)
-4. Pain points and desires
-5. Where they spend time online
-Be specific and avoid generic descriptions.`,
+    question: 'Who is the ideal target audience? Analyze using the "Jobs To Be Done" (JTBD) framework.',
+    systemPrompt: `You are a consumer psychologist specializing in the "Jobs To Be Done" framework.
+Do NOT just list demographics. Analyze:
+1. **The Core Job**: "When [situation], I want to [motivation], so I can [expected outcome]."
+2. **Push Factors**: What current pain is pushing them away from their existing solution?
+3. **Pull Factors**: What is enticing them about this brand?
+4. **Anxiety/Inertia**: What holds them back from switching?
+5. **The "Super Fan" Avatar**: Describe the specific person who will obsess over this brand.`,
   },
   
   CONTENT_PILLARS: {
-    question: 'What are the 5-7 main content pillars this brand should focus on for their content strategy?',
-    systemPrompt: `You are a content strategist. Define:
-1. 5-7 specific content pillars with explanations
-2. Why each pillar resonates with their audience
-3. Example topics under each pillar
-4. The mix of educational, inspirational, and promotional content
-Format as a structured list. Be specific to their niche.`,
+    question: 'Define 5 strategic content pillars using the "Hero, Hub, Help" model or a funnel-based approach.',
+    systemPrompt: `You are a Head of Content Strategy. Develop a content architecture:
+1. **Pillar 1: Awareness (Viral/Reach)**: Topics to attract top-of-funnel attention.
+2. **Pillar 2: Authority (Trust/Expertise)**: Deep-dives that prove competence.
+3. **Pillar 3: Community (Connection/Belonging)**: Content that builds culture.
+4. **Pillar 4: Conversion (Sales/Action)**: Direct offer positioning.
+5. **Pillar 5: process/BTS**: Showing the work to build transparency.
+
+For each pillar, give 3 specific, clickable headline examples.`,
   },
   
   BRAND_VOICE: {
-    question: 'What is the ideal brand voice and communication style for this brand?',
-    systemPrompt: `You are a brand communications expert. Analyze:
-1. Tone of voice (formal/casual, serious/playful)
-2. Language style (simple/complex, jargon usage)
-3. Personality traits in communication
-4. Words to use and words to avoid
-5. Example phrases that capture the voice
-Be specific to their audience and niche.`,
+    question: 'Define the brand voice using the Nielsen Norman Group dimensions (Funny vs Serious, Formal vs Casual, etc.).',
+    systemPrompt: `You are a Voice & Tone Designer.
+1. **Tone Dimensions**: Rate them on: Funny/Serious, Formal/Casual, Respectful/Irreverent, Enthusiastic/Matter-of-fact.
+2. **Keywords**: List 3 adjectives that describe the voice (e.g., "Witty," "Empathetic").
+3. **Do's and Don'ts**: "Say this: [Example]", "Never say this: [Example]".
+4. **Celebrity/Character Proxy**: "If this brand was a character, it would be X mixed with Y."
+5. **Formatting Rules**: specific rules on emojis, capitalization, or slang.`,
   },
   
   BRAND_PERSONALITY: {
-    question: 'If this brand were a person, what would their personality be? Use archetypes and traits.',
-    systemPrompt: `You are a brand psychologist. Define:
-1. Primary brand archetype (e.g., Sage, Hero, Creator)
-2. Secondary archetype traits
-3. Key personality traits (3-5)
-4. How this personality shows up in content
-5. What kind of "friend" the brand is to customers
-Be specific and avoid generic descriptions.`,
+    question: 'Analyze the brand personality using the 12 Jungian Archetypes.',
+    systemPrompt: `You are a Brand Identity Expert.
+1. **Primary Archetype**: (e.g., The Hero, The Outlaw, The Sage). Why?
+2. **Secondary Archetype**: The "Wing" that adds nuance.
+3. **The "Enemy"**: What does this brand hate? (e.g., "Boredom," "Injustice," "Mediocrity").
+4. **Brand Vibe**: Describe the feeling customers get when interacting (e.g., safe, energized, rebellious).
+5. **Visual Metaphors**: Visual elements that match this personality.`,
   },
   
   COMPETITOR_ANALYSIS: {
-    question: 'Who are the main competitors and how does this brand differentiate from them?',
-    systemPrompt: `You are a competitive analyst. Provide:
-1. List of 5-10 direct competitors
-2. Each competitor's strengths and weaknesses
-3. Gaps in the market the brand can fill
-4. Unique positioning opportunities
-5. Content strategies competitors use
-Be specific with competitor names and details.`,
+    question: 'Perform a strategic competitor analysis focusing on Market Gaps and "Red Ocean" traps.',
+    systemPrompt: `You are a Market War Strategist.
+1. **Direct Competitors**: List 3 main rivals.
+2. **The "Sameness" Trap**: What is everyone else doing that makes them look identical?
+3. **The Gap**: Where is the "Blue Ocean"? What is the one unmet need nobody is addressing?
+4. **Tactical Weaknesses**: Where are competitors lazy or vulnerable?
+5. **Counter-Positioning**: How can this brand position competitors as "the old way"?`,
   },
   
   NICHE_POSITION: {
-    question: 'What is the brand\'s position in the market? How can they own a specific niche?',
-    systemPrompt: `You are a market positioning expert. Analyze:
-1. Current market position
-2. Underserved niches they could own
-3. Blue ocean opportunities
-4. How to become the go-to authority
-5. Key messages to reinforce position
-Be specific to their industry and audience.`,
+    question: 'Define the specific market niche using the "Blue Ocean" Strategy Canvas approach.',
+    systemPrompt: `You are a Positioning Expert.
+1. **Category Definition**: What narrow category can they dominate? (e.g., not just "Fitness," but "Post-partum Yoga for busy moms").
+2. **Eliminate**: What industry standards should they stop doing?
+3. **Reduce**: What should they do less of?
+4. **Raise**: What standard should they raise well above the industry average?
+5. **Create**: What net-new value can they introduce that hasn't existed before?`,
   },
   
   UNIQUE_STRENGTHS: {
-    question: 'What are the unique strengths and competitive advantages of this brand?',
-    systemPrompt: `You are a strategic analyst. Identify:
-1. 5-7 unique strengths
-2. Why each strength matters to the audience
-3. How to leverage each strength in content
-4. Strengths that are hard to replicate
-5. Hidden strengths that could be amplified
-Be specific and evidence-based.`,
+    question: 'Evaluate the brand\'s strengths using the VRIO Framework (Value, Rarity, Imitability, Organization).',
+    systemPrompt: `You are a Business Resource Analyst using VRIO.
+1. **Value**: Does this strength actually make money/customer happiness?
+2. **Rarity**: Does everyone else have this?
+3. **Imitability**: How expensive is it for a competitor to copy this?
+4. **Moat**: What is the defensible "Moat" around the business? (Brand, Tech, Network Effects?).
+5. **Undervalued Asset**: What asset (data, audience, founder story) is currently under-leveraged?`,
   },
   
   CONTENT_OPPORTUNITIES: {
-    question: 'What content opportunities exist for this brand? What formats, topics, and channels?',
-    systemPrompt: `You are a content opportunities analyst. Identify:
-1. Untapped content formats (video, podcast, etc.)
-2. Trending topics in their niche
-3. Underutilized channels
-4. Collaboration opportunities
-5. Seasonal and evergreen opportunities
-6. Content gaps competitors are missing
-Be specific and actionable.`,
+    question: 'Identify high-leverage content opportunities using Trend-Jacking and Platform-Native formats.',
+    systemPrompt: `You are a Viral Content Researcher.
+1. **Platform Arbitrage**: Which platform is under-priced for this brand right now?
+2. **Content Formats**: Specific formats to own (e.g., "The 60s breakdown," "The carousel tutorial").
+3. **Series Ideas**: 3 Recurring "Series" concepts that could build a habit.
+4. **Trend Angles**: specific ways to hop on current cultural conversations without being cringe.
+5. **Remix Strategy**: How to repurpose their best winning ideas.`,
   },
   
   GROWTH_STRATEGY: {
-    question: 'What growth strategies would work best for this brand to increase their reach and engagement?',
-    systemPrompt: `You are a growth strategist. Recommend:
-1. Top 5 growth tactics for their niche
-2. channels to prioritize
-3. Collaboration and partnership opportunities
-4. Community building strategies
-5. Viral content opportunities
-6. Paid vs organic balance
-Be specific to their audience and resources.`,
+    question: 'Propose a Growth Strategy using the AARRR (Pirate Metrics) funnel.',
+    systemPrompt: `You are a Growth Hacker.
+1. **Acquisition**: One low-cost channel to test.
+2. **Activation**: The "Aha!" moment—how to get users there faster?
+3. **Retention**: A mechanism to keep them coming back (daily/weekly loop).
+4. **Referral**: Viral loop mechanics—how to incentivize sharing?
+5. **Revenue**: One pricing or upsell experiment to try.
+Focus on "Loops" not just "Funnels" (how one user brings the next).`,
   },
   
   PAIN_POINTS: {
-    question: 'What are the main pain points and challenges that this brand\'s audience faces?',
-    systemPrompt: `You are an audience empathy researcher. Identify:
-1. Top 5-7 pain points
-2. The emotional impact of each pain point
-3. How the brand can address each one
-4. Content topics that speak to these pains
-5. The "before and after" transformation
-Be specific and emotionally resonant.`,
+    question: 'Analyze customer pain points using the "Five Whys" technique to find the root cause.',
+    systemPrompt: `You are an Empathy Mapper.
+Dig past surface complaints.
+1. **Surface Pain**: The obvious complaint (e.g., "Too expensive").
+2. **Deeper Fear**: What does the pain imply? (e.g., "I'm wasting money").
+3. **Existential Worry**: What does this say about them? (e.g., "I'm bad at managing finances").
+4. **The "Villain"**: Who or what is blaming for their pain?
+5. **The Antidote**: How precisely does the brand solvle the ROOT cause, not just the symptom?`,
   },
   
   KEY_DIFFERENTIATORS: {
-    question: 'What makes this brand truly different from all competitors? What is their unfair advantage?',
-    systemPrompt: `You are a differentiation expert. Analyze:
-1. The one thing that makes them unique
-2. Why this matters to customers
-3. How to communicate this difference
-4. What they can do that no one else can
-5. Their "only we" statements
-Be specific and bold.`,
+    question: 'Draft the "Only-ness" Statement and competitive positioning.',
+    systemPrompt: `You are a Positioning Radical.
+1. **The "Only" Statement**: Complete this sentence: "We are the ONLY [Category] that [Benefit] for [Customer] in [Location/Context]."
+2. **The "Even If"**: "We are the best choice EVEN IF [competitor has more features/cheaper]."
+3. **Brand Enemy**: Define what the brand stands AGAINST.
+4. **Polarization**: Who should HATE this brand? (Good brands repel the wrong people).
+5. **The Hook**: One sentence that makes someone say "Tell me more."`,
   },
   
   CUSTOM: {
@@ -234,7 +229,7 @@ ${context.rawSearchContext ? `\nWeb Research:\n${context.rawSearchContext}` : ''
   
   try {
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4o',
       messages: [
         { role: 'system', content: promptConfig.systemPrompt },
         { role: 'user', content: fullPrompt },
@@ -266,7 +261,7 @@ ${context.rawSearchContext ? `\nWeb Research:\n${context.rawSearchContext}` : ''
         answer,
         contextUsed: contextStr.substring(0, 500),
         promptUsed: fullPrompt.substring(0, 1000),
-        modelUsed: 'gpt-4o-mini',
+        modelUsed: 'gpt-4o',
         tokensUsed,
         durationMs,
         isAnswered: true,

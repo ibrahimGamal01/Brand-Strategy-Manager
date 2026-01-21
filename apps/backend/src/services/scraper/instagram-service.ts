@@ -142,61 +142,90 @@ export async function scrapeInstagramProfile(
  * Puppeteer fallback scraper
  * Currently acting as a robust mock for development/testing
  */
+/**
+ * Puppeteer fallback scraper
+ * Uses Site-Limited Search (DuckDuckGo) as a robust fallback
+ * This ensures we get REAL data (images/videos) instead of mocks
+ */
 async function scrapeWithPuppeteer(
   handle: string,
   postsLimit: number
 ): Promise<InstagramProfileData> {
-  console.log(`[Instagram] Using Mock/Puppeteer scraper for @${handle}`);
+  console.log(`[Instagram] Using Site-Limited Search fallback for @${handle}`);
+  
+  // Dynamically import to avoid circular dependencies if any
+  const duckduckgoSearch = await import('../discovery/duckduckgo-search.js');
+    // Extract media
+    const scrapedResult = await duckduckgoSearch.scrapeSocialContent({ instagram: handle }, postsLimit);
+    const images = scrapedResult.images || [];
+    const videos = scrapedResult.videos || [];
+    
+    // Check for profile stats if available
+    const stats = (scrapedResult as any).profile_stats?.instagram;
+    const followerCount = stats?.followers || 0;
+    const followingCount = stats?.following || 0;
+    
+    // Convert to InstagramPost format
+    const posts: InstagramPost[] = [];
+    
+    // Mix images and videos, sort by assumed recency (or just interleaving)
+    const allMedia = [
+      ...images.map(img => ({ ...img, type: 'image' })),
+      ...videos.map(vid => ({ ...vid, type: 'video' }))
+    ];
+  
+  // Create InstagramPost objects from scraped content
+  allMedia.forEach((media: any, index) => {
+    // Determine URLs based on media type (duckduckgo-search.ts interfaces)
+    // ImageResult: { image_url, source_url, ... }
+    // VideoResult: { video_url, content_url, embed_url, ... }
+    
+    let postUrl = '';
+    let mediaUrl = '';
+    let videoUrl = null;
 
-  // Mock data for development - allow ANY handle to pass so we can test downstream services
-  // The downstream Information Gathering service will use the REAL handle to find REAL competitors
+    if (media.type === 'image') {
+       postUrl = media.source_url || media.image_url;
+       // Prefer image_url because thumbnail_url from DDG is often small/base64/expired.
+       // We want the high-res one.
+       mediaUrl = media.image_url || media.thumbnail_url;
+    } else {
+       postUrl = media.content_url || media.embed_url; // VideoResult properties
+       // For videos, content_url IS the video file often, but for display we want a thumb? 
+       // Actually instagram-service logic puts this into `media_url` field of post.
+       // If it's a video, `media_url` usually holds the thumbnail for display in many grids, 
+       // OR the video itself. 
+       // But wait, `media_url` in InstagramPost interface is "media_url".
+       // Looking at frontend: <img src={thumbnail...}>
+       // <video ...> src={...}
+       mediaUrl = media.thumbnail_url || media.image_url || '';
+       videoUrl = media.content_url || media.embed_url;
+    }
+
+    posts.push({
+      external_post_id: `site_limited_${handle}_${index}`,
+      post_url: postUrl || `https://instagram.com/${handle}`,
+      caption: media.title || '',
+      likes: 0,
+      comments: 0,
+      timestamp: new Date().toISOString(),
+      media_url: mediaUrl || '',
+      is_video: media.type === 'video',
+      video_url: videoUrl,
+      typename: media.type === 'video' ? 'GraphVideo' : 'GraphImage',
+    });
+  });
+
   return {
     handle: handle,
-    follower_count: 154000,
-    following_count: 120,
-    bio: "Helping Muslims Build Wealth & Leave A Legacy 🚀\nCheck out our free masterclass 👇",
-    profile_pic: "https://ui-avatars.com/api/?name=" + handle + "&background=random",
-    is_verified: true,
+    follower_count: followerCount,
+    following_count: followingCount,
+    bio: "", // Could try to extract from snippets later
+    profile_pic: "",
+    is_verified: false,
     is_private: false,
-    total_posts: 450,
-    posts: [
-      {
-        external_post_id: `3265891234567_${Date.now()}_1`,
-        post_url: "https://instagram.com/p/C123456789",
-        caption: "Stop trading your time for money. The wealthiest people in the world don't work for money, they make their money work for them. 💰\n\nIf you want to build true generational wealth, you need to shift your mindset from consumer to producer.\n\nType 'WEALTH' below and I'll send you my free guide on halal investment strategies. 👇\n\n#muslimbusiness #halalwealth #entrepreneurship #passiveincome",
-        likes: 2450,
-        comments: 134,
-        timestamp: new Date().toISOString(),
-        media_url: "https://images.unsplash.com/photo-1579621970563-ebec7560ff3e?w=800", // Stock image for testing
-        is_video: false,
-        video_url: null,
-        typename: "GraphImage"
-      },
-      {
-        external_post_id: `3265891234568_${Date.now()}_2`,
-        post_url: "https://instagram.com/p/C123456790",
-        caption: "3 Halal Business Ideas you can start with $0 today:\n\n1. Service Arbitrage: Connect clients with freelancers and take a cut.\n2. Digital Products: Sell templates, ebooks, or guides.\n3. Content Creation: Build a personal brand and monetize through affiliates.\n\nWhich one are you starting? Let me know in the comments! 👇\n\n#halalbusiness #sidehustle #muslimabusiness",
-        likes: 1890,
-        comments: 89,
-        timestamp: new Date(Date.now() - 86400000).toISOString(),
-        media_url: "https://images.unsplash.com/photo-1556761175-5973dc0f32e7?w=800",
-        is_video: false,
-        video_url: null,
-        typename: "GraphImage"
-      },
-      {
-        external_post_id: `3265891234569_${Date.now()}_3`,
-        post_url: "https://instagram.com/p/C123456791",
-        caption: "The biggest mistake Muslim entrepreneurs make: Trying strict separation of Deen and Dunya.\n\nYour business IS your worship if your intention is right. Being ethical, honest, and excellent (Ihsan) in your work is a form of Ibadah.\n\nDon't leave your values at the door when you enter the office.\n\n#islamicbusiness #deenanddunya #muslimmindset",
-        likes: 3200,
-        comments: 210,
-        timestamp: new Date(Date.now() - 172800000).toISOString(),
-        media_url: "https://images.unsplash.com/photo-1542204165-65bf26472b9b?w=800",
-        is_video: false,
-        video_url: null,
-        typename: "GraphImage"
-      }
-    ]
+    total_posts: posts.length,
+    posts: posts,
   };
 }
 

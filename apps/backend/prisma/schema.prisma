@@ -246,6 +246,7 @@ model SocialPost {
   caption         String?
   hashtags        Json?       // Array of strings
   mentions        Json?       // Array of strings
+  thumbnailUrl    String?     @map("thumbnail_url")
   
   // Meta Info / Metrics
   likesCount      Int?        @map("likes_count")
@@ -261,6 +262,7 @@ model SocialPost {
   
   socialProfile   SocialProfile @relation(fields: [socialProfileId], references: [id], onDelete: Cascade)
   trends          SocialTrend[] // Trends identified in this post
+  mediaAssets     MediaAsset[]
 
   @@unique([socialProfileId, externalId])
   @@map("social_posts")
@@ -600,7 +602,9 @@ model MediaAsset {
   id              String    @id @default(uuid())
   clientPostId    String?   @map("client_post_id")
   cleanedPostId   String?   @map("cleaned_post_id")
+  socialPostId    String?   @map("social_post_id") // Added for Social Scraper
   externalMediaId String?   @map("external_media_id")
+
   mediaType       MediaType @map("media_type")
   originalUrl     String?   @map("original_url")
   blobStoragePath String?   @map("blob_storage_path")
@@ -614,6 +618,7 @@ model MediaAsset {
 
   clientPost  ClientPost?  @relation(fields: [clientPostId], references: [id], onDelete: Cascade)
   cleanedPost CleanedPost? @relation(fields: [cleanedPostId], references: [id], onDelete: Cascade)
+  socialPost  SocialPost?  @relation(fields: [socialPostId], references: [id], onDelete: Cascade)
   
   // DDG Relations
   ddgVideoResultId String? @map("ddg_video_result_id")

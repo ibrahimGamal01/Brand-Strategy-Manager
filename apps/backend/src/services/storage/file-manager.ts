@@ -17,26 +17,60 @@ export const fileManager = {
   /**
    * Download media from URL and save to storage
    */
-  async downloadAndSave(url: string, savePath: string): Promise<void> {
+  async downloadAndSave(url: string, savePath: string, headers: Record<string, string> = {}): Promise<void> {
     // Ensure directory exists
     const dir = path.dirname(savePath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
 
-    // Download file
-    const response = await axios.get(url, { 
-      responseType: 'arraybuffer',
-      timeout: 60000, // 60 second timeout
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36'
-      }
-    });
-    const buffer = Buffer.from(response.data);
+    // Default headers to look like a browser
+    const requestHeaders = {
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Referer': 'https://www.instagram.com/',
+      ...headers
+    };
 
-    // Save to disk
-    fs.writeFileSync(savePath, buffer);
-    console.log(`[FileManager] Saved: ${savePath} (${buffer.length} bytes)`);
+    // Download file
+    try {
+        const response = await axios.get(url, { 
+        responseType: 'arraybuffer',
+        timeout: 60000,
+        headers: requestHeaders
+        });
+
+        // VALIDATION: Check Content-Type
+        const contentType = response.headers['content-type'];
+        if (contentType && contentType.includes('text/html')) {
+            throw new Error(`Invalid content type: ${contentType}. Likely a login page or error page.`);
+        }
+
+        const buffer = Buffer.from(response.data);
+
+        // EXTRA VALIDATION: Check magic bytes for common image formats if possible, 
+        // but content-type check is a good first step. 
+        // HTML often starts with <DOCTYPE or <html.
+        if (buffer.length > 0) {
+             const head = buffer.slice(0, 10).toString('utf-8').toLowerCase();
+             if (head.includes('<html') || head.includes('<!doctype') || head.includes('<body')) {
+                 throw new Error('Detected HTML content in download buffer. Rejecting.');
+             }
+        }
+
+        // Save to disk
+        fs.writeFileSync(savePath, buffer);
+        console.log(`[FileManager] Saved: ${savePath} (${buffer.length} bytes, Type: ${contentType})`);
+
+    } catch (error: any) {
+        // If it's our validation error, just throw it
+        if (error.message.includes('Invalid content type') || error.message.includes('Detected HTML')) {
+            throw error;
+        }
+        // Otherwise wrap it
+        throw new Error(`Download failed for ${url}: ${error.message}`);
+    }
   },
 
   /**

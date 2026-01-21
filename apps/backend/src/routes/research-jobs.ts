@@ -4,7 +4,7 @@ import { gatherAllDDG, searchCompetitorsDDG, performDirectCompetitorSearch } fro
 import { runCommunityDetective } from '../services/social/community-detective';
 import { askAllDeepQuestions } from '../services/ai/deep-questions';
 import { analyzeSearchTrends } from '../services/discovery/google-trends';
-import { scrapeProfileIncrementally } from '../services/social/scraper';
+import { scrapeProfileIncrementally, scrapeProfileSafe } from '../services/social/scraper';
 import { suggestCompetitorsWithAI } from '../services/ai/competitor-discovery';
 import { evaluateCompetitorRelevance } from '../services/ai/competitor-evaluation';
 
@@ -31,6 +31,19 @@ async function saveCompetitors(
                 create: { clientId, handle, platform }
             });
 
+            // Prevent duplicates in the SAME research job
+            const existingDiscovery = await prisma.discoveredCompetitor.findFirst({
+                where: {
+                    researchJobId: jobId,
+                    competitorId: competitor.id
+                }
+            });
+
+            if (existingDiscovery) {
+                console.log(`[API] Competitor ${handle} already discovered for job ${jobId}, skipping duplicate.`);
+                continue;
+            }
+
             await prisma.discoveredCompetitor.create({
                 data: {
                     researchJobId: jobId,
@@ -43,7 +56,8 @@ async function saveCompetitors(
                 }
             }).catch(() => {}); // Ignore duplicates
         } catch (e) {
-            // silent fail
+            console.error(`[API] Failed to save competitor ${item.handleOrUrl} for client ${clientId}:`, e);
+            // silent fail -> continue to next item
         }
     }
 }
@@ -110,8 +124,11 @@ router.get('/:id', async (req: Request, res: Response) => {
         socialProfiles: {
           include: {
             posts: {
-              take: 10,
-              orderBy: { likesCount: 'desc' }
+              take: 30, // Increased to show full batch
+              orderBy: { postedAt: 'desc' }, // Show recent scrapes first
+              include: {
+                mediaAssets: true
+              }
             }
           }
         },
@@ -150,6 +167,11 @@ router.get('/:id', async (req: Request, res: Response) => {
         orderBy: { createdAt: 'desc' }
     });
 
+    const aggregatedSocialTrends = await prisma.socialTrend.findMany({
+        where: { researchJobId: { in: clientJobIds } },
+        orderBy: { firstSeenAt: 'desc' }
+    });
+
     // Aggregated raw results (deduplicated by href effectively via latest)
     const aggregatedRawResults = await prisma.rawSearchResult.findMany({
         where: { researchJobId: { in: clientJobIds } },
@@ -163,6 +185,7 @@ router.get('/:id', async (req: Request, res: Response) => {
         ...job,
         discoveredCompetitors: aggregatedCompetitors,
         searchTrends: aggregatedTrends,
+        socialTrends: aggregatedSocialTrends,
         communityInsights: aggregatedInsights,
         aiQuestions: aggregatedQuestions,
         rawSearchResults: aggregatedRawResults,
@@ -230,7 +253,19 @@ router.post('/:id/rerun/:scraper', async (req: Request, res: Response) => {
 
     switch (scraper) {
       case 'instagram':
-        result = await scrapeProfileIncrementally(id, 'instagram', handle);
+        // Run in background (Fire & Forget)
+        scrapeProfileSafe(id, 'instagram', handle).then(res => {
+            console.log(`[Background] Instagram scrape finished:`, res);
+        });
+        result = { status: 'started_background', message: 'Instagram scrape started in background' };
+        break;
+
+      case 'tiktok':
+         // Run in background (Fire & Forget)
+        scrapeProfileSafe(id, 'tiktok', handle).then(res => {
+            console.log(`[Background] TikTok scrape finished:`, res);
+        });
+        result = { status: 'started_background', message: 'TikTok scrape started in background' };
         break;
         
       case 'ddg_search':
@@ -295,11 +330,12 @@ router.post('/:id/rerun/:scraper', async (req: Request, res: Response) => {
         }
 
 
-        // SOURCE 3: AI Suggestions (Already clean)
+    // SOURCE 3: AI Suggestions (Already clean)
         if (scraper === 'competitors' || scraper === 'competitors_ai') {
-            console.log('[Competitors] Source 3: Running AI Suggestions...');
+            console.log(`[Competitors] Source 3: Running AI Suggestions for brand "${brandName}" in niche "${niche}"...`);
             try {
                 const aiSuggestions = await suggestCompetitorsWithAI(brandName || handle, niche || 'General');
+                console.log(`[Competitors] Received ${aiSuggestions.length} suggestions from AI`);
                 
                 const formatted = aiSuggestions.map(s => ({
                     handleOrUrl: s.handle,
@@ -311,6 +347,7 @@ router.post('/:id/rerun/:scraper', async (req: Request, res: Response) => {
                 
                 results.push({ source: 'ai_suggestion', count: formatted.length });
                 await saveCompetitors(job.clientId, id, formatted, 'ai_suggestion');
+                console.log('[Competitors] AI suggestions saved to database');
             } catch (e) {
                 console.error('[Competitors] AI Suggestion failed:', e);
             }
@@ -318,8 +355,9 @@ router.post('/:id/rerun/:scraper', async (req: Request, res: Response) => {
         
         result = { sources: results };
         break;
-      }
 
+
+      }
 
       case 'community_insights':
         result = await runCommunityDetective(id, handle, brandName || handle);

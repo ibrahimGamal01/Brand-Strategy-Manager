@@ -1,0 +1,5 @@
+instaloader
+yt-dlp
+pandas
+numpy
+playwright

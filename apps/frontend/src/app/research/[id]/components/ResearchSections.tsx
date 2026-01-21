@@ -11,11 +11,12 @@ import {
     MessageSquare,
     Brain,
     Database,
-    XCircle
+    XCircle,
+    Share2
 } from 'lucide-react';
 import { PipelineProgress } from './PipelineProgress';
 import { DataSourceSection } from './DataSourceSection';
-import { InstagramSection } from './InstagramSection';
+import { SocialProfilesSection } from './SocialProfilesSection';
 import { SearchResultsList } from './SearchResultsList';
 import { ImageGallery } from './ImageGallery';
 import { VideoGallery } from './VideoGallery';
@@ -23,30 +24,21 @@ import { TrendsSection } from './TrendsSection';
 import { CompetitorsSection } from './CompetitorsSection';
 import { CommunityInsightsSection } from './CommunityInsightsSection';
 import { AIQuestionsSection } from './AIQuestionsSection';
+import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
 // API helper
-// API helper
-async function rerunScraper(jobId: string, scraperType: string) {
-    try {
-        const response = await fetch(`http://localhost:3001/api/research-jobs/${jobId}/rerun/${scraperType}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        });
-
-        if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.message || 'Failed to re-run scraper');
+async function callRerunApi(jobId: string, scraperType: string) {
+    const response = await fetch(`http://localhost:3001/api/research-jobs/${jobId}/rerun/${scraperType}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
         }
+    });
 
-        // Reload page to show new data (or invalidate query if using react-query)
-        window.location.reload();
-
-    } catch (error) {
-        console.error(`Failed to rerun ${scraperType}:`, error);
-        alert(`Failed to start ${scraperType}: ${(error as Error).message}`);
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to re-run scraper');
     }
 }
 
@@ -65,10 +57,27 @@ interface AllResearchSectionsProps {
         communityInsights: any[];
         mediaAssets: any[];
         aiQuestions: any[];
+        socialProfiles: any[];
     }
 }
 
 export function AllResearchSections({ jobId, status, client, data }: AllResearchSectionsProps) {
+    const router = useRouter();
+    const [runningScrapers, setRunningScrapers] = useState<Record<string, boolean>>({});
+
+    // Wrapper for rerun actions
+    async function rerunScraper(jobId: string, scraperType: string) {
+        try {
+            setRunningScrapers(prev => ({ ...prev, [scraperType]: true }));
+            await callRerunApi(jobId, scraperType);
+            router.refresh();
+        } catch (error) {
+            console.error(`Failed to rerun ${scraperType}:`, error);
+            alert(`Failed to start ${scraperType}: ${(error as Error).message}`);
+        } finally {
+            setRunningScrapers(prev => ({ ...prev, [scraperType]: false }));
+        }
+    }
 
     // Handlers for re-run buttons
     function makeRerunHandler(scraper: string) {
@@ -85,12 +94,17 @@ export function AllResearchSections({ jobId, status, client, data }: AllResearch
             if (!response.ok) throw new Error('Failed to stop job');
 
             // Reload to show cancelled status
-            window.location.reload();
+            router.refresh();
         } catch (error) {
             console.error('Failed to stop job:', error);
             alert('Failed to stop job');
         }
     }
+
+    const instagramProfile = data.socialProfiles?.find((p: any) =>
+        p.platform === 'instagram' &&
+        p.handle?.toLowerCase() === client.handle?.toLowerCase()
+    ) || data.socialProfiles?.find((p: any) => p.platform === 'instagram'); // Fallback to first if no match
 
     return (
         <div className="space-y-4 pb-20">
@@ -102,25 +116,12 @@ export function AllResearchSections({ jobId, status, client, data }: AllResearch
                 />
             </div>
 
-            {/* 1. Instagram Profile & Posts */}
-            <DataSourceSection
-                title="Instagram Profile & Posts"
-                icon={Instagram}
-                count={data.clientPosts.length}
-                defaultOpen={true}
-                onRerun={makeRerunHandler('instagram')}
-            >
-                <InstagramSection
-                    profile={{
-                        handle: client.handle || '',
-                        bio: client.businessOverview || '', // fallback if bio stored here
-                        followerCount: 0, // Should be passed from client data if available
-                        followingCount: 0,
-                        profileImageUrl: undefined // add if available
-                    }}
-                    posts={data.clientPosts}
-                />
-            </DataSourceSection>
+            {/* 1. Social Profiles (Consolidated) */}
+            <SocialProfilesSection
+                client={client}
+                data={data}
+                onRerun={(id) => rerunScraper(jobId, id)} // Fix: bind was tricky, using arrow function
+            />
 
             {/* 2. Search Results */}
             <DataSourceSection
@@ -182,10 +183,11 @@ export function AllResearchSections({ jobId, status, client, data }: AllResearch
                 <CompetitorsSection
                     competitors={data.competitors}
                     onRunScraper={(scraper) => rerunScraper(jobId, scraper)}
+                    runningScrapers={runningScrapers}
                 />
             </DataSourceSection>
 
-            {/* 8. Community Insights */}
+            {/* 8. Community Insights (VoC) */}
             <DataSourceSection
                 title="Community Insights (VoC)"
                 icon={MessageSquare}
@@ -193,18 +195,6 @@ export function AllResearchSections({ jobId, status, client, data }: AllResearch
                 onRerun={makeRerunHandler('community_insights')}
             >
                 <CommunityInsightsSection insights={data.communityInsights} />
-            </DataSourceSection>
-
-            {/* 9. Media Assets (Downloaded) */}
-            <DataSourceSection
-                title="Downloaded Media Assets"
-                icon={Database}
-                count={data.mediaAssets.length}
-            >
-                <div className="p-4 text-center text-muted-foreground">
-                    {data.mediaAssets.length} assets downloaded to storage.
-                    (Visualized in Images section where matches occur)
-                </div>
             </DataSourceSection>
 
             {/* 10. AI Questions */}
@@ -218,6 +208,6 @@ export function AllResearchSections({ jobId, status, client, data }: AllResearch
                 <AIQuestionsSection questions={data.aiQuestions} />
             </DataSourceSection>
 
-        </div>
+        </div >
     );
 }

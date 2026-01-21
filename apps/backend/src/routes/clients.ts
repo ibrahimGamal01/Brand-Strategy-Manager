@@ -32,73 +32,156 @@ router.get('/', async (req: Request, res: Response) => {
  * POST /api/clients
  * Create new client and start research job
  * 
+ * SMART BEHAVIOR:
+ * - If ANY handle matches an existing ClientAccount, reuse that Client
+ * - If that Client has a recent research job (< 24 hours), redirect to it
+ * - Otherwise create new research job with resume logic (skips completed steps)
+ * 
  * Body:
  * {
  *   "name": "Client Name",
- *   "handle": "@ummahpreneur",
- *   "platform": "instagram"
+ *   "handles": { "instagram": "ummahpreneur", "tiktok": "ummahpreneur" },
+ *   "niche": "Islamic Finance",
+ *   "forceNew": false  // Optional: force new job even if recent exists
  * }
  */
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { name, handle, platform = 'instagram' } = req.body;
+    const { name, handle, handles, niche, platform = 'instagram', forceNew = false } = req.body;
 
-    if (!name || !handle) {
-      return res.status(400).json({ error: 'Name and handle are required' });
+    if (!name) {
+      return res.status(400).json({ error: 'Name is required' });
     }
 
-    const cleanHandle = handle.replace(/^@+/, '').toLowerCase().trim();
+    // Build handles map (support both old single-handle and new multi-handle)
+    let platformHandles: Record<string, string> = {};
+    
+    if (handles && typeof handles === 'object') {
+      Object.entries(handles).forEach(([p, h]) => {
+        if (typeof h === 'string' && h.trim()) {
+          platformHandles[p.toLowerCase()] = h.replace(/^@+/, '').toLowerCase().trim();
+        }
+      });
+    }
+    
+    // Fallback to legacy single handle
+    if (Object.keys(platformHandles).length === 0 && handle) {
+      const cleanHandle = handle.replace(/^@+/, '').toLowerCase().trim();
+      platformHandles[platform] = cleanHandle;
+    }
+    
+    if (Object.keys(platformHandles).length === 0) {
+      return res.status(400).json({ error: 'At least one social media handle is required' });
+    }
 
-    // Check if client with this handle already exists (continuity mode)
-    const existingAccount = await prisma.clientAccount.findFirst({
-      where: {
-        handle: cleanHandle,
-        platform: platform,
-      },
-      include: {
-        client: true,
-      },
-    });
+    const primaryPlatform = Object.keys(platformHandles)[0];
+    const primaryHandle = platformHandles[primaryPlatform];
 
+    // === STEP 1: Check if client with any of these handles already exists ===
     let client;
-    if (existingAccount?.client) {
-      // Reuse existing client for continuous info gathering
-      client = existingAccount.client;
-      console.log(`[API] Found existing client for @${cleanHandle}: ${client.id} (${client.name})`);
-    } else {
-      // Create new client
-      console.log(`[API] Creating new client: ${name} (@${cleanHandle})`);
-      client = await prisma.client.create({
-        data: {
-          name,
+    let isExistingClient = false;
+    
+    for (const [p, h] of Object.entries(platformHandles)) {
+      const existingAccount = await prisma.clientAccount.findFirst({
+        where: { handle: h, platform: p },
+        include: { client: true },
+      });
+      if (existingAccount?.client) {
+        client = existingAccount.client;
+        isExistingClient = true;
+        console.log(`[API] Found existing client for @${h} (${p}): ${client.id} (${client.name})`);
+        break;
+      }
+    }
+
+    // === STEP 2: For existing clients, check for recent research job ===
+    let existingRecentJob = null;
+    if (isExistingClient && client && !forceNew) {
+      const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      
+      existingRecentJob = await prisma.researchJob.findFirst({
+        where: {
+          clientId: client.id,
+          startedAt: { gte: twentyFourHoursAgo },
+          // Status is either running or complete (not failed)
+          status: { in: ['PENDING', 'SCRAPING_CLIENT', 'DISCOVERING_COMPETITORS', 'COMPLETE'] },
         },
+        orderBy: { startedAt: 'desc' },
+      });
+
+      if (existingRecentJob) {
+        console.log(`[API] Found recent job for existing client: ${existingRecentJob.id} (${existingRecentJob.status})`);
+        
+        // Add any new handles that weren't in the original job
+        for (const [p, h] of Object.entries(platformHandles)) {
+          await prisma.clientAccount.upsert({
+            where: { clientId_platform_handle: { clientId: client.id, platform: p, handle: h } },
+            update: {},
+            create: { clientId: client.id, platform: p, handle: h, profileUrl: getProfileUrl(p, h) },
+          });
+        }
+
+        // Return the existing job - no need to create duplicate
+        return res.json({
+          success: true,
+          client,
+          researchJob: {
+            id: existingRecentJob.id,
+            status: existingRecentJob.status,
+          },
+          handles: platformHandles,
+          isExisting: true,
+          message: `Existing research found. Redirecting to job ${existingRecentJob.id}`,
+        });
+      }
+    }
+
+    // === STEP 3: Create new client if needed ===
+    if (!client) {
+      console.log(`[API] Creating new client: ${name}`);
+      client = await prisma.client.create({
+        data: { name },
       });
       console.log(`[API] Client created: ${client.id}`);
     }
 
-    // Step 2: Create research job
+    // === STEP 4: Create/update ClientAccounts for each platform handle ===
+    for (const [p, h] of Object.entries(platformHandles)) {
+      await prisma.clientAccount.upsert({
+        where: { clientId_platform_handle: { clientId: client.id, platform: p, handle: h } },
+        update: {},
+        create: { clientId: client.id, platform: p, handle: h, profileUrl: getProfileUrl(p, h) },
+      });
+      console.log(`[API] ClientAccount ensured: @${h} on ${p}`);
+    }
+
+    // === STEP 5: Create new research job ===
+    // The resume logic in gatherInformation will check what data already exists
+    // and skip steps that have already been completed
     const researchJob = await prisma.researchJob.create({
       data: {
         clientId: client.id,
         status: 'PENDING',
         startedAt: new Date(),
         inputData: {
-          handle: cleanHandle,
-          platform,
+          handle: primaryHandle,
+          platform: primaryPlatform,
+          handles: platformHandles,
+          brandName: name,
+          niche: niche || '',
+          isResumeJob: isExistingClient, // Flag to help pipeline know to check for existing data
         },
       },
     });
 
-    console.log(`[API] Research job created: ${researchJob.id}`);
+    console.log(`[API] Research job created: ${researchJob.id} (resume=${isExistingClient})`);
 
-    // Step 3: Start scraping process asynchronously
-    // Don't await this - let it run in background
-    scrapeAndSaveClientData(researchJob.id, client.id, cleanHandle, platform)
+    // Start scraping process asynchronously
+    scrapeAndSaveClientData(researchJob.id, client.id, primaryHandle, primaryPlatform, platformHandles, niche)
       .catch(error => {
         console.error(`[API] Scraping failed for job ${researchJob.id}:`, error);
       });
 
-    // Return immediately with job ID
     res.json({
       success: true,
       client,
@@ -106,7 +189,11 @@ router.post('/', async (req: Request, res: Response) => {
         id: researchJob.id,
         status: researchJob.status,
       },
-      message: 'Research job started. Check status at /api/research-jobs/' + researchJob.id,
+      handles: platformHandles,
+      isExisting: isExistingClient,
+      message: isExistingClient 
+        ? `Continuing research for existing client. New data will be added.`
+        : `New research job started.`,
     });
   } catch (error: any) {
     console.error('[API] Error creating client:', error);
@@ -114,9 +201,23 @@ router.post('/', async (req: Request, res: Response) => {
   }
 });
 
+// Helper to get profile URL for a platform
+function getProfileUrl(platform: string, handle: string): string {
+  const urls: Record<string, string> = {
+    instagram: `https://instagram.com/${handle}/`,
+    tiktok: `https://tiktok.com/@${handle}`,
+    youtube: `https://youtube.com/@${handle}`,
+    twitter: `https://twitter.com/${handle}`,
+    linkedin: `https://linkedin.com/in/${handle}`,
+    facebook: `https://facebook.com/${handle}`,
+  };
+  return urls[platform] || '';
+}
+
+
 /**
  * Background function: Complete 7-step research pipeline
- * 1-2: Scrape + validate ✅
+ * 1-2: Scrape + validate
  * 3: Download media
  * 4: AI analyze posts
  * 5: Discover competitors
@@ -127,7 +228,9 @@ async function scrapeAndSaveClientData(
   jobId: string,
   clientId: string,
   handle: string,
-  platform: string
+  platform: string,
+  platformHandles: Record<string, string> = {},
+  niche: string = 'business'
 ) {
   try {
     // ==== STEP 1-2: Scrape + Validate ====
@@ -208,10 +311,9 @@ async function scrapeAndSaveClientData(
       }
     }
 
-    console.log(`[Job ${jobId}] ✅ Step 1-2 complete: ${cleanedPosts.length} posts saved`);
+    console.log(`[Job ${jobId}] Step 1-2 complete: ${cleanedPosts.length} posts saved`);
 
     // ==== STEP 1.5 (NEW): Update Client Bio if empty ====
-    // Use scraped bio for better context in subsequent steps
     let currentBio = '';
     const currentClient = await prisma.client.findUnique({ where: { id: clientId } });
     if (currentClient && !currentClient.businessOverview && cleanedProfile.bio) {
@@ -229,45 +331,38 @@ async function scrapeAndSaveClientData(
     console.log(`[Job ${jobId}] Step 3: Downloading media...`);
     const { mediaDownloader } = await import('../services/media/downloader');
     await mediaDownloader.downloadAllClientMedia(clientId);
-    console.log(`[Job ${jobId}] ✅ Step 3 complete: Media downloaded`);
+    console.log(`[Job ${jobId}] Step 3 complete: Media downloaded`);
 
-    // ==== STEP 4: AI Analyze Posts (SKIPPED - run later to save AI costs) ====
+    // ==== STEP 4: AI Analyze Posts (SKIPPED) ====
     console.log(`[Job ${jobId}] Step 4: Skipping AI media analysis (can be run later)`);
-    // NOTE: To run AI analysis later, call contentAnalyzer.analyzePost for each post
-    // const { contentAnalyzer } = await import('../services/ai/content-analyzer');
-    // const posts = await prisma.clientPost.findMany({ where: { clientAccountId: clientAccount.id } });
-    // for (const post of posts) {
-    //   const mediaAssets = await prisma.mediaAsset.findMany({ where: { clientPostId: post.id } });
-    //   await contentAnalyzer.analyzePost(post, mediaAssets[0]?.blobStoragePath);
-    // }
     
     const posts = await prisma.clientPost.findMany({
       where: { clientAccountId: clientAccount.id },
     });
-    console.log(`[Job ${jobId}] ✅ Step 4 skipped: ${posts.length} posts ready for later analysis`);
+    console.log(`[Job ${jobId}] Step 4 skipped: ${posts.length} posts ready for later analysis`);
 
     // ==== STEP 5: Information Gathering (Competitors + Target Intel) ====
     await updateJobStatus(jobId, 'DISCOVERING_COMPETITORS');
     console.log(`[Job ${jobId}] Step 5: Information Gathering (multi-layer fallback)...`);
 
-    // Import the new robust discovery service
     const { gatherInformation } = await import('../services/discovery');
     
-    // Gather sample posts for context
     const samplePosts = posts.slice(0, 5).map(p => ({
       caption: p.caption || '',
       likes: p.likes || 0,
       comments: p.comments || 0,
     }));
 
-    // Run the multi-layer information gathering
+    // Run the multi-layer information gathering with ALL platform handles
     const infoResult = await gatherInformation({
       handle,
+      brandName: currentClient?.name || handle,
       bio: currentBio || cleanedProfile.bio || '',
-      niche: 'business', // TODO: derive from content analysis
+      niche: niche || 'business',
       followerCount: cleanedProfile.follower_count,
       posts: samplePosts,
-      researchJobId: jobId, // CRITICAL: Link all gathered data to this job
+      researchJobId: jobId,
+      handles: platformHandles, // Pass ALL platform handles for site-limited scraping
     });
 
     console.log(`[Job ${jobId}] Info gathering used layers: ${infoResult.layersUsed.join(', ')}`);

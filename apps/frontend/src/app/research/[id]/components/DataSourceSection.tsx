@@ -13,6 +13,7 @@ interface DataSourceSectionProps {
     onRerun?: () => Promise<void>;
     lastRun?: string;
     status?: 'complete' | 'running' | 'pending' | 'failed';
+    rawData?: any; // New prop for raw JSON data
 }
 
 export function DataSourceSection({
@@ -23,10 +24,12 @@ export function DataSourceSection({
     defaultOpen = false,
     onRerun,
     lastRun,
-    status = 'complete'
+    status = 'complete',
+    rawData
 }: DataSourceSectionProps) {
     const [isOpen, setIsOpen] = useState(defaultOpen);
     const [isRerunning, setIsRerunning] = useState(false);
+    const [showJson, setShowJson] = useState(false); // Toggle for JSON view
 
     const handleRerun = async () => {
         if (!onRerun || isRerunning) return;
@@ -38,31 +41,22 @@ export function DataSourceSection({
         }
     };
 
-    const statusColors = {
-        complete: 'text-green-500',
-        running: 'text-yellow-500',
-        pending: 'text-muted-foreground',
-        failed: 'text-red-500',
-    };
-
     return (
         <div className="border border-border rounded-lg overflow-hidden bg-card/50">
             <div
-                onClick={() => setIsOpen(!isOpen)}
-                className="flex items-center gap-3 w-full p-4 hover:bg-muted/30 transition-colors cursor-pointer select-none"
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                        setIsOpen(!isOpen);
-                    }
-                }}
+                className="flex items-center gap-3 w-full p-4 hover:bg-muted/30 transition-colors select-none"
             >
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 border border-primary/20">
+                <div
+                    onClick={() => setIsOpen(!isOpen)}
+                    className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 border border-primary/20 cursor-pointer"
+                >
                     <Icon className="h-5 w-5 text-primary" />
                 </div>
 
-                <div className="flex-1">
+                <div
+                    onClick={() => setIsOpen(!isOpen)}
+                    className="flex-1 cursor-pointer"
+                >
                     <div className="flex items-center gap-2">
                         <h3 className="font-semibold">{title}</h3>
                         <span className="text-xs font-mono px-2 py-0.5 bg-muted rounded-full">
@@ -80,6 +74,22 @@ export function DataSourceSection({
                 </div>
 
                 <div className="flex items-center gap-2">
+                    {rawData && (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setShowJson(!showJson);
+                            }}
+                            className={cn(
+                                "text-xs px-2 py-1 rounded border border-border/50 hover:bg-muted mr-2",
+                                showJson && "bg-muted font-medium"
+                            )}
+                            title="Toggle Raw Data View"
+                        >
+                            {showJson ? '{ Hide JSON }' : '{ JSON }'}
+                        </button>
+                    )}
+
                     {onRerun && (
                         <button
                             onClick={(e) => {
@@ -101,16 +111,28 @@ export function DataSourceSection({
                             )} />
                         </button>
                     )}
-                    {isOpen ? (
-                        <ChevronDown className="h-5 w-5 text-muted-foreground" />
-                    ) : (
-                        <ChevronRight className="h-5 w-5 text-muted-foreground" />
-                    )}
+                    <div
+                        onClick={() => setIsOpen(!isOpen)}
+                        className="cursor-pointer p-1"
+                    >
+                        {isOpen ? (
+                            <ChevronDown className="h-5 w-5 text-muted-foreground" />
+                        ) : (
+                            <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                        )}
+                    </div>
                 </div>
             </div>
 
             {isOpen && (
                 <div className="border-t border-border p-4 bg-background/50">
+                    {showJson ? (
+                        <div className="bg-slate-950 p-4 rounded-lg overflow-x-auto mb-4 border border-slate-800">
+                            <pre className="text-xs font-mono text-slate-300">
+                                {JSON.stringify(rawData, null, 2)}
+                            </pre>
+                        </div>
+                    ) : null}
                     {children}
                 </div>
             )}

@@ -12,6 +12,7 @@ import { PrismaClient } from '@prisma/client';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
+import { mediaDownloader } from '../media/downloader';
 
 const prisma = new PrismaClient();
 const execAsync = promisify(exec);
@@ -23,6 +24,7 @@ export interface ScrapedPost {
   caption: string;
   hashtags: string[];
   mentions: string[];
+  thumbnailUrl?: string;
   
   // Metrics
   likesCount: number;
@@ -46,6 +48,68 @@ export interface ScrapedProfile {
   website: string;
   isVerified: boolean;
   posts: ScrapedPost[];
+}
+
+// Concurrency Control
+class ScraperLockManager {
+  private locks: Set<string> = new Set();
+
+  getLockId(platform: string, handle: string): string {
+    return `${platform}:${handle}`;
+  }
+
+  tryAcquire(platform: string, handle: string): boolean {
+    const id = this.getLockId(platform, handle);
+    if (this.locks.has(id)) return false;
+    this.locks.add(id);
+    return true;
+  }
+
+  release(platform: string, handle: string): void {
+    const id = this.getLockId(platform, handle);
+    this.locks.delete(id);
+  }
+  
+  isLocked(platform: string, handle: string): boolean {
+      return this.locks.has(this.getLockId(platform, handle));
+  }
+}
+
+export const scraperLock = new ScraperLockManager();
+
+/**
+ * Robust wrapper for scraping that handles errors and concurrency
+ */
+export async function scrapeProfileSafe(
+    researchJobId: string, 
+    platform: string, 
+    handle: string
+) {
+    // 1. Concurrency Check
+    if (!scraperLock.tryAcquire(platform, handle)) {
+        console.warn(`[SocialScraper] Skipped: ${platform} @${handle} is already being scraped.`);
+        return { success: false, error: 'Scrape already in progress for this profile' };
+    }
+
+    const start = Date.now();
+    try {
+        console.log(`[SocialScraper] Starting safe scrape: ${platform} @${handle}`);
+        
+        // 2. Execute Core Logic
+        const result = await scrapeProfileIncrementally(researchJobId, platform, handle);
+        
+        const duration = ((Date.now() - start) / 1000).toFixed(1);
+        console.log(`[SocialScraper] Completed ${platform} @${handle} in ${duration}s`);
+        
+        return { success: true, data: result };
+
+    } catch (error: any) {
+        console.error(`[SocialScraper] CRITICAL FAILURE for ${platform} @${handle}:`, error);
+        return { success: false, error: error.message || 'Unknown critical error' };
+    } finally {
+        // 3. Always Release Lock
+        scraperLock.release(platform, handle);
+    }
 }
 
 /**
@@ -73,30 +137,135 @@ export async function scrapeProfileIncrementally(
   const lastPostId = existingProfile?.lastPostId;
   console.log(`[SocialScraper] Checkpoint: ${lastPostId ? `Last post ${lastPostId}` : 'None (Full scrape)'}`);
   
-  // 2. Run Python scraper (simulated for now, would call real script)
-  // In real implementation, we pass lastPostId to Python script to stop early
+  // 2. Run platform-specific scraper
   try {
-    // TODO: Replace with actual Python script call
-    // const scriptPath = path.join(process.cwd(), 'scripts/social_scraper.py');
-    // const { stdout } = await execAsync(`python3 ${scriptPath} scrape ${platform} ${handle} ${lastPostId || ''}`);
-    // const scrapedData: ScrapedProfile = JSON.parse(stdout);
+    let scrapedData: ScrapedProfile | null = null;
     
-    // MOCK DATA for logic verification
-    const scrapedData: ScrapedProfile = await mockScrape(handle, platform, lastPostId);
+    if (platform === 'instagram') {
+      // Use the instagram-service which calls the Python scraper
+      const { scrapeInstagramProfile } = await import('../scraper/instagram-service');
+      const result = await scrapeInstagramProfile(handle, 30);
+      
+      if (result.success && result.data) {
+        scrapedData = {
+          handle: result.data.handle,
+          platform: 'instagram',
+          url: `https://instagram.com/${result.data.handle}`,
+          followers: result.data.follower_count,
+          following: result.data.following_count,
+          postsCount: result.data.total_posts,
+          bio: result.data.bio,
+          website: '',
+          isVerified: result.data.is_verified,
+          posts: result.data.posts.map(p => ({
+            externalId: p.external_post_id,
+            url: p.post_url,
+            type: p.is_video ? 'video' : 'image',
+            caption: p.caption,
+            hashtags: extractHashtags(p.caption),
+            mentions: extractMentions(p.caption),
+            thumbnailUrl: p.media_url || p.video_url || undefined,
+            likesCount: p.likes,
+            commentsCount: p.comments,
+            sharesCount: 0,
+            viewsCount: 0,
+            playsCount: 0,
+            duration: 0,
+            postedAt: p.timestamp,
+          })),
+        };
+        console.log(`[SocialScraper] Instagram scraper used: ${result.scraper_used}`);
+      } else {
+        console.warn(`[SocialScraper] Instagram scrape failed: ${result.error}`);
+        return null;
+      }
+    } else if (platform === 'tiktok') {
+      // Use the tiktok-service
+      const { tiktokService } = await import('../scraper/tiktok-service');
+      const result = await tiktokService.scrapeProfile(handle, 30);
+      
+      if (result.success && result.profile) {
+        scrapedData = {
+          handle: result.profile.handle,
+          platform: 'tiktok',
+          url: result.profile.profile_url,
+          followers: result.profile.follower_count || 0,
+          following: 0,
+          postsCount: result.total_videos || 0,
+          bio: '',
+          website: '',
+          isVerified: false,
+          posts: (result.videos || []).map(v => ({
+            externalId: v.video_id,
+            url: v.url,
+            type: 'video',
+            caption: v.description || v.title,
+            hashtags: extractHashtags(v.description || ''),
+            mentions: [],
+            // Fix: correctly map (v as any).thumbnail which is provided by yt-dlp logic
+            thumbnailUrl: (v as any).thumbnail || (v as any).cover || (v as any).origin_cover || undefined,
+            likesCount: v.like_count || 0,
+            commentsCount: v.comment_count || 0,
+            sharesCount: v.share_count || 0,
+            viewsCount: v.view_count || 0,
+            playsCount: v.view_count || 0,
+            duration: v.duration || 0,
+            postedAt: v.upload_date || new Date().toISOString(),
+          })),
+        };
+      } else {
+        console.warn(`[SocialScraper] TikTok scrape failed: ${result.error}`);
+        return null;
+      }
+    } else {
+      console.warn(`[SocialScraper] Unsupported platform: ${platform}`);
+      return null;
+    }
     
     if (!scrapedData) return null;
     
-    console.log(`[SocialScraper] Scraped ${scrapedData.posts.length} new posts`);
+    // Filter out posts we've already seen (if we have a checkpoint)
+    if (lastPostId && scrapedData.posts.length > 0) {
+      const lastIdx = scrapedData.posts.findIndex(p => p.externalId === lastPostId);
+      if (lastIdx > 0) {
+        scrapedData.posts = scrapedData.posts.slice(0, lastIdx);
+        console.log(`[SocialScraper] Filtered to ${scrapedData.posts.length} new posts (checkpoint hit)`);
+      }
+    }
+    
+    console.log(`[SocialScraper] Scraped ${scrapedData.posts.length} posts for @${handle}`);
     
     // 3. Save Profile & Posts to DB (Transactional)
-    await saveScrapedData(researchJobId, scrapedData);
+    const savedProfile = await saveScrapedData(researchJobId, scrapedData);
+
+    // 4. Trigger Media Download (Robust/Grep mode)
+    if (savedProfile) {
+        await mediaDownloader.downloadSocialProfileMedia(savedProfile.id);
+    }
     
     return scrapedData;
     
   } catch (error: any) {
     console.error(`[SocialScraper] Failed to scrape @${handle}:`, error.message);
-    throw error;
+    // Don't throw - return null so pipeline can continue
+    return null;
   }
+}
+
+/**
+ * Extract hashtags from caption
+ */
+function extractHashtags(text: string): string[] {
+  const matches = text.match(/#[\w]+/g) || [];
+  return matches.map(h => h.replace('#', '').toLowerCase());
+}
+
+/**
+ * Extract mentions from caption
+ */
+function extractMentions(text: string): string[] {
+  const matches = text.match(/@[\w.]+/g) || [];
+  return matches.map(m => m.replace('@', '').toLowerCase());
 }
 
 /**
@@ -160,6 +329,7 @@ async function saveScrapedData(researchJobId: string, data: ScrapedProfile) {
           sharesCount: post.sharesCount,
           viewsCount: post.viewsCount,
           playsCount: post.playsCount,
+          thumbnailUrl: post.thumbnailUrl, // Update thumbnail if missing
           scrapedAt: new Date(),
         },
         create: {
@@ -170,13 +340,13 @@ async function saveScrapedData(researchJobId: string, data: ScrapedProfile) {
           caption: post.caption,
           hashtags: post.hashtags,
           mentions: post.mentions,
+          thumbnailUrl: post.thumbnailUrl,
           likesCount: post.likesCount,
           commentsCount: post.commentsCount,
           sharesCount: post.sharesCount,
           viewsCount: post.viewsCount,
-          playsCount: post.playsCount,
           duration: post.duration,
-          postedAt: new Date(post.postedAt),
+          postedAt: safeDate(post.postedAt), 
           scrapedAt: new Date(),
         },
       });
@@ -203,55 +373,26 @@ async function saveScrapedData(researchJobId: string, data: ScrapedProfile) {
     }
     
     console.log(`[SocialScraper] Saved profile @${data.handle} and ${newPosts} posts`);
+    return profile;
   });
 }
 
-// Mock function for testing logic
-async function mockScrape(handle: string, platform: string, lastId?: string | null): Promise<ScrapedProfile> {
-  // Simulate delay
-  await new Promise(r => setTimeout(r, 1000));
+// Helper to safely parse dates
+function safeDate(dateStr: string | undefined): Date {
+  if (!dateStr) return new Date();
   
-  return {
-    handle,
-    platform,
-    url: `https://${platform}.com/${handle}`,
-    followers: 15200,
-    following: 340,
-    postsCount: 1250,
-    bio: 'Helping you be productive in this life and the next.',
-    website: 'productivemuslim.com',
-    isVerified: true,
-    posts: [
-      {
-        externalId: 'post_101', // Newest
-        url: `https://${platform}.com/p/101`,
-        type: 'video',
-        caption: '5 Tips for Fajr #productivity #islam',
-        hashtags: ['productivity', 'islam', 'fajr'],
-        mentions: [],
-        likesCount: 1200,
-        commentsCount: 45,
-        sharesCount: 300,
-        viewsCount: 15000,
-        playsCount: 15000,
-        duration: 60,
-        postedAt: new Date().toISOString(),
-      },
-      {
-        externalId: 'post_100', // Older
-        url: `https://${platform}.com/p/100`,
-        type: 'image',
-        caption: 'Ramadan prep starts now! #ramadan',
-        hashtags: ['ramadan', 'prep'],
-        mentions: [],
-        likesCount: 900,
-        commentsCount: 30,
-        sharesCount: 150,
-        viewsCount: 0,
-        playsCount: 0,
-        duration: 0,
-        postedAt: new Date(Date.now() - 86400000).toISOString(),
-      }
-    ].filter(p => !lastId || p.externalId > lastId), // Simple mock filter
-  };
+  // Handle YYYYMMDD format (common in some scrapers)
+  if (/^\d{8}$/.test(dateStr)) {
+    const year = dateStr.substring(0, 4);
+    const month = dateStr.substring(4, 6);
+    const day = dateStr.substring(6, 8);
+    return new Date(`${year}-${month}-${day}`);
+  }
+
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) {
+    console.warn(`[SocialScraper] Invalid date encountered: ${dateStr}. Fallback to now.`);
+    return new Date();
+  }
+  return d;
 }

@@ -7,8 +7,10 @@ interface Post {
     caption: string;
     likes: number;
     comments: number;
-    postUrl: string;
+    postUrl?: string;
+    url?: string;
     postedAt: string;
+    thumbnailUrl?: string; // New field
     mediaAssets?: Array<{
         thumbnailPath?: string;
         blobStoragePath?: string;
@@ -25,33 +27,62 @@ interface InstagramSectionProps {
         profileImageUrl?: string;
     };
     posts: Post[];
+    platform?: 'instagram' | 'tiktok';
 }
 
-export function InstagramSection({ profile, posts }: InstagramSectionProps) {
+export function InstagramSection({ profile, posts, platform = 'instagram' }: InstagramSectionProps) {
+    const isInsta = platform === 'instagram';
+    const profileUrl = isInsta
+        ? `https://instagram.com/${profile.handle}`
+        : `https://tiktok.com/@${profile.handle.replace('@', '')}`; // Ensure @ for URL if needed or not
+
+    const gradientClass = isInsta
+        ? "from-purple-500/10 to-pink-500/10 border-purple-500/20"
+        : "from-black/10 to-teal-500/10 border-teal-500/20";
+
+    const iconBgClass = isInsta
+        ? "bg-gradient-to-br from-purple-500 to-pink-500"
+        : "bg-black border border-gray-800";
+
     return (
         <div className="space-y-6">
             {/* Profile Header */}
-            <div className="flex items-start gap-4 p-4 bg-gradient-to-r from-purple-500/10 to-pink-500/10 rounded-lg border border-purple-500/20">
-                <div className="w-16 h-16 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center overflow-hidden">
+            <div className={`flex items-start gap-4 p-4 bg-gradient-to-r ${gradientClass} rounded-lg border`}>
+                <div className={`w-16 h-16 rounded-full ${iconBgClass} flex items-center justify-center overflow-hidden shrink-0`}>
                     {profile.profileImageUrl ? (
                         <img src={profile.profileImageUrl} alt={profile.handle} className="w-full h-full object-cover" />
                     ) : (
-                        <Instagram className="h-8 w-8 text-white" />
+                        <div className="text-white">
+                            {isInsta ? <Instagram className="h-8 w-8" /> : (
+                                <svg
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    className="h-8 w-8"
+                                >
+                                    <path d="M9 12a4 4 0 1 0 4 4V4a5 5 0 0 0 5 5" />
+                                </svg>
+                            )}
+                            {/* Standard Lucide Share2 is not TikTok logo. Using basic path or just generic icon if cleaner */}
+                        </div>
                     )}
                 </div>
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                        <h3 className="font-bold text-lg">@{profile.handle}</h3>
+                        <h3 className="font-bold text-lg truncate">@{profile.handle}</h3>
                         <a
-                            href={`https://instagram.com/${profile.handle}`}
+                            href={profileUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-primary hover:underline"
+                            className="text-primary hover:underline shrink-0"
                         >
                             <ExternalLink className="h-4 w-4" />
                         </a>
                     </div>
-                    <p className="text-sm text-muted-foreground mt-1 whitespace-pre-line">{profile.bio}</p>
+                    <p className="text-sm text-muted-foreground mt-1 whitespace-pre-line line-clamp-3">{profile.bio}</p>
                     <div className="flex items-center gap-4 mt-3">
                         <div className="flex items-center gap-1.5">
                             <Users className="h-4 w-4 text-muted-foreground" />
@@ -68,42 +99,90 @@ export function InstagramSection({ profile, posts }: InstagramSectionProps) {
             {/* Posts Grid */}
             <div>
                 <h4 className="text-sm font-medium text-muted-foreground mb-3">Recent Posts ({posts.length})</h4>
-                <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
-                    {posts.slice(0, 18).map((post) => {
-                        const thumbnail = post.mediaAssets?.[0]?.thumbnailPath ||
-                            post.mediaAssets?.[0]?.blobStoragePath ||
-                            post.mediaAssets?.[0]?.originalUrl;
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {posts.map((post) => {
+                        // Priority: Local Video > Local Image > Thumbnail URL > Original URL
+                        const localVideo = post.mediaAssets?.find(m => m.blobStoragePath?.endsWith('.mp4') || m.blobStoragePath?.endsWith('.webm'));
+                        const localImage = post.mediaAssets?.find(m => !m.blobStoragePath?.endsWith('.mp4') && !m.blobStoragePath?.endsWith('.webm'));
+
+                        let mediaSrc = post.thumbnailUrl || post.url;
+                        let isVideo = false;
+
+                        if (localVideo?.blobStoragePath) {
+                            mediaSrc = `http://localhost:3001/storage${localVideo.blobStoragePath.split('/storage')[1]}`;
+                            isVideo = true;
+                        } else if (localImage?.blobStoragePath) {
+                            mediaSrc = `http://localhost:3001/storage${localImage.blobStoragePath.split('/storage')[1]}`;
+                        } else if (post.thumbnailUrl) {
+                            mediaSrc = post.thumbnailUrl;
+                        }
+
+                        // Fallback logic for "isVideo" if no local asset but URL looks like video (unlikely for TikTok CDN usually)
+                        if (!isVideo && (mediaSrc?.includes('.mp4') || mediaSrc?.includes('.webm'))) {
+                            isVideo = true;
+                        }
+
                         return (
-                            <a
-                                key={post.id}
-                                href={post.postUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="relative aspect-square rounded-lg overflow-hidden bg-muted group"
-                            >
-                                {thumbnail ? (
-                                    <img
-                                        src={thumbnail.startsWith('/') ? `http://localhost:3001/storage${thumbnail.split('/storage')[1]}` : thumbnail}
-                                        alt=""
-                                        className="w-full h-full object-cover"
-                                        loading="lazy"
-                                    />
-                                ) : (
-                                    <div className="w-full h-full flex items-center justify-center bg-muted">
-                                        <Instagram className="h-6 w-6 text-muted-foreground" />
-                                    </div>
-                                )}
-                                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4">
-                                    <div className="flex items-center gap-1 text-white text-sm">
-                                        <Heart className="h-4 w-4" fill="white" />
-                                        {post.likes?.toLocaleString()}
-                                    </div>
-                                    <div className="flex items-center gap-1 text-white text-sm">
-                                        <MessageCircle className="h-4 w-4" fill="white" />
-                                        {post.comments?.toLocaleString()}
-                                    </div>
+                            <div key={post.id} className="group border rounded-lg bg-card overflow-hidden flex flex-col shadow-sm hover:shadow-md transition-all">
+                                {/* Media Section */}
+                                <div className="aspect-[9/16] bg-black relative">
+                                    {mediaSrc ? (
+                                        isVideo ? (
+                                            <video
+                                                src={mediaSrc}
+                                                className="w-full h-full object-cover"
+                                                controls // User asked for the video, controls help
+                                                preload="metadata"
+                                                playsInline
+                                            />
+                                        ) : (
+                                            <img
+                                                src={mediaSrc}
+                                                alt={post.caption?.slice(0, 50)}
+                                                className="w-full h-full object-cover"
+                                                loading="lazy"
+                                            />
+                                        )
+                                    ) : (
+                                        <div className="w-full h-full flex flex-col items-center justify-center bg-muted text-muted-foreground gap-2">
+                                            {isInsta ? <Instagram className="h-8 w-8" /> : <div className="font-bold">TIKTOK</div>}
+                                            <span className="text-xs">No media</span>
+                                        </div>
+                                    )}
                                 </div>
-                            </a>
+
+                                {/* Metadata & Content */}
+                                <div className="p-3 flex flex-col gap-2 flex-1">
+                                    {/* Stats Row */}
+                                    <div className="flex items-center justify-between text-xs text-muted-foreground border-b pb-2">
+                                        <div className="flex items-center gap-3">
+                                            <span className="flex items-center gap-1">
+                                                <Heart className="h-3 w-3" /> {post.likes?.toLocaleString() || 0}
+                                            </span>
+                                            <span className="flex items-center gap-1">
+                                                <MessageCircle className="h-3 w-3" /> {post.comments?.toLocaleString() || 0}
+                                            </span>
+                                        </div>
+                                        <span className="text-[10px]">{new Date(post.postedAt).toLocaleDateString()}</span>
+                                    </div>
+
+                                    {/* Caption */}
+                                    <p className="text-xs line-clamp-2 text-foreground/80 flex-1" title={post.caption}>
+                                        {post.caption || 'No caption'}
+                                    </p>
+
+                                    {/* Action Button */}
+                                    <a
+                                        href={post.postUrl || post.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="mt-auto flex items-center justify-center gap-2 w-full py-2 bg-secondary/50 hover:bg-secondary text-xs font-medium rounded-md transition-colors"
+                                    >
+                                        <ExternalLink className="h-3 w-3" />
+                                        See Post
+                                    </a>
+                                </div>
+                            </div>
                         );
                     })}
                 </div>
