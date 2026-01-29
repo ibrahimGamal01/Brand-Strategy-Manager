@@ -14,6 +14,7 @@ interface DataSourceSectionProps {
     lastRun?: string;
     status?: 'complete' | 'running' | 'pending' | 'failed';
     rawData?: any; // New prop for raw JSON data
+    className?: string; // Optional custom class
 }
 
 export function DataSourceSection({
@@ -25,7 +26,8 @@ export function DataSourceSection({
     onRerun,
     lastRun,
     status = 'complete',
-    rawData
+    rawData,
+    className
 }: DataSourceSectionProps) {
     const [isOpen, setIsOpen] = useState(defaultOpen);
     const [isRerunning, setIsRerunning] = useState(false);
@@ -42,7 +44,7 @@ export function DataSourceSection({
     };
 
     return (
-        <div className="border border-border rounded-lg overflow-hidden bg-card/50">
+        <div className={cn("border border-border rounded-lg overflow-hidden bg-card/50", className)}>
             <div
                 className="flex items-center gap-3 w-full p-4 hover:bg-muted/30 transition-colors select-none"
             >

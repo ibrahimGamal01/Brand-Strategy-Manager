@@ -28,6 +28,7 @@ import { askAllDeepQuestions } from '../ai/deep-questions';
 import { scrapeProfileIncrementally } from '../social/scraper';
 import { analyzeSearchTrends } from './google-trends';
 import { runCommunityDetective } from '../social/community-detective';
+import { validateCompetitorBatch, filterValidatedCompetitors } from './instagram-validator.js';
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
@@ -370,15 +371,50 @@ export async function gatherInformation(input: GatheringInput): Promise<Informat
     }
   }
 
-  // Layer 3: AI validation SKIPPED
-  console.log(`[InfoGather] Layer 3: AI validation skipped as requested.`);
-
-  // === GUARANTEE: Minimum 5 competitors ===
-  if (competitors.length < 5) {
-      console.log(`[InfoGather] Only ${competitors.length} competitors found found (AI fallback skipped).`);
+  // Layer 3: Validate discovered competitors
+  console.log(`[InfoGather] Layer 3: Validating ${competitors.length} discovered competitors...`);
+  
+  if (competitors.length > 0) {
+    try {
+      // Batch validate all discovered competitors
+      const validationResults = await validateCompetitorBatch(
+        competitors,
+        effectiveNiche,
+        input.handle
+      );
+      
+      // Filter and re-score based on validation
+      const validatedCompetitors = filterValidatedCompetitors(
+        competitors,
+        validationResults,
+        0.5 // Minimum confidence threshold
+      );
+      
+      console.log(`[InfoGather] Validation complete: ${validatedCompetitors.length}/${competitors.length} competitors passed validation`);
+      
+      // Log some examples of filtered competitors
+      const filtered = competitors.filter(c => 
+        !validatedCompetitors.find(vc => vc.handle === c.handle)
+      );
+      if (filtered.length > 0) {
+        console.log(`[InfoGather] Filtered out ${filtered.length} competitors:`, 
+          filtered.slice(0, 5).map(c => c.handle).join(', '));
+      }
+      
+      competitors = validatedCompetitors;
+      layersUsed.push('INSTAGRAM_VALIDATION');
+    } catch (error: any) {
+      console.error(`[InfoGather] Validation failed, using unvalidated competitors:`, error.message);
+      errors.push(`Validation: ${error.message}`);
+    }
   }
 
-  // Sort by relevance
+  // === GUARANTEE: Minimum competitors ===
+  if (competitors.length < 3) {
+      console.log(`[InfoGather] Only ${competitors.length} validated competitors found.`);
+  }
+
+  // Sort by relevance (validation may have updated scores)
   competitors.sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0));
 
   // === STEP 4: Deep AI Business Analysis ===

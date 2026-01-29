@@ -21,28 +21,40 @@ export async function suggestCompetitorsWithAI(
 ): Promise<AICompetitorSuggestion[]> {
     console.log(`[AI] Suggesting competitors for ${brandName} (${niche})`);
 
-  const prompt = `You are a strategic brand consultant. Identify exactly 3-5 top-tier, direct competitors for the brand "${brandName}" operating in the "${niche}" niche.
+  const prompt = `You are a strategic brand consultant specialized in ${niche}. Find 3-5 REAL, ACTIVE Instagram competitors for "${brandName}".  
   ${description ? `Brand Description: ${description}` : ''}
 
-  CRITICAL RULES:
-  1. ONLY suggest active, high-quality businesses with populated Instagram profiles.
-  2. DO NOT suggest "dead" accounts, personal blogs, or low-quality pages.
-  3. Suggest specific BRANDS, not just generic accounts.
-  4. If you cannot find 3 high-quality competitors, return fewer (e.g., 1 or 2) rather than making up bad ones.
+  CRITICAL REQUIREMENTS:
+  1. ✅ ONLY suggest accounts that ACTUALLY EXIST on Instagram right now
+  2. ✅ Accounts MUST be in the ${niche} niche or closely related
+  3. ✅ Accounts must be ACTIVE (posting within last 3 months)
+  4. ✅ Minimum 5,000 followers (no micro or inactive accounts)
+  5. ❌ DO NOT suggest mega-celebrities (>5M followers) - they're not real competitors
+  6. ❌ DO NOT suggest accounts outside the ${niche} niche
+  7. ❌ DO NOT make up handles - if you can't find real ones, return fewer results
+  8. ❌ DO NOT suggest: ${brandName} itself, generic accounts, personal blogs, or dead pages
+
+  BEFORE suggesting each account, ask yourself:
+  - "Does this account actually exist on Instagram?"
+  - "Is it in the ${niche} niche?"
+  - "Would ${brandName} actually consider this a competitor?"
+  
+  If the answer to ANY question is "no" or "unsure", DO NOT include it.
 
   For each competitor, provide:
-  1. Name (brand/account name)
-  2. Handle (Instagram handle without @)
-  3. Relevance (0-100%) - Be strict. Only give >80% to perfect matches.
+  1. Name (actual brand/business name)
+  2. Handle (Instagram username without @)
+  3. Relevance (0-100%) - Only give >70% to true competitors in same niche
+  4. Reasoning (brief explanation why this is a real competitor)
 
-  Return a valid JSON object with a "competitors" key containing the array.
-  Format:
+  Return valid JSON:
   {
     "competitors": [
       {
         "name": "Competitor Name",
-        "handle": "competitor_handle",
-        "relevance": 85
+        "handle": "actual_ig_handle",
+        "relevance": 85,
+        "reasoning": "Brief explanation of why this is a competitor"
       }
     ]
   }`;
@@ -80,10 +92,10 @@ export async function suggestCompetitorsWithAI(
     return results.map((c: any) => ({
       name: c.name,
       handle: c.handle,
-      platform: 'instagram', // Default to Instagram since we simplified prompt
-      reasoning: `${c.relevance}% relevance`, // Use relevance as reasoning
-      relevanceScore: (c.relevance || 80) / 100 // Convert percentage to 0-1 score
-    }));
+      platform: 'instagram' as const,
+      reasoning: c.reasoning || `${c.relevance}% relevance`,
+      relevanceScore: (c.relevance || 70) / 100 // Convert percentage to 0-1 score
+    })).filter(c => c.relevanceScore >= 0.7); // Only return high-confidence suggestions
 
   } catch (error) {
     console.error('[AI] Competitor suggestion failed:', error);

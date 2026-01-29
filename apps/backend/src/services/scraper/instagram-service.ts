@@ -92,12 +92,21 @@ export async function scrapeInstagramProfile(
     } else if ('error' in result) {
       throw new Error((result as any).error);
     }
+    
+    // CRITICAL: Check for "Partial Success" (Soft Ban)
+    // If we got stats but 0 posts (and total_posts > 0), it implies we couldn't fetch posts.
+    // We should fallback to Puppeteer/DDG to get at least some media.
+    const profileData = result as InstagramProfileData;
+    if (profileData.posts.length === 0 && profileData.total_posts > 0) {
+         console.warn(`[Instagram] Partial success detected for @${cleanHandle}: Stats found but 0 posts. Likely Soft Ban. Triggering fallback.`);
+         throw new Error('PARTIAL_SCRAPE_NO_POSTS');
+    }
 
-    console.log(`[Instagram] Python scraper succeeded: ${result.posts.length} posts scraped, ${(result as InstagramProfileData).discovered_competitors?.length || 0} competitors found.`);
+    console.log(`[Instagram] Python scraper succeeded: ${profileData.posts.length} posts scraped, ${profileData.discovered_competitors?.length || 0} competitors found.`);
 
     return {
       success: true,
-      data: result as InstagramProfileData,
+      data: profileData,
       scraper_used: 'python',
     };
   } catch (pythonError: any) {

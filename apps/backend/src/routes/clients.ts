@@ -176,6 +176,21 @@ router.post('/', async (req: Request, res: Response) => {
 
     console.log(`[API] Research job created: ${researchJob.id} (resume=${isExistingClient})`);
 
+    // NEW: Auto-scrape client social profiles (Instagram, TikTok)
+    // This runs in background and will respect rate limiting (15 min between scrapes)
+    const { autoScrapeClientProfiles } = await import('../services/social/auto-scraper');
+    autoScrapeClientProfiles(researchJob.id)
+      .then(result => {
+        console.log(`[API] Auto-scrape complete for job ${researchJob.id}:`, {
+          scraped: result.scraped.length,
+          skipped: result.skipped.length,
+          errors: result.errors.length
+        });
+      })
+      .catch(error => {
+        console.error(`[API] Auto-scrape failed for job ${researchJob.id}:`, error);
+      });
+
     // Start scraping process asynchronously
     scrapeAndSaveClientData(researchJob.id, client.id, primaryHandle, primaryPlatform, platformHandles, niche)
       .catch(error => {

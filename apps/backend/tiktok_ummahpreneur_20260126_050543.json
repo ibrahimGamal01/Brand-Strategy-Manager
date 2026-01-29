@@ -1,0 +1,90 @@
+{
+  "success": true,
+  "username": "ummahpreneur",
+  "scraped_at": "2026-01-26T05:05:43.304156",
+  "posts": [
+    {
+      "id": "7551812725278575880",
+      "url": "https://www.tiktok.com/@ummahpreneur/video/7551812725278575880",
+      "description": "We believe that as Muslim Entrepreneurs we have to develop in 3 diffe...",
+      "views": 389,
+      "likes": 27,
+      "comments": 0,
+      "shares": 2,
+      "duration": 60,
+      "date": null,
+      "thumbnail": null,
+      "extraction_method": "playlist_metadata"
+    },
+    {
+      "id": "7550357965212126482",
+      "url": "https://www.tiktok.com/@ummahpreneur/video/7550357965212126482",
+      "description": "5 Easy Halal Side Hustle Ideas for Students   1. Freelance Design & E...",
+      "views": 1573,
+      "likes": 73,
+      "comments": 1,
+      "shares": 4,
+      "duration": 60,
+      "date": null,
+      "thumbnail": null,
+      "extraction_method": "playlist_metadata"
+    },
+    {
+      "id": "7548475720289340690",
+      "url": "https://www.tiktok.com/@ummahpreneur/video/7548475720289340690",
+      "description": "How do you stay productive while you work on your business? Healthy h...",
+      "views": 1200,
+      "likes": 92,
+      "comments": 0,
+      "shares": 2,
+      "duration": 60,
+      "date": null,
+      "thumbnail": null,
+      "extraction_method": "playlist_metadata"
+    },
+    {
+      "id": "7546239141114055943",
+      "url": "https://www.tiktok.com/@ummahpreneur/video/7546239141114055943",
+      "description": "Ready to take the plunge and launch your own halal online business? D...",
+      "views": 649,
+      "likes": 35,
+      "comments": 0,
+      "shares": 1,
+      "duration": 60,
+      "date": null,
+      "thumbnail": null,
+      "extraction_method": "playlist_metadata"
+    },
+    {
+      "id": "7545121125236346119",
+      "url": "https://www.tiktok.com/@ummahpreneur/video/7545121125236346119",
+      "description": "What was your first self-help book that positively impacted your life...",
+      "views": 934,
+      "likes": 58,
+      "comments": 0,
+      "shares": 4,
+      "duration": 60,
+      "date": null,
+      "thumbnail": null,
+      "extraction_method": "playlist_metadata"
+    },
+    {
+      "id": "7543672599675440402",
+      "url": "https://www.tiktok.com/@ummahpreneur/video/7543672599675440402",
+      "description": "People don't buy what you do; they buy why you do it.\" -Simon Sinek. ...",
+      "views": 1033,
+      "likes": 45,
+      "comments": 0,
+      "shares": 3,
+      "duration": 60,
+      "date": null,
+      "thumbnail": null,
+      "extraction_method": "playlist_metadata"
+    }
+  ],
+  "stats": {
+    "total_posts": 6,
+    "extraction_success": 6,
+    "time": 2.863722801208496
+  }
+}

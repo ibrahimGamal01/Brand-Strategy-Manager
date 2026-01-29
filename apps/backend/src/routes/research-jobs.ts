@@ -7,8 +7,11 @@ import { analyzeSearchTrends } from '../services/discovery/google-trends';
 import { scrapeProfileIncrementally, scrapeProfileSafe } from '../services/social/scraper';
 import { suggestCompetitorsWithAI } from '../services/ai/competitor-discovery';
 import { evaluateCompetitorRelevance } from '../services/ai/competitor-evaluation';
+import { validateCompetitorBatch, filterValidatedCompetitors } from '../services/discovery/instagram-validator';
 
 // ... (imports)
+
+import { visualAggregationService } from '../services/analytics/visual-aggregation';
 
 const router = Router();
 
@@ -268,6 +271,35 @@ router.post('/:id/rerun/:scraper', async (req: Request, res: Response) => {
         result = { status: 'started_background', message: 'TikTok scrape started in background' };
         break;
         
+      case 'scrape_social_images':
+      case 'social_images':
+        // Scrape images from Instagram/TikTok using site-limited search
+        // This populates ddgImageResult collection
+        try {
+          const { scrapeSocialContent } = await import('../services/discovery/duckduckgo-search');
+          const clientAccounts = await prisma.clientAccount.findMany({
+            where: { clientId: job.clientId },
+          });
+          
+          const handles: Record<string, string> = {};
+          clientAccounts.forEach(acc => {
+            if (acc.handle) {
+              handles[acc.platform] = acc.handle;
+            }
+          });
+          
+          if (Object.keys(handles).length === 0) {
+            // Fallback to input handle
+            handles.instagram = handle;
+          }
+          
+          console.log(`[API] Scraping social images for: ${Object.entries(handles).map(([p, h]) => `${p}:@${h}`).join(', ')}`);
+          result = await scrapeSocialContent(handles, 30, id);
+        } catch (error: any) {
+          result = { error: error.message };
+        }
+        break;
+        
       case 'ddg_search':
       case 'ddg_images': 
       case 'ddg_videos':
@@ -283,6 +315,7 @@ router.post('/:id/rerun/:scraper', async (req: Request, res: Response) => {
       case 'competitors_direct':
       case 'competitors_ai': {
         const results = [];
+        const allCompetitors: Array<{ handle: string; handleOrUrl: string; platform: string; relevanceScore: number; reasoning: string; title: string }> = [];
         
         // SOURCE 1: Search Code (Algorithmic / Existing Logic)
         if (scraper === 'competitors' || scraper === 'competitors_code') {
@@ -290,47 +323,46 @@ router.post('/:id/rerun/:scraper', async (req: Request, res: Response) => {
             try {
                 const rawHandles = await searchCompetitorsDDG(handle, niche || 'General', 50, id);
                 
-                // NO AI as per user request. Map to generic structure.
                 const formatted = rawHandles.map(h => ({
+                    handle: h,
                     handleOrUrl: h,
-                    platform: 'unknown',
+                    platform: 'instagram',
                     relevanceScore: 0.5,
                     reasoning: 'Algorithmic Search Result',
                     title: h
                 }));
                 
+                allCompetitors.push(...formatted);
                 results.push({ source: 'search_code', count: formatted.length });
-                await saveCompetitors(job.clientId, id, formatted, 'search_code');
             } catch (e) {
                 console.error('[Competitors] Search Code failed:', e);
             }
         }
 
-        // SOURCE 2: Direct Direct Query ("Brand competitors")
+        // SOURCE 2: Direct Query ("Brand competitors")
         if (scraper === 'competitors' || scraper === 'competitors_direct') {
             console.log('[Competitors] Source 2: Running Direct Query Search...');
             try {
                 const query = `${brandName || handle} competitors instagram`;
                 const directHandles = await performDirectCompetitorSearch(query);
                 
-                // NO AI as per user request. Map to generic structure.
                 const formatted = directHandles.map(h => ({
+                    handle: h,
                     handleOrUrl: h,
-                    platform: 'unknown',
+                    platform: 'instagram',
                     relevanceScore: 0.5,
                     reasoning: 'Direct Search Query Result',
                     title: h
                 }));
 
+                allCompetitors.push(...formatted);
                 results.push({ source: 'direct_query', count: formatted.length });
-                await saveCompetitors(job.clientId, id, formatted, 'direct_query');
             } catch (e) {
                  console.error('[Competitors] Direct Query failed:', e);
             }
         }
 
-
-    // SOURCE 3: AI Suggestions (Already clean)
+        // SOURCE 3: AI Suggestions
         if (scraper === 'competitors' || scraper === 'competitors_ai') {
             console.log(`[Competitors] Source 3: Running AI Suggestions for brand "${brandName}" in niche "${niche}"...`);
             try {
@@ -338,6 +370,7 @@ router.post('/:id/rerun/:scraper', async (req: Request, res: Response) => {
                 console.log(`[Competitors] Received ${aiSuggestions.length} suggestions from AI`);
                 
                 const formatted = aiSuggestions.map(s => ({
+                    handle: s.handle,
                     handleOrUrl: s.handle,
                     platform: s.platform,
                     relevanceScore: s.relevanceScore,
@@ -345,18 +378,54 @@ router.post('/:id/rerun/:scraper', async (req: Request, res: Response) => {
                     title: s.name
                 }));
                 
+                allCompetitors.push(...formatted);
                 results.push({ source: 'ai_suggestion', count: formatted.length });
-                await saveCompetitors(job.clientId, id, formatted, 'ai_suggestion');
-                console.log('[Competitors] AI suggestions saved to database');
             } catch (e) {
                 console.error('[Competitors] AI Suggestion failed:', e);
             }
         }
         
+        // VALIDATION LAYER: Filter all collected competitors
+        console.log(`[Competitors] Validating ${allCompetitors.length} total competitors...`);
+        try {
+            const validationResults = await validateCompetitorBatch(
+                allCompetitors,
+                niche || 'General',
+                handle
+            );
+            
+            const validatedCompetitors = filterValidatedCompetitors(
+                allCompetitors,
+                validationResults,
+                0.5 // Minimum confidence
+            );
+            
+            console.log(`[Competitors] Validation complete: ${validatedCompetitors.length}/${allCompetitors.length} passed validation`);
+            
+            // Save only validated competitors
+            const toSave = validatedCompetitors.map(c => ({
+                handleOrUrl: c.handle,
+                platform: c.platform || 'instagram',
+                relevanceScore: c.relevanceScore,
+                reasoning: `${c.reasoning} (validated)`,
+                title: c.title || c.handle,
+            }));
+            
+            if (toSave.length > 0) {
+                await saveCompetitors(job.clientId, id, toSave, 'validated_competitor');
+            }
+            
+            results.push({ source: 'validation', verified: validatedCompetitors.length, rejected: allCompetitors.length - validatedCompetitors.length });
+        } catch (validationError: any) {
+            console.error('[Competitors] Validation failed, saving unvalidated:', validationError.message);
+            // Fallback: save unvalidated competitors
+            for (const comp of allCompetitors) {
+                await saveCompetitors(job.clientId, id, [comp], 'unvalidated_competitor');
+            }
+        }
+        
         result = { sources: results };
         break;
-
-
       }
 
       case 'community_insights':
@@ -421,6 +490,23 @@ router.post('/:id/stop', async (req: Request, res: Response) => {
     console.error('[API] Failed to stop job:', error);
     res.status(500).json({ error: error.message });
   }
+});
+
+/**
+ * GET /api/research-jobs/:id/visual-comparison
+ * Get top performing visual assets for comparison
+ */
+router.get('/:id/visual-comparison', async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const limit = parseInt(req.query.limit as string) || 4;
+        
+        const assets = await visualAggregationService.getTopPerformingAssets(id, limit);
+        res.json(assets);
+    } catch (error: any) {
+        console.error('[API] Failed to get visual comparison:', error);
+        res.status(500).json({ error: error.message });
+    }
 });
 
 export default router;

@@ -13,6 +13,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import { mediaDownloader } from '../media/downloader';
+import { calculatePostRankings } from '../scrapers/post-ranking-service';
 
 const prisma = new PrismaClient();
 const execAsync = promisify(exec);
@@ -310,10 +311,19 @@ async function saveScrapedData(researchJobId: string, data: ScrapedProfile) {
       },
     });
     
-    // 2. Process Posts & Trends
+    // 2. Calculate post rankings
+    const rankingsMap = calculatePostRankings(
+      data.posts,
+      data.followers,
+      data.platform
+    );
+    
+    // 3. Process Posts & Trends
     let newPosts = 0;
     
     for (const post of data.posts) {
+      const metadata = rankingsMap.get(post.externalId);
+      
       // Save Post
       const savedPost = await tx.socialPost.upsert({
         where: {
@@ -329,7 +339,8 @@ async function saveScrapedData(researchJobId: string, data: ScrapedProfile) {
           sharesCount: post.sharesCount,
           viewsCount: post.viewsCount,
           playsCount: post.playsCount,
-          thumbnailUrl: post.thumbnailUrl, // Update thumbnail if missing
+          thumbnailUrl: post.thumbnailUrl,
+          metadata: metadata as any, // Performance rankings
           scrapedAt: new Date(),
         },
         create: {
@@ -346,7 +357,8 @@ async function saveScrapedData(researchJobId: string, data: ScrapedProfile) {
           sharesCount: post.sharesCount,
           viewsCount: post.viewsCount,
           duration: post.duration,
-          postedAt: safeDate(post.postedAt), 
+          postedAt: safeDate(post.postedAt),
+          metadata: metadata as any, // Performance rankings
           scrapedAt: new Date(),
         },
       });

@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useResearchJob } from '@/hooks/useResearchJob';
 import { useParams } from 'next/navigation';
 import {
@@ -7,9 +8,12 @@ import {
     ResearchFooter,
     AllResearchSections
 } from './components';
+import PhaseNavigation, { Phase } from './components/PhaseNavigation';
+import StrategyWorkspace from './components/strategy/StrategyWorkspace';
 
 export default function ResearchPage() {
     const params = useParams();
+    const [activePhase, setActivePhase] = useState<Phase>('intelligence');
     const { data: job, isLoading, error } = useResearchJob(params.id as string);
 
     if (isLoading) {
@@ -90,23 +94,38 @@ export default function ResearchPage() {
         <div className="min-h-screen bg-background">
             <ClientHeader client={client} job={data} />
 
-            {/* Unified Info Gathering Dashboard */}
-            <div className="container mx-auto px-6 py-8">
-                <div className="flex items-center gap-2 mb-6">
-                    <h2 className="text-xl font-semibold tracking-tight">Intelligence Gathering</h2>
-                    <div className="h-px flex-1 bg-border" />
-                    <span className="text-xs font-mono text-muted-foreground">
-                        {Object.values(researchData).reduce((acc, arr) => acc + (arr?.length || 0), 0)} total data points
-                    </span>
-                </div>
+            {/* Phase Navigation */}
+            <PhaseNavigation
+                activePhase={activePhase}
+                onPhaseChange={setActivePhase}
+                strategyStatus={{
+                    generated: false, // TODO: Check if strategy document exists
+                    sectionsComplete: 0,
+                    totalSections: 9
+                }}
+            />
 
-                <AllResearchSections
-                    jobId={data.id}
-                    status={data.status}
-                    client={client}
-                    data={researchData}
-                />
-            </div>
+            {/* Conditional Content Based on Active Phase */}
+            {activePhase === 'intelligence' ? (
+                <div className="container mx-auto px-6 py-8">
+                    <div className="flex items-center gap-2 mb-6">
+                        <h2 className="text-xl font-semibold tracking-tight">Intelligence Gathering</h2>
+                        <div className="h-px flex-1 bg-border" />
+                        <span className="text-xs font-mono text-muted-foreground">
+                            {Object.values(researchData).reduce((acc, arr) => acc + (arr?.length || 0), 0)} total data points
+                        </span>
+                    </div>
+
+                    <AllResearchSections
+                        jobId={data.id}
+                        status={data.status}
+                        client={client}
+                        data={researchData}
+                    />
+                </div>
+            ) : (
+                <StrategyWorkspace jobId={data.id} />
+            )}
 
             <ResearchFooter jobId={data.id} />
         </div>

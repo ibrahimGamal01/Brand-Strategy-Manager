@@ -5,6 +5,7 @@ import { prisma } from '../../lib/prisma';
 import sharp from 'sharp';
 import fs from 'fs'; 
 import { tiktokService } from '../scraper/tiktok-service';
+import { exec } from 'child_process';
 
 /**
  * Download media assets for a post and save to storage
@@ -149,10 +150,30 @@ async function extractImageMetadata(imagePath: string) {
  * Generate thumbnail for video (first frame)
  */
 async function generateVideoThumbnail(videoPath: string): Promise<string> {
-  // For now, return null
-  // TODO: Implement ffmpeg thumbnail generation
-  console.log('[Downloader] Video thumbnail generation not yet implemented');
-  return '';
+  try {
+    const thumbnailFilename = path.basename(videoPath, path.extname(videoPath)) + '_thumb.jpg';
+    const thumbnailPath = path.join(path.dirname(videoPath), thumbnailFilename);
+    
+    // Use ffmpeg to extract first frame
+    const command = `ffmpeg -i "${videoPath}" -vf "select=eq(n\\,0)" -vframes 1 -y "${thumbnailPath}"`;
+    
+    await new Promise((resolve, reject) => {
+      exec(command, (error: any, stdout: any, stderr: any) => {
+        if (error) {
+          console.error('[Downloader] ffmpeg error:', stderr);
+          reject(error);
+        } else {
+          resolve(stdout);
+        }
+      });
+    });
+    
+    console.log(`[Downloader] Generated thumbnail: ${thumbnailPath}`);
+    return thumbnailPath;
+  } catch (error: any) {
+    console.error('[Downloader] Failed to generate video thumbnail:', error.message);
+    return '';
+  }
 }
 
 /**
@@ -208,7 +229,10 @@ export async function downloadSocialProfileMedia(profileId: string) {
         }
     });
 
+    console.log(`[Downloader] Found ${posts.length} posts without media assets`);
+
     let downloadedCount = 0;
+    const processedUrls = new Set<string>(); // Track URLs to prevent duplicates
 
     for (const post of posts) {
         try {
@@ -219,14 +243,28 @@ export async function downloadSocialProfileMedia(profileId: string) {
             // or we might have a specific media URL in `thumbnailUrl` (which is often just a static image).
             
             if (post.url && post.url.includes('tiktok.com')) {
-                urlsToDownload.push(post.url);
+                // Skip if we already processed this URL
+                if (!processedUrls.has(post.url)) {
+                    urlsToDownload.push(post.url);
+                    processedUrls.add(post.url);
+                    console.log(`[Downloader] Queued TikTok video: ${post.url}`);
+                } else {
+                    console.log(`[Downloader] Skipping duplicate URL: ${post.url}`);
+                }
             } else if (post.thumbnailUrl) { // Often holds the media URL for Instagram
-                urlsToDownload.push(post.thumbnailUrl);
+                if (!processedUrls.has(post.thumbnailUrl)) {
+                    urlsToDownload.push(post.thumbnailUrl);
+                    processedUrls.add(post.thumbnailUrl);
+                    console.log(`[Downloader] Queued Instagram media: ${post.thumbnailUrl}`);
+                }
             }
 
             if (urlsToDownload.length > 0) {
                  await downloadPostMedia(post.id, urlsToDownload, 'SOCIAL', profileId);
                  downloadedCount++;
+                 console.log(`[Downloader] Downloaded media for post ${post.externalId} (${downloadedCount}/${posts.length})`);
+            } else {
+                 console.log(`[Downloader] No media URL found for post ${post.externalId}`);
             }
             
         } catch (error: any) {

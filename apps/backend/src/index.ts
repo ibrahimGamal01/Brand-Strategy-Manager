@@ -8,8 +8,10 @@ import researchJobsRouter from './routes/research-jobs';
 import mediaRouter from './routes/media';
 import competitorsRouter from './routes/competitors';
 import analyticsRouter from './routes/analytics';
+import aiStrategyRouter from './routes/ai-strategy';
 
 dotenv.config({ path: '../../.env' });
+console.log('[DEBUG] DATABASE_URL loaded:', process.env.DATABASE_URL?.replace(/:[^:@]*@/, ':***@'));
 
 const app = express();
 const PORT = process.env.BACKEND_PORT || 3001;
@@ -35,6 +37,8 @@ app.use('/api/research-jobs', researchJobsRouter);
 app.use('/api/media', mediaRouter);
 app.use('/api/competitors', competitorsRouter);
 app.use('/api/analytics', analyticsRouter);
+app.use('/api/scrapers', require('./routes/scrapers').default);
+app.use('/api/strategy', aiStrategyRouter);
 
 // Error handling
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

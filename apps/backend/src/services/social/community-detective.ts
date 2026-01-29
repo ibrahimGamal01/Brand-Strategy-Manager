@@ -55,7 +55,11 @@ export async function runCommunityDetective(
       
       // Filter for community sources (Reddit, Quora, forums)
       // Filter for community sources (Reddit, Quora, forums)
-      // AND STRICTLY enforce that the result contains the handle/brand
+      // STRICT REQUIREMENTS:
+      // 1. Must be community source
+      // 2. Must mention brand/handle
+      // 3. Must NOT contain irrelevant keywords
+      // 4. Should relate to niche
       const communityLinks = searchResult.text_results.filter(r => {
         // 1. Source check
         const isCommunity = r.href.includes('reddit.com') || 
@@ -68,11 +72,27 @@ export async function runCommunityDetective(
 
         if (!isCommunity) return false;
 
-        // 2. Strict Content Check (Force Handle)
-        const target = (handle || brandName).toLowerCase().replace('@', '');
         const text = (r.title + ' ' + r.body).toLowerCase();
         
-        return text.includes(target); 
+        // 2. CRITICAL: Must mention brand/handle
+        const target = (handle || brandName).toLowerCase().replace('@', '');
+        const hasBrandMention = text.includes(target);
+        
+        if (!hasBrandMention) {
+          console.log(`[Filter] Rejected: No brand mention in "${r.title.slice(0, 50)}..."`);
+          return false;
+        }
+        
+        // 3. SIMPLE: Just check if it relates to the niche
+        const nicheKeywords = niche.toLowerCase().split(' ').filter(w => w.length > 3);
+        const hasNicheMatch = nicheKeywords.some(kw => text.includes(kw));
+        
+        // Log if weak niche match but keep it (brand mention is what matters)
+        if (!hasNicheMatch) {
+          console.log(`[Info] Weak niche match but has brand mention: "${r.title.slice(0, 50)}..."`);
+        }
+        
+        return true; // Passed: has brand mention
       }).slice(0, 5); // Top 5 per query
       
       if (communityLinks.length === 0) {

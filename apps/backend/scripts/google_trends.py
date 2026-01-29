@@ -24,8 +24,8 @@ import time
 import random
 from pytrends.request import TrendReq
 
-MAX_RETRIES = 3
-RETRY_DELAY = 5  # seconds
+MAX_RETRIES = 5
+RETRY_DELAY = 10  # seconds base delay for exponential backoff
 
 
 def get_interest_over_time(pytrends, keywords, region='', timeframe='today 12-m'):
@@ -49,8 +49,9 @@ def get_interest_over_time(pytrends, keywords, region='', timeframe='today 12-m'
             error_str = str(e)
             if 'Too Many Requests' in error_str or '429' in error_str:
                 if attempt < MAX_RETRIES - 1:
-                    wait = RETRY_DELAY * (attempt + 1)
-                    print(f"[GoogleTrends] Rate limited, waiting {wait}s (attempt {attempt+1}/{MAX_RETRIES})", file=sys.stderr)
+                    # Exponential backoff with jitter: base * 2^attempt + random(0-3s)
+                    wait = RETRY_DELAY * (2 ** attempt) + random.uniform(0, 3)
+                    print(f"[GoogleTrends] Rate limited, waiting {wait:.1f}s (attempt {attempt+1}/{MAX_RETRIES})", file=sys.stderr)
                     time.sleep(wait)
                     continue
             return {"error": error_str}
@@ -78,8 +79,9 @@ def get_related_queries(pytrends, keywords, region='', timeframe='today 12-m'):
             error_str = str(e)
             if 'Too Many Requests' in error_str or '429' in error_str:
                 if attempt < MAX_RETRIES - 1:
-                    wait = RETRY_DELAY * (attempt + 1)
-                    print(f"[GoogleTrends] Rate limited, waiting {wait}s", file=sys.stderr)
+                    # Exponential backoff with jitter
+                    wait = RETRY_DELAY * (2 ** attempt) + random.uniform(0, 3)
+                    print(f"[GoogleTrends] Rate limited, waiting {wait:.1f}s", file=sys.stderr)
                     time.sleep(wait)
                     continue
             return {"error": error_str}
@@ -107,7 +109,9 @@ def get_related_topics(pytrends, keywords, region='', timeframe='today 12-m'):
             error_str = str(e)
             if 'Too Many Requests' in error_str or '429' in error_str:
                 if attempt < MAX_RETRIES - 1:
-                    time.sleep(RETRY_DELAY * (attempt + 1))
+                    # Exponential backoff with jitter
+                    wait = RETRY_DELAY * (2 ** attempt) + random.uniform(0, 3)
+                    time.sleep(wait)
                     continue
             return {"error": error_str}
     return {"error": "Max retries exceeded"}
@@ -132,7 +136,7 @@ def comprehensive_trends(pytrends, keywords, region='', timeframe='today 12-m'):
         result["interest_over_time"] = {"error": interest["error"]}
     
     # Related queries
-    time.sleep(random.uniform(1, 2))
+    time.sleep(random.uniform(3, 7))
     queries = get_related_queries(pytrends, keywords, region, timeframe)
     if "data" in queries:
         result["related_queries"] = queries["data"]
@@ -140,7 +144,7 @@ def comprehensive_trends(pytrends, keywords, region='', timeframe='today 12-m'):
         result["related_queries"] = {"error": queries["error"]}
     
     # Related topics
-    time.sleep(random.uniform(1, 2))
+    time.sleep(random.uniform(3, 7))
     topics = get_related_topics(pytrends, keywords, region, timeframe)
     if "data" in topics:
         result["related_topics"] = topics["data"]
@@ -186,7 +190,7 @@ def main():
         sys.exit(1)
 
     # Random delay to avoid rate limiting
-    time.sleep(random.uniform(1, 3))
+    time.sleep(random.uniform(2, 5))
 
     print(f"[GoogleTrends] Action: {action}, Region: {region or 'worldwide'}, Keywords: {keywords}", file=sys.stderr)
 

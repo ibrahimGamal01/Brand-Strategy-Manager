@@ -1,9 +1,9 @@
-'use client';
-
-import { Users, ExternalLink, MessageSquare, Bot, Search, Code, Play, Loader2 } from 'lucide-react';
+import { Users, ExternalLink, Bot, Code, Play, Loader2, Download } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { JsonViewer } from '@/components/ui/json-viewer';
 import { Button } from '@/components/ui/button';
+import { useState } from 'react';
+import { toast } from 'sonner';
 
 interface Competitor {
     id: string;
@@ -15,7 +15,6 @@ interface Competitor {
     discoveryReason?: string;
 }
 
-
 interface CompetitorsSectionProps {
     competitors: Competitor[];
     onRunScraper?: (scraperId: string) => void;
@@ -23,6 +22,8 @@ interface CompetitorsSectionProps {
 }
 
 export function CompetitorsSection({ competitors, onRunScraper, runningScrapers = {} }: CompetitorsSectionProps) {
+    const [scrapingCompetitors, setScrapingCompetitors] = useState<Record<string, boolean>>({});
+
     // Robust checks for discovery reason
     const getReason = (c: Competitor) => (c.discoveryReason || '').toLowerCase();
     const isAi = (c: Competitor) => getReason(c).includes('ai_suggestion');
@@ -33,6 +34,41 @@ export function CompetitorsSection({ competitors, onRunScraper, runningScrapers 
         ai: competitors.filter(isAi),
         direct: competitors.filter(isDirect),
         code: competitors.filter(c => !isAi(c) && !isDirect(c))
+    };
+
+    const handleScrape = async (competitor: Competitor) => {
+        if (!competitor.id || !competitor.platform) return;
+
+        const platform = competitor.platform.toUpperCase();
+        if (platform !== 'INSTAGRAM' && platform !== 'TIKTOK') {
+            toast.error('Only Instagram and TikTok scraping supported currently');
+            return;
+        }
+
+        setScrapingCompetitors(prev => ({ ...prev, [competitor.id]: true }));
+        toast.info(`Starting scrape for @${competitor.handle}...`);
+
+        try {
+            const response = await fetch(`/api/scrapers/${competitor.id}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ platform })
+            });
+
+            if (!response.ok) throw new Error('Scraping failed');
+
+            const result = await response.json();
+            if (result.success) {
+                toast.success(`Scraped ${result.postsScraped} posts from @${competitor.handle}`);
+            } else {
+                toast.error(`Scraping failed: ${result.error}`);
+            }
+        } catch (error) {
+            console.error(error);
+            toast.error('Failed to start scraping');
+        } finally {
+            setScrapingCompetitors(prev => ({ ...prev, [competitor.id]: false }));
+        }
     };
 
     const renderGroup = (title: string, icon: React.ReactNode, items: Competitor[], colorClass: string, scraperId: string) => {
@@ -58,7 +94,7 @@ export function CompetitorsSection({ competitors, onRunScraper, runningScrapers 
                             ) : (
                                 <Play className="h-3 w-3" />
                             )}
-                            {isThisRunning ? 'Running...' : 'Run Source'}
+                            {isThisRunning ? 'Running...' : 'Run Discovery'}
                         </Button>
                     )}
                 </div>
@@ -66,20 +102,44 @@ export function CompetitorsSection({ competitors, onRunScraper, runningScrapers 
                 {items.length > 0 ? (
                     <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
                         {items.map((comp) => (
-                            <a
+                            <div
                                 key={comp.id}
-                                href={comp.profileUrl || `https://instagram.com/${comp.handle}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
                                 className="p-4 rounded-lg bg-muted/40 border border-border hover:bg-muted/60 transition-colors group relative flex flex-col justify-between"
                             >
                                 <div>
                                     <div className="flex items-center justify-between">
                                         <div className="flex items-center gap-2">
                                             <Users className="h-4 w-4 text-muted-foreground" />
-                                            <span className="font-semibold text-foreground">@{comp.handle}</span>
+                                            <a
+                                                href={comp.profileUrl || `https://instagram.com/${comp.handle}`}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="font-semibold text-foreground hover:underline"
+                                            >
+                                                @{comp.handle}
+                                            </a>
                                         </div>
-                                        <ExternalLink className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={() => handleScrape(comp)}
+                                                disabled={scrapingCompetitors[comp.id]}
+                                                className="text-xs flex items-center gap-1 text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
+                                                title="Scrape Posts"
+                                            >
+                                                {scrapingCompetitors[comp.id] ? (
+                                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                                ) : (
+                                                    <Download className="h-3 w-3" />
+                                                )}
+                                            </button>
+                                            <a
+                                                href={comp.profileUrl || `https://instagram.com/${comp.handle}`}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                            >
+                                                <ExternalLink className="h-3 w-3 text-muted-foreground hover:text-foreground transition-colors" />
+                                            </a>
+                                        </div>
                                     </div>
 
                                     <div className="flex items-center gap-2 mt-3 flex-wrap">
@@ -100,12 +160,12 @@ export function CompetitorsSection({ competitors, onRunScraper, runningScrapers 
                                         src: {comp.discoveryReason || 'unknown'}
                                     </p>
                                 </div>
-                            </a>
+                            </div>
                         ))}
                     </div>
                 ) : (
                     <div className="p-4 border border-dashed border-border rounded-lg text-center text-xs text-muted-foreground bg-muted/10">
-                        No results from {title} yet. Click "Run Source" to fetch.
+                        No results from {title} yet. Click "Run Discovery" to fetch.
                     </div>
                 )}
             </div>
@@ -114,42 +174,6 @@ export function CompetitorsSection({ competitors, onRunScraper, runningScrapers 
 
     return (
         <div className="space-y-8">
-            {/* DIAGNOSTIC DATA - REMOVE AFTER DEBUGGING */}
-            <div className="p-4 bg-slate-950 border border-red-900/50 rounded-md text-xs font-mono mb-6 shadow-sm">
-                <h5 className="font-bold text-red-400 mb-2 uppercase tracking-wider">Diagnostic Data (Temporary)</h5>
-                <div className="grid grid-cols-2 gap-4">
-                    <div>
-                        <span className="text-slate-500 block mb-1">Total Items:</span>
-                        <span className="text-white font-bold">{competitors.length}</span>
-                    </div>
-                    <div>
-                        <span className="text-slate-500 block mb-1">Data Keys (First Item):</span>
-                        <div className="text-slate-300 break-words">
-                            {competitors.length > 0 ? Object.keys(competitors[0]).join(', ') : 'No data'}
-                        </div>
-                    </div>
-                </div>
-                <div className="mt-4 pt-3 border-t border-slate-800">
-                    <span className="text-slate-500 block mb-2">First 5 Discovery Reasons:</span>
-                    <ul className="space-y-1">
-                        {competitors.slice(0, 5).map((c, i) => (
-                            <li key={i} className="flex gap-2">
-                                <span className="text-slate-600">#{i + 1}</span>
-                                <span className="text-yellow-500">
-                                    {c.discoveryReason ? `"${c.discoveryReason}"` : <span className="text-red-500">UNDEFINED/NULL</span>}
-                                </span>
-                            </li>
-                        ))}
-                    </ul>
-                </div>
-                <div className="mt-4 pt-3 border-t border-slate-800">
-                    <span className="text-slate-500 block mb-2">Debug Console:</span>
-                    <p className="text-slate-400">Check your browser console for full 'Competitors Data' log.</p>
-                    {/* Console Log Side Effect */}
-                    {console.log('--- DEBUG: Competitors Data ---', competitors)}
-                </div>
-            </div>
-
             <div className="grid gap-8">
                 {/* 1. AI Suggestions */}
                 {renderGroup(

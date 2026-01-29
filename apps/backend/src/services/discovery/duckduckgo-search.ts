@@ -508,6 +508,26 @@ export async function gatherAllDDG(
     // Save all results to DB
     await saveAllResultsToDB(researchJobId, result);
     
+    // NEW: Also scrape social content for images/videos using site-limited search
+    // This ensures we get media from the actual social profiles, not generic search
+    console.log(`[DDGSearch] Scraping social content for images/videos...`);
+    
+    // First, try to find social handles from the brand context search
+    const brandContext = await searchBrandContextDDG(brandName, researchJobId);
+    
+    // Build handles object from discovered socials
+    const handles: Record<string, string> = {};
+    if (brandContext.instagram_handle) handles.instagram = brandContext.instagram_handle;
+    if (brandContext.tiktok_handle) handles.tiktok = brandContext.tiktok_handle;
+    
+    // Scrape social content if we found any handles
+    if (Object.keys(handles).length > 0) {
+      const socialContent = await scrapeSocialContent(handles, 30, researchJobId);
+      console.log(`[DDGSearch] Scraped ${socialContent.totals.images} images, ${socialContent.totals.videos} videos from social profiles`);
+    } else {
+      console.log(`[DDGSearch] No social handles found, skipping social content scrape`);
+    }
+    
     return result;
     
   } catch (error: any) {

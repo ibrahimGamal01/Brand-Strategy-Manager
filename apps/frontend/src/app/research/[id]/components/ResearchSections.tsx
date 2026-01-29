@@ -24,6 +24,7 @@ import { TrendsSection } from './TrendsSection';
 import { CompetitorsSection } from './CompetitorsSection';
 import { CommunityInsightsSection } from './CommunityInsightsSection';
 import { AIQuestionsSection } from './AIQuestionsSection';
+import { VisualComparisonSection } from './VisualComparisonSection';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
@@ -152,6 +153,9 @@ export function AllResearchSections({ jobId, status, client, data }: AllResearch
             >
                 <VideoGallery videos={data.ddgVideoResults} />
             </DataSourceSection>
+
+            {/* 4.5. Visual Comparison Strategy */}
+            <VisualComparisonSection jobId={jobId} />
 
             {/* 5. News Articles */}
             <DataSourceSection

@@ -596,7 +596,57 @@ def scrape_social_content(handles: Dict[str, str], max_items: int = 30) -> Dict:
         else:
             continue
         
-        # Search images (Limit 20)
+        
+        # 1. Search for Profile Stats (Text Search)
+        # Images/Videos often don't have the "X Followers, Y Following" snippet. Text results do.
+        try:
+            print(f"[DDG] looking for profile stats: site:{platform}.com @{handle}", file=sys.stderr)
+            stats_query = f'site:{platform}.com @{handle}'
+            # Fetch just top 3 results to find the main profile page
+            text_results = list(ddgs.text(stats_query, max_results=3))
+            
+            for r in text_results:
+                href = r.get('href', '')
+                body = r.get('body', '')
+                title = r.get('title', '')
+                
+                # Check if this is the profile URL
+                is_profile = False
+                if platform == 'instagram' and f'instagram.com/{handle}'.lower() in href.lower():
+                     is_profile = True
+                elif platform == 'tiktok' and f'tiktok.com/@{handle}'.lower() in href.lower():
+                     is_profile = True
+                
+                if is_profile:
+                    print(f"[DDG] Found profile text result: {title}", file=sys.stderr)
+                    # Attempt to parse stats
+                    # Format: "12K Followers, 500 Following, 100 Posts..."
+                    snippet = f"{title} {body}"
+                    
+                    follower_match = re.search(r'([\d.,]+[KkMmBb]?)\s+Followers', snippet, re.IGNORECASE)
+                    following_match = re.search(r'([\d.,]+[KkMmBb]?)\s+Following', snippet, re.IGNORECASE)
+                    posts_match = re.search(r'([\d.,]+[KkMmBb]?)\s+(?:Posts|Videos)', snippet, re.IGNORECASE)
+                    
+                    if follower_match or following_match:
+                         if 'profile_stats' not in result: result['profile_stats'] = {}
+                         if platform not in result['profile_stats']: result['profile_stats'][platform] = {}
+                         
+                         if follower_match:
+                              result['profile_stats'][platform]['followers'] = parse_count(follower_match.group(1))
+                              print(f"[DDG] Extracted Followers: {result['profile_stats'][platform]['followers']}", file=sys.stderr)
+                         
+                         if following_match:
+                              result['profile_stats'][platform]['following'] = parse_count(following_match.group(1))
+                        
+                         if posts_match:
+                              # Optional: might be useful
+                              pass
+                    break 
+
+        except Exception as e:
+             print(f"[DDG] Stats search error: {e}", file=sys.stderr)
+
+        # 2. Search images (Limit 20)
         for query in queries_images:
             try:
                 print(f"[DDG] Image search: {query}", file=sys.stderr)

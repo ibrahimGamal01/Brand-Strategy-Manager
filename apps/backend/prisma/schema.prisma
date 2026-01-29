@@ -99,6 +99,7 @@ model ResearchJob {
   socialTrends          SocialTrend[]
   searchTrends          SearchTrend[]
   communityInsights     CommunityInsight[]
+  aiAnalyses            AiAnalysis[]
 
   @@map("research_jobs")
 }
@@ -255,6 +256,7 @@ model SocialPost {
   viewsCount      Int?        @map("views_count")
   playsCount      Int?        @map("plays_count")
   duration        Float?      // Seconds
+  metadata        Json?       // Performance rankings and analysis data
   
   // Timing
   postedAt        DateTime?   @map("posted_at")
@@ -651,6 +653,7 @@ model BrandMention {
 enum AnalysisType {
   CONTENT
   VISUAL
+  VISUAL_COMPARISON
   AUDIO
   CAPTION
   OVERALL
@@ -659,6 +662,7 @@ enum AnalysisType {
 
 model AiAnalysis {
   id                   String       @id @default(uuid())
+  researchJobId        String?      @map("research_job_id") // Added for global comparisons
   clientPostId         String?      @map("client_post_id")
   cleanedPostId        String?      @map("cleaned_post_id")
   mediaAssetId         String?      @map("media_asset_id")
@@ -683,6 +687,7 @@ model AiAnalysis {
   mediaAsset      MediaAsset?     @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
   clientDocument  ClientDocument? @relation(fields: [clientDocumentId], references: [id], onDelete: Cascade)
   brandMention    BrandMention?   @relation(fields: [brandMentionId], references: [id], onDelete: Cascade)
+  researchJob     ResearchJob?    @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
 
   @@map("ai_analyses")
 }

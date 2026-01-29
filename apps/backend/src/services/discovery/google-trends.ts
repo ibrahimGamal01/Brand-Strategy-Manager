@@ -40,33 +40,69 @@ export async function analyzeSearchTrends(
   try {
     // 1. Fetch Interest Over Time
     const interestCmd = `python3 ${scriptPath} interest_over_time "${uniqueKeywords.join('" "')}"`;
+    console.log(`[SearchTrends] Running: ${interestCmd}`);
     const { stdout: interestOut } = await execAsync(interestCmd);
-    const interestData = JSON.parse(interestOut);
+    const interestResponse = JSON.parse(interestOut);
     
-    if (interestData.error) {
-      console.error(`[SearchTrends] Interest API error: ${interestData.error}`);
+    if (interestResponse.error) {
+      console.error(`[SearchTrends] Interest API error: ${interestResponse.error}`);
+      // Save empty data so we know we tried
+      for (const keyword of uniqueKeywords) {
+        await prisma.searchTrend.create({
+          data: {
+            researchJobId,
+            keyword,
+            region: 'US',
+            timeframe: 'today 12-m',
+            interestOverTime: {},
+            relatedQueries: {},
+          },
+        });
+      }
       return;
     }
+    
+    // Extract data (Python returns {data: ..., keywords: ...})
+    const interestData = interestResponse.data || {};
     
     // 2. Fetch Related Queries
     const relatedCmd = `python3 ${scriptPath} related_queries "${uniqueKeywords.join('" "')}"`;
+    console.log(`[SearchTrends] Running: ${relatedCmd}`);
     const { stdout: relatedOut } = await execAsync(relatedCmd);
-    const relatedData = JSON.parse(relatedOut);
+    const relatedResponse = JSON.parse(relatedOut);
 
-    if (relatedData.error) {
-      console.error(`[SearchTrends] Related API error: ${relatedData.error}`);
+    if (relatedResponse.error) {
+      console.error(`[SearchTrends] Related API error: ${relatedResponse.error}`);
+      // Save with empty related queries
+      for (const keyword of uniqueKeywords) {
+        const keywordInterest: Record<string, number> = {};
+        for (const [date, values] of Object.entries(interestData)) {
+          if (values && typeof values === 'object' && keyword in (values as any)) {
+            keywordInterest[date] = (values as any)[keyword];
+          }
+        }
+        
+        await prisma.searchTrend.create({
+          data: {
+            researchJobId,
+            keyword,
+            region: 'US',
+            timeframe: 'today 12-m',
+            interestOverTime: keywordInterest,
+            relatedQueries: {},
+          },
+        });
+      }
       return;
     }
     
+    // Extract data (Python returns {data: {keyword: {...}}, keywords: ...})
+    const relatedData = relatedResponse.data || {};
+    
     // 3. Save to DB
     for (const keyword of uniqueKeywords) {
-      // Extract specific data for this keyword
-      // Interest data structure depends on pytrends output, assuming simple mapping here
-      // Real pytrends output usually has keyword as key or column
-      
-      // Filter interest data for this keyword
-      // The script returns { date: { keyword: value, ... }, ... }
-      // We want to transform it to { date: value } for this keyword
+      // Extract interest data for this keyword
+      // interestData structure: { "2025-01-01T00:00:00": { "keyword1": 50, "keyword2": 30 }, ... }
       const keywordInterest: Record<string, number> = {};
       for (const [date, values] of Object.entries(interestData)) {
         if (values && typeof values === 'object' && keyword in (values as any)) {
@@ -74,13 +110,14 @@ export async function analyzeSearchTrends(
         }
       }
       
-      const keywordRelated = relatedData[keyword] || {};
+      // Extract related queries for this keyword
+      const keywordRelated = relatedData[keyword] || { top: [], rising: [] };
       
       await prisma.searchTrend.create({
         data: {
           researchJobId,
           keyword,
-          region: 'US', // Default
+          region: 'US',
           timeframe: 'today 12-m',
           interestOverTime: keywordInterest,
           relatedQueries: keywordRelated,

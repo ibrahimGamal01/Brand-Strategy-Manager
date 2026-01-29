@@ -3,7 +3,7 @@
 
 import { Instagram, Share2, RefreshCw, Users } from 'lucide-react';
 import { DataSourceSection } from './DataSourceSection';
-import { InstagramSection } from './InstagramSection';
+import { PostsGridWithRanking } from './PostsGridWithRanking';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 
@@ -62,16 +62,16 @@ export function SocialProfilesSection({ client, data, onRerun }: SocialProfilesS
         : data.clientPosts.filter(isTikTokPost);
 
     const ProfileBlock = ({ platform, icon: Icon, profile, posts, label }: any) => (
-        <div className="border border-border/50 rounded-lg p-4 bg-card/30">
-            <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                    <div className="p-2 bg-primary/5 rounded-md text-primary">
-                        <Icon className="h-5 w-5" />
+        <div className="border border-border/50 rounded-lg p-6 bg-card/30">
+            <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                    <div className="p-3 bg-primary/10 rounded-lg text-primary">
+                        <Icon className="h-6 w-6" />
                     </div>
                     <div>
-                        <h3 className="font-semibold text-sm">{label}</h3>
-                        <p className="text-xs text-muted-foreground">
-                            {posts.length} scraped items • {profile?.follower_count ? `${(profile.follower_count / 1000).toFixed(1)}K` : '0'} followers
+                        <h3 className="font-bold text-lg">{label}</h3>
+                        <p className="text-sm text-muted-foreground">
+                            @{profile?.handle || `${platform}_user`} • {(profile?.followers || profile?.follower_count || 0).toLocaleString()} followers
                         </p>
                     </div>
                 </div>
@@ -79,27 +79,60 @@ export function SocialProfilesSection({ client, data, onRerun }: SocialProfilesS
                     onClick={() => handleRun(platform)}
                     disabled={running[platform]}
                     className={cn(
-                        "flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md border transition-colors",
+                        "flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md border transition-colors",
                         running[platform]
                             ? "bg-muted text-muted-foreground cursor-not-allowed"
                             : "bg-background hover:bg-muted text-primary border-border"
                     )}
                 >
-                    <RefreshCw className={cn("h-3.5 w-3.5", running[platform] && "animate-spin")} />
+                    <RefreshCw className={cn("h-4 w-4", running[platform] && "animate-spin")} />
                     {running[platform] ? 'Scraping...' : 'Run Scraper'}
                 </button>
             </div>
 
-            <InstagramSection
+            {/* Profile Info Bar */}
+            {profile && (
+                <div className="flex items-center gap-4 mb-6 p-4 bg-muted/30 rounded-lg border">
+                    <div className="flex-1">
+                        <p className="text-sm text-muted-foreground line-clamp-2">
+                            {profile.bio || 'No bio available'}
+                        </p>
+                    </div>
+                    <div className="flex gap-4 text-sm">
+                        <div className="text-center">
+                            <div className="font-bold">{(profile.followers || 0).toLocaleString()}</div>
+                            <div className="text-xs text-muted-foreground">Followers</div>
+                        </div>
+                        <div className="text-center">
+                            <div className="font-bold">{(profile.following || 0).toLocaleString()}</div>
+                            <div className="text-xs text-muted-foreground">Following</div>
+                        </div>
+                        <div className="text-center">
+                            <div className="font-bold">{posts.length}</div>
+                            <div className="text-xs text-muted-foreground">Posts</div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Enhanced Posts Grid with Ranking */}
+            <PostsGridWithRanking
+                posts={posts.map((p: any) => ({
+                    id: p.id,
+                    caption: p.caption,
+                    likesCount: p.likes || p.likesCount || 0,
+                    commentsCount: p.comments || p.commentsCount || 0,
+                    sharesCount: p.sharesCount || 0,
+                    viewsCount: p.viewsCount || p.playsCount || 0,
+                    playsCount: p.playsCount || 0,
+                    postUrl: p.postUrl || p.url,
+                    url: p.url,
+                    postedAt: p.postedAt,
+                    thumbnailUrl: p.thumbnailUrl,
+                    mediaAssets: p.mediaAssets
+                }))}
+                followerCount={profile?.followers || profile?.follower_count || 0}
                 platform={platform as 'instagram' | 'tiktok'}
-                profile={{
-                    handle: profile?.handle || (platform === 'instagram' ? client.handle : client.platformHandles?.tiktok) || `${platform}_user`,
-                    bio: profile?.bio || (platform === 'instagram' ? client.businessOverview : '') || '',
-                    followerCount: profile?.followers || profile?.follower_count || 0,
-                    followingCount: profile?.following || profile?.following_count || 0,
-                    profileImageUrl: profile?.profileImageUrl
-                }}
-                posts={posts}
             />
         </div>
     );

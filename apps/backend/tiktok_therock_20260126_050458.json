@@ -1,0 +1,77 @@
+{
+  "success": true,
+  "username": "therock",
+  "scraped_at": "2026-01-26T05:04:58.439769",
+  "posts": [
+    {
+      "id": "7597158863153958199",
+      "url": "https://www.tiktok.com/@therock/video/7597158863153958199",
+      "description": "It's gonna be an honor tonight to be tired and fatigued from doing th...",
+      "views": 327100,
+      "likes": 25100,
+      "comments": 1273,
+      "shares": 609,
+      "duration": 94,
+      "date": null,
+      "thumbnail": null,
+      "extraction_method": "playlist_metadata"
+    },
+    {
+      "id": "7592321402837945614",
+      "url": "https://www.tiktok.com/@therock/video/7592321402837945614",
+      "description": "“WE DID IT!” 🥂😉 One of my favorite stories about the night that me an...",
+      "views": 239100,
+      "likes": 11300,
+      "comments": 991,
+      "shares": 253,
+      "duration": 192,
+      "date": null,
+      "thumbnail": null,
+      "extraction_method": "playlist_metadata"
+    },
+    {
+      "id": "7590467239808109879",
+      "url": "https://www.tiktok.com/@therock/video/7590467239808109879",
+      "description": "Big windshield 👉🏾 small rearview.  And that kindness stuff never goes...",
+      "views": 395100,
+      "likes": 19800,
+      "comments": 1708,
+      "shares": 539,
+      "duration": 121,
+      "date": null,
+      "thumbnail": null,
+      "extraction_method": "playlist_metadata"
+    },
+    {
+      "id": "7585313180621016333",
+      "url": "https://www.tiktok.com/@therock/video/7585313180621016333",
+      "description": "So I pulled up to @Walmart and surprised some beautiful families from...",
+      "views": 870600,
+      "likes": 72900,
+      "comments": 2861,
+      "shares": 3299,
+      "duration": 319,
+      "date": null,
+      "thumbnail": null,
+      "extraction_method": "playlist_metadata"
+    },
+    {
+      "id": "7583487664712830263",
+      "url": "https://www.tiktok.com/@therock/video/7583487664712830263",
+      "description": "@John Cena 🐐 John, you epitomize one of my favorite quotes, \"it's nic...",
+      "views": 5500000,
+      "likes": 512600,
+      "comments": 5737,
+      "shares": 8435,
+      "duration": 177,
+      "date": null,
+      "thumbnail": null,
+      "extraction_method": "playlist_metadata"
+    }
+  ],
+  "stats": {
+    "total_posts": 5,
+    "extraction_success": 5,
+    "time": 3.8491787910461426
+  }
+}

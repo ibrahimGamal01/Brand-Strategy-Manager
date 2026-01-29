@@ -1,0 +1,126 @@
+{
+  "success": true,
+  "scraped_at": "2026-01-26T04:59:59.074259",
+  "profile": {
+    "username": "natgeo",
+    "full_name": "National Geographic",
+    "biography": "Inspiring the explorer in everyone 🌎",
+    "followers": 275647354,
+    "following": 172,
+    "total_posts": 31310,
+    "is_verified": true,
+    "is_private": false,
+    "is_business": true,
+    "profile_pic_url": "https://instagram.fcai18-1.fna.fbcdn.net/v/t51.2885-19/495970936_18571729156019133_4702419124763180758_n.jpg?stp=dst-jpg_s320x320_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InByb2ZpbGVfcGljLmRqYW5nby40MDAuYzIifQ&_nc_ht=instagram.fcai18-1.fna.fbcdn.net&_nc_cat=1&_nc_oc=Q6cZ2QHpycCyK67MI_vnvcKjL173EQivsSC1aSazy3d9_2h_Btl700YOMGTKQuegT7H4fRU&_nc_ohc=accOZNcqcRkQ7kNvwE5yLmI&_nc_gid=lbJ01F818_-_smgc1kUv-g&edm=AOQ1c0wBAAAA&ccb=7-5&oh=00_AfqqPwpXBtsvLyVLdOUrGXMLD5iM8fydkIRFSwBjpCouIQ&oe=697CB85A&_nc_sid=8b3546"
+  },
+  "posts": [
+    {
+      "shortcode": "DRPbQcBD07d",
+      "url": "https://instagram.com/p/DRPbQcBD07d",
+      "type": "CAROUSEL",
+      "typename": "GraphSidecar",
+      "caption": "National Geographic photographers have spent the past year documenting the world in all its beauty and complexity. Out of hundreds of thousands of photos, 25 were selected as our Pictures of the Year. 📸\n\nFrom once-in-a-lifetime phenomena to elusive animals to pioneering science, view these special moments featuring rare wildlife, scientific discoveries, and human exploration at the link in bio.\n\nPhotograph 1 by Anand Varma, photograph 2 by @johnstanmeyer, photograph 3 by @stephenwilkes",
+      "likes": 87407,
+      "comments": 488,
+      "engagement_rate": 0.03,
+      "date": "2025-11-19T14:15:15",
+      "is_video": false,
+      "video_duration": null,
+      "hashtags": [],
+      "mentions": [
+        "johnstanmeyer",
+        "stephenwilkes"
+      ],
+      "location": null
+    },
+    {
+      "shortcode": "DSHwVR4Dnx_",
+      "url": "https://instagram.com/p/DSHwVR4Dnx_",
+      "type": "REEL",
+      "typename": "GraphVideo",
+      "caption": "100 days, seven continents, the journey of a lifetime. Join @willsmith as he travels pole to pole with scientists conducting groundbreaking research at the edges of the world.\n\n#PoleToPole with Will Smith premieres January 13 at 9/8c on @natgeotv. Streaming on @DisneyPlus and @hulu.",
+      "likes": 194374,
+      "comments": 5856,
+      "engagement_rate": 0.07,
+      "date": "2025-12-11T13:00:02",
+      "is_video": true,
+      "video_duration": 143.147,
+      "hashtags": [
+        "poletopole"
+      ],
+      "mentions": [
+        "willsmith",
+        "natgeotv",
+        "disneyplus",
+        "hulu"
+      ],
+      "location": null
+    },
+    {
+      "shortcode": "DT6ioINk_DX",
+      "url": "https://instagram.com/p/DT6ioINk_DX",
+      "type": "REEL",
+      "typename": "GraphVideo",
+      "caption": "Each winter in Switzerland’s Valais region, skiers take to the slopes dressed as witches for the Belalp Hexe—an annual race inspired by a local legend about a sorceress and her hapless husband. What began as a playful nod to regional folklore to fill the January low season has grown into a beloved event that blends skiing, costumes, and social traditions.\n\nDiscover how this race became a modern alpine tradition at the link in bio.",
+      "likes": 23253,
+      "comments": 96,
+      "engagement_rate": 0.01,
+      "date": "2026-01-25T20:30:03",
+      "is_video": true,
+      "video_duration": 24.832,
+      "hashtags": [],
+      "mentions": [],
+      "location": null
+    },
+    {
+      "shortcode": "DT61-AhjIHg",
+      "url": "https://instagram.com/p/DT61-AhjIHg",
+      "type": "SINGLE",
+      "typename": "GraphImage",
+      "caption": "Photo by @joelsartore | Seen here as a two-month-old cub is the jaguar named Teiku that calls @zoodomrd home. Jaguars are most similar in appearance to leopards, but there’s nothing you can confuse them with in South America. The most distinctive feature of jaguars is the shape of their spots, which resemble a certain sweet-smelling flower: the rose. To see more species featured in the #PhotoArk, follow me, @joelsartore.",
+      "likes": 42741,
+      "comments": 123,
+      "engagement_rate": 0.02,
+      "date": "2026-01-25T17:00:00",
+      "is_video": false,
+      "video_duration": null,
+      "hashtags": [
+        "photoark"
+      ],
+      "mentions": [
+        "joelsartore",
+        "zoodomrd",
+        "joelsartore"
+      ],
+      "location": null
+    },
+    {
+      "shortcode": "DT5ycwyD1Le",
+      "url": "https://instagram.com/p/DT5ycwyD1Le",
+      "type": "SINGLE",
+      "typename": "GraphImage",
+      "caption": "We stretch, bend, and hold—trusting it’s all part of keeping our bodies healthy, but new research suggests some of our stretching habits may not be helping us in the ways we think they are. Some familiar poses owe more to tradition than science, prompting experts to rethink how stretching really works.\n\nHead to the link in bio to learn what science says about stretching—and how to do it in ways that actually work.\n\nPhotograph by FreshSplash, Getty Images",
+      "likes": 5944,
+      "comments": 52,
+      "engagement_rate": 0.0,
+      "date": "2026-01-25T14:00:00",
+      "is_video": false,
+      "video_duration": null,
+      "hashtags": [],
+      "mentions": [],
+      "location": null
+    }
+  ],
+  "stats": {
+    "total_posts": 5,
+    "scraping_time": 20.84281277656555,
+    "post_types": {
+      "CAROUSEL": 1,
+      "REEL": 2,
+      "SINGLE": 2
+    },
+    "avg_likes": 70743.8,
+    "avg_comments": 1323.0,
+    "avg_engagement_rate": 0.026000000000000002
+  }
+}

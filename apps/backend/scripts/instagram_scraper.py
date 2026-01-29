@@ -18,6 +18,7 @@ import os
 import datetime
 from itertools import islice
 from typing import Dict, List, Optional
+import contextlib
 
 # --- CONFIGURATION (Safe Limits) ---
 MAX_REQUESTS_PER_HOUR = 150 # Safety buffer below 200
@@ -102,12 +103,6 @@ class RateLimiter:
 def import_session_from_browser(L: instaloader.Instaloader, session_path: str) -> bool:
     """
     Import Instagram session cookies from user's browser.
-    This is MORE RELIABLE than password login because:
-    1. No login challenges (already trusted)
-    2. No 2FA prompts
-    3. Session is pre-authenticated
-    
-    Returns True if import succeeded, False otherwise.
     """
     try:
         import browser_cookie3
@@ -216,7 +211,11 @@ def scrape_profile(handle: str, posts_limit: int = 30, use_proxy: bool = False, 
     if os.path.exists(session_path):
         try:
             print(f"[Scraper] Loading session from: {session_path}", file=sys.stderr)
-            L.load_session_from_file(os.environ.get('INSTAGRAM_USERNAME'), filename=session_path)
+            
+            # SUPPRESS STDOUT for L.load_session_from_file because it prints "Loaded session from..."
+            with contextlib.redirect_stdout(sys.stderr):
+                L.load_session_from_file(os.environ.get('INSTAGRAM_USERNAME'), filename=session_path)
+            
             is_logged_in = True
             print(f"[Scraper] Session loaded.", file=sys.stderr)
         except Exception as e:
@@ -225,7 +224,9 @@ def scrape_profile(handle: str, posts_limit: int = 30, use_proxy: bool = False, 
     if not is_logged_in:
         # Priority 1: Try importing from browser (MOST RELIABLE)
         print("[Scraper] No saved session. Trying browser import...", file=sys.stderr)
-        is_logged_in = import_session_from_browser(L, session_path)
+        # Suppress output from this too just in case
+        with contextlib.redirect_stdout(sys.stderr):
+             is_logged_in = import_session_from_browser(L, session_path)
         
     if not is_logged_in:
         # Priority 2: Password login (fallback)
@@ -258,6 +259,7 @@ def scrape_profile(handle: str, posts_limit: int = 30, use_proxy: bool = False, 
     try:
         profile = instaloader.Profile.from_username(L.context, handle)
         print(f"[Scraper] Found profile: @{handle} ({profile.followers} followers)", file=sys.stderr)
+        print(f"[Scraper] Private: {profile.is_private}, Verified: {profile.is_verified}", file=sys.stderr)
         limiter.increment(1) # Profile fetch cost
     except instaloader.exceptions.ConnectionException as e:
          # COOL DOWN LOGIC
@@ -275,12 +277,16 @@ def scrape_profile(handle: str, posts_limit: int = 30, use_proxy: bool = False, 
             # Iterate similar accounts (limit to 5 to be safe)
             sim_iter = profile.get_similar_accounts()
             for sim_profile in islice(sim_iter, 5):
-                competitors.append({
-                    'username': sim_profile.username,
-                    'full_name': sim_profile.full_name,
-                    'followers': sim_profile.followers
-                })
-                time.sleep(random.uniform(1, 3)) # Delay between competitor fetches
+                try:
+                    competitors.append({
+                        'username': sim_profile.username,
+                        'full_name': sim_profile.full_name,
+                        'followers': sim_profile.followers
+                    })
+                    time.sleep(random.uniform(1, 3)) # Delay between competitor fetches
+                except Exception as inner_e:
+                     print(f"[Scraper] Skipped one competitor due to error: {inner_e}", file=sys.stderr)
+                     
             limiter.increment(len(competitors))
             print(f"[Scraper] Found {len(competitors)} competitors.", file=sys.stderr)
         except Exception as e:
@@ -290,7 +296,12 @@ def scrape_profile(handle: str, posts_limit: int = 30, use_proxy: bool = False, 
     posts = []
     try:
         current_count = 0
-        for post in profile.get_posts():
+        print(f"[Scraper] Starting post loop for @{handle}...", file=sys.stderr)
+        
+        post_iterator = profile.get_posts()
+        print(f"[Scraper] Iterator created. Fetching items...", file=sys.stderr)
+        
+        for post in post_iterator:
              if current_count >= posts_limit: break
              
              # Random pause every 5 posts to mimic reading
@@ -328,10 +339,13 @@ def scrape_profile(handle: str, posts_limit: int = 30, use_proxy: bool = False, 
              
              current_count += 1
              limiter.increment(1) # Post fetch cost
-             print(f"[Scraper] Scraped post {current_count}/{posts_limit}", file=sys.stderr)
+             print(f"[Scraper] Scraped post {current_count}/{posts_limit} (ID: {post.shortcode})", file=sys.stderr)
              
              # Standard delay
              time.sleep(random.uniform(3, 7))
+        
+        if current_count == 0:
+             print(f"[Scraper] WARNING: No posts were scraped! Profile posts count is {profile.mediacount}. Is Private? {profile.is_private}", file=sys.stderr)
 
     except instaloader.exceptions.TooManyRequestsException:
         print("[Scraper] Rate limit hit during posts!", file=sys.stderr)
@@ -343,6 +357,8 @@ def scrape_profile(handle: str, posts_limit: int = 30, use_proxy: bool = False, 
              # Signal backend? We return what we have.
         else:
              print(f"[Scraper] Error scraping posts: {error_msg}", file=sys.stderr)
+             import traceback
+             traceback.print_exc(file=sys.stderr)
 
     result = {
         'handle': handle,
@@ -356,7 +372,8 @@ def scrape_profile(handle: str, posts_limit: int = 30, use_proxy: bool = False, 
         'discovered_competitors': competitors # New OASP Field
     }
     
-    return result
+    # Print JSON to stdout - THIS MUST BE THE ONLY STDOUT
+    print(json.dumps(result, indent=2))
 
 if __name__ == '__main__':
     # Robust Env Loader
@@ -369,15 +386,12 @@ if __name__ == '__main__':
     ]
     
     for env_path in possible_env_paths:
-        print(f"[Scraper] Checking .env at: {env_path}", file=sys.stderr)
         if os.path.exists(env_path):
-            print(f"[Scraper] Found .env, parsing...", file=sys.stderr)
             with open(env_path) as f:
                 for line in f:
                     line = line.strip()
                     if line and not line.startswith('#') and 'INSTAGRAM_' in line and '=' in line:
                          key, val = line.split('=', 1)
-                         print(f"[Scraper] Loaded env var: {key}", file=sys.stderr)
                          if key not in os.environ: 
                             os.environ[key] = val.strip('"').strip("'")
             break
@@ -390,8 +404,7 @@ if __name__ == '__main__':
     posts_limit = int(sys.argv[2]) if len(sys.argv) > 2 else 30
     
     try:
-        data = scrape_profile(handle, posts_limit)
-        print(json.dumps(data, indent=2))
+        scrape_profile(handle, posts_limit)
     except Exception as e:
         print(json.dumps({'error': str(e)}), file=sys.stdout)
         sys.exit(1)
