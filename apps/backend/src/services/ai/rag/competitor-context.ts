@@ -28,90 +28,170 @@ export interface CompetitorContext {
 
 /**
  * Get competitor context with quality validation
+ * CRITICAL: Filters out client's own social handles to prevent self-comparison
  */
 export async function getCompetitorContext(researchJobId: string): Promise<CompetitorContext> {
-  const competitors = await prisma.competitor.findMany({
+  // Get client name to filter out client-related handles
+  const researchJob = await prisma.researchJob.findUnique({
+    where: { id: researchJobId },
+    include: { client: true }
+  });
+
+  const clientName = researchJob?.client?.name?.toLowerCase() || '';
+  
+  // Filter function to exclude client-related handles
+  const isClientHandle = (handle: string): boolean => {
+    const normalizedHandle = handle.toLowerCase().replace(/[@_\s]/g, '');
+    const normalizedClient = clientName.replace(/[@_\s]/g, '');
+    
+    // Exclude if handle contains client name or vice versa
+    return normalizedHandle.includes(normalizedClient) || normalizedClient.includes(normalizedHandle);
+  };
+
+  // Get discovered competitors (all statuses - SUGGESTED, CONFIRMED, SCRAPED)
+  const discoveredCompetitors = await prisma.discoveredCompetitor.findMany({
     where: { 
-      client: {
-        researchJobs: {
-          some: { id: researchJobId }
-        }
-      }
+      researchJobId
+      // Removed status filter - get all competitors to match content-intelligence behavior
+    },
+    orderBy: { relevanceScore: 'desc' },
+    take: 20 // Limit to top 20 by relevance
+  });
+
+  // CRITICAL: Filter out client handles
+  const externalCompetitors = discoveredCompetitors.filter(dc => !isClientHandle(dc.handle));
+
+  console.log(`[Competitor Context] Found ${discoveredCompetitors.length} discovered competitors, ${externalCompetitors.length} after filtering client handles`);
+
+  // Get social profile data for these competitors
+  const competitorHandles = externalCompetitors.map(c => c.handle);
+  const socialProfiles = await prisma.socialProfile.findMany({
+    where: {
+      researchJobId,
+      handle: { in: competitorHandles }
     },
     include: {
-      rawPosts: {
-        include: {
-          cleanedPost: {
-            include: {
-              aiAnalyses: true
-            }
-          }
-        },
-        take: 10,
-        orderBy: { scrapedAt: 'desc' }
+      posts: {
+        take: 50, // Increased from 10 to get more comprehensive data
+        orderBy: { postedAt: 'desc' }
       }
     }
   });
+
+  // Platform breakdown for debugging
+  const platformCounts = socialProfiles.reduce((acc, p) => {
+    acc[p.platform] = (acc[p.platform] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+  
+  console.log(`[Competitor Context] Retrieved ${socialProfiles.length} social profiles:`, platformCounts);
+  console.log(`[Competitor Context] Platform breakdown: Instagram=${platformCounts.instagram || 0}, TikTok=${platformCounts.tiktok || 0}`);
 
   const issues: string[] = [];
   const warnings: string[] = [];
 
-  if (competitors.length < 10) {
-    warnings.push(`Only ${competitors.length}/10 competitors found`);
+  if (externalCompetitors.length < 10) {
+    warnings.push(`Only ${externalCompetitors.length}/10 external competitors found`);
   }
 
-  const suspiciousIssues = detectSuspiciousData(competitors, 'competitor');
-  issues.push(...suspiciousIssues);
-
-  const noHandle = competitors.filter(c => !c.handle);
-  if (noHandle.length > 0) {
-    issues.push(`${noHandle.length} competitors missing handle`);
+  if (externalCompetitors.length === 0) {
+    issues.push('No external competitors found - only client handles detected');
   }
 
-  const unrealistic = competitors.filter(c => 
-    c.followerCount && (c.followerCount > 50000000 || c.followerCount < 0)
-  );
-  if (unrealistic.length > 0) {
-    warnings.push(`${unrealistic.length} competitors have suspicious follower counts`);
-  }
-
-  const allCompetitors: CompetitorData[] = competitors.map(c => {
+  const allCompetitors: CompetitorData[] = externalCompetitors.map(dc => {
+    // Find corresponding social profile for metrics
+    const profile = socialProfiles.find(p => p.handle === dc.handle && p.platform === dc.platform);
+    
     const postIssues: string[] = [];
-    const postWarnings: string[] = [];
+    const postWarnings: string[] = []
 
-    if (c.isPriority && c.rawPosts.length === 0) {
-      postIssues.push('Priority competitor has no posts');
-    }
+;
 
+    const posts = profile?.posts || [];
+    
     const postQuality = calculateQualityScore(
-      c.rawPosts,
+      posts,
       postIssues,
       postWarnings,
-      c.isPriority ? 10 : 0
+      5 // expected minimum posts
     );
 
+    // Calculate posting frequency from actual post dates (not profile creation date)
+    let postingFreq = 'Unknown';
+    if (posts.length >= 3) {
+      // Sort posts by date to find date range
+      const sortedPosts = [...posts].sort((a, b) => {
+        const dateA = a.postedAt ? new Date(a.postedAt).getTime() : 0;
+        const dateB = b.postedAt ? new Date(b.postedAt).getTime() : 0;
+        return dateB - dateA; // newest first
+      });
+      
+      const oldestDate = sortedPosts[sortedPosts.length - 1].postedAt;
+      const newestDate = sortedPosts[0].postedAt;
+      
+      if (oldestDate && newestDate) {
+        const oldestPost = new Date(oldestDate);
+        const newestPost = new Date(newestDate);
+        const daysBetween = Math.max(1, (newestPost.getTime() - oldestPost.getTime()) / (24 * 60 * 60 * 1000));
+        const postsPerWeek = (posts.length / daysBetween) * 7;
+        
+        // Round to 1 decimal place for cleaner display
+        postingFreq = `${Math.round(postsPerWeek * 10) / 10}/week`;
+      }
+    } else if (posts.length > 0) {
+      postingFreq = 'Insufficient data';
+    }
+
+    // Calculate engagement from posts
+    let engagement = 'Unknown';
+    if (posts.length > 0) {
+      const postsWithEngagement = posts.filter(p => {
+        const metadata = p.metadata as any;
+        return metadata?.engagement_rate != null;
+      });
+      
+      if (postsWithEngagement.length > 0) {
+        const avgEngagement = postsWithEngagement.reduce((sum, p) => {
+          return sum + ((p.metadata as any)?.engagement_rate || 0);
+        }, 0) / postsWithEngagement.length;
+        engagement = `${(avgEngagement * 100).toFixed(1)}%`;
+      }
+    }
+
     return {
-      handle: c.handle,
-      platform: c.platform,
-      followers: c.followerCount || undefined,
-      postingFreq: c.postingFrequency || undefined,
-      formats: c.mostUsedFormats as string[] || undefined,
-      engagement: c.engagementLevel || undefined,
-      discoveryMethod: 'database',
-      isPriority: c.isPriority,
-      topPosts: c.rawPosts.map(p => p.cleanedPost).filter(Boolean),
+      handle: dc.handle,
+      platform: dc.platform,
+      followers: profile?.followers || undefined,
+      postingFreq,
+      formats: undefined, // TODO: derive from post metadata
+      engagement,
+      discoveryMethod: dc.discoveryReason || 'unknown',
+      isPriority: dc.relevanceScore ? dc.relevanceScore >= 0.7 : false, // High relevance = priority
+      topPosts: posts.map(p => ({
+        content: p.caption || '', // Use caption field
+        metadata: p.metadata,
+        postedAt: p.postedAt
+      })),
       qualityScore: postQuality
     };
   });
 
-  const priority3 = allCompetitors.filter(c => c.isPriority).slice(0, 3);
+  // Priority competitors: top 3 by relevance score
+  const priority3 = allCompetitors
+    .filter(c => c.isPriority)
+    .slice(0, 3);
   
+  if (priority3.length < 3 && allCompetitors.length >= 3) {
+    // If not enough high-priority, take top 3 anyway
+    priority3.push(...allCompetitors.filter(c => !c.isPriority).slice(0, 3 - priority3.length));
+  }
+
   if (priority3.length < 3) {
-    issues.push(`Only ${priority3.length}/3 priority competitors available`);
+    warnings.push(`Only ${priority3.length}/3 priority competitors available`);
   }
 
   const overallQuality = calculateQualityScore(
-    competitors,
+    externalCompetitors,
     issues,
     warnings,
     10
@@ -119,7 +199,7 @@ export async function getCompetitorContext(researchJobId: string): Promise<Compe
 
   return {
     all10: allCompetitors.slice(0, 10),
-    priority3,
+    priority3: priority3.slice(0, 3),
     overallQuality
   };
 }

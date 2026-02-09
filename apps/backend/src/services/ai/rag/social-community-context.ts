@@ -12,7 +12,23 @@ export interface SocialContext {
   posts: any[];
   topPosts: any[];  // Filtered top performers
   trends: any[];
+  platformMetrics: PlatformMetrics[];  // NEW: Aggregated metrics by platform
   qualityScore: DataQualityScore;
+}
+
+export interface PlatformMetrics {
+  platform: string;
+  profileCount: number;
+  totalFollowers: number;
+  avgFollowers: number;
+  totalPosts: number;
+  avgEngagementRate: number;
+  topPerformers: {
+    handle: string;
+    followers: number;
+    engagementRate: number;
+    postsPerWeek: number;
+  }[];
 }
 
 export interface CommunityContext {
@@ -78,13 +94,107 @@ export async function getSocialContext(researchJobId: string): Promise<SocialCon
     warnings
   );
 
+  // NEW: Aggregate metrics by platform
+  const profiles = await prisma.socialProfile.findMany({
+    where: { researchJobId }
+  });
+
+  const platformMetrics = aggregatePlatformMetrics(profiles, allPosts);
+
   return {
-    profiles: [],
+    profiles,
     posts: allPosts,      // Keep all posts for reference
     topPosts: topPosts,   // NEW: Filtered top performers
     trends,
+    platformMetrics,      // NEW: Aggregated platform data
     qualityScore
   };
+}
+
+/**
+ * Aggregate platform metrics from profiles and posts
+ */
+function aggregatePlatformMetrics(profiles: any[], posts: any[]): PlatformMetrics[] {
+  const platformGroups = profiles.reduce((acc: Record<string, any[]>, profile: any) => {
+    const platform = profile.platform;
+    if (!acc[platform]) {
+      acc[platform] = [];
+    }
+    acc[platform].push(profile);
+    return acc;
+  }, {} as Record<string, any[]>);
+
+  return Object.entries(platformGroups).map(([platform, platformProfiles]: [string, any[]]) => {
+    const validProfiles = platformProfiles.filter((p: any) => p.followers && p.followers > 0);
+    const totalFollowers = validProfiles.reduce((sum: number, p: any) => sum + (p.followers || 0), 0);
+    const avgFollowers = validProfiles.length > 0 ? Math.round(totalFollowers / validProfiles.length) : 0;
+
+    // Calculate engagement rates from posts
+    const platformPosts = posts.filter((post: any) => {
+      const handle = (post.metadata as any)?.handle;
+      return platformProfiles.some((p: any) => p.handle === handle);
+    });
+
+    const engagementRates = platformPosts
+      .map((post: any) => {
+        const metadata = post.metadata as any;
+        return metadata?.engagement_rate || 0;
+      })
+      .filter((rate: number) => rate > 0);
+
+    const avgEngagementRate = engagementRates.length > 0
+      ? engagementRates.reduce((sum: number, rate: number) => sum + rate, 0) / engagementRates.length
+      : 0;
+
+    // Identify top performers
+    const topPerformers = validProfiles
+      .sort((a: any, b: any) => (b.followers || 0) - (a.followers || 0))
+      .slice(0, 3)
+      .map((profile: any) => {
+        const profilePosts = platformPosts.filter((p: any) => (p.metadata as any)?.handle === profile.handle);
+        const profileEngagement = profilePosts
+          .map((p: any) => (p.metadata as any)?.engagement_rate || 0)
+          .filter((r: number) => r > 0);
+        const avgEngagement = profileEngagement.length > 0
+          ? profileEngagement.reduce((sum: number, r: number) => sum + r, 0) / profileEngagement.length
+          : 0;
+
+        // Estimate posts per week
+        const postsPerWeek = profile.postsCount && profile.lastScrapedAt
+          ? estimatePostsPerWeek(profile)
+          : 0;
+
+        return {
+          handle: profile.handle,
+          followers: profile.followers || 0,
+          engagementRate: avgEngagement,
+          postsPerWeek
+        };
+      });
+
+    return {
+      platform,
+      profileCount: platformProfiles.length,
+      totalFollowers,
+      avgFollowers,
+      totalPosts: platformPosts.length,
+      avgEngagementRate,
+      topPerformers
+    };
+  });
+}
+
+/**
+ * Estimate posts per week from profile data
+ */
+function estimatePostsPerWeek(profile: any): number {
+  if (!profile.postsCount || !profile.createdAt) return 0;
+  
+  const now = new Date();
+  const created = new Date(profile.createdAt);
+  const weeksActive = Math.max(1, (now.getTime() - created.getTime()) / (7 * 24 * 60 * 60 * 1000));
+  
+  return Math.round((profile.postsCount / weeksActive) * 10) / 10; // Round to 1 decimal
 }
 
 /**

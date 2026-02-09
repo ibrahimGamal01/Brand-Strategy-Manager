@@ -17,7 +17,7 @@ async function testGenerator() {
 
   // Get a research job
   const job = await prisma.researchJob.findFirst({
-    where: { status: 'COMPLETED' },
+    where: { status: 'COMPLETE' }, // Fixed: was 'COMPLETED'
     orderBy: { startedAt: 'desc' }
   });
 

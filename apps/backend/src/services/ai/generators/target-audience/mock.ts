@@ -1,56 +1,4 @@
-/**
- * Target Audience Generator (Personas)
- * 
- * Generates 2-4 detailed personas using JTBD framework
- */
-
-import { BaseGenerator, GenerationResult } from './base-generator';
-import { SYSTEM_PROMPTS } from '../prompts/system-prompts';
-import { ResearchContext } from '../rag';
-
-/**
- * Generate Target Audience section with personas
- */
-export async function generateTargetAudience(
-  researchJobId: string
-): Promise<GenerationResult> {
-  
-  console.log(`[Target Audience] Starting generation for job: ${researchJobId}`);
-
-  const generator = new TargetAudienceGenerator();
-  return generator.generate(researchJobId);
-}
-
-/**
- * Target Audience Generator Class
- */
-class TargetAudienceGenerator extends BaseGenerator {
-  constructor() {
-    super({
-      sectionType: 'target_audience',
-      systemPrompt: SYSTEM_PROMPTS.TARGET_AUDIENCE,
-      requiredElements: [
-        'personas',
-        'demographics',
-        'jtbd_framework',
-        'pain_points',
-        'goals',
-        'fears',
-        'motivators',
-        'blockers',
-        'content_preferences'
-      ],
-      wordCount: { min: 1500, max: 2500 },
-      model: 'gpt-4o',
-      temperature: 0.7
-    });
-  }
-
-  /**
-   * Generate mock personas for testing
-   */
-  protected generateMockContent(context: ResearchContext): string {
-    return `# Part 2: Target Audience Analysis
+export const MOCK_TARGET_AUDIENCE = `# Part 2: Target Audience Analysis
 
 ## Persona 1: Ahmed, the Ambitious Villa Owner
 
@@ -365,5 +313,3 @@ Business-focused, ROI-driven, process-oriented. Efficiency over creativity. Part
 ---
 
 **Data Sources**: Based on AI TARGET_AUDIENCE analysis, 89 community insights from Reddit r/CairoLiving and New Cairo forums, social audience data showing 65% aged 28-50, and 34 competitor client testimonials revealing common pain points.`;
-  }
-}

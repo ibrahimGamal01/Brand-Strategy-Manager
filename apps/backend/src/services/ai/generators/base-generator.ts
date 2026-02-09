@@ -10,6 +10,7 @@ import { validateContent } from '../validation';
 import { ValidationResult } from '../types/templates';
 import { COST_PROTECTION, costTracker, checkCostLimit } from '../validation/cost-protection';
 import { detectIndustry, applyIndustryModifier, IndustryContext } from '../prompts/industry-modifiers';
+import { postProcessContent } from './post-processor';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -109,14 +110,60 @@ export class BaseGenerator {
         if (validation.passed) {
           console.log(`[${this.config.sectionType}] ✓ Passed validation`);
           
+          // Apply post-processing to clean up contradictions and validate headers
+          const { cleaned, issues } = postProcessContent(markdown);
+          
+          if (issues.length > 0) {
+            console.warn(`[${this.config.sectionType}] Header validation issues:`, issues);
+          }
+          
+          // NEW: Fact-checking validation against database
+          console.log(`[${this.config.sectionType}] Running fact-checker...`);
+          const { factCheck } = await import('../validation/fact-checker');
+          const factCheckResult = await factCheck(cleaned, researchJobId);
+          
+          const criticalInaccuracies = factCheckResult.inaccuracies.filter(
+            i => i.severity === 'CRITICAL' || i.severity === 'HIGH'
+          );
+          
+          if (criticalInaccuracies.length > 0) {
+            console.warn(`[${this.config.sectionType}] ⚠️ Found ${criticalInaccuracies.length} critical inaccuracies`);
+            criticalInaccuracies.slice(0, 3).forEach((inaccuracy, i) => {
+              console.warn(`  ${i+1}. [${inaccuracy.severity}] ${inaccuracy.issue}`);
+            });
+            
+            // Auto-correct if we have suggested fixes
+            const { sanitizeContent } = await import('../validation/fact-checker');
+            const corrected = sanitizeContent(cleaned, factCheckResult.inaccuracies);
+            
+            console.log(`[${this.config.sectionType}] Auto-corrected critical inaccuracies`);
+            
+            const finalCost = costTracker.getStats().estimatedCostUSD;
+            
+            return {
+              markdown: corrected,
+              validationScore: validation.score,
+              passed: true,
+              attempts: attempt,
+              warnings: [
+                ...context.warnings,
+                ...issues,
+                `Auto-corrected ${criticalInaccuracies.length} inaccuracies in generated content`
+              ],
+              costUSD: finalCost - initialCost
+            };
+          } else {
+            console.log(`[${this.config.sectionType}] ✓ Passed fact-checking (${factCheckResult.verifiedClaims}/${factCheckResult.totalClaims} claims verified)`);
+          }
+          
           const finalCost = costTracker.getStats().estimatedCostUSD;
           
           return {
-            markdown,
+            markdown: cleaned,
             validationScore: validation.score,
             passed: true,
             attempts: attempt,
-            warnings: context.warnings,
+            warnings: [...context.warnings, ...issues],
             costUSD: finalCost - initialCost
           };
         }

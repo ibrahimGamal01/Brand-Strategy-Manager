@@ -159,9 +159,9 @@ def get_profile_and_videos(handle: str, max_videos: int = 30) -> dict:
                 # Extract profile info from first video
                 if not profile_info and 'uploader' in data:
                     profile_info = {
-                        'handle': data.get('uploader_id', handle),
+                        'handle': handle,  # Use original handle parameter, not uploader_id
                         'display_name': data.get('uploader', ''),
-                        'profile_url': f"https://www.tiktok.com/@{data.get('uploader_id', handle)}",
+                        'profile_url': f"https://www.tiktok.com/@{handle}",
                         'follower_count': data.get('channel_follower_count', 0),
                     }
                 

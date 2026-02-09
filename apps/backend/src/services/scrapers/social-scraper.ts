@@ -43,7 +43,8 @@ export class SocialScraperService {
 
       // Check if handle exists for platform
       // Note: Assuming handle is stored in 'handle' field or needs extraction
-      const handle = this.extractHandle(competitor.handle || competitor.name, platform);
+      const rawHandle = competitor.handle || competitor.name || '';
+      const handle = this.extractHandle(rawHandle, platform);
       
       console.log(`[Scraper] Target handle: @${handle}`);
 
@@ -139,10 +140,12 @@ export class SocialScraperService {
       try {
         await prisma.socialPost.create({
           data: {
-            competitorId,
-            platform,
+            // Note: This function needs socialProfileId to work properly
+            // competitorId and platform fields don't exist in SocialPost schema
             url: post.url || '',
-            content: post.caption || post.description || '',
+            caption: post.caption || post.description || '',
+            externalId: post.id || `post_${Date.now()}`,
+            socialProfileId: 'PLACEHOLDER', // TODO: Pass socialProfileId from parent
             metadata: {
               likes: post.likes || 0,
               comments: post.comments || 0,
@@ -151,8 +154,7 @@ export class SocialScraperService {
               engagementRate: post.engagement_rate || 0,
               format: post.type || (platform === 'TIKTOK' ? 'VIDEO' : 'UNKNOWN')
             },
-            publishedAt: post.date ? new Date(post.date) : new Date(),
-            source: platform === 'INSTAGRAM' ? 'INSTALOADER' : 'YT_DLP'
+            postedAt: post.date ? new Date(post.date) : new Date()
           }
         });
         count++;

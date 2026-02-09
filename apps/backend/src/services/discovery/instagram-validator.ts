@@ -208,19 +208,65 @@ export async function validateInstagramHandle(
     const followerEstimate = extractFollowerEstimate(combinedText);
     const isActive = isActiveFromSearchResults(searchTexts);
     
-    // Check if niche is mentioned or related
-    const nicheWords = targetNiche.toLowerCase().split(' ');
-    const hasNicheMatch = nicheWords.some(word => 
-      word.length > 3 && combinedText.toLowerCase().includes(word)
+    // Check if niche is mentioned or related - EXTREMELY STRICT MATCHING
+    const nicheWords = targetNiche.toLowerCase().split(' ').filter(w => w.length > 3);
+    
+    // For multi-word niches, require ALL words to appear (not just ANY)
+    const hasNicheMatch = nicheWords.length > 0 && nicheWords.every(word => 
+      combinedText.toLowerCase().includes(word)
     );
     
-    // Calculate confidence score
-    let confidenceScore = 0.5; // Base score for existing account
-    if (isActive) confidenceScore += 0.2;
-    if (followerEstimate !== 'unknown') confidenceScore += 0.1;
-    if (hasNicheMatch) confidenceScore += 0.2;
+    // EXPANDED Blacklist - filter out irrelevant categories AGGRESSIVELY
+    const blacklistedTerms = [
+      // Government & Official
+      'bank indonesia', 'government official', 'prime minister', 'president of',
+      'ministry of', 'official account', 'government of', 'public service',
+      
+      // Generic Entrepreneurship (NOT Islamic-specific)
+      'boss babe', 'bossbabe', 'girl boss', 'girlboss', 'lady boss',
+      'mompreneur', 'wife boss', 'side hustle', 'hustle culture',
+      'generic business', 'business tips', 'entrepreneur tips',
+      
+      // Celebrities & Influencers
+      'celebrity', 'bollywood', 'hollywood', 'actor', 'actress',
+      'model', 'fashion model', 'lifestyle blog', 'personal blog',
+      'influencer marketing', 'brand ambassador', 'sponsored content',
+      
+      // Personal/Non-Business
+      'personal account', 'personal page', 'my journey', 'lifestyle vlog',
+      'daily vlog', 'vlog life', 'travel blog', 'food blog',
+      
+      // Non-Islamic Finance
+      'crypto only', 'cryptocurrency trading', 'forex trading',
+      'day trading', 'stock tips', 'investment memes',
+      
+      // Random/Unrelated
+      'fashion studio', 'beauty salon', 'makeup artist', 'hair stylist',
+      'fitness coach', 'yoga instructor', 'life coach', 'motivation quotes'
+    ];
     
-    const isRelevant = hasNicheMatch || confidenceScore >= 0.6;
+    const hasBlacklistedTerms = blacklistedTerms.some(term => 
+      combinedText.toLowerCase().includes(term)
+    );
+    
+    // Penalty for generic business terms without Islamic context
+    const genericBusinessTerms = ['entrepreneur', 'business', 'startup', 'finance'];
+    const hasGenericOnly = genericBusinessTerms.some(term => 
+      combinedText.toLowerCase().includes(term)
+    ) && !combinedText.toLowerCase().includes('islam') 
+      && !combinedText.toLowerCase().includes('halal')
+      && !combinedText.toLowerCase().includes('sharia');
+    
+    // Calculate confidence score - MUCH STRICTER
+    let confidenceScore = 0.2; // Very low base score (was 0.3)
+    if (isActive) confidenceScore += 0.15;
+    if (followerEstimate !== 'unknown') confidenceScore += 0.10;
+    if (hasNicheMatch) confidenceScore += 0.45; // Strong boost for niche match
+    if (hasBlacklistedTerms) confidenceScore -= 0.6; // MASSIVE penalty
+    if (hasGenericOnly) confidenceScore -= 0.3; // Penalty for generic business without Islamic context
+    
+    // MUST have niche match AND high score AND no blacklist to be relevant
+    const isRelevant = hasNicheMatch && confidenceScore >= 0.70 && !hasBlacklistedTerms;
     
     return {
       handle,
@@ -296,7 +342,7 @@ export async function validateCompetitorBatch(
 export function filterValidatedCompetitors<T extends { handle: string; relevanceScore?: number }>(
   competitors: T[],
   validationResults: Map<string, ValidationResult>,
-  minConfidence: number = 0.5
+  minConfidence: number = 0.7  // Raised from 0.5 for stricter filtering
 ): Array<T & { validationScore: number; followerEstimate?: string }> {
   return competitors
     .map(comp => {

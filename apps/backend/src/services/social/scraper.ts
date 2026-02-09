@@ -49,6 +49,11 @@ export interface ScrapedProfile {
   website: string;
   isVerified: boolean;
   posts: ScrapedPost[];
+  discoveredCompetitors?: Array<{ // New field
+    username: string;
+    full_name: string;
+    followers: number;
+  }>;
 }
 
 // Concurrency Control
@@ -174,6 +179,7 @@ export async function scrapeProfileIncrementally(
             duration: 0,
             postedAt: p.timestamp,
           })),
+          discoveredCompetitors: result.data.discovered_competitors, // Pass discovered competitors
         };
         console.log(`[SocialScraper] Instagram scraper used: ${result.scraper_used}`);
       } else {
@@ -382,6 +388,41 @@ async function saveScrapedData(researchJobId: string, data: ScrapedProfile) {
           });
         }
       }
+    }
+
+    // 4. Save Discovered Competitors (OASP Integration)
+    if (data.discoveredCompetitors && data.discoveredCompetitors.length > 0) {
+        let newCompetitors = 0;
+        
+        // Real Logic for Competitors
+        for (const comp of data.discoveredCompetitors) {
+             // Basic validation
+             if (!comp.username) continue;
+
+            const exists = await tx.discoveredCompetitor.findFirst({
+                where: {
+                    researchJobId,
+                    handle: comp.username
+                }
+            });
+
+            if (!exists) {
+                await tx.discoveredCompetitor.create({
+                    data: {
+                        researchJobId,
+                        handle: comp.username,
+                        platform: data.platform,
+                        profileUrl: `https://instagram.com/${comp.username}`,
+                        discoveryReason: `Discovered via @${data.handle} (OASP)`,
+                        relevanceScore: 0.8, // Initial high relevance for discovered similar accounts
+                        status: 'SUGGESTED',
+                        discoveredAt: new Date()
+                    }
+                });
+                newCompetitors++;
+            }
+        }
+        console.log(`[SocialScraper] Saved ${newCompetitors} new competitors discovered via @${data.handle}`);
     }
     
     console.log(`[SocialScraper] Saved profile @${data.handle} and ${newPosts} posts`);

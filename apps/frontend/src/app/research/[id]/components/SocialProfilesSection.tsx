@@ -2,10 +2,14 @@
 'use client';
 
 import { Instagram, Share2, RefreshCw, Users } from 'lucide-react';
-import { DataSourceSection } from './DataSourceSection';
+import { DataSection } from './data/DataSection';
+import { DataCard } from './data/DataCard';
+import { socialProfileSchema } from './data/schemas/social-profiles.schema';
+import { useDataCrud } from '../hooks/useDataCrud';
 import { PostsGridWithRanking } from './PostsGridWithRanking';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
+import { useParams } from 'next/navigation'; // To get jobId if not in props
 
 interface SocialProfilesSectionProps {
     client: any;
@@ -17,6 +21,8 @@ interface SocialProfilesSectionProps {
 }
 
 export function SocialProfilesSection({ client, data, onRerun }: SocialProfilesSectionProps) {
+    const params = useParams();
+    const jobId = params.id as string;
     const [running, setRunning] = useState<Record<string, boolean>>({});
 
     const handleRun = async (platform: string) => {
@@ -61,89 +67,69 @@ export function SocialProfilesSection({ client, data, onRerun }: SocialProfilesS
         ? tiktokProfile.posts
         : data.clientPosts.filter(isTikTokPost);
 
-    const ProfileBlock = ({ platform, icon: Icon, profile, posts, label }: any) => (
-        <div className="border border-border/50 rounded-lg p-6 bg-card/30">
-            <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-3">
-                    <div className="p-3 bg-primary/10 rounded-lg text-primary">
-                        <Icon className="h-6 w-6" />
-                    </div>
-                    <div>
-                        <h3 className="font-bold text-lg">{label}</h3>
-                        <p className="text-sm text-muted-foreground">
-                            @{profile?.handle || `${platform}_user`} • {(profile?.followers || profile?.follower_count || 0).toLocaleString()} followers
-                        </p>
-                    </div>
+    const {
+        updateItem: updateProfile,
+        deleteItem: deleteProfile
+    } = useDataCrud({ jobId, dataType: 'social-profiles' });
+
+    const ProfileBlock = ({ platform, icon: Icon, profile, posts, label }: any) => {
+        if (!profile) return null;
+
+        return (
+            <div className="border border-border/50 rounded-lg p-6 bg-card/30">
+                <div className="mb-6">
+                    <DataCard
+                        data={profile}
+                        schema={socialProfileSchema}
+                        title={`${label} Profile`}
+                        icon={Icon}
+                        onEdit={updateProfile}
+                        onDelete={deleteProfile}
+                        actions={[
+                            {
+                                label: running[platform] ? 'Scraping...' : 'Run Scraper',
+                                icon: RefreshCw,
+                                onClick: () => handleRun(platform)
+                            }
+                        ]}
+                        defaultExpanded={true}
+                    />
                 </div>
-                <button
-                    onClick={() => handleRun(platform)}
-                    disabled={running[platform]}
-                    className={cn(
-                        "flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md border transition-colors",
-                        running[platform]
-                            ? "bg-muted text-muted-foreground cursor-not-allowed"
-                            : "bg-background hover:bg-muted text-primary border-border"
-                    )}
-                >
-                    <RefreshCw className={cn("h-4 w-4", running[platform] && "animate-spin")} />
-                    {running[platform] ? 'Scraping...' : 'Run Scraper'}
-                </button>
+
+                {/* Enhanced Posts Grid with Ranking */}
+                <div className="mt-4">
+                    <div className="flex items-center justify-between mb-4">
+                        <h4 className="text-sm font-semibold text-muted-foreground">Recent Posts ({posts.length})</h4>
+                    </div>
+                    <PostsGridWithRanking
+                        posts={posts.map((p: any) => ({
+                            id: p.id,
+                            caption: p.caption,
+                            likesCount: p.likes || p.likesCount || 0,
+                            commentsCount: p.comments || p.commentsCount || 0,
+                            sharesCount: p.sharesCount || 0,
+                            viewsCount: p.viewsCount || p.playsCount || 0,
+                            playsCount: p.playsCount || 0,
+                            postUrl: p.postUrl || p.url,
+                            url: p.url,
+                            postedAt: p.postedAt,
+                            thumbnailUrl: p.thumbnailUrl,
+                            mediaAssets: p.mediaAssets
+                        }))}
+                        followerCount={profile?.followers || profile?.follower_count || 0}
+                        platform={platform as 'instagram' | 'tiktok'}
+                    />
+                </div>
             </div>
-
-            {/* Profile Info Bar */}
-            {profile && (
-                <div className="flex items-center gap-4 mb-6 p-4 bg-muted/30 rounded-lg border">
-                    <div className="flex-1">
-                        <p className="text-sm text-muted-foreground line-clamp-2">
-                            {profile.bio || 'No bio available'}
-                        </p>
-                    </div>
-                    <div className="flex gap-4 text-sm">
-                        <div className="text-center">
-                            <div className="font-bold">{(profile.followers || 0).toLocaleString()}</div>
-                            <div className="text-xs text-muted-foreground">Followers</div>
-                        </div>
-                        <div className="text-center">
-                            <div className="font-bold">{(profile.following || 0).toLocaleString()}</div>
-                            <div className="text-xs text-muted-foreground">Following</div>
-                        </div>
-                        <div className="text-center">
-                            <div className="font-bold">{posts.length}</div>
-                            <div className="text-xs text-muted-foreground">Posts</div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Enhanced Posts Grid with Ranking */}
-            <PostsGridWithRanking
-                posts={posts.map((p: any) => ({
-                    id: p.id,
-                    caption: p.caption,
-                    likesCount: p.likes || p.likesCount || 0,
-                    commentsCount: p.comments || p.commentsCount || 0,
-                    sharesCount: p.sharesCount || 0,
-                    viewsCount: p.viewsCount || p.playsCount || 0,
-                    playsCount: p.playsCount || 0,
-                    postUrl: p.postUrl || p.url,
-                    url: p.url,
-                    postedAt: p.postedAt,
-                    thumbnailUrl: p.thumbnailUrl,
-                    mediaAssets: p.mediaAssets
-                }))}
-                followerCount={profile?.followers || profile?.follower_count || 0}
-                platform={platform as 'instagram' | 'tiktok'}
-            />
-        </div>
-    );
+        );
+    };
 
     return (
-        <DataSourceSection
+        <DataSection // Using generic DataSection now
             title="Social Profiles"
             icon={Users}
             count={filteredInstaPosts.length + tiktokPosts.length}
-            defaultOpen={true}
-            rawData={{ instagram: { profile: instagramProfile, posts: filteredInstaPosts }, tiktok: { profile: tiktokProfile, posts: tiktokPosts } }}
+            defaultExpanded={true}
         >
             <div className="space-y-6">
                 <ProfileBlock
@@ -162,6 +148,6 @@ export function SocialProfilesSection({ client, data, onRerun }: SocialProfilesS
                     label="TikTok"
                 />
             </div>
-        </DataSourceSection>
+        </DataSection>
     );
 }

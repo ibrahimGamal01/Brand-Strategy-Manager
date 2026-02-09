@@ -409,6 +409,107 @@ export async function gatherInformation(input: GatheringInput): Promise<Informat
     }
   }
 
+  // Layer 4: AI Multi-Platform Discovery (if we still need more)
+  if (competitors.length < 6 && input.brandName) {
+    try {
+      console.log(`[InfoGather] Layer 4: AI Multi-Platform Discovery...`);
+      const { suggestCompetitorsMultiPlatform } = await import('../ai/competitor-discovery');
+      
+      const aiCompetitors = await suggestCompetitorsMultiPlatform(
+        input.brandName,
+        effectiveNiche,
+        input.bio
+      );
+      
+      if (aiCompetitors.length > 0) {
+        const existingHandles = new Set(competitors.map(c => c.handle.toLowerCase()));
+        for (const comp of aiCompetitors) {
+          if (!existingHandles.has(comp.handle.toLowerCase())) {
+            competitors.push({
+              handle: comp.handle,
+              platform: comp.platform,
+              discoveryReason: `AI Discovery (${comp.platform}): ${comp.reasoning}`,
+              relevanceScore: comp.relevanceScore,
+              competitorType: 'suggested',
+            });
+            existingHandles.add(comp.handle.toLowerCase());
+          }
+        }
+        layersUsed.push('AI_MULTI_PLATFORM_DISCOVERY');
+        console.log(`[InfoGather] ✅ AI found ${aiCompetitors.length} multi-platform competitors`);
+      }
+    } catch (error: any) {
+      console.error(`[InfoGather] AI discovery failed:`, error.message);
+      errors.push(`AI Discovery: ${error.message}`);
+    }
+  }
+
+  // === SAVE ALL DISCOVERED COMPETITORS TO DATABASE ===
+  if (input.researchJobId && competitors.length > 0) {
+    try {
+      console.log(`[InfoGather] Saving ${competitors.length} discovered competitors to database...`);
+      const { saveDiscoveredCompetitors } = await import('./competitor-storage');
+      
+      // Type assertion needed due to platform type mismatch between interfaces
+      await saveDiscoveredCompetitors(
+        input.researchJobId,
+        competitors as any, // ai-intel.Competitor has string platform, storage expects literal union
+        'Multi-layer Discovery'
+      );
+      
+      console.log(`[InfoGather] ✅ Competitors saved to database`);
+      layersUsed.push('COMPETITOR_STORAGE');
+      
+      // === Auto-Scrape Discovered Competitors (Background) ===
+      // Queue competitors for scraping - non-blocking
+      if (competitors.length > 0) {
+        console.log(`[InfoGather] Auto-queueing ${competitors.length} competitors for scraping...`);
+        
+        // Import scraper dynamically
+        import('./competitor-scraper')
+          .then(async ({ scrapeCompetitorsIncremental }) => {
+            // Fetch saved competitors with their database IDs
+            const { prisma } = await import('../../lib/prisma');
+            const savedCompetitors = await prisma.discoveredCompetitor.findMany({
+              where: {
+                researchJobId: input.researchJobId,
+                status: 'SUGGESTED' // Only scrape newly suggested competitors
+              },
+              take: 10 // Limit to top 10 by relevance
+            });
+            
+            if (savedCompetitors.length === 0) {
+              console.log(`[InfoGather] No competitors need scraping - skipping`);
+              return;
+            }
+            
+            console.log(`[InfoGather] Starting background scraping for ${savedCompetitors.length} competitors`);
+            
+            // Start scraping in background (don't await)
+            const results = await scrapeCompetitorsIncremental(
+              input.researchJobId!,
+              savedCompetitors.map(c => ({
+                id: c.id,
+                handle: c.handle,
+                platform: c.platform
+              }))
+            );
+            
+            const success = results.filter(r => r.status === 'SUCCESS').length;
+            console.log(`[InfoGather] Completed background scraping: ${success}/${results.length} successful`);
+          })
+          .catch(err => {
+            console.error(`[InfoGather] Background scraping error (non-blocking):`, err.message);
+          });
+        
+        console.log(`[InfoGather] ✅ Competitor scraping queued (running in background)`);
+      }
+    } catch (error: any) {
+      console.error(`[InfoGather] Failed to save competitors:`, error.message);
+      errors.push(`Competitor Storage: ${error.message}`);
+    }
+  }
+
   // === GUARANTEE: Minimum competitors ===
   if (competitors.length < 3) {
       console.log(`[InfoGather] Only ${competitors.length} validated competitors found.`);

@@ -39,6 +39,18 @@ export const apiClient = {
     return res.json();
   },
 
+  async scrapeCompetitor(discoveredId: string) {
+    const res = await fetch(`${API_BASE}/competitors/discovered/${discoveredId}/scrape`, {
+      method: 'POST',
+    });
+    return res.json();
+  },
+
+  async getCompetitorPosts(discoveredId: string) {
+    const res = await fetch(`${API_BASE}/competitors/discovered/${discoveredId}/posts`);
+    return res.json();
+  },
+
   async confirmCompetitor(discoveredId: string) {
     const res = await fetch(`${API_BASE}/competitors/discovered/${discoveredId}/confirm`, {
       method: 'POST',
@@ -49,6 +61,13 @@ export const apiClient = {
   async rejectCompetitor(discoveredId: string) {
     const res = await fetch(`${API_BASE}/competitors/discovered/${discoveredId}/reject`, {
       method: 'POST',
+    });
+    return res.json();
+  },
+
+  async deleteCompetitorPosts(discoveredId: string) {
+    const res = await fetch(`${API_BASE}/competitors/discovered/${discoveredId}/posts`, {
+      method: 'DELETE',
     });
     return res.json();
   },
@@ -77,6 +96,14 @@ export const apiClient = {
     const res = await fetch(
       `${API_BASE}/analytics/client/${clientId}/top-posts?metric=${metric}&limit=${limit}`
     );
+    return res.json();
+  },
+
+  // General Rerun
+  async rerunScraper(jobId: string, scraper: string) {
+    const res = await fetch(`${API_BASE}/research-jobs/${jobId}/rerun/${scraper}`, {
+      method: 'POST',
+    });
     return res.json();
   },
 };

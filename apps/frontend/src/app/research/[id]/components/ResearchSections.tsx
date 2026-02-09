@@ -15,16 +15,25 @@ import {
     Share2
 } from 'lucide-react';
 import { PipelineProgress } from './PipelineProgress';
+// New Generic Data Components
+import { DataSection } from './data/DataSection';
+import { DataGrid } from './data/DataGrid';
+import { searchResultSchema } from './data/schemas/search-results.schema';
+import { imageSchema } from './data/schemas/images.schema';
+import { videoSchema } from './data/schemas/videos.schema';
+import { newsSchema } from './data/schemas/news.schema';
+import { trendsSchema } from './data/schemas/trends.schema';
+import { communityInsightsSchema } from './data/schemas/community-insights.schema';
+import { aiQuestionsSchema } from './data/schemas/ai-questions.schema';
+import { useDataCrud } from '../hooks/useDataCrud';
+
+// Legacy components (kept for reference or specific use cases)
 import { DataSourceSection } from './DataSourceSection';
 import { SocialProfilesSection } from './SocialProfilesSection';
-import { SearchResultsList } from './SearchResultsList';
-import { ImageGallery } from './ImageGallery';
-import { VideoGallery } from './VideoGallery';
-import { TrendsSection } from './TrendsSection';
-import { CompetitorsSection } from './CompetitorsSection';
-import { CommunityInsightsSection } from './CommunityInsightsSection';
-import { AIQuestionsSection } from './AIQuestionsSection';
+import { CompetitorIntelligence } from './competitor/CompetitorIntelligence';
 import { VisualComparisonSection } from './VisualComparisonSection';
+import { ClientDataCard } from './cards/ClientDataCard';
+import { Badge } from '@/components/ui/badge';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
@@ -80,6 +89,37 @@ export function AllResearchSections({ jobId, status, client, data }: AllResearch
         }
     }
 
+    // TikTok discovery handler
+    async function discoverTikTok() {
+        try {
+            setRunningScrapers(prev => ({ ...prev, 'tiktok_discovery': true }));
+
+            const response = await fetch(`http://localhost:3001/api/research-jobs/${jobId}/discover-tiktok`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+
+            if (!response.ok) throw new Error('TikTok discovery failed');
+
+            const result = await response.json();
+            alert(`Discovered ${result.discovered} TikTok competitors! ${result.message}`);
+
+            // Poll for updates every 3 seconds
+            const pollInterval = setInterval(() => {
+                router.refresh();
+            }, 3000);
+
+            // Stop polling after 30 seconds
+            setTimeout(() => clearInterval(pollInterval), 30000);
+
+        } catch (error) {
+            console.error('TikTok discovery failed:', error);
+            alert(`Failed to discover TikTok competitors: ${(error as Error).message}`);
+        } finally {
+            setRunningScrapers(prev => ({ ...prev, 'tiktok_discovery': false }));
+        }
+    }
+
     // Handlers for re-run buttons
     function makeRerunHandler(scraper: string) {
         return async () => await rerunScraper(jobId, scraper);
@@ -102,115 +142,248 @@ export function AllResearchSections({ jobId, status, client, data }: AllResearch
         }
     }
 
+    // Existing declarations (kept for reference, but we will redefine strictly what we need or check for conflicts)
+    // const instagramProfile = ... (This conflicts with later declaration)
+    // Let's remove the first declaration since we define it better later for the card.
+    // OR easier: just use the first one and only define tiktokProfile.
+
+    // Changing the first declaration to be more robust and allowing reuse
     const instagramProfile = data.socialProfiles?.find((p: any) =>
         p.platform === 'instagram' &&
         p.handle?.toLowerCase() === client.handle?.toLowerCase()
-    ) || data.socialProfiles?.find((p: any) => p.platform === 'instagram'); // Fallback to first if no match
+    ) || data.socialProfiles?.find((p: any) => p.platform === 'instagram');
+
+
+    const {
+        updateItem: updateSearch,
+        deleteItem: deleteSearch
+    } = useDataCrud({ jobId, dataType: 'search-results' });
+
+    const {
+        updateItem: updateImage,
+        deleteItem: deleteImage
+    } = useDataCrud({ jobId, dataType: 'images' });
+
+    const {
+        updateItem: updateVideo,
+        deleteItem: deleteVideo
+    } = useDataCrud({ jobId, dataType: 'videos' });
+
+    const {
+        updateItem: updateNews,
+        deleteItem: deleteNews
+    } = useDataCrud({ jobId, dataType: 'news' });
+
+    const {
+        updateItem: updateTrend,
+        deleteItem: deleteTrend
+    } = useDataCrud({ jobId, dataType: 'trends' });
+
+    const {
+        updateItem: updateInsight,
+        deleteItem: deleteInsight
+    } = useDataCrud({ jobId, dataType: 'community-insights' });
+
+    const {
+        updateItem: updateQuestion,
+        deleteItem: deleteQuestion
+    } = useDataCrud({ jobId, dataType: 'ai-questions' });
+
+    // Filter posts for ClientDataCard
+    const { socialProfiles, clientPosts } = data;
+    // instagramProfile is already defined above
+    const tiktokProfile = socialProfiles?.find((p: any) => p.platform === 'tiktok');
+
+    const instagramPosts = instagramProfile?.posts || clientPosts || [];
+    const tiktokPosts = tiktokProfile?.posts || [];
 
     return (
-        <div className="space-y-4 pb-20">
-            {/* Global Pipeline Progress with Stop Button */}
-            <div className="mb-6">
-                <PipelineProgress
-                    status={status}
-                    onStop={handleStop}
+        <div className="space-y-12 pb-20">
+            {/* Client Data Section */}
+            <section id="client-data">
+                <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-xl font-semibold">Client Overview</h2>
+                    <Badge variant="outline">{socialProfiles.length} Profiles</Badge>
+                </div>
+                <ClientDataCard
+                    client={client}
+                    socialProfiles={socialProfiles || []}
+                    instagramPosts={instagramPosts}
+                    tiktokPosts={tiktokPosts}
+                    className="w-full"
                 />
-            </div>
-
-            {/* 1. Social Profiles (Consolidated) */}
-            <SocialProfilesSection
-                client={client}
-                data={data}
-                onRerun={(id) => rerunScraper(jobId, id)} // Fix: bind was tricky, using arrow function
-            />
+            </section>
 
             {/* 2. Search Results */}
-            <DataSourceSection
+            <DataSection
                 title="Search Results"
                 icon={Search}
                 count={data.rawSearchResults.length}
-                onRerun={makeRerunHandler('ddg_search')}
+                onRefresh={makeRerunHandler('ddg_search')}
             >
-                <SearchResultsList results={data.rawSearchResults} />
-            </DataSourceSection>
+                <DataGrid
+                    data={data.rawSearchResults}
+                    config={(item) => ({
+                        schema: searchResultSchema,
+                        title: item.title,
+                        icon: Search,
+                        onEdit: updateSearch,
+                        onDelete: deleteSearch
+                    })}
+                />
+            </DataSection>
 
             {/* 3. Images */}
-            <DataSourceSection
+            <DataSection
                 title="Images"
                 icon={ImageIcon}
                 count={data.ddgImageResults.length}
-                onRerun={makeRerunHandler('ddg_images')}
+                onRefresh={makeRerunHandler('ddg_images')}
             >
-                <ImageGallery images={data.ddgImageResults} />
-            </DataSourceSection>
+                <DataGrid
+                    data={data.ddgImageResults}
+                    config={(item) => ({
+                        schema: imageSchema,
+                        title: item.title,
+                        icon: ImageIcon,
+                        onEdit: updateImage,
+                        onDelete: deleteImage
+                    })}
+                    columns={{ sm: 2, md: 3, lg: 4, xl: 5 }}
+                />
+            </DataSection>
 
             {/* 4. Videos */}
-            <DataSourceSection
+            <DataSection
                 title="Videos"
                 icon={Video}
                 count={data.ddgVideoResults.length}
-                onRerun={makeRerunHandler('ddg_videos')}
+                onRefresh={makeRerunHandler('ddg_videos')}
             >
-                <VideoGallery videos={data.ddgVideoResults} />
-            </DataSourceSection>
+                <DataGrid
+                    data={data.ddgVideoResults}
+                    config={(item) => ({
+                        schema: videoSchema,
+                        title: item.title,
+                        icon: Video,
+                        onEdit: updateVideo,
+                        onDelete: deleteVideo
+                    })}
+                />
+            </DataSection>
 
             {/* 4.5. Visual Comparison Strategy */}
             <VisualComparisonSection jobId={jobId} />
 
             {/* 5. News Articles */}
-            <DataSourceSection
+            <DataSection
                 title="News Articles"
                 icon={Newspaper}
                 count={data.ddgNewsResults.length}
-                onRerun={makeRerunHandler('ddg_news')}
+                onRefresh={makeRerunHandler('ddg_news')}
             >
-                <SearchResultsList results={data.ddgNewsResults} />
-            </DataSourceSection>
+                <DataGrid
+                    data={data.ddgNewsResults}
+                    config={(item) => ({
+                        schema: newsSchema,
+                        title: item.title,
+                        icon: Newspaper,
+                        onEdit: updateNews,
+                        onDelete: deleteNews
+                    })}
+                />
+            </DataSection>
 
             {/* 6. Google Trends */}
-            <DataSourceSection
+            <DataSection
                 title="Search Trends"
                 icon={TrendingUp}
                 count={data.searchTrends.length}
-                onRerun={makeRerunHandler('trends')}
+                onRefresh={makeRerunHandler('trends')}
             >
-                <TrendsSection trends={data.searchTrends} />
-            </DataSourceSection>
+                <DataGrid
+                    data={data.searchTrends}
+                    config={(item) => ({
+                        schema: trendsSchema,
+                        title: item.name,
+                        icon: TrendingUp,
+                        onEdit: updateTrend,
+                        onDelete: deleteTrend
+                    })}
+                />
+            </DataSection>
 
-            {/* 7. Competitors */}
+            {/* 7. Competitors - New Modular UI */}
             <DataSourceSection
-                title="Competitors"
+                title="Competitor Intelligence"
                 icon={Users}
                 count={data.competitors.length}
                 onRerun={makeRerunHandler('competitors')}
             >
-                <CompetitorsSection
+                <CompetitorIntelligence
+                    jobId={jobId}
                     competitors={data.competitors}
-                    onRunScraper={(scraper) => rerunScraper(jobId, scraper)}
-                    runningScrapers={runningScrapers}
+                    onRunDiscovery={(type) => {
+                        const scraperType = type === 'ai' ? 'competitors_ai' : 'competitors_code';
+                        rerunScraper(jobId, scraperType);
+                    }}
+                    onDiscoverTikTok={discoverTikTok}
+                    isDiscoveringTikTok={runningScrapers['tiktok_discovery'] || false}
+                    onEditCompetitor={async (id, updates) => {
+                        // TODO: Use hook here too?
+                        // For now keeping custom component as it's specialized
+                    }}
+                    onDeleteCompetitor={async (id) => {
+                        // TODO: Use hook here too
+                    }}
+                    onScrapeCompetitor={async (id) => {
+                        console.log('Scrape competitor', id);
+                    }}
+                    onScrapeAll={async () => {
+                        console.log('Scrape all competitors');
+                    }}
                 />
             </DataSourceSection>
 
             {/* 8. Community Insights (VoC) */}
-            <DataSourceSection
+            <DataSection
                 title="Community Insights (VoC)"
                 icon={MessageSquare}
                 count={data.communityInsights.length}
-                onRerun={makeRerunHandler('community_insights')}
+                onRefresh={makeRerunHandler('community_insights')}
             >
-                <CommunityInsightsSection insights={data.communityInsights} />
-            </DataSourceSection>
+                <DataGrid
+                    data={data.communityInsights}
+                    config={(item) => ({
+                        schema: communityInsightsSchema,
+                        title: item.content ? item.content.substring(0, 50) + '...' : 'Insight',
+                        icon: MessageSquare,
+                        onEdit: updateInsight,
+                        onDelete: deleteInsight
+                    })}
+                />
+            </DataSection>
 
             {/* 10. AI Questions */}
-            <DataSourceSection
+            <DataSection
                 title="Strategic Analysis (12 Questions)"
                 icon={Brain}
                 count={data.aiQuestions.length}
-                onRerun={makeRerunHandler('ai_analysis')}
-                defaultOpen={data.aiQuestions.length > 0}
+                onRefresh={makeRerunHandler('ai_analysis')}
             >
-                <AIQuestionsSection questions={data.aiQuestions} />
-            </DataSourceSection>
+                <DataGrid
+                    data={data.aiQuestions}
+                    config={(item) => ({
+                        schema: aiQuestionsSchema,
+                        title: item.question,
+                        icon: Brain,
+                        onEdit: updateQuestion,
+                        onDelete: deleteQuestion,
+                        defaultExpanded: true
+                    })}
+                    columns={{ sm: 1, md: 1, lg: 1, xl: 1 }}
+                />
+            </DataSection>
 
         </div >
     );

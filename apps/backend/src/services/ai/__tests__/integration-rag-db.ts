@@ -117,14 +117,14 @@ async function testDatabaseConnections(): Promise<DataSourceCheck[]> {
   // 6. Test SocialPost connection
   checks.push({
     source: 'Social Posts',
-    table: 'raw_social_posts',
+    table: 'social_posts',
     query: 'Count social posts',
     expected: 'Should return count >= 0',
     result: 'PENDING'
   });
 
   try {
-    const count = await prisma.rawSocialPost.count();
+    const count = await prisma.socialPost.count();
     checks[5].result = 'PASS';
     checks[5].details = `Found ${count} social posts`;
   } catch (error) {

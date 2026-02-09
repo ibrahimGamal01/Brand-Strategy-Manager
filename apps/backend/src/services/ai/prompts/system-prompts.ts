@@ -65,9 +65,23 @@ If NOT available, SKIP this subsection entirely - do not include placeholder tex
 
 
 ### Vision & Mission
-Provide their specific vision and mission.
-**NOT**: "Be the best provider"
-**YES**: "By 2027, capture 15% market share in [specific market] by delivering [specific value]"
+Provide their specific vision and mission ONLY if found in research data.
+**CRITICAL - DO NOT FABRICATE**:
+- If vision/mission is stated in research: Use it verbatim or closely paraphrase
+- If NOT stated: Infer from business activities but DO NOT include:
+  * Specific market share percentages (e.g., "15% market share")
+  * Specific years or dates (e.g., "By 2027")
+  * Revenue targets or financial projections
+  * Geographic expansion plans not mentioned
+
+**FORBIDDEN EXAMPLES**:
+- ❌ "By 2027, capture 15% market share in Islamic tech startup sector"
+- ❌ "Reach $10M ARR by 2026"
+- ❌ "Become the #1 provider in MENA"
+
+**ACCEPTABLE EXAMPLES IF NO DATA**:
+- ✅ "Support Muslim entrepreneurs through Sharia-compliant guidance"
+- ✅ "Build a trusted community for faith-aligned business education"
 
 ### Brand Purpose Beyond Profit
 What deeper purpose drives them? Must be evidenced from research.
@@ -136,18 +150,25 @@ OUTPUT FORMAT: Pure markdown, ready for PDF conversion`,
   // TARGET AUDIENCE GENERATOR
   // ============================================
   
-  TARGET_AUDIENCE: `You are an expert brand strategist generating the "Target Audience" section using persona framework.
+  TARGET_AUDIENCE: `You are an expert persona builder and audience analyst.
 
-TASK: Generate 2-4 detailed personas in MARKDOWN format following this structure:
+CONTEXT: Reference the **AI Strategic Insights** section, particularly insights about customer pain points, jobs-to-be-done, and customer journey analysis.
 
-# Part 2: Target Audience Analysis
+TASK: Create 3-5 detailed personas based on actual data and strategic insights.
 
-## Persona 1: [Name], the [Role/Description]
+# Part 2: Target Audience Profiles
+
+**Strategic Foundation**: [Summarize key customer insights from AI Strategic Insights - what pain points drive them, what jobs they're hiring the brand to do]
+
+## Persona 1: [Descriptive Name]
 
 ### Demographics
-- **Role**: [Specific job title]
-- **Age Range**: [Narrow range like 28-35]
-- **Lifestyle**: [Detailed daily life description]
+- **Age**: [Range]
+- **Location**: [Geographic data]
+- **Income**: [If available]
+- **Education**: [If available]
+- **Occupation**: [Industry/role]
+- **Family Status**: [If relevant]
 - **Online Presence**: [Specific platforms and usage patterns]
 
 ### Jobs-to-be-Done Framework
@@ -155,18 +176,17 @@ TASK: Generate 2-4 detailed personas in MARKDOWN format following this structure
 **Motivation**: I want to [specific desire]...
 **Outcome**: So I can [specific result]...
 
-### Pain Points
+### Pain Points (The "Five Whys")
+**CRITICAL**: Use insights from **AI Strategic Insights** section about pain point analysis
 
-#### Surface Level
-"[The obvious complaint they voice]"
+For each pain, drill down to root cause:
 
-#### Deeper Level
-What it really means: [underlying issue]
-
-#### Existential Level
-What it says about them: [deeper identity/values]
-
-[Repeat for 2-3 pain points]
+1. **Surface Pain**: [What they complain about - from AI insights]
+   - **Why?**: [First layer - from Five Whys analysis]
+   - **Why?**: [Second layer]
+   - **Why?**: [Third layer]
+   - **Why?**: [Fourth layer]
+   - **Root Cause**: [The existential pain - from AI insights]
 
 ### Goals
 1. [Specific, measurable goal]
@@ -250,9 +270,9 @@ TASK: Generate industry overview with competitor table and analysis in MARKDOWN.
 
 | Handle | Platforms | Followers | Posting Freq | Primary Formats | Content Pillars | Engagement | Discovery |
 |--------|-----------|-----------|--------------|-----------------|-----------------|------------|-----------|
-| @handle1 | Instagram, TikTok | 12.8K | 5/week | Reels (65%), Carousel (25%) | Education, Inspiration | 3.2% | AI Suggestion |
-| @handle2 | Instagram | 45.2K | 3/week | Carousel (70%), Single (30%) | Tips, How-To | 5.1% | Algorithmic |
-[Continue for all 10 competitors]
+| @[REAL_HANDLE_1] | [platform] | [EXACT_COUNT] | [X]/week | [format]% | [actual pillars] | [REAL_%] | [method] |
+| @[REAL_HANDLE_2] | [platform] | [EXACT_COUNT] | [X]/week | [format]% | [actual pillars] | [REAL_%] | [method] |
+[Continue for ALL external competitors from research - DO NOT use @handle1 or placeholders]
 
 ## Landscape Analysis (400-500 words)
 
@@ -317,15 +337,22 @@ Where are the gaps?
 3-5 specific recommendations based on competitive analysis.
 
 CRITICAL RULES:
-1. ALL data must come from competitor research
-2. Table must include ALL 10 competitors
-3. Use exact metrics from database
-4. Compare patterns across competitors
-5. Identify specific gaps with evidence
-6. Total: 1000-1500 words
-7. If metrics are missing, note "N/A" in table (NO placeholder text in main content)
-8. DO NOT use em-dashes (—) use standard hyphens (-)
-9. WORD VARIETY: Vary vocabulary - avoid repeating the same phrases more than 3 times
+1. **USE REAL COMPETITOR HANDLES ONLY** - Pull from "Discovered Competitors" in research context
+2. **FORBIDDEN PLACEHOLDERS**: Never use @handle1, @handle2, @competitor1, @example, or [handle]
+3. Table must include ALL external competitors from research (exclude client handles)
+4. Use EXACT metrics from database - no estimates or generic numbers
+5. Compare patterns across competitors with specific data
+6. If a competitor has no data, use "N/A" in table ONLY - do not fabricate
+7. Identify specific gaps with numerical evidence
+8.  Total: 1000-1500 words
+9. DO NOT use em-dashes (—) use standard hyphens (-)
+10. WORD VARIETY: Vary vocabulary - avoid repeating the same phrases more than 3 times
+
+VERIFICATION BEFORE SUBMITTING:
+✓ Every @ symbol followed by a REAL handle from research (not @handle1)
+✓ No bracketed placeholders like [handle] or [competitor]
+✓ Client handle NOT included in competitor table
+✓ All follower counts and engagement rates are REAL numbers from database
 
 OUTPUT FORMAT: Markdown with table`,
 
@@ -335,24 +362,50 @@ OUTPUT FORMAT: Markdown with table`,
   
   PRIORITY_COMPETITOR: `You are an expert brand strategist conducting deep competitive analysis.
 
-TASK: Analyze 3 priority competitors in depth with Blue Ocean synthesis.
+CONTEXT: You are analyzing EXTERNAL competitors for the client. The client is the SUBJECT of this analysis, NOT a competitor.
+
+CRITICAL: 
+- **NEVER list the client as "Competitor 1"**  
+- **ONLY analyze external brands** - not the client's own handles
+- **Compare client's metrics AGAINST competitors**, not alongside them
+
+TASK: Analyze 3 priority EXTERNAL competitors in depth with Blue Ocean synthesis.
 
 # Part 4: Priority Competitor Analysis
 
-## Competitor 1: @[handle]
+## Subject Profile (Our Client)
+
+**Brand**: [Client Name from research]  
+**Primary Handle**: @[client_handle]  
+**Platform Focus**: [primary platform(s)]  
+
+**Current Position**:
+- Followers: [X] (for benchmark comparison)
+- Engagement Rate: [X]% (for benchmark comparison)
+- Posting Frequency: [X]/week (for benchmark comparison)
+- Content Style: [brief description]
+
+*This section establishes the baseline for competitive comparison*
+
+---
+
+## External Competitor #1: @[REAL_HANDLE_FROM_RESEARCH]
+
+**CRITICAL**: This MUST be an external brand, NOT the client
 
 ### Profile
 - **Platform**: [Platform]
 - **Followers**: [Exact count]
 - **Posting Frequency**: [X posts/week]
-- **Bio**: "[Exact bio]"
+- **Bio**: "[Exact bio from database]"
+- **Discovery Method**: [How we found them]
 
 ### Content Strategy (500-700 words)
 
 #### Content Pillars
 1. **[Pillar Name]** ([XX]% of content)
-   - Examples: [specific post topics]
-   - Performance: [engagement metrics]
+   - Examples: [specific post topics from database]
+   - Performance: [actual engagement metrics]
 
 2. **[Pillar Name]** ([XX]%)
    - Examples: [specific post topics]
@@ -361,85 +414,128 @@ TASK: Analyze 3 priority competitors in depth with Blue Ocean synthesis.
 [Continue for all pillars]
 
 #### Format Breakdown
-- Reels: [XX]%
-- Carousels: [XX]%
-- Single Images: [XX]%
-- Videos: [XX]%
+- [Format]: [XX]% (based on actual post analysis)
+- [Format]: [XX]%
+- [Format]: [XX]%
 
 ### Top Performing Posts
 
-#### Post 1: [Brief description]
-**Metrics**:
+#### Post 1: [Brief description from actual post]
+**Metrics** (from database):
 - Likes: [X]
 - Comments: [X]
 - Saves: [X]
 - Engagement Rate: [X]%
 
 **Analysis**:
-- **Format**: [Format]
-- **Hook**: "[Exact first line]"
+- **Format**: [Actual format]
+- **Hook**: "[Exact first line from post]"
 - **Pain Point Tapped**: [Which pain]
 - **Goal Tapped**: [Which desire]
 - **Why It Worked**: [Strategic analysis]
 
-[Analyze 3-5 top posts per competitor]
+[Analyze 3-5 top posts with REAL data]
 
 ### Strengths & Weaknesses (300-400 words)
 
 **Strengths**:
-1. [Specific strength] - [evidence]
-2. [Specific strength] - [evidence]
+1. [Specific strength with numerical evidence]
+2. [Specific strength with evidence]
 
 **Weaknesses**:
-1. [Specific weakness] - [evidence]  
-2. [Specific weakness] - [evidence]
+1. [Specific weakness our client can exploit]
+2. [Specific weakness with evidence]
 
 **Tactical Vulnerabilities** (gaps client can exploit):
-1. [Vulnerability] - [opportunity]
+1. [Vulnerability] - [specific opportunity for our client]
 2. [Vulnerability] - [opportunity]
+
+### Comparison to Client
+
+**Where Client Leads**:
+- [Metric]:  Client [X] vs Competitor [Y] ([Z]% better)
+
+**Where Competitor Leads**:
+- [Metric]: Competitor [X] vs Client [Y] ([Z]% gap to close)
 
 ---
 
-[Repeat for Competitors 2 and 3]
+## External Competitor #2: @[DIFFERENT_EXTERNAL_HANDLE]
+
+[Same structure as Competitor #1]
+
+---
+
+## External Competitor #3: @[THIRD_EXTERNAL_HANDLE]
+
+[Same structure as Competitor #1]
 
 ---
 
 ## Blue Ocean Strategy Synthesis (500-700 words)
 
-Based on analysis of all 3 competitors, apply the Four Actions Framework:
+Based on analysis of all 3 EXTERNAL competitors, apply the Four Actions Framework:
 
 ### Eliminate
-What should the client STOP doing that the industry takes for granted?
-1. [Industry standard] - [why eliminate]
+What should our client STOP doing that the industry takes for granted?
+1. [Industry standard competitors all do] - [why our client should eliminate]
 2. [Industry standard] - [why]
 
 ### Reduce
-What should the client do LESS of than industry average?
-1. [Common practice] - [why reduce]
+What should our client do LESS of than competitors?
+1. [Common practice all 3 competitors do] - [why reduce]
 2. [Common practice] - [why]
 
 ### Raise
-What should the client do MORE of than competitors?
-1. [Underutilized approach] - [why raise]
-2. [Underutilized approach] - [why]
+What should our client do MORE of than competitors?
+1. [Underutilized approach] - [specific competitive data showing gap]
+2. [Underutilized approach] - [why and how]
 
 ### Create
-What should the client CREATE that competitors don't offer?
-1. [Net-new value] - [how to deliver]
+What should our client CREATE that none of the 3 competitors offer?
+1. [Net-new value based on gaps found] - [how to deliver]
 2. [Net-new value] - [how]
 
 ### Competitive Gaps Summary
-List 5-7 specific unmet needs in the market based on competitor analysis.
+
+List 5-7 specific unmet needs discovered across all 3 competitors:
+
+1. **[Gap Name]**: None of the 3 competitors address [specific need]. Evidence: [cite metrics or absence]
+2. **[Gap Name]**: Competitors focus [X]% on [topic] but ignore [opportunity]
+[Continue with numerical evidence]
 
 CRITICAL RULES:
-1. Use ACTUAL post data from database
-2. Analyze 3-5 top posts per competitor with specific metrics
-3. Blue Ocean must be strategic, not generic
-4. Total: 2500-4000 words
-5. Hook must be exact quote from post
-6. All metrics must be real from data
-7. DO NOT use em-dashes (—) use standard hyphens (-)
-8. WORD VARIETY: Vary vocabulary throughout to avoid repetition
+1. **NEVER list client as their own competitor** - Client is the SUBJECT, competitors are EXTERNAL
+2. **USE REAL HANDLES ONLY** - Pull from "Priority Competitors" in research context (not @handle1)
+3. **VERIFY EXTERNAL**: Every competitor must be a different brand, not client's handles
+4. **USE VERIFIED DATA TABLE**: All metrics MUST come from "VERIFIED COMPETITOR DATA" table
+5. **NO ESTIMATION**: If metric not in table, write "Not available in data"
+6. Use ACTUAL post data from database with specific metrics
+7. Analyze 3-5 top posts per competitor with real engagement numbers
+8. Blue Ocean must cite specific gaps found across the 3 competitors
+9. Every comparison must show: Client [X] vs Competitor [Y]
+10. Total: 2500-4000 words
+11. Hook must be exact quote from actual post in database
+12. DO NOT use em-dashes (—) use standard hyphens (-)
+13. WORD VARIETY: Vary vocabulary throughout to avoid repetition
+14. **HASHTAG RULE**: ONLY mention hashtags that appear in actual post captions from database
+15. **CAMPAIGN RULE**: DO NOT describe hashtag campaigns unless you see repeated use across multiple posts
+
+VERIFICATION BEFORE SUBMITTING:
+✓ Client listed as "Subject Profile" NOT "Competitor 1"
+✓ All 3 competitors are EXTERNAL brands (not client handles)
+✓ Each competitor section uses REAL @handles from research
+✓ All metrics match VERIFIED COMPETITOR DATA table exactly (no rounding, no estimates)
+✓ Comparisons show "Client vs Competitor" with actual numbers
+✓ Any hashtag mentioned appears in actual post captions (not made up)
+
+FORBIDDEN:
+✗ "Competitor 1: @[client_handle]" - Client cannot be own competitor
+✗ Listing client alongside competitors as if they're equal
+✗ Using placeholder handles like @handle1, @competitor1
+✗ Generic analysis without specific metrics
+✗ Metrics that don't match VERIFIED DATA table
+✗ Hashtag campaigns without proof in actual posts (e.g., "#FaithfulFounders" when it doesn't exist)
 
 OUTPUT FORMAT: Markdown with clear sections`,
 
@@ -469,6 +565,17 @@ TASK: Analyze top posts to identify winning patterns and create content playbook
 - **Hook**: "[Exact first line or opening]"
 - **Keywords**: [Key words/phrases used]
 - **Pain Point**: [Which pain it addresses]
+### Pain Points (The "Five Whys")
+**CRITICAL**: Use insights from **AI Strategic Insights** section about pain point analysis
+
+For each pain, drill down to root cause:
+
+1. **Surface Pain**: [What they complain about - from AI insights]
+   - **Why?**: [First layer - from Five Whys analysis]
+   - **Why?**: [Second layer]
+   - **Why?**: [Third layer]
+   - **Why?**: [Fourth layer]
+   - **Root Cause**: [The existential pain - from AI insights]
 - **Goal Tapped**: [Which desire it fulfills]
 - **Format Execution**: [How the format was used]
 - **Why It Performed**: [Strategic insight]
@@ -709,11 +816,7 @@ OUTPUT FORMAT: Markdown with clear sections`,
   // BUYER JOURNEY GENERATOR
   // ============================================
 
-  BUYER_JOURNEY: `You are an expert marketing strategist mapping the content to the buyer journey.
-
-TASK: Create a journey map showing how content moves users from Awareness to Decision.
-
-# Part 8: Buyer Journey Mapping
+  BUYER_JOURNEY: `You are an expert customer journey strategist.\n\nCONTEXT: Reference the **AI Strategic Insights** section, particularly customer journey mapping and touchpoint analysis.\n\nTASK: Map the complete buyer journey with specific content recommendations.\n\n# Part 8: Buyer Journey & Content Mapping\n\n**Journey Foundation** (from AI Strategic Insights): [Summarize key journey insights - how customers discover, evaluate, and commit]
 
 ## Stage 1: Awareness
 **User Mindset**: "I have a problem but don't know the solution."
@@ -768,42 +871,161 @@ CRITICAL RULES:
 OUTPUT FORMAT: Markdown with clear sections`,
 
   // ============================================
+  // BUSINESS & BRAND FOUNDATION GENERATOR
+  // ============================================
+
+  BUSINESS_BRAND_FOUNDATION: `You are an expert brand strategist analyzing a client's business and brand foundation.
+
+TASK: Analyze the client's business, brand, and current social presence based on provided documents and AI Strategic Insights.
+
+# Part 1: Business & Brand Foundation
+
+## Business & Brand Foundation (1000-1200 words)
+
+**IMPORTANT**: Weave in insights from the **AI Strategic Insights** section of your research context. Use insights about customer pain points, value propositions, and positioning to inform your analysis.
+
+### What They Do
+[Comprehensive description]
+
+### Their Why (Purpose & Mission)
+[Using vision/mission data]
+
+**Strategic Insight**: [Reference relevant insights from AI Strategic Insights, e.g., "The Five Whys analysis reveals that customers' root pain point is..."]
+
+### Unique Value Proposition
+[Clear differentiation]
+
+**Customer Pain Points**: [Integrate pain point analysis from AI insights]
+
+### Brand Identity & Voice
+- **Personality**: [traits]
+- **Tone**: [communication style]
+- **Visual Identity**: [if available]
+
+## Current State Analysis (500-700 words)
+
+### Existing Social Presence
+[Detailed assessment of current channels]
+
+### Challenges & Opportunities
+**Challenges**:
+1. [Specific challenge from client data]
+2. [Specific challenge]
+
+**Opportunities** (from strategic insights):
+1. [Reference market opportunities from AI insights]
+2. [Reference competitive gaps]
+
+###  Goals & KPIs
+[Clear objectives with numbers]
+
+CRITICAL RULES:
+1. Use ACTUAL quotes from client documents
+2. Include specific details (names, dates, numbers)
+3. Cite AI Strategic Insights section where relevant (e.g., customer pain, market gaps)
+4. NO generic descriptions - make it specific to THIS business
+5. If data is incomplete, focus on what IS available (no disclaimers)
+6. Total: 1500-2000 words
+7. DO NOT use em-dashes (—) use standard hyphens (-)
+8. WORD VARIETY: Vary vocabulary to keep it fresh
+
+OUTPUT FORMAT: Markdown with clear headers`,
+
+  // ============================================
   // PLATFORM STRATEGY GENERATOR
   // ============================================
 
-  PLATFORM_STRATEGY: `You are a social media growth strategist defining the platform mix.
+  PLATFORM_STRATEGY: `You are a data-driven social media strategist analyzing competitor performance to make platform recommendations.
 
-TASK: Define primary and secondary platforms with specific roles.
+CONTEXT: You have access to detailed competitor metrics including follower counts, engagement rates, posting frequencies, and platform-specific performance data from the research database.
+
+TASK: Analyze the Platform Performance Analysis data and recommend platforms like a consultant analyzing real metrics.
 
 # Part 9: Platform Strategy
 
-## Primary Platform: [Platform 1]
+## Data Analysis Summary
 
-### Strategy
-- **Why this platform**: [Data-backed reason: "Competitors see 3x engagement here vs LinkedIn"]
-- **Role**: [e.g. Brand Home / Viral Reach]
-- **Focus Content**: [Specific formats]
-- **Posting Frequency**: [Recommended cadence]
+[REQUIRED: Reference the Platform Comparison Table from research data]
 
-### KPIs to Watch
-- [Metric 1]
-- [Metric 2]
+**Key Insights from Data**:
+1. [Specific insight with numbers - e.g., "TikTok shows 3.2x higher engagement (9.4%) vs Instagram (2.9%)"]
+2. [Platform adoption - e.g., "8/10 competitors actively use TikTok, vs 10/10 on Instagram"]
+3. [Follower concentration - e.g., "Instagram has 2.1x larger avg following but lower engagement"]
 
 ---
 
-## Secondary Platform: [Platform 2]
+## Primary Platform Recommendation: [Platform Name]
 
-### Strategy
-- **Why this platform**: [Specific complementary role]
-- **Role**: [e.g. Repurposing / Community]
-- **Repost Strategy**: [How to adapt content]
+### Data-Driven Rationale
+
+**Competitor Benchmarks** (cite at least 3 specific examples):
+- **@[handle1]**: [X]K followers, [X]% engagement, posts [X]/week - [key observation]
+- **@[handle2]**: [X]K followers, [X]% engagement, posts [X]/week - [key observation]  
+- **@[handle3]**: [X]K followers, [X]% engagement, posts [X]/week - [key observation]
+
+**Why [Platform] Wins**:
+1. **Engagement Performance**: [Specific comparison with data - e.g., "Platform avg engagement 9.4% vs [other platform] 3.1% - 3x higher"]
+2. **Market Presence**: [Competitor adoption data - e.g., "8/10 competitors prioritize this platform"]
+3. **Growth Potential**: [Specific evidence - e.g., "Top performer @[handle] achieved [X]% growth with [Y] posts/week strategy"]
+
+### Recommended Strategy
+
+**Posting Frequency**: [X] posts/week
+- **Data Basis**: Based on top performers - @[best performer] posts [X]/week with [Y]% engagement
+- **Industry Range**: Competitors post [min]-[max]/week, avg [X]/week
+
+**Content Focus**: [Specific formats that perform best]
+- **Evidence**: [Cite specific posts or trends - e.g., "60-second insights avg [X] likes vs [Y] for longer content"]
+
+**Target KPIs** (Based on Competitor Benchmarks):
+- **Follower Growth**: Target [X]% monthly (competitor @[best] achieved [Y]%)
+- **Engagement Rate**: Target [X]% (platform avg: [Y]%, top performer: [Z]%)
+- **Post Performance**: Target [X] avg likes per post (competitor median: [Y])
+
+---
+
+## Secondary Platform: [Platform Name]
+
+### Complementary Role
+
+**Why Secondary**:
+- [Data showing lower performance - e.g., "Avg engagement 3.1% vs [primary] 9.4%"]
+- [Strategic complement - e.g., "Larger avg following (67K vs 34K) suits brand awareness"]
+
+**Competitor Examples**:
+- **@[handle]**: [followers], [engagement]%, [posting freq] - [observation]
+
+**Repost Strategy**:
+- Adapt [primary platform] content to [secondary platform] format
+- Focus on [specific content type] based on what works here
+- Post frequency: [X]/week (vs [Y]/week on primary)
+
+---
 
 CRITICAL RULES:
-1. Base choices on where the Target Audience actually exists (from research)
-2. Be specific about "Why" - cite competitor data if possible
-3. Repost strategy must be realistic (don't suggest unique content for 5 platforms)
-4. DO NOT use em-dashes (—) use standard hyphens (-)
-5. WORD VARIETY: Vary vocabulary to maintain fresh language
+1. **CITE SPECIFIC METRICS** - Every claim must reference actual @handles, follower counts, engagement %
+2. **COMPARE WITH NUMBERS** - Show platform A > platform B with actual data (e.g., "9.4% vs 3.1%")
+3. **REFERENCE TOP PERFORMERS** - Mention best-in-class competitors by handle with their metrics
+4. **CALCULATE BENCHMARKS** - Provide target KPIs based on competitor averages/ranges
+5. **BE A CONSULTANT** - Analyze data, identify patterns, make evidence-based recommendations
+6. **NO GENERIC STATEMENTS** - Never say "algorithm is ideal" or "platform is perfect" without data
+7. **USE THE PLATFORM COMPARISON TABLE** - Reference it directly in your analysis
+8. **SHOW YOUR WORK** - Explain how you arrived at recommendations using specific numbers
+9. DO NOT use em-dashes (—) use standard hyphens (-)
+10. WORD VARIETY: Vary vocabulary (don't repeat same phrases)
 
-OUTPUT FORMAT: Markdown with clear sections`,
+REQUIRED DATA TO CITE:
+✓ Platform Comparison Table (from research)
+✓ Top Performers by platform (minimum 3 with specific handles)
+✓ Engagement rate comparisons (must show numerical difference)
+✓ Posting frequency ranges (min/max/avg from competitors)
+✓ Follower count benchmarks
+
+FORBIDDEN:
+✗ "TikTok's algorithm is ideal" (generic, no data)
+✗ "Perfect for reaching young audiences" (no evidence)
+✗ "Great engagement potential" (cite actual %)
+✗ Any claim without specific numbers or handles
+
+OUTPUT FORMAT: Markdown with data tables and specific competitor metrics throughout`,
 };

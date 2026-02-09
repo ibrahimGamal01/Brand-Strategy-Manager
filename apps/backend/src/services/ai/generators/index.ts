@@ -14,6 +14,8 @@ import { generateFormatRecommendations } from './format-recommendations';
 import { generateBuyerJourney } from './buyer-journey';
 import { generatePlatformStrategy } from './platform-strategy';
 import { GenerationResult } from './base-generator';
+import { addSectionTransitions } from './section-connector';
+import { validateDocument } from './document-validator';
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
@@ -117,6 +119,24 @@ export async function generateStrategyDocument(
       result.sections.platformStrategy = await generatePlatformStrategy(researchJobId);
     }
 
+    // Extract markdown from each section for transition processing
+    const sectionMarkdown: Record<string, string> = {};
+    Object.entries(result.sections).forEach(([key, value]) => {
+      if (value && value.markdown) {
+        sectionMarkdown[key] = value.markdown;
+      }
+    });
+
+    // Add smooth transitions between sections
+    const connectedSections = addSectionTransitions(sectionMarkdown);
+
+    // Update sections with connected markdown
+    Object.entries(connectedSections).forEach(([key, markdown]) => {
+      if (result.sections[key as keyof typeof result.sections]) {
+        result.sections[key as keyof typeof result.sections]!.markdown = markdown;
+      }
+    });
+
     // Calculate overall metrics
     const completedSections = Object.values(result.sections).filter(Boolean);
     const totalScore = completedSections.reduce((sum, s) => sum + s.validationScore, 0);
@@ -132,6 +152,27 @@ export async function generateStrategyDocument(
     console.log(`  Overall Score: ${result.overallScore.toFixed(1)}/100`);
     console.log(`  Total Cost: $${result.totalCost.toFixed(4)}`);
     console.log(`  Time: ${result.generationTime.toFixed(1)}s\n`);
+
+    // Run 2-pass validation
+    console.log('[Orchestrator] Running 2-pass document validation...');
+    const validationResult = await validateDocument(researchJobId, result.sections, 80);
+    
+    if (!validationResult.passed) {
+      console.error(`[Orchestrator] ⚠️  VALIDATION FAILED`);
+      console.error(`  Critical Issues: ${validationResult.issues.filter(i => i.severity === 'CRITICAL').length}`);
+      console.error(`  High Issues: ${validationResult.issues.filter(i => i.severity === 'HIGH').length}`);
+      console.error(`  Quality Score: ${validationResult.overallScore.toFixed(1)}/100 (min: 80)`);
+      
+      // Log top 3 issues for debugging
+      validationResult.issues.slice(0, 3).forEach((issue, i) => {
+        console.error(`  ${i+1}. [${issue.severity}] ${issue.section}: ${issue.issue}`);
+      });
+      
+      // Store validation results but don't block return
+      result.status = 'PARTIAL'; // Downgrade status
+    } else {
+      console.log('[Orchestrator] ✅ Validation PASSED - Document is client-ready');
+    }
 
     return result;
 

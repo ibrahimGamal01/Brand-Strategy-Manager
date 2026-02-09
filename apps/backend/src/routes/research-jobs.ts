@@ -182,6 +182,36 @@ router.get('/:id', async (req: Request, res: Response) => {
         take: 100
     });
     
+    // Transform socialProfiles posts to match frontend expectations
+    // Database uses: likesCount, commentsCount, followers, following, etc.
+    // Frontend expects: likes, comments, followerCount, followingCount, etc.
+    const transformedSocialProfiles = job.socialProfiles?.map((profile: any) => ({
+        ...profile,
+        // Transform profile-level fields
+        followerCount: profile.followers ?? 0,
+        followingCount: profile.following ?? 0,
+        // Keep original names for backwards compatibility
+        followers: profile.followers ?? 0,
+        following: profile.following ?? 0,
+        posts: profile.posts?.map((post: any) => ({
+            ...post,
+            // Transform field names for frontend compatibility
+            likes: post.likesCount ?? 0,
+            comments: post.commentsCount ?? 0,
+            shares: post.sharesCount ?? 0,
+            views: post.viewsCount ?? 0,
+            plays: post.playsCount ?? 0,
+            // Map database fields to frontend Post interface
+            id: post.id,
+            caption: post.caption || '',
+            postUrl: post.url,
+            url: post.url,
+            postedAt: post.postedAt,
+            thumbnailUrl: post.thumbnailUrl,
+            mediaAssets: post.mediaAssets || [],
+        })) || []
+    })) || [];
+
     // Merge aggregated data into the job response object
     // This makes the frontend show ALL historical data for this client
     const responseJob = {
@@ -192,6 +222,7 @@ router.get('/:id', async (req: Request, res: Response) => {
         communityInsights: aggregatedInsights,
         aiQuestions: aggregatedQuestions,
         rawSearchResults: aggregatedRawResults,
+        socialProfiles: transformedSocialProfiles, // Use transformed profiles
     };
 
     res.json(responseJob);
@@ -224,6 +255,34 @@ router.get('/', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('[API] Failed to fetch research jobs:', error);
     res.status(500).json({ error: 'Failed to fetch research jobs' });
+  }
+});
+
+/**
+ * DELETE /api/research-jobs/:id/clear-competitors
+ * Clear all discovered competitors for a research job
+ */
+router.delete('/:id/clear-competitors', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    
+    console.log(`[API] Clearing all competitors for job ${id}...`);
+    
+    // Delete all discovered competitors for this job
+    const result = await prisma.discoveredCompetitor.deleteMany({
+      where: { researchJobId: id }
+    });
+    
+    console.log(`[API] Deleted ${result.count} competitors`);
+    
+    res.json({ 
+      success: true, 
+      message: `Cleared ${result.count} competitors`,
+      deletedCount: result.count
+    });
+  } catch (error: any) {
+    console.error('[API] Failed to clear competitors:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -362,12 +421,13 @@ router.post('/:id/rerun/:scraper', async (req: Request, res: Response) => {
             }
         }
 
-        // SOURCE 3: AI Suggestions
+        // SOURCE 3: AI Suggestions (Multi-Platform: Instagram + TikTok)
         if (scraper === 'competitors' || scraper === 'competitors_ai') {
-            console.log(`[Competitors] Source 3: Running AI Suggestions for brand "${brandName}" in niche "${niche}"...`);
+            console.log(`[Competitors] Source 3: Running AI Multi-Platform Discovery for brand "${brandName}" in niche "${niche}"...`);
             try {
-                const aiSuggestions = await suggestCompetitorsWithAI(brandName || handle, niche || 'General');
-                console.log(`[Competitors] Received ${aiSuggestions.length} suggestions from AI`);
+                const { suggestCompetitorsMultiPlatform } = await import('../services/ai/competitor-discovery');
+                const aiSuggestions = await suggestCompetitorsMultiPlatform(brandName || handle, niche || 'General');
+                console.log(`[Competitors] Received ${aiSuggestions.length} multi-platform suggestions from AI`);
                 
                 const formatted = aiSuggestions.map(s => ({
                     handle: s.handle,
@@ -397,7 +457,7 @@ router.post('/:id/rerun/:scraper', async (req: Request, res: Response) => {
             const validatedCompetitors = filterValidatedCompetitors(
                 allCompetitors,
                 validationResults,
-                0.5 // Minimum confidence
+                0.75 // VERY strict minimum confidence (was 0.7, originally 0.5)
             );
             
             console.log(`[Competitors] Validation complete: ${validatedCompetitors.length}/${allCompetitors.length} passed validation`);
@@ -505,6 +565,152 @@ router.get('/:id/visual-comparison', async (req: Request, res: Response) => {
         res.json(assets);
     } catch (error: any) {
         console.error('[API] Failed to get visual comparison:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+/**
+ * POST /:id/discover-tiktok
+ * Discover TikTok competitors for a research job
+ * Progressive: Returns discovered competitors immediately, scraping happens in background
+ */
+router.post('/:id/discover-tiktok', async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        
+        console.log(`[API] TikTok discovery triggered for job ${id}`);
+        
+        // Get research job and client info
+        const job = await prisma.researchJob.findUnique({
+            where: { id },
+            include: {
+                client: {
+                    include: {
+                        clientAccounts: true
+                    }
+                }
+            }
+        });
+        
+        if (!job) {
+            return res.status(404).json({ error: 'Research job not found' });
+        }
+        
+        const client = job.client;
+        const inputData = job.inputData as any || {};
+        const brandName = client.name || inputData.brandName || '';
+        const niche = inputData.niche || 'business';
+        
+        console.log(`[API] Discovering TikTok competitors for "${brandName}" in "${niche}"`);
+        
+        // 1. Call AI to suggest TikTok competitors
+        const { suggestTikTokCompetitors } = await import('../services/ai/competitor-discovery');
+        const aiSuggestions = await suggestTikTokCompetitors(brandName, niche, inputData.description);
+        
+        console.log(`[API] AI suggested ${aiSuggestions.length} TikTok competitors`);
+        
+        if (aiSuggestions.length === 0) {
+            return res.json({
+                success: true,
+                discovered: 0,
+                competitors: [],
+                message: 'No TikTok competitors found'
+            });
+        }
+        
+        // 2. Save discovered competitors to database
+        const savedCompetitors = [];
+        
+        for (const suggestion of aiSuggestions) {
+            try {
+                // Create competitor record
+                const competitor = await prisma.competitor.upsert({
+                    where: {
+                        clientId_platform_handle: {
+                            clientId: client.id,
+                            platform: 'tiktok',
+                            handle: suggestion.handle
+                        }
+                    },
+                    update: {},
+                    create: {
+                        clientId: client.id,
+                        handle: suggestion.handle,
+                        platform: 'tiktok'
+                    }
+                });
+                
+                // Create discovered competitor record
+                const discovered = await prisma.discoveredCompetitor.create({
+                    data: {
+                        researchJobId: id,
+                        competitorId: competitor.id,
+                        handle: suggestion.handle,
+                        platform: 'tiktok',
+                        relevanceScore: suggestion.relevanceScore,
+                        discoveryReason: 'ai_suggestion_tiktok',
+                        status: 'SUGGESTED'
+                    }
+                });
+                
+                savedCompetitors.push({
+                    id: discovered.id,
+                    handle: suggestion.handle,
+                    platform: 'tiktok',
+                    relevanceScore: suggestion.relevanceScore,
+                    status: 'SUGGESTED',
+                    reasoning: suggestion.reasoning
+                });
+                
+                console.log(`[API] Saved TikTok competitor: @${suggestion.handle} (${Math.round(suggestion.relevanceScore * 100)}%)`);
+                
+            } catch (error: any) {
+                console.error(`[API] Failed to save TikTok competitor ${suggestion.handle}:`, error.message);
+            }
+        }
+        
+        // 3. Queue background scraping for discovered competitors (don't wait)
+        console.log(`[API] Queuing background scraping for ${savedCompetitors.length} TikTok competitors...`);
+        
+        // Import scraper and scrape in background
+        (async () => {
+            const { scrapeCompetitorsIncremental } = await import('../services/discovery/competitor-scraper');
+            
+            // Small delay before starting to ensure response is sent first
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            console.log(`[Background] Starting TikTok competitor scraping for job ${id}`);
+            
+            // Fetch TikTok competitors for this job to pass to scraper
+            const tiktokCompetitors = await prisma.discoveredCompetitor.findMany({
+                where: {
+                    researchJobId: id,
+                    platform: 'tiktok',
+                    status: 'SUGGESTED'
+                },
+                select: {
+                    id: true,
+                    handle: true,
+                    platform: true
+                }
+            });
+            
+            await scrapeCompetitorsIncremental(id, tiktokCompetitors);
+            console.log(`[Background] Completed TikTok competitor scraping for job ${id}`);
+        })().catch(err => {
+            console.error(`[Background] TikTok scraping failed:`, err);
+        });
+        
+        // 4. Return immediately with discovered competitors
+        res.json({
+            success: true,
+            discovered: savedCompetitors.length,
+            competitors: savedCompetitors,
+            message: `Discovered ${savedCompetitors.length} TikTok competitors. Scraping in background...`
+        });
+        
+    } catch (error: any) {
+        console.error('[API] TikTok discovery failed:', error);
         res.status(500).json({ error: error.message });
     }
 });

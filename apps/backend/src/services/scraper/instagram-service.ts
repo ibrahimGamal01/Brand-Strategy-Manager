@@ -1,6 +1,7 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
+import { createGraphQLScraper } from './instagram-graphql';
 
 const execAsync = promisify(exec);
 
@@ -48,13 +49,15 @@ export interface ScrapeResult {
   success: boolean;
   data?: InstagramProfileData;
   error?: string;
-  scraper_used?: 'python' | 'puppeteer';
+  scraper_used?: 'apify' | 'graphql' | 'python' | 'puppeteer';
 }
 
 /**
  * Scrape Instagram profile using multi-layer strategy
- * Layer 1: Python Instaloader (primary) with OASP powers
- * Layer 2: Puppeteer (fallback)
+ * Layer 0: Apify API (primary) - most reliable with accurate post metrics
+ * Layer 1: GraphQL API (secondary) - fast but may hit rate limits
+ * Layer 2: Python Instaloader (tertiary) - with OASP powers
+ * Layer 3: Puppeteer (fallback) - last resort
  */
 export async function scrapeInstagramProfile(
   handle: string,
@@ -63,7 +66,53 @@ export async function scrapeInstagramProfile(
 ): Promise<ScrapeResult> {
   const cleanHandle = handle.replace('@', '');
 
-  // Layer 1: Try Python Instaloader first
+  // Layer 0: Try Apify API first (most reliable, accurate metrics)
+  try {
+    console.log(`[Instagram] Attempting Apify scraper for @${cleanHandle}...`);
+    
+    const { scrapeWithApify } = await import('./apify-instagram-scraper');
+    const result = await scrapeWithApify(cleanHandle, postsLimit);
+    
+    // Check if we got meaningful data with posts
+    if (result.success && result.data && result.data.posts && result.data.posts.length > 0) {
+      console.log(`[Instagram] ✓ Apify scraper succeeded with ${result.data.posts.length} posts`);
+      return {
+        success: true,
+        data: result.data as any,
+        scraper_used: 'apify'
+      };
+    }
+    
+    // Apify succeeded but returned no posts - try next layer
+    console.log('[Instagram] Apify returned no posts, trying GraphQL...');
+  } catch (error: any) {
+    console.log(`[Instagram] Apify scraper failed: ${error.message}, falling back to GraphQL...`);
+  }
+
+  // Layer 1: Try GraphQL API (fast, but may have rate limits)
+  try {
+    console.log(`[Instagram] Attempting GraphQL scraper for @${cleanHandle}...`);
+    
+    const graphqlScraper = createGraphQLScraper();
+    const result = await graphqlScraper.scrapeFullProfile(cleanHandle, postsLimit);
+    
+    // Check if we got meaningful data
+    if (result.success && result.profile && result.posts.length > 0) {
+      console.log(`[Instagram] ✓ GraphQL scraper succeeded with ${result.posts.length} posts`);
+      return {
+        success: true,
+        data: result.profile as any,
+        scraper_used: 'graphql'
+      };
+    }
+    
+    // GraphQL succeeded but returned no posts - try next layer
+    console.log('[Instagram] GraphQL returned no posts, trying Python scraper...');
+  } catch (error: any) {
+    console.log(`[Instagram] GraphQL scraper failed: ${error.message}, falling back to Python...`);
+  }
+
+  // Layer 1: Try Python Instaloader
   try {
     console.log(`[Instagram] Attempting Python scraper for @${cleanHandle} (Deep OASP Mode)...`);
     
@@ -163,7 +212,7 @@ async function scrapeWithPuppeteer(
   console.log(`[Instagram] Using Site-Limited Search fallback for @${handle}`);
   
   // Dynamically import to avoid circular dependencies if any
-  const duckduckgoSearch = await import('../discovery/duckduckgo-search.js');
+  const duckduckgoSearch = await import('../discovery/duckduckgo-search');
     // Extract media
     const scrapedResult = await duckduckgoSearch.scrapeSocialContent({ instagram: handle }, postsLimit);
     const images = scrapedResult.images || [];
@@ -223,6 +272,29 @@ async function scrapeWithPuppeteer(
       video_url: videoUrl,
       typename: media.type === 'video' ? 'GraphVideo' : 'GraphImage',
     });
+  });
+
+  // Helper function to parse metrics from title/description
+  function extractMetricsFromText(text: string): { likes: number; comments: number } {
+    const likesMatch = text.match(/(\d+(?:,\d{3})*(?:\.\d+)?)\s*(?:likes?|❤️|hearts?)/i);
+    const commentsMatch = text.match(/(\d+(?:,\d{3})*(?:\.\d+)?)\s*(?:comments?|💬)/i);
+    
+    return {
+      likes: likesMatch ? parseInt(likesMatch[1].replace(/,/g, ''), 10) : 0,
+      comments: commentsMatch ? parseInt(commentsMatch[1].replace(/,/g, ''), 10) : 0
+    };
+  }
+
+  // Try to extract metrics from titles/descriptions
+  allMedia.forEach((media: any, index) => {
+    const textToSearch = `${media.title || ''} ${media.description || ''}`;
+    const metrics = extractMetricsFromText(textToSearch);
+    
+    // Update the corresponding post with extracted metrics
+    if (posts[index]) {
+      posts[index].likes = metrics.likes;
+      posts[index].comments = metrics.comments;
+    }
   });
 
   return {

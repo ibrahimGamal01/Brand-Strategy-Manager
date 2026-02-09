@@ -92,8 +92,15 @@ router.post('/:jobId/generate', async (req, res) => {
     // Call the generator service from Phase 2
     const result = await generateStrategyDocument(jobId, sections === 'all' ? ['all'] : sections);
 
+    // CHANGED: Save sections even if validation fails - user paid for generation!
+    // Only throw if we got NO sections at all
+    if (!result.sections || Object.keys(result.sections).length === 0) {
+      throw new Error('Generation failed - no sections generated');
+    }
+
+    console.log(`[Strategy API] Generated ${Object.keys(result.sections).length} sections with status: ${result.status}`);
     if (result.status !== 'COMPLETE') {
-      throw new Error('Generation failed or incomplete');
+      console.log(`[Strategy API] ⚠️  Validation failed but saving sections anyway (user paid for this)`);
     }
 
     // Store results in database as AiAnalysis records

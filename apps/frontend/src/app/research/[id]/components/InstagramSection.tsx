@@ -1,6 +1,8 @@
 'use client';
 
-import { Instagram, Heart, MessageCircle, Users, ExternalLink } from 'lucide-react';
+import { Instagram, Heart, MessageCircle, Users, ExternalLink, RefreshCw, Trash2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { useState } from 'react';
 
 interface Post {
     id: string;
@@ -28,9 +30,16 @@ interface InstagramSectionProps {
     };
     posts: Post[];
     platform?: 'instagram' | 'tiktok';
+    profileId?: string; // NEW: For API operations
+    onDataReset?: () => void; // NEW: Callback after reset
+    onRescrape?: () => void; // NEW: Callback after re-scrape
 }
 
-export function InstagramSection({ profile, posts, platform = 'instagram' }: InstagramSectionProps) {
+export function InstagramSection({ profile, posts, platform = 'instagram', profileId, onDataReset, onRescrape }: InstagramSectionProps) {
+    const [isResetting, setIsResetting] = useState(false);
+    const [isRescrapng, setIsRescrapng] = useState(false);
+
+
     const isInsta = platform === 'instagram';
     const profileUrl = isInsta
         ? `https://instagram.com/${profile.handle}`
@@ -43,6 +52,65 @@ export function InstagramSection({ profile, posts, platform = 'instagram' }: Ins
     const iconBgClass = isInsta
         ? "bg-gradient-to-br from-purple-500 to-pink-500"
         : "bg-black border border-gray-800";
+
+    // Handler for reset section
+    const handleReset = async () => {
+        if (!profileId) return;
+        if (!confirm(`Are you sure you want to delete all ${posts.length} posts for @${profile.handle}? This cannot be undone.`)) {
+            return;
+        }
+
+        setIsResetting(true);
+        try {
+            const response = await fetch(`http://localhost:3001/api/instagram/profile/${profileId}`, {
+                method: 'DELETE'
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to delete profile data');
+            }
+
+            const result = await response.json();
+            console.log(`[Instagram] Deleted ${result.deletedCount} posts`);
+
+            // Trigger parent callback to refresh data
+            onDataReset?.();
+        } catch (error: any) {
+            console.error('[Instagram] Reset error:', error);
+            alert(`Failed to reset section: ${error.message}`);
+        } finally {
+            setIsResetting(false);
+        }
+    };
+
+    // Handler for re-scrape
+    const handleRescrape = async () => {
+        if (!profileId) return;
+
+        setIsRescrapng(true);
+        try {
+            const response = await fetch(`http://localhost:3001/api/instagram/scrape/${profileId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ postsLimit: 30 })
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to re-scrape profile');
+            }
+
+            const result = await response.json();
+            console.log(`[Instagram] Re-scraped ${result.postsCount} posts using ${result.scraper}`);
+
+            // Trigger parent callback to refresh data
+            onRescrape?.();
+        } catch (error: any) {
+            console.error('[Instagram] Re-scrape error:', error);
+            alert(`Failed to re-scrape: ${error.message}`);
+        } finally {
+            setIsRescrapng(false);
+        }
+    };
 
     return (
         <div className="space-y-6">
@@ -93,6 +161,32 @@ export function InstagramSection({ profile, posts, platform = 'instagram' }: Ins
                             {(profile.followingCount || 0).toLocaleString()} following
                         </div>
                     </div>
+
+                    {/* Control Buttons */}
+                    {profileId && (
+                        <div className="flex items-center gap-2 mt-4 pt-3 border-t border-border/40">
+                            <Button
+                                onClick={handleRescrape}
+                                disabled={isRescrapng}
+                                size="sm"
+                                variant="default"
+                                className="text-xs h-8 gap-1.5 flex-1"
+                            >
+                                <RefreshCw className={`h-3 w-3 ${isRescrapng ? 'animate-spin' : ''}`} />
+                                {isRescrapng ? 'Re-scraping...' : 'Re-scrape Posts'}
+                            </Button>
+                            <Button
+                                onClick={handleReset}
+                                disabled={isResetting}
+                                size="sm"
+                                variant="destructive"
+                                className="text-xs h-8 gap-1.5"
+                            >
+                                <Trash2 className="h-3 w-3" />
+                                {isResetting ? 'Deleting...' : 'Reset'}
+                            </Button>
+                        </div>
+                    )}
                 </div>
             </div>
 
