@@ -2,7 +2,9 @@
 
 import { useState } from 'react';
 import { useResearchJob } from '@/hooks/useResearchJob';
+import { useResearchJobEvents } from '@/hooks/useResearchJobEvents';
 import { useParams, useRouter } from 'next/navigation';
+import { useToast } from '@/hooks/use-toast';
 import {
     ClientHeader,
     ResearchFooter,
@@ -13,13 +15,80 @@ import PhaseNavigation, { Phase } from './components/PhaseNavigation';
 import StrategyWorkspace from './components/strategy/StrategyWorkspace';
 import { Button } from '@/components/ui/button';
 import { LayoutGrid, List } from 'lucide-react';
+import { apiClient } from '@/lib/api-client';
+import { LiveActivityFeed } from './components/LiveActivityFeed';
+import { BrainWorkspacePanel } from './components/brain/BrainWorkspacePanel';
 
 export default function ResearchPage() {
     const params = useParams();
     const router = useRouter();
+    const { toast } = useToast();
+    const jobId = params.id as string;
     const [activePhase, setActivePhase] = useState<Phase>('intelligence');
     const [viewMode, setViewMode] = useState<'list' | 'cards'>('cards');
-    const { data: job, isLoading, error } = useResearchJob(params.id as string);
+    const [isContinuing, setIsContinuing] = useState(false);
+    const [isSavingContinuity, setIsSavingContinuity] = useState(false);
+    const { events, connectionState, isSseHealthy } = useResearchJobEvents(jobId);
+    const { data: job, isLoading, error, refetch } = useResearchJob(jobId, { sseHealthy: isSseHealthy });
+
+    async function handleContinueNow() {
+        try {
+            setIsContinuing(true);
+            const payload = await apiClient.continueResearchJob(jobId);
+
+            if (!payload || payload.error || !payload.success) {
+                throw new Error(payload?.error || 'Failed to continue research job');
+            }
+
+            const result = payload?.result || {};
+            const hadErrors = Array.isArray(result?.errors) && result.errors.length > 0;
+            toast({
+                title: hadErrors ? 'Continuity run finished with warnings' : 'Continuity run started',
+                description: hadErrors
+                    ? result.errors.slice(0, 2).join(' | ')
+                    : `Client targets: ${result.clientProfilesAttempted || 0}, competitor targets: ${result.competitorProfilesAttempted || 0}.`
+            });
+
+            await refetch();
+        } catch (error: any) {
+            toast({
+                title: 'Continue failed',
+                description: error.message || 'Failed to run continuity cycle',
+                variant: 'destructive'
+            });
+        } finally {
+            setIsContinuing(false);
+        }
+    }
+
+    async function handleSaveContinuity(config: { enabled: boolean; intervalHours: number }) {
+        try {
+            setIsSavingContinuity(true);
+            const intervalHours = Math.max(2, Math.floor(config.intervalHours || 2));
+            const payload = await apiClient.updateResearchContinuity(jobId, {
+                enabled: config.enabled,
+                intervalHours
+            });
+            if (!payload?.success) throw new Error(payload?.error || 'Failed to save continuity settings');
+
+            toast({
+                title: 'Continuity settings saved',
+                description: config.enabled
+                    ? `Auto-continue enabled every ${intervalHours}h`
+                    : 'Auto-continue disabled'
+            });
+
+            await refetch();
+        } catch (error: any) {
+            toast({
+                title: 'Save failed',
+                description: error.message || 'Failed to save continuity settings',
+                variant: 'destructive'
+            });
+        } finally {
+            setIsSavingContinuity(false);
+        }
+    }
 
     if (isLoading) {
         return (
@@ -63,19 +132,100 @@ export default function ResearchPage() {
     const ddgVideoResults = data.ddgVideoResults || [];
     const ddgNewsResults = data.ddgNewsResults || [];
     const searchTrends = data.searchTrends || [];
+    // Deduplicate discovered competitors across stacked runs/jobs by platform+handle.
+    // Keep the row with highest selection/status priority, falling back to newest discoveredAt.
+    const selectionPriority: Record<string, number> = {
+        TOP_PICK: 5,
+        APPROVED: 4,
+        SHORTLISTED: 3,
+        FILTERED_OUT: 2,
+        REJECTED: 1,
+    };
+    const statusPriority: Record<string, number> = {
+        SCRAPED: 6,
+        SCRAPING: 5,
+        CONFIRMED: 4,
+        SUGGESTED: 3,
+        FAILED: 2,
+        REJECTED: 1,
+    };
+    const dedupedCompetitorRows = new Map<string, any>();
+    for (const row of data.discoveredCompetitors || []) {
+        const platform = String(row?.platform || '').toLowerCase();
+        const handle = String(row?.handle || '').toLowerCase();
+        if (!platform || !handle) continue;
+
+        const key = `${platform}:${handle}`;
+        const existing = dedupedCompetitorRows.get(key);
+        if (!existing) {
+            dedupedCompetitorRows.set(key, row);
+            continue;
+        }
+
+        const nextSelectionRank = selectionPriority[String(row?.selectionState || '').toUpperCase()] || 0;
+        const existingSelectionRank = selectionPriority[String(existing?.selectionState || '').toUpperCase()] || 0;
+        const nextStatusRank = statusPriority[String(row?.status || '').toUpperCase()] || 0;
+        const existingStatusRank = statusPriority[String(existing?.status || '').toUpperCase()] || 0;
+        const nextDiscoveredAt = new Date(row?.discoveredAt || 0).getTime();
+        const existingDiscoveredAt = new Date(existing?.discoveredAt || 0).getTime();
+
+        if (
+            nextDiscoveredAt > existingDiscoveredAt ||
+            (nextDiscoveredAt === existingDiscoveredAt && nextSelectionRank > existingSelectionRank) ||
+            (nextDiscoveredAt === existingDiscoveredAt &&
+                nextSelectionRank === existingSelectionRank &&
+                nextStatusRank > existingStatusRank)
+        ) {
+            dedupedCompetitorRows.set(key, row);
+        }
+    }
+
     // Map discoveredCompetitors to competitors format
-    const competitors = (data.discoveredCompetitors || []).map((dc: any) => ({
-        id: dc.id,
-        handle: dc.handle,
-        platform: dc.platform,
-        status: dc.status,
-        discoveryReason: dc.discoveryReason,
-        relevanceScore: dc.relevanceScore,
-        postsScraped: dc.postsScraped,
-        profileUrl: dc.profileUrl,
-        followers: dc.followers,
-        engagement: dc.engagement
-    }));
+    const competitors = Array.from(dedupedCompetitorRows.values()).map((dc: any) => {
+        const followerCount = dc.competitor?.followerCount ?? dc.followerCount ?? dc.followers;
+        return {
+            id: dc.id,
+            handle: dc.handle,
+            platform: dc.platform,
+            status: dc.status,
+            discoveryReason: dc.discoveryReason,
+            relevanceScore: dc.relevanceScore,
+            postsScraped: dc.postsScraped,
+            profileUrl: dc.profileUrl,
+            followerCount,
+            followers: followerCount,
+            engagement: dc.engagement,
+            selectionState: dc.selectionState,
+            selectionReason: dc.selectionReason,
+            evidence: dc.evidence,
+            scoreBreakdown: dc.scoreBreakdown,
+            orchestrationRunId: dc.orchestrationRunId,
+        };
+    }).sort((a: any, b: any) => {
+        const selectionRank = (state?: string) => {
+            const normalized = String(state || '').toUpperCase();
+            if (normalized === 'TOP_PICK') return 5;
+            if (normalized === 'APPROVED') return 4;
+            if (normalized === 'SHORTLISTED') return 3;
+            if (normalized === 'FILTERED_OUT') return 2;
+            if (normalized === 'REJECTED') return 1;
+            return 0;
+        };
+        const statusRank = (status?: string) => {
+            const normalized = String(status || '').toUpperCase();
+            if (normalized === 'SCRAPED') return 5;
+            if (normalized === 'SCRAPING') return 4;
+            if (normalized === 'CONFIRMED') return 3;
+            if (normalized === 'SUGGESTED') return 2;
+            if (normalized === 'FAILED') return 1;
+            return 0;
+        };
+        const bySelection = selectionRank(b.selectionState) - selectionRank(a.selectionState);
+        if (bySelection !== 0) return bySelection;
+        const byScore = (Number(b.relevanceScore) || 0) - (Number(a.relevanceScore) || 0);
+        if (byScore !== 0) return byScore;
+        return statusRank(b.status) - statusRank(a.status);
+    });
     const communityInsights = data.communityInsights || [];
     const mediaAssets = data.mediaAssets || [];
     const aiQuestions = data.aiQuestions || [];
@@ -116,17 +266,10 @@ export default function ResearchPage() {
         const isTikTok = p.platform?.toLowerCase() === 'tiktok';
         const isCompetitor = competitorHandles.has(handleLower);
 
-        if (isTikTok && !isCompetitor) {
-            console.log(`[ResearchPage] Allowing TikTok profile: ${p.handle} (Not a competitor)`);
-            return true;
-        }
+        if (isTikTok && !isCompetitor) return true;
 
         return matchesClientHandle;
     });
-
-    console.log('[ResearchPage] Client Handles:', Array.from(clientHandles));
-    console.log('[ResearchPage] All Social Profiles:', data.socialProfiles?.map((p: any) => `${p.platform}:${p.handle}`));
-    console.log('[ResearchPage] Filtered API Profiles:', apiSocialProfiles.map((p: any) => `${p.platform}:${p.handle}`));
 
     // Use filtered data if available, otherwise fallback to constructing from accounts
     let socialProfiles = apiSocialProfiles.length > 0
@@ -155,6 +298,8 @@ export default function ResearchPage() {
     const researchData = {
         clientPosts,
         tiktokPosts, // Pass explicit tiktokPosts
+        clientProfileSnapshots: data.clientProfileSnapshots || [],
+        competitorProfileSnapshots: data.competitorProfileSnapshots || [],
         rawSearchResults,
         ddgImageResults,
         ddgVideoResults,
@@ -167,18 +312,30 @@ export default function ResearchPage() {
         socialProfiles,
         brandMentions: client.brandMentions || [],
         clientDocuments: client.clientDocuments || [],
+        trendDebug: inputData.trendDebug || undefined,
     };
 
     return (
         <div className="min-h-screen bg-background">
-            <ClientHeader client={client} job={data} />
+            <ClientHeader
+                client={client}
+                job={data}
+                onContinueNow={handleContinueNow}
+                onSaveContinuity={handleSaveContinuity}
+                isContinuing={isContinuing}
+                isSavingContinuity={isSavingContinuity}
+            />
+            <LiveActivityFeed events={events} connectionState={connectionState} />
+            <div className="container mx-auto px-6 pt-4">
+                <BrainWorkspacePanel jobId={jobId} onRefresh={() => void refetch()} />
+            </div>
 
             {/* Phase Navigation */}
             <PhaseNavigation
                 activePhase={activePhase}
                 onPhaseChange={setActivePhase}
                 strategyStatus={{
-                    generated: false, // TODO: Check if strategy document exists
+                    generated: false,
                     sectionsComplete: 0,
                     totalSections: 9
                 }}
@@ -223,11 +380,7 @@ export default function ResearchPage() {
                             jobId={data.id}
                             client={client}
                             data={researchData}
-                            onScrapeCompetitor={async (id) => {
-                                console.log('Scrape competitor', id);
-                            }}
                             onRefreshSection={async (section) => {
-                                console.log('Refresh section:', section);
                                 router.refresh();
                             }}
                         />

@@ -24,7 +24,10 @@ interface Competitor {
     platform: string;
     profileUrl?: string;
     relevanceScore?: number;
-    status: 'SUGGESTED' | 'SCRAPING' | 'SCRAPED' | 'FAILED';
+    status: 'SUGGESTED' | 'SCRAPING' | 'SCRAPED' | 'FAILED' | 'CONFIRMED' | 'REJECTED';
+    selectionState?: 'FILTERED_OUT' | 'SHORTLISTED' | 'TOP_PICK' | 'APPROVED' | 'REJECTED';
+    availabilityStatus?: 'UNVERIFIED' | 'VERIFIED' | 'PROFILE_UNAVAILABLE' | 'INVALID_HANDLE' | 'RATE_LIMITED' | 'CONNECTOR_ERROR';
+    selectionReason?: string;
     discoveryReason?: string;
     postsScraped?: number;
     scrapedAt?: string;
@@ -32,7 +35,7 @@ interface Competitor {
 
 interface CompetitorRowProps {
     competitor: Competitor;
-    onEdit?: (id: string, updates: Partial<Competitor>) => void;
+    onEdit?: (id: string, updates: any) => void;
     onDelete?: (id: string) => void;
     onScrape?: (id: string) => void;
     isScraping?: boolean;
@@ -94,6 +97,20 @@ export function CompetitorRow({
         if (!onScrape) return;
         onScrape(competitor.id);
         toast.info(`Starting scrape for @${competitor.handle}...`);
+    };
+
+    const isExcludedFromScrape =
+        competitor.selectionState === 'FILTERED_OUT' || competitor.selectionState === 'REJECTED';
+    const isVerifiedProfile = !competitor.availabilityStatus || competitor.availabilityStatus === 'VERIFIED';
+    const isQueueableStatus = competitor.status === 'SUGGESTED' || competitor.status === 'FAILED';
+    const canContinueScrape = !isExcludedFromScrape && isVerifiedProfile && isQueueableStatus;
+
+    const getSelectionBadgeVariant = () => {
+        const state = competitor.selectionState;
+        if (state === 'TOP_PICK') return 'default' as const;
+        if (state === 'APPROVED') return 'secondary' as const;
+        if (state === 'SHORTLISTED') return 'outline' as const;
+        return 'secondary' as const;
     };
 
     // Get status icon and color
@@ -188,6 +205,11 @@ export function CompetitorRow({
                         {getStatusIcon()}
                         <span className="text-[10px] text-muted-foreground uppercase">{competitor.status}</span>
                     </div>
+                    {competitor.selectionState && (
+                        <Badge variant={getSelectionBadgeVariant()} className="text-[10px] h-5 uppercase tracking-wide">
+                            {competitor.selectionState.replaceAll('_', ' ')}
+                        </Badge>
+                    )}
 
                     {competitor.postsScraped !== undefined && competitor.postsScraped > 0 && (
                         <span className="text-[10px] text-muted-foreground">
@@ -198,22 +220,28 @@ export function CompetitorRow({
 
                 {/* Right: Actions */}
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2">
-                    {onScrape && (
+                    {onScrape && canContinueScrape && (
                         <Button
                             variant="ghost"
                             size="sm"
-                            className="h-7 w-7 p-0"
+                            className="h-7 text-[10px] px-2 gap-1"
                             onClick={handleScrape}
                             disabled={isScraping || competitor.status === 'SCRAPING'}
-                            title="Scrape Posts"
+                            title="Continue Scrape"
                         >
                             {isScraping || competitor.status === 'SCRAPING' ? (
                                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                             ) : (
                                 <Download className="h-3.5 w-3.5" />
                             )}
+                            Continue Scrape
                         </Button>
                     )}
+                    {onScrape && !canContinueScrape ? (
+                        <span className="text-[10px] text-muted-foreground px-2">
+                            Not scrape-ready
+                        </span>
+                    ) : null}
 
                     {onEdit && (
                         <Button
@@ -263,6 +291,13 @@ export function CompetitorRow({
                 <div className="mt-2 pt-2 border-t border-border/30">
                     <p className="text-[10px] text-muted-foreground truncate" title={competitor.discoveryReason}>
                         Source: {competitor.discoveryReason}
+                    </p>
+                </div>
+            )}
+            {competitor.selectionReason && (
+                <div className="mt-1">
+                    <p className="text-[10px] text-muted-foreground truncate" title={competitor.selectionReason}>
+                        Selection: {competitor.selectionReason}
                     </p>
                 </div>
             )}

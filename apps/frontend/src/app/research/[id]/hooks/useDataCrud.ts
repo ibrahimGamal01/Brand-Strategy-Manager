@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
+import { apiClient } from '@/lib/api-client';
+import { apiFetch } from '@/lib/api/http';
 
 interface UseDataCrudOptions {
   jobId: string;
@@ -12,68 +14,52 @@ export function useDataCrud({ jobId, dataType, onSuccess }: UseDataCrudOptions) 
   const router = useRouter();
   const [loading, setLoading] = useState(false);
 
-  const updateItem = async (itemId: string, updates: any) => {
+  const withMutation = async (mutate: () => Promise<void>, successMessage: string, failMessage: string) => {
     try {
       setLoading(true);
-      const res = await fetch(`/api/research-jobs/${jobId}/${dataType}/${itemId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates)
-      });
-      
-      if (!res.ok) throw new Error('Update failed');
-      
-      toast.success('Calculated update');
+      await mutate();
+      toast.success(successMessage);
       router.refresh();
       onSuccess?.();
-    } catch (error) {
-        console.error(error)
-      toast.error('Failed to update item');
+    } catch (error: any) {
+      console.error(error);
+      toast.error(error?.message || failMessage);
     } finally {
       setLoading(false);
     }
+  };
+
+  const updateItem = async (itemId: string, updates: any) => {
+    await withMutation(
+      async () => {
+        await apiClient.updateDataItem(jobId, dataType, itemId, updates);
+      },
+      'Data updated',
+      'Failed to update item'
+    );
   };
 
   const deleteItem = async (itemId: string) => {
-    try {
-      setLoading(true);
-      const res = await fetch(`/api/research-jobs/${jobId}/${dataType}/${itemId}`, {
-        method: 'DELETE'
-      });
-      
-      if (!res.ok) throw new Error('Delete failed');
-      
-      toast.success('Item deleted');
-      router.refresh();
-      onSuccess?.();
-    } catch (error) {
-        console.error(error)
-      toast.error('Failed to delete item');
-    } finally {
-      setLoading(false);
-    }
+    await withMutation(
+      async () => {
+        await apiFetch(`/research-jobs/${jobId}/${dataType}/${itemId}`, { method: 'DELETE' });
+      },
+      'Item deleted',
+      'Failed to delete item'
+    );
   };
 
   const createItem = async (data: any) => {
-    try {
-      setLoading(true);
-      const res = await fetch(`/api/research-jobs/${jobId}/${dataType}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-      });
-      
-      if (!res.ok) throw new Error('Create failed');
-      
-      toast.success('Item created');
-      router.refresh();
-      onSuccess?.();
-    } catch (error) {
-        console.error(error)
-      toast.error('Failed to create item');
-    } finally {
-      setLoading(false);
-    }
+    await withMutation(
+      async () => {
+        await apiFetch(`/research-jobs/${jobId}/${dataType}`, {
+          method: 'POST',
+          body: JSON.stringify(data),
+        });
+      },
+      'Item created',
+      'Failed to create item'
+    );
   };
 
   return {

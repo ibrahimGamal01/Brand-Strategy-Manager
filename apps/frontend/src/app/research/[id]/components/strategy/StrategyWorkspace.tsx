@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import DocumentViewer from './DocumentViewer';
 import ExportButton from './ExportButton';
+import { apiFetch } from '@/lib/api/http';
 
 interface StrategyWorkspaceProps {
     jobId: string;
@@ -34,18 +35,14 @@ export default function StrategyWorkspace({ jobId }: StrategyWorkspaceProps) {
     useEffect(() => {
         async function fetchDocument() {
             try {
-                const response = await fetch(`/api/strategy/${jobId}`);
-                if (response.ok) {
-                    const data = await response.json();
-                    setDocument(data);
-                } else if (response.status === 404) {
-                    // Document doesn't exist yet
+                const data = await apiFetch<StrategyDocument>(`/strategy/${jobId}`);
+                setDocument(data);
+            } catch (err: any) {
+                if (err?.status === 404) {
                     setDocument(null);
                 } else {
-                    throw new Error('Failed to fetch strategy document');
+                    setError(err?.message || 'Failed to fetch strategy document');
                 }
-            } catch (err) {
-                setError((err as Error).message);
             } finally {
                 setIsLoading(false);
             }
@@ -60,20 +57,13 @@ export default function StrategyWorkspace({ jobId }: StrategyWorkspaceProps) {
         setError(null);
 
         try {
-            const response = await fetch(`/api/strategy/${jobId}/generate`, {
+            const data = await apiFetch<StrategyDocument>(`/strategy/${jobId}/generate`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ sections: 'all' })
             });
-
-            if (!response.ok) {
-                throw new Error('Failed to generate strategy document');
-            }
-
-            const data = await response.json();
             setDocument(data);
-        } catch (err) {
-            setError((err as Error).message);
+        } catch (err: any) {
+            setError(err?.message || 'Failed to generate strategy document');
         } finally {
             setIsGenerating(false);
         }
@@ -207,7 +197,7 @@ export default function StrategyWorkspace({ jobId }: StrategyWorkspaceProps) {
 
             <DocumentViewer
                 sections={document.sections}
-                clientName="Test Client" // TODO: Get from props or context
+                clientName="Client"
                 generatedAt={document.generatedAt}
                 jobId={jobId}
             />

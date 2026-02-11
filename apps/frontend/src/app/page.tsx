@@ -11,14 +11,19 @@ import { apiClient } from "@/lib/api-client";
 export default function Home() {
   const [clients, setClients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
       try {
+        setLoadError(null);
         const data = await apiClient.getClients();
         setClients(data);
-      } catch (e) {
-        console.error(e);
+      } catch (e: any) {
+        setLoadError(
+          e?.message ||
+            'Backend is unavailable. Start backend and verify /api/health responds with schemaReady=true.'
+        );
       } finally {
         setLoading(false);
       }
@@ -66,6 +71,14 @@ export default function Home() {
             {[1, 2, 3].map(i => (
               <div key={i} className="h-40 bg-card rounded-lg border border-border" />
             ))}
+          </div>
+        ) : loadError ? (
+          <div className="border border-amber-500/30 rounded-xl p-8 bg-amber-500/5">
+            <h3 className="text-lg font-semibold mb-2">Backend Unavailable</h3>
+            <p className="text-sm text-muted-foreground mb-3">{loadError}</p>
+            <p className="text-xs text-muted-foreground font-mono">
+              Check backend at <code>/api/health</code> and confirm schema readiness.
+            </p>
           </div>
         ) : clients.length === 0 ? (
           <div className="border border-dashed border-border rounded-xl p-16 text-center bg-card/50">

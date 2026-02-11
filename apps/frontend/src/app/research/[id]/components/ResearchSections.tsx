@@ -12,7 +12,8 @@ import {
     Brain,
     Database,
     XCircle,
-    Share2
+    Share2,
+    Loader2
 } from 'lucide-react';
 import { PipelineProgress } from './PipelineProgress';
 // New Generic Data Components
@@ -30,27 +31,17 @@ import { useDataCrud } from '../hooks/useDataCrud';
 // Legacy components (kept for reference or specific use cases)
 import { DataSourceSection } from './DataSourceSection';
 import { SocialProfilesSection } from './SocialProfilesSection';
-import { CompetitorIntelligence } from './competitor/CompetitorIntelligence';
+import { CompetitorOrchestrationPanel } from './competitor/CompetitorOrchestrationPanel';
 import { VisualComparisonSection } from './VisualComparisonSection';
 import { ClientDataCard } from './cards/ClientDataCard';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { apiClient } from '@/lib/api-client';
+import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-
-// API helper
-async function callRerunApi(jobId: string, scraperType: string) {
-    const response = await fetch(`http://localhost:3001/api/research-jobs/${jobId}/rerun/${scraperType}`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        }
-    });
-
-    if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || 'Failed to re-run scraper');
-    }
-}
+import { useModuleActions } from '../hooks/useModuleActions';
+import { ModuleActionButtons } from './ModuleActionButtons';
 
 interface AllResearchSectionsProps {
     jobId: string;
@@ -68,78 +59,47 @@ interface AllResearchSectionsProps {
         mediaAssets: any[];
         aiQuestions: any[];
         socialProfiles: any[];
+        trendDebug?: {
+            attemptedKeywords?: string[];
+            insertedCount?: number;
+            totalCount?: number;
+        };
     }
 }
 
 export function AllResearchSections({ jobId, status, client, data }: AllResearchSectionsProps) {
     const router = useRouter();
+    const { toast } = useToast();
     const [runningScrapers, setRunningScrapers] = useState<Record<string, boolean>>({});
+    const { runModuleAction, isRunning, getLastResult } = useModuleActions(jobId);
 
     // Wrapper for rerun actions
     async function rerunScraper(jobId: string, scraperType: string) {
         try {
             setRunningScrapers(prev => ({ ...prev, [scraperType]: true }));
-            await callRerunApi(jobId, scraperType);
+            const response = await apiClient.rerunScraper(jobId, scraperType);
+            if (response?.error) {
+                throw new Error(response.error);
+            }
             router.refresh();
+            toast({
+                title: 'Module rerun started',
+                description: `${scraperType} rerun has started.`,
+            });
         } catch (error) {
-            console.error(`Failed to rerun ${scraperType}:`, error);
-            alert(`Failed to start ${scraperType}: ${(error as Error).message}`);
+            toast({
+                title: 'Failed to rerun module',
+                description: `Unable to start ${scraperType}: ${(error as Error).message}`,
+                variant: 'destructive',
+            });
         } finally {
             setRunningScrapers(prev => ({ ...prev, [scraperType]: false }));
-        }
-    }
-
-    // TikTok discovery handler
-    async function discoverTikTok() {
-        try {
-            setRunningScrapers(prev => ({ ...prev, 'tiktok_discovery': true }));
-
-            const response = await fetch(`http://localhost:3001/api/research-jobs/${jobId}/discover-tiktok`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            });
-
-            if (!response.ok) throw new Error('TikTok discovery failed');
-
-            const result = await response.json();
-            alert(`Discovered ${result.discovered} TikTok competitors! ${result.message}`);
-
-            // Poll for updates every 3 seconds
-            const pollInterval = setInterval(() => {
-                router.refresh();
-            }, 3000);
-
-            // Stop polling after 30 seconds
-            setTimeout(() => clearInterval(pollInterval), 30000);
-
-        } catch (error) {
-            console.error('TikTok discovery failed:', error);
-            alert(`Failed to discover TikTok competitors: ${(error as Error).message}`);
-        } finally {
-            setRunningScrapers(prev => ({ ...prev, 'tiktok_discovery': false }));
         }
     }
 
     // Handlers for re-run buttons
     function makeRerunHandler(scraper: string) {
         return async () => await rerunScraper(jobId, scraper);
-    }
-
-    async function handleStop() {
-        if (!confirm('Are you sure you want to stop this research job?')) return;
-
-        try {
-            const response = await fetch(`http://localhost:3001/api/research-jobs/${jobId}/stop`, {
-                method: 'POST'
-            });
-            if (!response.ok) throw new Error('Failed to stop job');
-
-            // Reload to show cancelled status
-            router.refresh();
-        } catch (error) {
-            console.error('Failed to stop job:', error);
-            alert('Failed to stop job');
-        }
     }
 
     // Existing declarations (kept for reference, but we will redefine strictly what we need or check for conflicts)
@@ -197,13 +157,32 @@ export function AllResearchSections({ jobId, status, client, data }: AllResearch
     const instagramPosts = instagramProfile?.posts || clientPosts || [];
     const tiktokPosts = tiktokProfile?.posts || [];
 
+    const trendActionResult = getLastResult('search_trends');
+    const attemptedTrendKeywords =
+        trendActionResult?.attemptedKeywords?.length
+            ? trendActionResult.attemptedKeywords
+            : Array.isArray(data.trendDebug?.attemptedKeywords)
+                ? data.trendDebug?.attemptedKeywords
+                : [];
+    const trendsEmptyMessage = attemptedTrendKeywords.length > 0
+        ? `No trends found. Attempted: ${attemptedTrendKeywords.slice(0, 6).join(', ')}. Next: use "Run from Start" or broaden handle/brand keywords.`
+        : 'No trends collected yet. Use Continue or Run from Start for this module.';
+
     return (
         <div className="space-y-12 pb-20">
             {/* Client Data Section */}
             <section id="client-data">
                 <div className="flex items-center justify-between mb-4">
                     <h2 className="text-xl font-semibold">Client Overview</h2>
-                    <Badge variant="outline">{socialProfiles.length} Profiles</Badge>
+                    <div className="flex items-center gap-2">
+                        <Badge variant="outline">{socialProfiles.length} Profiles</Badge>
+                        <ModuleActionButtons
+                            module="client_profiles"
+                            runModuleAction={runModuleAction}
+                            isRunning={isRunning}
+                            compact
+                        />
+                    </div>
                 </div>
                 <ClientDataCard
                     client={client}
@@ -220,6 +199,14 @@ export function AllResearchSections({ jobId, status, client, data }: AllResearch
                 icon={Search}
                 count={data.rawSearchResults.length}
                 onRefresh={makeRerunHandler('ddg_search')}
+                actions={
+                    <ModuleActionButtons
+                        module="search_results"
+                        runModuleAction={runModuleAction}
+                        isRunning={isRunning}
+                        compact
+                    />
+                }
             >
                 <DataGrid
                     data={data.rawSearchResults}
@@ -239,6 +226,14 @@ export function AllResearchSections({ jobId, status, client, data }: AllResearch
                 icon={ImageIcon}
                 count={data.ddgImageResults.length}
                 onRefresh={makeRerunHandler('ddg_images')}
+                actions={
+                    <ModuleActionButtons
+                        module="images"
+                        runModuleAction={runModuleAction}
+                        isRunning={isRunning}
+                        compact
+                    />
+                }
             >
                 <DataGrid
                     data={data.ddgImageResults}
@@ -259,6 +254,14 @@ export function AllResearchSections({ jobId, status, client, data }: AllResearch
                 icon={Video}
                 count={data.ddgVideoResults.length}
                 onRefresh={makeRerunHandler('ddg_videos')}
+                actions={
+                    <ModuleActionButtons
+                        module="videos"
+                        runModuleAction={runModuleAction}
+                        isRunning={isRunning}
+                        compact
+                    />
+                }
             >
                 <DataGrid
                     data={data.ddgVideoResults}
@@ -281,6 +284,14 @@ export function AllResearchSections({ jobId, status, client, data }: AllResearch
                 icon={Newspaper}
                 count={data.ddgNewsResults.length}
                 onRefresh={makeRerunHandler('ddg_news')}
+                actions={
+                    <ModuleActionButtons
+                        module="news"
+                        runModuleAction={runModuleAction}
+                        isRunning={isRunning}
+                        compact
+                    />
+                }
             >
                 <DataGrid
                     data={data.ddgNewsResults}
@@ -300,16 +311,25 @@ export function AllResearchSections({ jobId, status, client, data }: AllResearch
                 icon={TrendingUp}
                 count={data.searchTrends.length}
                 onRefresh={makeRerunHandler('trends')}
+                actions={
+                    <ModuleActionButtons
+                        module="search_trends"
+                        runModuleAction={runModuleAction}
+                        isRunning={isRunning}
+                        compact
+                    />
+                }
             >
                 <DataGrid
                     data={data.searchTrends}
                     config={(item) => ({
                         schema: trendsSchema,
-                        title: item.name,
+                        title: item.keyword,
                         icon: TrendingUp,
                         onEdit: updateTrend,
                         onDelete: deleteTrend
                     })}
+                    emptyMessage={trendsEmptyMessage}
                 />
             </DataSection>
 
@@ -318,30 +338,22 @@ export function AllResearchSections({ jobId, status, client, data }: AllResearch
                 title="Competitor Intelligence"
                 icon={Users}
                 count={data.competitors.length}
-                onRerun={makeRerunHandler('competitors')}
+                actions={
+                    <div className="flex items-center gap-1">
+                        <ModuleActionButtons
+                            module="competitors"
+                            runModuleAction={runModuleAction}
+                            isRunning={isRunning}
+                            compact
+                            hiddenActions={['continue']}
+                        />
+                    </div>
+                }
             >
-                <CompetitorIntelligence
+                <CompetitorOrchestrationPanel
                     jobId={jobId}
-                    competitors={data.competitors}
-                    onRunDiscovery={(type) => {
-                        const scraperType = type === 'ai' ? 'competitors_ai' : 'competitors_code';
-                        rerunScraper(jobId, scraperType);
-                    }}
-                    onDiscoverTikTok={discoverTikTok}
-                    isDiscoveringTikTok={runningScrapers['tiktok_discovery'] || false}
-                    onEditCompetitor={async (id, updates) => {
-                        // TODO: Use hook here too?
-                        // For now keeping custom component as it's specialized
-                    }}
-                    onDeleteCompetitor={async (id) => {
-                        // TODO: Use hook here too
-                    }}
-                    onScrapeCompetitor={async (id) => {
-                        console.log('Scrape competitor', id);
-                    }}
-                    onScrapeAll={async () => {
-                        console.log('Scrape all competitors');
-                    }}
+                    className="mb-4"
+                    onRefresh={() => router.refresh()}
                 />
             </DataSourceSection>
 
@@ -351,6 +363,14 @@ export function AllResearchSections({ jobId, status, client, data }: AllResearch
                 icon={MessageSquare}
                 count={data.communityInsights.length}
                 onRefresh={makeRerunHandler('community_insights')}
+                actions={
+                    <ModuleActionButtons
+                        module="community_insights"
+                        runModuleAction={runModuleAction}
+                        isRunning={isRunning}
+                        compact
+                    />
+                }
             >
                 <DataGrid
                     data={data.communityInsights}
@@ -370,6 +390,14 @@ export function AllResearchSections({ jobId, status, client, data }: AllResearch
                 icon={Brain}
                 count={data.aiQuestions.length}
                 onRefresh={makeRerunHandler('ai_analysis')}
+                actions={
+                    <ModuleActionButtons
+                        module="ai_questions"
+                        runModuleAction={runModuleAction}
+                        isRunning={isRunning}
+                        compact
+                    />
+                }
             >
                 <DataGrid
                     data={data.aiQuestions}

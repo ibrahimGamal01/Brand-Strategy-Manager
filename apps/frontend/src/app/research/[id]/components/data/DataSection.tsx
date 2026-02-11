@@ -10,6 +10,7 @@ interface DataSectionProps {
     icon: React.ComponentType<{ className?: string }>;
     count?: number;
     children: React.ReactNode;
+    actions?: React.ReactNode;
     onRefresh?: () => void;
     onAdd?: () => void;
     defaultExpanded?: boolean;
@@ -22,6 +23,7 @@ export function DataSection({
     icon: Icon,
     count,
     children,
+    actions,
     onRefresh,
     onAdd,
     defaultExpanded = false,
@@ -56,6 +58,7 @@ export function DataSection({
                 </button>
 
                 <div className="flex items-center gap-2">
+                    {actions}
                     {onRefresh && (
                         <Button
                             variant="ghost"

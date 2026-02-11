@@ -73,9 +73,6 @@ export function SocialProfileNode({ profile, index, onRefreshSection }: SocialPr
 
     const posts = profile.posts || [];
 
-    // Debug log to verify if TikTok profile is being rendered and if it has posts
-    console.log(`[SocialProfileNode] Rendering ${platformName} for @${profile.handle}. Posts count: ${posts.length}`);
-
     // Action handlers
     const handleScrape = async (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -83,8 +80,8 @@ export function SocialProfileNode({ profile, index, onRefreshSection }: SocialPr
 
         try {
             const endpoint = platformKey === 'instagram'
-                ? `http://localhost:3001/api/instagram/scrape/${profile.id}`
-                : `http://localhost:3001/api/tiktok/scrape/${profile.id}`;
+                ? `/api/instagram/scrape/${profile.id}`
+                : `/api/tiktok/scrape/${profile.id}`;
 
             const response = await fetch(endpoint, {
                 method: 'POST',
@@ -116,8 +113,8 @@ export function SocialProfileNode({ profile, index, onRefreshSection }: SocialPr
 
         try {
             const endpoint = platformKey === 'instagram'
-                ? `http://localhost:3001/api/instagram/profile/${profile.id}`
-                : `http://localhost:3001/api/tiktok/profile/${profile.id}`;
+                ? `/api/instagram/profile/${profile.id}`
+                : `/api/tiktok/profile/${profile.id}`;
 
             const response = await fetch(endpoint, {
                 method: 'DELETE'

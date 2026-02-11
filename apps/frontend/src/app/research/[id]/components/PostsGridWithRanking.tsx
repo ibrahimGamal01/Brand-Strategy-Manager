@@ -6,6 +6,7 @@ import {
     TrendingUp, Users, Clock, Trophy, BarChart3
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { toMediaUrl } from '@/lib/media-url';
 
 interface Post {
     id: string;
@@ -20,6 +21,7 @@ interface Post {
     postedAt: string;
     thumbnailUrl?: string;
     mediaAssets?: Array<{
+        url?: string;
         thumbnailPath?: string;
         blobStoragePath?: string;
         originalUrl?: string;
@@ -205,18 +207,21 @@ function StatsCard({ label, value, icon: Icon, trend }: any) {
 function PostCard({ rankedPost, platform, criteria }: { rankedPost: RankedPost; platform: string; criteria: RankingCriteria }) {
     const { post, rank, score, breakdown } = rankedPost;
 
-    // Get media
-    const localVideo = post.mediaAssets?.find(m => m.blobStoragePath?.endsWith('.mp4'));
-    const localImage = post.mediaAssets?.find(m => !m.blobStoragePath?.endsWith('.mp4'));
-    let mediaSrc = post.thumbnailUrl || post.url;
-    let isVideo = false;
+    const [mediaIndex, setMediaIndex] = useState(0);
 
-    if (localVideo?.blobStoragePath) {
-        mediaSrc = `http://localhost:3001/storage${localVideo.blobStoragePath.split('/storage')[1]}`;
-        isVideo = true;
-    } else if (localImage?.blobStoragePath) {
-        mediaSrc = `http://localhost:3001/storage${localImage.blobStoragePath.split('/storage')[1]}`;
-    }
+    const mediaItems = (post.mediaAssets || []).map(m => {
+        const raw = m.url || m.blobStoragePath || m.originalUrl;
+        const isVideo = !!raw && raw.toLowerCase().includes('.mp4');
+        return { url: toMediaUrl(raw), isVideo };
+    });
+    const current = mediaItems[mediaIndex] || null;
+
+    let mediaSrc = current?.url ||
+        toMediaUrl(post.thumbnailUrl) ||
+        toMediaUrl(post.url) ||
+        post.thumbnailUrl ||
+        post.url;
+    const isVideo = current?.isVideo || false;
 
     return (
         <div className="group border rounded-lg bg-card overflow-hidden flex flex-col shadow-sm hover:shadow-lg transition-all relative">
@@ -238,6 +243,7 @@ function PostCard({ rankedPost, platform, criteria }: { rankedPost: RankedPost; 
                             src={mediaSrc}
                             className="w-full h-full object-cover"
                             preload="metadata"
+                            controls
                             playsInline
                         />
                     ) : (
@@ -251,6 +257,24 @@ function PostCard({ rankedPost, platform, criteria }: { rankedPost: RankedPost; 
                 ) : (
                     <div className="w-full h-full flex items-center justify-center bg-muted text-muted-foreground">
                         No media
+                    </div>
+                )}
+
+                {mediaItems.length > 1 && (
+                    <div className="absolute bottom-2 right-2 flex items-center gap-2 bg-black/60 text-white text-xs px-2 py-1 rounded-full">
+                        <button
+                            onClick={(e) => { e.stopPropagation(); setMediaIndex((mediaIndex - 1 + mediaItems.length) % mediaItems.length); }}
+                            className="px-1"
+                        >
+                            ‹
+                        </button>
+                        <span>{mediaIndex + 1}/{mediaItems.length}</span>
+                        <button
+                            onClick={(e) => { e.stopPropagation(); setMediaIndex((mediaIndex + 1) % mediaItems.length); }}
+                            className="px-1"
+                        >
+                            ›
+                        </button>
                     </div>
                 )}
             </div>
@@ -324,7 +348,7 @@ function PostRow({ rankedPost, platform, criteria }: { rankedPost: RankedPost; p
 
     const localImage = post.mediaAssets?.find(m => !m.blobStoragePath?.endsWith('.mp4'));
     const mediaSrc = localImage?.blobStoragePath
-        ? `http://localhost:3001/storage${localImage.blobStoragePath.split('/storage')[1]}`
+        ? toMediaUrl(localImage.blobStoragePath)
         : post.thumbnailUrl;
 
     return (

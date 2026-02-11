@@ -4,6 +4,8 @@
 import { useEffect, useState } from 'react';
 import { Layers, ThumbsUp, MessageCircle, Share2, Eye } from 'lucide-react';
 import { DataSourceSection } from './DataSourceSection';
+import { toMediaUrl } from '@/lib/media-url';
+import { apiFetch } from '@/lib/api/http';
 
 interface VisualAsset {
     id: string;
@@ -33,10 +35,8 @@ export function VisualComparisonSection({ jobId }: VisualComparisonSectionProps)
     useEffect(() => {
         async function fetchAssets() {
             try {
-                const res = await fetch(`http://localhost:3001/api/research-jobs/${jobId}/visual-comparison`);
-                if (!res.ok) throw new Error('Failed to load visual comparison');
-                const data = await res.json();
-                setAssets(data);
+                const data = await apiFetch<VisualAsset[]>(`/research-jobs/${jobId}/visual-comparison`);
+                setAssets(Array.isArray(data) ? data : []);
             } catch (err: any) {
                 setError(err.message);
             } finally {
@@ -60,11 +60,7 @@ export function VisualComparisonSection({ jobId }: VisualComparisonSectionProps)
             return url; // Valid HTTP image URL
         }
         // Handle both file:// URLs and absolute paths
-        const match = url.match(/\/storage\/(.+)/);
-        if (match) {
-            return `http://localhost:3001/storage/${match[1]}`;
-        }
-        return url;
+        return toMediaUrl(url);
     };
 
     if (loading) return null; // Or a skeleton

@@ -3,6 +3,8 @@
 import { Instagram, Heart, MessageCircle, Users, ExternalLink, RefreshCw, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useState } from 'react';
+import { useToast } from '@/hooks/use-toast';
+import { toMediaUrl } from '@/lib/media-url';
 
 interface Post {
     id: string;
@@ -38,6 +40,7 @@ interface InstagramSectionProps {
 export function InstagramSection({ profile, posts, platform = 'instagram', profileId, onDataReset, onRescrape }: InstagramSectionProps) {
     const [isResetting, setIsResetting] = useState(false);
     const [isRescrapng, setIsRescrapng] = useState(false);
+    const { toast } = useToast();
 
 
     const isInsta = platform === 'instagram';
@@ -62,7 +65,7 @@ export function InstagramSection({ profile, posts, platform = 'instagram', profi
 
         setIsResetting(true);
         try {
-            const response = await fetch(`http://localhost:3001/api/instagram/profile/${profileId}`, {
+            const response = await fetch(`/api/instagram/profile/${profileId}`, {
                 method: 'DELETE'
             });
 
@@ -71,13 +74,19 @@ export function InstagramSection({ profile, posts, platform = 'instagram', profi
             }
 
             const result = await response.json();
-            console.log(`[Instagram] Deleted ${result.deletedCount} posts`);
+            toast({
+                title: 'Section reset',
+                description: `Deleted ${result.deletedCount || 0} posts for @${profile.handle}.`,
+            });
 
             // Trigger parent callback to refresh data
             onDataReset?.();
         } catch (error: any) {
-            console.error('[Instagram] Reset error:', error);
-            alert(`Failed to reset section: ${error.message}`);
+            toast({
+                title: 'Failed to reset section',
+                description: error?.message || 'Unable to delete profile data.',
+                variant: 'destructive',
+            });
         } finally {
             setIsResetting(false);
         }
@@ -89,7 +98,7 @@ export function InstagramSection({ profile, posts, platform = 'instagram', profi
 
         setIsRescrapng(true);
         try {
-            const response = await fetch(`http://localhost:3001/api/instagram/scrape/${profileId}`, {
+            const response = await fetch(`/api/instagram/scrape/${profileId}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ postsLimit: 30 })
@@ -100,13 +109,19 @@ export function InstagramSection({ profile, posts, platform = 'instagram', profi
             }
 
             const result = await response.json();
-            console.log(`[Instagram] Re-scraped ${result.postsCount} posts using ${result.scraper}`);
+            toast({
+                title: 'Re-scrape started',
+                description: `Queued @${profile.handle} (${result.scraper || 'scraper'}).`,
+            });
 
             // Trigger parent callback to refresh data
             onRescrape?.();
         } catch (error: any) {
-            console.error('[Instagram] Re-scrape error:', error);
-            alert(`Failed to re-scrape: ${error.message}`);
+            toast({
+                title: 'Failed to re-scrape profile',
+                description: error?.message || 'Unable to start re-scrape.',
+                variant: 'destructive',
+            });
         } finally {
             setIsRescrapng(false);
         }
@@ -203,10 +218,10 @@ export function InstagramSection({ profile, posts, platform = 'instagram', profi
                         let isVideo = false;
 
                         if (localVideo?.blobStoragePath) {
-                            mediaSrc = `http://localhost:3001/storage${localVideo.blobStoragePath.split('/storage')[1]}`;
+                            mediaSrc = toMediaUrl(localVideo.blobStoragePath);
                             isVideo = true;
                         } else if (localImage?.blobStoragePath) {
-                            mediaSrc = `http://localhost:3001/storage${localImage.blobStoragePath.split('/storage')[1]}`;
+                            mediaSrc = toMediaUrl(localImage.blobStoragePath);
                         } else if (post.thumbnailUrl) {
                             mediaSrc = post.thumbnailUrl;
                         }

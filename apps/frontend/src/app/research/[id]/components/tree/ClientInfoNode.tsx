@@ -1,6 +1,7 @@
+import type { ReactNode } from 'react';
 // ... imports
 import {
-    User, Newspaper, ImageIcon, RefreshCw, Trash2, Video
+    User, Newspaper, ImageIcon, RefreshCw, Trash2, Video, Instagram
 } from 'lucide-react';
 import { TreeNodeCard, DataList } from './';
 import { SocialProfileNode } from './SocialProfileNode';
@@ -12,24 +13,42 @@ import { useToast } from '@/hooks/use-toast';
 interface ClientInfoNodeProps {
     client: any;
     socialProfiles: any[];
+    clientProfileSnapshots?: any[];
     clientDocuments: any[];
     clientPosts: any[];
     tiktokPosts?: any[]; // New prop
     onRefreshSection?: (section: string) => void;
+    actions?: ReactNode;
 }
 
 export function ClientInfoNode({
     client,
     socialProfiles,
+    clientProfileSnapshots = [],
     clientDocuments,
     clientPosts,
     tiktokPosts = [],
-    onRefreshSection
+    onRefreshSection,
+    actions
 }: ClientInfoNodeProps) {
     const { toast } = useToast();
 
-    console.log('[ClientInfoNode] socialProfiles:', socialProfiles);
-    console.log('[ClientInfoNode] tiktokPosts:', tiktokPosts.length);
+    const instagramProfile = socialProfiles.find((p: any) => p.platform === 'instagram');
+    const tiktokProfile = socialProfiles.find((p: any) => p.platform === 'tiktok');
+
+    const latestSnapshotFor = (platform: string) =>
+        [...clientProfileSnapshots]
+            .filter((s: any) => s.clientProfile?.platform === platform)
+            .sort((a: any, b: any) => new Date(b.scrapedAt || 0).getTime() - new Date(a.scrapedAt || 0).getTime())[0];
+
+    const instagramSnapshot = latestSnapshotFor('instagram');
+    const tiktokSnapshot = latestSnapshotFor('tiktok');
+
+    const instagramPosts = (instagramSnapshot?.posts?.length ? instagramSnapshot.posts : instagramProfile?.posts) || [];
+    const tiktokPostsCombined = (tiktokSnapshot?.posts?.length ? tiktokSnapshot.posts : tiktokProfile?.posts) || [];
+
+    const instagramFollowers = instagramSnapshot?.followerCount ?? instagramProfile?.followers ?? 0;
+    const tiktokFollowers = tiktokSnapshot?.followerCount ?? tiktokProfile?.followers ?? 0;
 
     return (
         <TreeNodeCard
@@ -38,6 +57,7 @@ export function ClientInfoNode({
             count={socialProfiles.length + clientDocuments.length}
             defaultExpanded={true}
             level={1}
+            actions={actions}
         >
             {/* Dynamic Social Profiles */}
             {socialProfiles.map((profile: any, index: number) => (
@@ -48,6 +68,70 @@ export function ClientInfoNode({
                     onRefreshSection={onRefreshSection} // Pass the prop
                 />
             ))}
+
+            {/* Level 2: Downloaded Content (by platform) */}
+            {(instagramPosts.length || tiktokPostsCombined.length) && (
+                <TreeNodeCard
+                    title="Downloaded Content"
+                    icon={<ImageIcon className="h-4 w-4 text-teal-500" />}
+                    level={2}
+                    defaultExpanded={true}
+                >
+                    {instagramPosts.length > 0 && (
+                        <div className="mb-6">
+                            <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                                <Instagram className="h-4 w-4 text-pink-500" />
+                                Instagram Posts
+                            </h4>
+                            <PostsGridWithRanking
+                                posts={instagramPosts.map((p: any) => ({
+                                    id: p.id,
+                                    caption: p.caption,
+                                    likesCount: p.likes || p.likesCount || 0,
+                                    commentsCount: p.comments || p.commentsCount || 0,
+                                    sharesCount: p.shares || p.sharesCount || 0,
+                                    viewsCount: p.views || p.viewsCount || p.playsCount || 0,
+                                    playsCount: p.plays || p.playsCount || 0,
+                                    postUrl: p.postUrl || p.url,
+                                    url: p.postUrl || p.url,
+                                    postedAt: p.postedAt || p.timestamp || new Date().toISOString(),
+                                    thumbnailUrl: p.thumbnailUrl,
+                                    mediaAssets: p.mediaAssets
+                                }))}
+                                followerCount={instagramFollowers}
+                                platform="instagram"
+                            />
+                        </div>
+                    )}
+
+                    {tiktokPostsCombined.length > 0 && (
+                        <div>
+                            <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                                <Video className="h-4 w-4 text-pink-500" />
+                                TikTok Posts
+                            </h4>
+                            <PostsGridWithRanking
+                                posts={tiktokPostsCombined.map((p: any) => ({
+                                    id: p.id,
+                                    caption: p.caption,
+                                    likesCount: p.likes || p.likesCount || 0,
+                                    commentsCount: p.comments || p.commentsCount || 0,
+                                    sharesCount: p.shares || p.sharesCount || 0,
+                                    viewsCount: p.views || p.viewsCount || p.playsCount || 0,
+                                    playsCount: p.plays || p.playsCount || 0,
+                                    postUrl: p.postUrl || p.url,
+                                    url: p.postUrl || p.url,
+                                    postedAt: p.postedAt || p.timestamp || new Date().toISOString(),
+                                    thumbnailUrl: p.thumbnailUrl,
+                                    mediaAssets: p.mediaAssets
+                                }))}
+                                followerCount={tiktokFollowers}
+                                platform="tiktok"
+                            />
+                        </div>
+                    )}
+                </TreeNodeCard>
+            )}
 
             {/* Level 2: Client Documents */}
             {clientDocuments.length > 0 && (
@@ -87,7 +171,7 @@ export function ClientInfoNode({
                                     onClick={async (e) => {
                                         e.stopPropagation();
                                         try {
-                                            const response = await fetch(`http://localhost:3001/api/instagram/scrape/${socialProfiles[0].id}`, {
+                                            const response = await fetch(`/api/instagram/scrape/${socialProfiles[0].id}`, {
                                                 method: 'POST',
                                                 headers: { 'Content-Type': 'application/json' },
                                                 body: JSON.stringify({ postsLimit: 30 })
@@ -113,7 +197,7 @@ export function ClientInfoNode({
                                         if (!confirmed) return;
 
                                         try {
-                                            const response = await fetch(`http://localhost:3001/api/instagram/profile/${socialProfiles[0].id}`, {
+                                            const response = await fetch(`/api/instagram/profile/${socialProfiles[0].id}`, {
                                                 method: 'DELETE'
                                             });
                                             if (response.ok) {

@@ -1,36 +1,28 @@
 'use client';
 
-import { useState } from 'react';
 import {
-    User, Instagram, Video, Users, Search, ImageIcon,
-    Newspaper, TrendingUp, MessageSquare, Brain, PlayCircle,
-    ExternalLink, Download, Loader2, RefreshCw, Database as DatabaseIcon, Trash2
+    Video, Users, Search, ImageIcon,
+    Newspaper, TrendingUp, MessageSquare, Brain,
+    RefreshCw, Database as DatabaseIcon
 } from 'lucide-react';
 import { TreeLayout, TreeNodeCard, DataList } from './tree';
-import { CompetitorPostsSection } from './competitor/CompetitorPostsSection';
-import { PostsGallery } from './competitor/PostsGallery';
-import { PostsGridWithRanking } from './PostsGridWithRanking';
 import { ImageGallery } from './search/ImageGallery';
 import { VideoGallery } from './search/VideoGallery';
 import { NewsGallery } from './search/NewsGallery';
 import { SearchResultsList } from './search/SearchResultsList';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
-import { Badge } from '@/components/ui/badge';
 import { ClientInfoNode } from './tree/ClientInfoNode';
-import { CompetitorsNode } from './tree/CompetitorsNode';
-import { SearchDataNode } from './tree/SearchDataNode';
-import { AnalyticsNode } from './tree/AnalyticsNode';
-import { AiAnalysisNode } from './tree/AiAnalysisNode';
-import { BrandReputationNode } from './tree/BrandReputationNode';
-import { apiClient } from '@/lib/api-client';
-import { useToast } from '@/hooks/use-toast';
+import { CompetitorOrchestrationPanel } from './competitor/CompetitorOrchestrationPanel';
+import { useModuleActions } from '../hooks/useModuleActions';
+import { ModuleActionButtons } from './ModuleActionButtons';
 
 interface ResearchTreeViewProps {
     jobId: string;
     client: any;
     data: {
         clientPosts: any[];
+        clientProfileSnapshots?: any[];
+        competitorProfileSnapshots?: any[];
         tiktokPosts?: any[]; // New prop in data interface
         rawSearchResults: any[];
         ddgImageResults: any[];
@@ -44,8 +36,12 @@ interface ResearchTreeViewProps {
         socialProfiles: any[];
         brandMentions: any[];
         clientDocuments: any[];
+        trendDebug?: {
+            attemptedKeywords?: string[];
+            insertedCount?: number;
+            totalCount?: number;
+        };
     };
-    onScrapeCompetitor?: (id: string) => void;
     onRefreshSection?: (section: string) => void;
 }
 
@@ -58,17 +54,16 @@ export function ResearchTreeView({
     jobId,
     client,
     data,
-    onScrapeCompetitor,
     onRefreshSection
 }: ResearchTreeViewProps) {
-    const [scrapingIds, setScrapingIds] = useState<Record<string, boolean>>({});
-    const { toast } = useToast();
+    const { runModuleAction, isRunning, getLastResult } = useModuleActions(jobId);
 
     // Safely handle null/undefined arrays  
     const competitors = data.competitors || [];
     const socialProfiles = data.socialProfiles || [];
     const clientPosts = data.clientPosts || [];
     const tiktokPosts = data.tiktokPosts || []; // Extract tiktokPosts
+    const clientProfileSnapshots = data.clientProfileSnapshots || [];
     const searchResults = data.rawSearchResults || [];
     const images = data.ddgImageResults || [];
     const videos = data.ddgVideoResults || [];
@@ -78,42 +73,27 @@ export function ResearchTreeView({
     const aiQuestions = data.aiQuestions || [];
     const brandMentions = data.brandMentions || [];
     const clientDocuments = data.clientDocuments || [];
+    const trendActionResult = getLastResult('search_trends');
+    const attemptedTrendKeywords =
+        trendActionResult?.attemptedKeywords?.length
+            ? trendActionResult.attemptedKeywords
+            : Array.isArray(data.trendDebug?.attemptedKeywords)
+                ? data.trendDebug?.attemptedKeywords
+                : [];
+    const trendsEmptyMessage = attemptedTrendKeywords.length > 0
+        ? `No trends available. Attempted: ${attemptedTrendKeywords.slice(0, 6).join(', ')}. Try Run from Start.`
+        : 'No trends available yet. Use Continue to collect missing trends.';
 
-    // Helper: Find social profile ID for a competitor based on handle/platform match
-    const getSocialProfileId = (competitorHandle: string, platform: string): string | undefined => {
-        const profile = socialProfiles.find((p: any) =>
-            p.platform === platform && p.handle === competitorHandle
-        );
-        return profile?.id;
+    const isFilteredSelectionState = (selectionState?: string) => {
+        const normalized = String(selectionState || '').toUpperCase();
+        return normalized === 'FILTERED_OUT' || normalized === 'REJECTED';
     };
 
-    // Category competitors properly - check ALL discovery sources
-    const instagramCompetitors = competitors.filter((c: any) => c?.platform === 'instagram');
-    const tiktokCompetitors = competitors.filter((c: any) => c?.platform === 'tiktok');
+    const hiddenCompetitorsCount = competitors.filter((c: any) =>
+        isFilteredSelectionState(c?.selectionState)
+    ).length;
 
-    const handleScrape = async (competitorId: string, handle: string) => {
-        // ... existing handleScrape logic ...
-        try {
-            const result = await apiClient.scrapeCompetitor(competitorId);
-            toast({
-                title: "Scraping Started",
-                description: `Started scraping posts for @${handle}. This may take a few moments.`,
-            });
-
-            // Auto-refresh after 5 seconds to show scraped data
-            setTimeout(() => {
-                onRefreshSection?.('competitors');
-            }, 5000);
-        } catch (error: any) {
-            toast({
-                title: "Scraping Failed",
-                description: error.message || "Failed to start scraping",
-                variant: "destructive"
-            });
-        } finally {
-            setScrapingIds(prev => ({ ...prev, [competitorId]: false }));
-        }
-    };
+    const visibleCompetitors = competitors.filter((c: any) => !isFilteredSelectionState(c?.selectionState));
 
     return (
         <TreeLayout className="max-w-6xl">
@@ -130,260 +110,65 @@ export function ResearchTreeView({
                     socialProfiles={socialProfiles}
                     clientDocuments={clientDocuments}
                     clientPosts={clientPosts}
+                    clientProfileSnapshots={clientProfileSnapshots}
                     tiktokPosts={tiktokPosts}
                     onRefreshSection={onRefreshSection}
+                    actions={
+                        <ModuleActionButtons
+                            module="client_profiles"
+                            runModuleAction={runModuleAction}
+                            isRunning={isRunning}
+                            compact
+                            hideLabels
+                        />
+                    }
                 />
 
                 {/* Level 1: Competitors */}
                 <TreeNodeCard
                     title="Competitors"
                     icon={<Users className="h-4 w-4" />}
-                    count={competitors.length}
-                    defaultExpanded={competitors.length > 0}
+                    count={visibleCompetitors.length}
+                    defaultExpanded={visibleCompetitors.length > 0}
                     level={1}
                     actions={
-                        <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => onRefreshSection?.('competitors')}
-                            className="h-7 text-xs px-2"
-                        >
-                            <RefreshCw className="h-3 w-3" />
-                        </Button>
+                        <div className="flex items-center gap-1">
+                            <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => onRefreshSection?.('competitors')}
+                                className="h-7 text-xs px-2"
+                            >
+                                <RefreshCw className="h-3 w-3" />
+                            </Button>
+                            <ModuleActionButtons
+                                module="competitors"
+                                runModuleAction={runModuleAction}
+                                isRunning={isRunning}
+                                compact
+                                hideLabels
+                                hiddenActions={['continue']}
+                            />
+                        </div>
                     }
                 >
-                    {competitors.length === 0 ? (
+                    <CompetitorOrchestrationPanel
+                        jobId={jobId}
+                        className="mb-4"
+                        onRefresh={() => onRefreshSection?.('competitors')}
+                    />
+
+                    {visibleCompetitors.length === 0 ? (
                         <div className="text-xs text-muted-foreground text-center py-6 px-4">
-                            No competitors discovered yet
+                            {hiddenCompetitorsCount > 0
+                                ? 'All discovered competitors are currently filtered/rejected. Use Continue Discovery to refresh the shortlist.'
+                                : 'No competitors discovered yet. Use Continue Discovery to generate cross-surface candidates.'}
                         </div>
                     ) : (
-                        <>
-                            {/* Level 2: Instagram Competitors */}
-                            {competitors.some(c => c.platform?.toLowerCase() === 'instagram') && (
-                                <TreeNodeCard
-                                    title="Instagram Competitors"
-                                    icon={<Instagram className="h-4 w-4 text-pink-500" />}
-                                    count={instagramCompetitors.length}
-                                    level={2}
-                                    defaultExpanded={true}
-                                >
-                                    {instagramCompetitors.map((comp: any) => (
-                                        <TreeNodeCard
-                                            key={comp.id}
-                                            title={
-                                                <div className="flex items-center gap-2 w-full">
-                                                    <span className="font-semibold">@{comp.handle}</span>
-                                                    {comp.relevanceScore && (
-                                                        <Badge variant="secondary" className="text-[10px] h-5 px-1.5 bg-green-500/10 text-green-500 hover:bg-green-500/20 border-green-500/20">
-                                                            {Math.round(comp.relevanceScore * 100)}% Match
-                                                        </Badge>
-                                                    )}
-                                                    {comp.postsScraped > 0 && (
-                                                        <Badge variant="outline" className="text-[10px] h-5 px-1.5 border-pink-500/30 text-pink-500 bg-pink-500/5">
-                                                            {comp.postsScraped} posts
-                                                        </Badge>
-                                                    )}
-                                                </div>
-                                            }
-                                            icon={<div className="w-2 h-2 rounded-full bg-pink-400 shadow-[0_0_8px_rgba(236,72,153,0.6)]" />}
-                                            level={3}
-                                            defaultExpanded={false}
-                                            actions={
-                                                <div className="flex items-center gap-2">
-                                                    <Badge variant={comp.status === 'SCRAPED' ? 'default' : 'secondary'} className="text-[10px] px-1.5 py-0 h-5">
-                                                        {comp.status}
-                                                    </Badge>
-                                                    <a
-                                                        href={comp.profileUrl || `https://instagram.com/${comp.handle}`}
-                                                        target="_blank"
-                                                        rel="noopener noreferrer"
-                                                        className="text-muted-foreground hover:text-foreground transition-colors p-1 hover:bg-muted rounded-md"
-                                                    >
-                                                        <ExternalLink className="h-3 w-3" />
-                                                    </a>
-                                                </div>
-                                            }
-                                        >
-                                            <div className="space-y-4 px-4 py-3">
-                                                {/* Competitor Stats Grid */}
-                                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                                                    <div className="bg-muted/30 rounded-lg p-2 border border-border/40">
-                                                        <span className="text-[10px] text-muted-foreground uppercase tracking-wider block mb-0.5">Followers</span>
-                                                        <span className="text-sm font-medium tabular-nums">{comp.followers ? comp.followers.toLocaleString() : 'N/A'}</span>
-                                                    </div>
-                                                    <div className="bg-muted/30 rounded-lg p-2 border border-border/40">
-                                                        <span className="text-[10px] text-muted-foreground uppercase tracking-wider block mb-0.5">Posts</span>
-                                                        <span className="text-sm font-medium tabular-nums">{comp.postsScraped || 0}</span>
-                                                    </div>
-                                                    <div className="bg-muted/30 rounded-lg p-2 border border-border/40">
-                                                        <span className="text-[10px] text-muted-foreground uppercase tracking-wider block mb-0.5">Engagement</span>
-                                                        <span className="text-sm font-medium tabular-nums">{comp.engagement || 'N/A'}</span>
-                                                    </div>
-                                                    <div className="bg-muted/30 rounded-lg p-2 border border-border/40">
-                                                        <span className="text-[10px] text-muted-foreground uppercase tracking-wider block mb-0.5">Relevance</span>
-                                                        <span className="text-sm font-medium tabular-nums text-green-500">{comp.relevanceScore ? `${Math.round(comp.relevanceScore * 100)}%` : 'N/A'}</span>
-                                                    </div>
-                                                </div>
-
-                                                {comp.discoveryReason && (
-                                                    <div className="text-xs text-muted-foreground bg-muted/20 p-3 rounded-lg border border-border/40 leading-relaxed italic">
-                                                        <span className="font-medium not-italic text-foreground mr-1">Why:</span>
-                                                        {comp.discoveryReason}
-                                                    </div>
-                                                )}
-
-                                                {(comp.status === 'SUGGESTED' || comp.postsScraped === 0) && (
-                                                    <Button
-                                                        onClick={() => handleScrape(comp.id, comp.handle)}
-                                                        disabled={scrapingIds[comp.id]}
-                                                        size="sm"
-                                                        className="w-full text-xs gap-2 h-9 bg-pink-600 hover:bg-pink-700 text-white"
-                                                    >
-                                                        {scrapingIds[comp.id] ? (
-                                                            <>
-                                                                <Loader2 className="h-3 w-3 animate-spin" />
-                                                                Scraping Instagram...
-                                                            </>
-                                                        ) : (
-                                                            <>
-                                                                <Download className="h-3 w-3" />
-                                                                Scrape Top Posts
-                                                            </>
-                                                        )}
-                                                    </Button>
-                                                )}
-
-                                                {/* Scraped Posts Section */}
-                                                {comp.postsScraped > 0 && (
-                                                    <CompetitorPostsSection
-                                                        competitorId={comp.id}
-                                                        handle={comp.handle}
-                                                        platform="instagram"
-                                                        postsCount={comp.postsScraped}
-                                                        profileId={getSocialProfileId(comp.handle, 'instagram')}
-                                                        onRefresh={() => onRefreshSection?.('competitors')}
-                                                    />
-                                                )}
-                                            </div>
-                                        </TreeNodeCard>
-                                    ))}
-                                </TreeNodeCard>
-                            )}
-
-                            {/* Level 2: TikTok Competitors */}
-                            {tiktokCompetitors.length > 0 && (
-                                <TreeNodeCard
-                                    title="TikTok Competitors"
-                                    icon={<Video className="h-4 w-4 text-blue-500" />}
-                                    count={tiktokCompetitors.length}
-                                    level={2}
-                                    defaultExpanded={true}
-                                >
-                                    {tiktokCompetitors.map((comp: any) => (
-                                        <TreeNodeCard
-                                            key={comp.id}
-                                            title={
-                                                <div className="flex items-center gap-2 w-full">
-                                                    <span className="font-semibold">@{comp.handle}</span>
-                                                    {comp.relevanceScore && (
-                                                        <Badge variant="secondary" className="text-[10px] h-5 px-1.5 bg-green-500/10 text-green-500 hover:bg-green-500/20 border-green-500/20">
-                                                            {Math.round(comp.relevanceScore * 100)}% Match
-                                                        </Badge>
-                                                    )}
-                                                    {comp.postsScraped > 0 && (
-                                                        <Badge variant="outline" className="text-[10px] h-5 px-1.5 border-blue-500/30 text-blue-500 bg-blue-500/5">
-                                                            {comp.postsScraped} posts
-                                                        </Badge>
-                                                    )}
-                                                </div>
-                                            }
-                                            icon={<div className="w-2 h-2 rounded-full bg-blue-400 shadow-[0_0_8px_rgba(59,130,246,0.6)]" />}
-                                            level={3}
-                                            defaultExpanded={false}
-                                            actions={
-                                                <div className="flex items-center gap-2">
-                                                    <Badge variant={comp.status === 'SCRAPED' ? 'default' : 'secondary'} className="text-[10px] px-1.5 py-0 h-5">
-                                                        {comp.status}
-                                                    </Badge>
-                                                    <a
-                                                        href={comp.profileUrl || `https://tiktok.com/@${comp.handle}`}
-                                                        target="_blank"
-                                                        rel="noopener noreferrer"
-                                                        className="text-muted-foreground hover:text-foreground transition-colors p-1 hover:bg-muted rounded-md"
-                                                    >
-                                                        <ExternalLink className="h-3 w-3" />
-                                                    </a>
-                                                </div>
-                                            }
-                                        >
-                                            <div className="space-y-4 px-4 py-3">
-                                                {/* Competitor Stats Grid */}
-                                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                                                    <div className="bg-muted/30 rounded-lg p-2 border border-border/40">
-                                                        <span className="text-[10px] text-muted-foreground uppercase tracking-wider block mb-0.5">Followers</span>
-                                                        <span className="text-sm font-medium tabular-nums">{comp.followers ? comp.followers.toLocaleString() : 'N/A'}</span>
-                                                    </div>
-                                                    <div className="bg-muted/30 rounded-lg p-2 border border-border/40">
-                                                        <span className="text-[10px] text-muted-foreground uppercase tracking-wider block mb-0.5">Posts</span>
-                                                        <span className="text-sm font-medium tabular-nums">{comp.postsScraped || 0}</span>
-                                                    </div>
-                                                    <div className="bg-muted/30 rounded-lg p-2 border border-border/40">
-                                                        <span className="text-[10px] text-muted-foreground uppercase tracking-wider block mb-0.5">Engagement</span>
-                                                        <span className="text-sm font-medium tabular-nums">{comp.engagement || 'N/A'}</span>
-                                                    </div>
-                                                    <div className="bg-muted/30 rounded-lg p-2 border border-border/40">
-                                                        <span className="text-[10px] text-muted-foreground uppercase tracking-wider block mb-0.5">Relevance</span>
-                                                        <span className="text-sm font-medium tabular-nums text-green-500">{comp.relevanceScore ? `${Math.round(comp.relevanceScore * 100)}%` : 'N/A'}</span>
-                                                    </div>
-                                                </div>
-
-                                                {comp.discoveryReason && (
-                                                    <div className="text-xs text-muted-foreground bg-muted/20 p-3 rounded-lg border border-border/40 leading-relaxed italic">
-                                                        <span className="font-medium not-italic text-foreground mr-1">Why:</span>
-                                                        {comp.discoveryReason}
-                                                    </div>
-                                                )}
-
-                                                {(comp.status === 'SUGGESTED' || comp.postsScraped === 0) && (
-                                                    <Button
-                                                        onClick={() => handleScrape(comp.id, comp.handle)}
-                                                        disabled={scrapingIds[comp.id]}
-                                                        size="sm"
-                                                        className="w-full text-xs gap-2 h-9 bg-blue-600 hover:bg-blue-700 text-white"
-                                                    >
-                                                        {scrapingIds[comp.id] ? (
-                                                            <>
-                                                                <Loader2 className="h-3 w-3 animate-spin" />
-                                                                Scraping TikTok...
-                                                            </>
-                                                        ) : (
-                                                            <>
-                                                                <Download className="h-3 w-3" />
-                                                                Scrape Top Posts
-                                                            </>
-                                                        )}
-                                                    </Button>
-                                                )}
-
-                                                {/* Scraped Posts Section */}
-                                                {comp.postsScraped > 0 && (
-                                                    <CompetitorPostsSection
-                                                        competitorId={comp.id}
-                                                        handle={comp.handle}
-                                                        platform="tiktok"
-                                                        postsCount={comp.postsScraped}
-                                                        profileId={getSocialProfileId(comp.handle, 'tiktok')}
-                                                        onRefresh={() => onRefreshSection?.('competitors')}
-                                                    />
-                                                )}
-                                            </div>
-                                        </TreeNodeCard>
-                                    ))}
-                                </TreeNodeCard>
-                            )}
-                        </>
-                    )
-                    }
+                        <div className="rounded-md border border-border/50 bg-muted/10 p-3 text-xs text-muted-foreground">
+                            Orchestration shortlist is the primary competitor source. Legacy per-platform lists are disabled to prevent noisy or unavailable profiles from overriding reviewed picks.
+                        </div>
+                    )}
                 </TreeNodeCard >
 
                 {/* Level 1: Search Data */}
@@ -401,6 +186,15 @@ export function ResearchTreeView({
                         count={searchResults.length}
                         level={2}
                         defaultExpanded={searchResults.length > 0}
+                        actions={
+                            <ModuleActionButtons
+                                module="search_results"
+                                runModuleAction={runModuleAction}
+                                isRunning={isRunning}
+                                compact
+                                hideLabels
+                            />
+                        }
                     >
                         <div className="px-4 py-3">
                             <SearchResultsList results={searchResults.map((result: any, idx: number) => ({
@@ -420,6 +214,15 @@ export function ResearchTreeView({
                         count={images.length}
                         level={2}
                         defaultExpanded={images.length > 0 && images.length <= 30}
+                        actions={
+                            <ModuleActionButtons
+                                module="images"
+                                runModuleAction={runModuleAction}
+                                isRunning={isRunning}
+                                compact
+                                hideLabels
+                            />
+                        }
                     >
                         <div className="px-4 py-3">
                             <ImageGallery images={images} />
@@ -433,6 +236,15 @@ export function ResearchTreeView({
                         count={videos.length}
                         level={2}
                         defaultExpanded={videos.length > 0 && videos.length <= 15}
+                        actions={
+                            <ModuleActionButtons
+                                module="videos"
+                                runModuleAction={runModuleAction}
+                                isRunning={isRunning}
+                                compact
+                                hideLabels
+                            />
+                        }
                     >
                         <div className="px-4 py-3">
                             <VideoGallery videos={videos} />
@@ -446,6 +258,15 @@ export function ResearchTreeView({
                         count={news.length}
                         level={2}
                         defaultExpanded={news.length > 0 && news.length <= 10}
+                        actions={
+                            <ModuleActionButtons
+                                module="news"
+                                runModuleAction={runModuleAction}
+                                isRunning={isRunning}
+                                compact
+                                hideLabels
+                            />
+                        }
                     >
                         <div className="px-4 py-3">
                             <NewsGallery news={news.map((article: any, idx: number) => ({
@@ -503,6 +324,15 @@ export function ResearchTreeView({
                         count={trends.length}
                         level={2}
                         defaultExpanded={trends.length > 0}
+                        actions={
+                            <ModuleActionButtons
+                                module="search_trends"
+                                runModuleAction={runModuleAction}
+                                isRunning={isRunning}
+                                compact
+                                hideLabels
+                            />
+                        }
                     >
                         <DataList
                             items={trends.slice(0, 10).map((trend: any, idx: number) => ({
@@ -515,7 +345,7 @@ export function ResearchTreeView({
                                         ? JSON.stringify(trend.relatedQueries)
                                         : (trend.relatedQueries || '').toString())
                             }))}
-                            emptyMessage="No trends available"
+                            emptyMessage={trendsEmptyMessage}
                         />
                     </TreeNodeCard>
                     <TreeNodeCard
@@ -524,6 +354,15 @@ export function ResearchTreeView({
                         count={insights.length}
                         level={2}
                         defaultExpanded={insights.length > 0}
+                        actions={
+                            <ModuleActionButtons
+                                module="community_insights"
+                                runModuleAction={runModuleAction}
+                                isRunning={isRunning}
+                                compact
+                                hideLabels
+                            />
+                        }
                     >
                         <DataList
                             items={insights.slice(0, 10).map((insight: any, idx: number) => ({
@@ -544,6 +383,15 @@ export function ResearchTreeView({
                     count={aiQuestions.length}
                     defaultExpanded={aiQuestions.length > 0}
                     level={1}
+                    actions={
+                        <ModuleActionButtons
+                            module="ai_questions"
+                            runModuleAction={runModuleAction}
+                            isRunning={isRunning}
+                            compact
+                            hideLabels
+                        />
+                    }
                 >
                     {
                         aiQuestions.length === 0 ? (

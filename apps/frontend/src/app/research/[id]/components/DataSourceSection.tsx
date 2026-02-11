@@ -9,6 +9,7 @@ interface DataSourceSectionProps {
     icon: React.ElementType;
     count: number;
     children: React.ReactNode;
+    actions?: React.ReactNode;
     defaultOpen?: boolean;
     onRerun?: () => Promise<void>;
     lastRun?: string;
@@ -22,6 +23,7 @@ export function DataSourceSection({
     icon: Icon,
     count,
     children,
+    actions,
     defaultOpen = false,
     onRerun,
     lastRun,
@@ -76,6 +78,7 @@ export function DataSourceSection({
                 </div>
 
                 <div className="flex items-center gap-2">
+                    {actions}
                     {rawData && (
                         <button
                             onClick={(e) => {
