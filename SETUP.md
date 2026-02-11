@@ -33,7 +33,7 @@ BACKEND_PORT=3001
 NODE_ENV=development
 
 # OpenAI
-OPENAI_API_KEY="sk-..."
+OPENAI_API_KEY="OPENAI_API_KEY_FROM_SECRET_MANAGER"
 ```
 
 ### Initialize Database
@@ -108,6 +108,24 @@ curl http://localhost:3001/api/health
   "database": "connected"
 }
 ```
+
+### If OpenAI Key Is Ignored (Troubleshooting)
+
+1. Stop backend fully and restart (do not rely on hot reload after env edits).
+2. Verify shell does not keep stale exports:
+   ```bash
+   echo $OPENAI_API_KEY
+   echo $AI_FALLBACK_MODE
+   ```
+3. Run runtime config check:
+   ```bash
+   npm run check:runtime-config --workspace=apps/backend
+   ```
+4. Local strict-mode expected output:
+   - `fallbackMode=off`
+   - `openAiKeyPresent=true`
+   - `openAiFormatValid=true`
+   - `preflightPass=true`
 
 ---
 

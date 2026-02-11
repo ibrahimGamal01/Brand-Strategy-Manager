@@ -66,7 +66,7 @@ DATABASE_URL="postgresql://user:password@localhost:5432/brand_strategy_db"
 BACKEND_PORT=3001
 
 # OpenAI (for AI analysis)
-OPENAI_API_KEY=your_openai_key
+OPENAI_API_KEY=OPENAI_API_KEY_FROM_SECRET_MANAGER
 ```
 
 ## Instagram Scraper Setup
