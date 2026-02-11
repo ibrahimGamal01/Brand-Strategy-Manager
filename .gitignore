@@ -1,4 +1,5 @@
 .env
+.env.bak
 node_modules/
 dist/
 build/
@@ -9,4 +10,14 @@ storage/documents/*
 !storage/.gitkeep
 .prisma/
 apps/backend/.env
+apps/backend/.env.*
+!apps/backend/.env.example
 apps/frontend/.env.local
+
+# Generated runtime media and local reference copies
+apps/backend/storage/media/**
+!apps/backend/storage/media/.gitkeep
+brand-compass-ref/
+brand-compass-ui/
+apps/backend/reproduction_output.json
+apps/backend/inspect_profiles.js
