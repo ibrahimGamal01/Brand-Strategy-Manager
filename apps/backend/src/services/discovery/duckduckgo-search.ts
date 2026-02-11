@@ -11,13 +11,106 @@
  * 4. Raw Results Storage (for later processing)
  */
 
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { spawn } from 'child_process';
 import path from 'path';
+import { existsSync } from 'fs';
 import { PrismaClient } from '@prisma/client';
 
-const execAsync = promisify(exec);
 const prisma = new PrismaClient();
+const DEFAULT_DDG_TIMEOUT_MS = 180_000;
+const MAX_DDG_ERROR_SNIPPET = 4_000;
+
+interface DdgRunResult {
+  stdout: string;
+  stderr: string;
+}
+
+function trimForLog(text: string, maxLength: number = MAX_DDG_ERROR_SNIPPET): string {
+  const normalized = String(text || '').trim();
+  if (!normalized) return '';
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(-maxLength)} (truncated)`;
+}
+
+function resolveDdgScriptPath(): string {
+  const cwd = process.cwd();
+  const candidates = [
+    path.join(cwd, 'scripts/ddg_search.py'),
+    path.join(cwd, 'apps/backend/scripts/ddg_search.py'),
+    path.resolve(cwd, '../backend/scripts/ddg_search.py'),
+    path.resolve(__dirname, '../../../scripts/ddg_search.py'),
+  ];
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  throw new Error(`ddg_search.py not found. Checked: ${candidates.join(', ')}`);
+}
+
+async function runDdgCommand(
+  args: string[],
+  timeoutMs: number = DEFAULT_DDG_TIMEOUT_MS
+): Promise<DdgRunResult> {
+  const scriptPath = resolveDdgScriptPath();
+  return await new Promise<DdgRunResult>((resolve, reject) => {
+    const child = spawn('python3', [scriptPath, ...args], {
+      cwd: process.cwd(),
+      env: { ...process.env, PYTHONUNBUFFERED: '1' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill('SIGKILL');
+      reject(
+        new Error(
+          `DDG command timed out after ${timeoutMs}ms: python3 ${path.basename(scriptPath)} ${args.join(' ')}`
+        )
+      );
+    }, timeoutMs);
+
+    child.stdout.on('data', (chunk: Buffer | string) => {
+      stdout += chunk.toString();
+    });
+
+    child.stderr.on('data', (chunk: Buffer | string) => {
+      stderr += chunk.toString();
+    });
+
+    child.on('error', (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      reject(error);
+    });
+
+    child.on('close', (code, signal) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+
+      if (code === 0) {
+        resolve({ stdout, stderr });
+        return;
+      }
+
+      const stderrSnippet = trimForLog(stderr);
+      reject(
+        new Error(
+          `DDG command failed (code=${code ?? 'null'}, signal=${signal ?? 'none'}): python3 ${path.basename(scriptPath)} ${args.join(' ')}${stderrSnippet ? ` | stderr=${stderrSnippet}` : ''}`
+        )
+      );
+    });
+  });
+}
 
 export interface RawSearchResult {
   query: string;
@@ -80,6 +173,131 @@ export interface SocialSearchResult {
   error?: string;
 }
 
+export async function searchRawDDG(
+  queries: string[],
+  options?: {
+    timeoutMs?: number;
+    maxResults?: number;
+    researchJobId?: string;
+    source?: string;
+  }
+): Promise<RawSearchResult[]> {
+  const normalizedQueries = Array.from(
+    new Set(
+      (queries || [])
+        .map((query) => String(query || '').trim())
+        .filter(Boolean)
+    )
+  );
+  if (normalizedQueries.length === 0) return [];
+
+  try {
+    const { stdout, stderr } = await runDdgCommand(
+      ['raw', ...normalizedQueries],
+      options?.timeoutMs ?? 60_000
+    );
+
+    if (stderr) {
+      console.log(`[DDGSearch] ${stderr}`);
+    }
+
+    const parsed = JSON.parse(stdout) as {
+      results?: RawSearchResult[];
+      total?: number;
+    };
+    const results = (parsed.results || []).slice(0, Math.max(1, Number(options?.maxResults || 120)));
+
+    if (options?.researchJobId && results.length > 0) {
+      await saveRawResultsToDB(
+        options.researchJobId,
+        results,
+        options.source || 'duckduckgo_raw_query'
+      );
+    }
+
+    return results;
+  } catch (error: any) {
+    console.error('[DDGSearch] Raw search failed:', error?.message || error);
+    return [];
+  }
+}
+
+const HANDLE_STOPWORDS = new Set([
+  'p',
+  'reel',
+  'reels',
+  'explore',
+  'stories',
+  'accounts',
+  'account',
+  'login',
+  'signup',
+  'about',
+  'share',
+  'video',
+  'videos',
+  'discover',
+  'fyp',
+  'foryou',
+  'hashtag',
+  'search',
+  'instagram',
+  'tiktok',
+  'www',
+]);
+
+function normalizeExtractedHandle(raw: string): string {
+  const normalized = String(raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^@+/, '')
+    .replace(/[^a-z0-9._]/g, '');
+
+  if (!normalized || normalized.length < 2 || normalized.length > 30) return '';
+  if (normalized.includes('..')) return '';
+  if (HANDLE_STOPWORDS.has(normalized)) return '';
+  if (normalized.endsWith('.com') || normalized.endsWith('.org') || normalized.endsWith('.net')) {
+    return '';
+  }
+  return normalized;
+}
+
+function extractHandlesFromRawResults(
+  rawResults: RawSearchResult[],
+  platform: 'instagram' | 'tiktok'
+): string[] {
+  const handles = new Set<string>();
+  const urlRegex =
+    platform === 'instagram'
+      ? /instagram\.com\/([a-z0-9._]{2,30})/gi
+      : /tiktok\.com\/@([a-z0-9._]{2,30})/gi;
+  const mentionRegex = /@([a-z0-9._]{2,30})/gi;
+
+  for (const row of rawResults || []) {
+    const href = String(row.href || '');
+    const title = String(row.title || '');
+    const body = String(row.body || '');
+    const text = `${title} ${body}`.toLowerCase();
+
+    const urlMatches = [...href.matchAll(urlRegex)];
+    for (const match of urlMatches) {
+      const handle = normalizeExtractedHandle(match[1] || '');
+      if (handle) handles.add(handle);
+    }
+
+    // Mentions are noisy; only trust them when platform appears in URL/title/body.
+    if (text.includes(platform) || href.toLowerCase().includes(platform)) {
+      const mentionMatches = [...text.matchAll(mentionRegex)];
+      for (const match of mentionMatches) {
+        const handle = normalizeExtractedHandle(match[1] || '');
+        if (handle) handles.add(handle);
+      }
+    }
+  }
+
+  return Array.from(handles);
+}
+
 /**
  * Save raw search results to database for later processing
  */
@@ -120,20 +338,15 @@ export async function saveRawResultsToDB(
  */
 export async function searchBrandContextDDG(
   brandName: string,
-  researchJobId?: string
+  researchJobId?: string,
+  options?: { timeoutMs?: number }
 ): Promise<BrandContextResult> {
   console.log(`[DDGSearch] Searching brand context for: "${brandName}"`);
   
   try {
-    const scriptPath = path.join(process.cwd(), 'scripts/ddg_search.py');
-    
-    const { stdout, stderr } = await execAsync(
-      `python3 ${scriptPath} brand_context "${brandName}"`,
-      {
-        cwd: process.cwd(),
-        timeout: 120000, // 2 min timeout for more results
-        maxBuffer: 50 * 1024 * 1024, // 50MB buffer for large results
-      }
+    const { stdout, stderr } = await runDdgCommand(
+      ['brand_context', brandName],
+      options?.timeoutMs ?? 120_000
     );
     
     if (stderr) {
@@ -182,15 +395,9 @@ export async function searchCompetitorsDDG(
   console.log(`[DDGSearch] Searching competitors for @${handle} in "${niche}"`);
   
   try {
-    const scriptPath = path.join(process.cwd(), 'scripts/ddg_search.py');
-    
-    const { stdout, stderr } = await execAsync(
-      `python3 ${scriptPath} competitors "${handle}" "${niche}" ${maxResults}`,
-      {
-        cwd: process.cwd(),
-        timeout: 180000, // 3 min timeout for extensive search
-        maxBuffer: 50 * 1024 * 1024,
-      }
+    const { stdout, stderr } = await runDdgCommand(
+      ['competitors', handle, niche, String(maxResults)],
+      60_000
     );
     
     if (stderr) {
@@ -220,40 +427,58 @@ export async function searchCompetitorsDDG(
  * e.g., "Brand Name competitors instagram"
  */
 export async function performDirectCompetitorSearch(query: string): Promise<string[]> {
-    console.log(`[DDGSearch] Running direct competitor search: "${query}"`);
-    // Re-use the existing search logic but purely as a discovery mechanism
-    // In reality this might need a specific python script mode, but for now 
-    // we can reuse the 'competitors' mode if we pass the query as the 'handle' 
-    // effectively tricking the script or using a new mode. 
-    // For simplicity/robustness, let's use searchCompetitorsDDG logic but 
-    // we might need to adjust the python script to handle freeform queries better.
-    // Assuming searchCompetitorsDDG handles the query construction internally mostly.
-    
-    // Actually, looking at the python script usage in searchCompetitorsDDG:
-    // python3 scripts/ddg_search.py competitors "handle" "niche"
-    
-    // We should probably rely on the gather_all or a raw search for this 
-    // to explain "Direct Query".
-    
-    // For MVP efficiency: We will use the existing searchCompetitorsDDG 
-    // but pass our constructed query as the "niche" to influence results
-    // while passing strict handle. This is a bit hacky.
-    
-    // BETTER APPROACH: Use the new AI service for parsing, but here we want
-    // raw DDG results.
-    
-    // Let's implement a simple raw search wrapper here if needed, 
-    // OR just alias it to searchCompetitorsDDG for now, acknowledging limitation.
-    
-    // It seems searchCompetitorsDDG uses the brand handle + "competitors" + niche.
-    // If we want "Direct Query", we effectively want to customize that string.
-    
-    // We will return an empty array for now and rely on Source 1 & 3 
-    // until we verify the python script supports raw queries. 
-    // Wait, the user wants "Direct Query: DDG Search for '${brand} competitors'".
-    
-    // Let's use searchCompetitorsDDG but utilize the 'niche' param to pass 'competitors' context
-    return searchCompetitorsDDG(query, 'competitors', 20);
+  console.log(`[DDGSearch] Running direct competitor search: "${query}"`);
+  return performDirectCompetitorSearchForPlatform(query, 'instagram', 30);
+}
+
+export async function performDirectCompetitorSearchForPlatform(
+  query: string,
+  platform: 'instagram' | 'tiktok',
+  maxResults: number = 30,
+  timeoutMs: number = 30_000
+): Promise<string[]> {
+  const normalizedQuery = String(query || '').trim();
+  if (!normalizedQuery) return [];
+
+  console.log(`[DDGSearch] Running direct ${platform} search: "${normalizedQuery}"`);
+
+  try {
+    const enrichedQueries =
+      platform === 'instagram'
+        ? [
+            `${normalizedQuery} site:instagram.com`,
+            `${normalizedQuery} instagram competitors`,
+            `${normalizedQuery} instagram accounts like`,
+          ]
+        : [
+            `${normalizedQuery} site:tiktok.com`,
+            `${normalizedQuery} tiktok competitors`,
+            `${normalizedQuery} tiktok creators like`,
+          ];
+    const { stdout, stderr } = await runDdgCommand(['raw', ...enrichedQueries], timeoutMs);
+
+    if (stderr) {
+      console.log(`[DDGSearch] ${stderr}`);
+    }
+
+    const parsed = JSON.parse(stdout) as {
+      results?: RawSearchResult[];
+      total?: number;
+    };
+    const rawResults = parsed.results || [];
+    const handles = extractHandlesFromRawResults(rawResults, platform).slice(
+      0,
+      Math.max(1, maxResults)
+    );
+
+    console.log(
+      `[DDGSearch] Direct ${platform} search found ${handles.length} handles from ${rawResults.length} raw results`
+    );
+    return handles;
+  } catch (error: any) {
+    console.error(`[DDGSearch] Direct ${platform} search failed:`, error.message);
+    return [];
+  }
 }
 
 /**
@@ -268,15 +493,9 @@ export async function searchCompetitorsDDGFull(
   console.log(`[DDGSearch] Full competitor search for @${handle} in "${niche}"`);
   
   try {
-    const scriptPath = path.join(process.cwd(), 'scripts/ddg_search.py');
-    
-    const { stdout, stderr } = await execAsync(
-      `python3 ${scriptPath} competitors "${handle}" "${niche}" ${maxResults}`,
-      {
-        cwd: process.cwd(),
-        timeout: 180000,
-        maxBuffer: 50 * 1024 * 1024,
-      }
+    const { stdout, stderr } = await runDdgCommand(
+      ['competitors', handle, niche, String(maxResults)],
+      60_000
     );
     
     if (stderr) {
@@ -315,16 +534,7 @@ export async function validateHandleDDG(
   console.log(`[DDGSearch] Validating @${handle} on ${platform}`);
   
   try {
-    const scriptPath = path.join(process.cwd(), 'scripts/ddg_search.py');
-    
-    const { stdout, stderr } = await execAsync(
-      `python3 ${scriptPath} validate "${handle}" "${platform}"`,
-      {
-        cwd: process.cwd(),
-        timeout: 60000,
-        maxBuffer: 10 * 1024 * 1024,
-      }
-    );
+    const { stdout, stderr } = await runDdgCommand(['validate', handle, platform], 12_000);
     
     if (stderr) {
       console.log(`[DDGSearch] ${stderr}`);
@@ -357,20 +567,15 @@ export async function validateHandleDDG(
  */
 export async function searchSocialProfiles(
   brandName: string,
-  researchJobId?: string
+  researchJobId?: string,
+  options?: { timeoutMs?: number }
 ): Promise<SocialSearchResult> {
   console.log(`[DDGSearch] Site-limited social search for: "${brandName}"`);
   
   try {
-    const scriptPath = path.join(process.cwd(), 'scripts/ddg_search.py');
-    
-    const { stdout, stderr } = await execAsync(
-      `python3 ${scriptPath} social_search "${brandName}"`,
-      {
-        cwd: process.cwd(),
-        timeout: 180000, // 3 min timeout for comprehensive search
-        maxBuffer: 50 * 1024 * 1024,
-      }
+    const { stdout, stderr } = await runDdgCommand(
+      ['social_search', brandName],
+      options?.timeoutMs ?? 45_000
     );
     
     if (stderr) {
@@ -486,16 +691,7 @@ export async function gatherAllDDG(
   console.log(`[DDGSearch] Starting comprehensive gather for "${brandName}" in "${niche}"`);
   
   try {
-    const scriptPath = path.join(process.cwd(), 'scripts/ddg_search.py');
-    
-    const { stdout, stderr } = await execAsync(
-      `python3 ${scriptPath} gather_all "${brandName}" "${niche}"`,
-      {
-        cwd: process.cwd(),
-        timeout: 300000, // 5 min timeout for comprehensive search
-        maxBuffer: 100 * 1024 * 1024, // 100MB buffer
-      }
-    );
+    const { stdout, stderr } = await runDdgCommand(['gather_all', brandName, niche], 180_000);
     
     if (stderr) {
       console.log(`[DDGSearch] ${stderr}`);
@@ -716,10 +912,10 @@ export async function scrapeSocialContent(
   researchJobId?: string
 ): Promise<ScrapeSocialContentResult> {
   // Build args string like: instagram:handle tiktok:handle
-  const handleArgs = Object.entries(handles)
+  const handleArgList = Object.entries(handles)
     .filter(([_, handle]) => handle)
-    .map(([platform, handle]) => `${platform}:${handle}`)
-    .join(' ');
+    .map(([platform, handle]) => `${platform}:${handle}`);
+  const handleArgs = handleArgList.join(' ');
   
   if (!handleArgs) {
     return {
@@ -736,15 +932,9 @@ export async function scrapeSocialContent(
   console.log(`[DDGSearch] Scraping social content: ${handleArgs} (max ${maxItems})`);
   
   try {
-    const scriptPath = path.join(process.cwd(), 'scripts/ddg_search.py');
-    
-    const { stdout, stderr } = await execAsync(
-      `python3 ${scriptPath} scrape_content ${handleArgs} ${maxItems}`,
-      {
-        cwd: process.cwd(),
-        timeout: 180000, // 3 min timeout
-        maxBuffer: 50 * 1024 * 1024,
-      }
+    const { stdout, stderr } = await runDdgCommand(
+      ['scrape_content', ...handleArgList, String(maxItems)],
+      120_000
     );
     
     if (stderr) {
@@ -827,4 +1017,3 @@ async function saveSocialContentToDB(
     console.log(`[DDGSearch] Saved ${created.count} social videos`);
   }
 }
-

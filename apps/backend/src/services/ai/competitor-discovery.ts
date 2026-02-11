@@ -1,4 +1,5 @@
-import { OpenAI } from 'openai';
+import OpenAI from 'openai';
+import { isOpenAiConfiguredForRealMode } from '../../lib/runtime-preflight';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -10,96 +11,211 @@ export interface AICompetitorSuggestion {
   relevanceScore: number; // 0.0 to 1.0
 }
 
+export interface CompetitorSuggestionContext {
+  searchInstructions?: string[];
+  nicheKeywords?: string[];
+  excludeHandles?: string[];
+  priorCompetitors?: string[];
+  audienceSummary?: string;
+  maxPerPlatform?: number;
+  minRelevanceScore?: number;
+}
+
+type DiscoveryPlatform = 'instagram' | 'tiktok';
+
+const GENERIC_OR_BROAD_HANDLES = new Set([
+  'google',
+  'nike',
+  'netflix',
+  'ibm',
+  'entrepreneur',
+  'creators',
+  'business',
+  'marketing',
+  'startup',
+  'quotes',
+  'motivation',
+  'success',
+  'viral',
+  'garyvee',
+  'imangadzhi',
+]);
+
+function looksLowSignalHandle(handle: string): boolean {
+  if (!handle) return true;
+  if (handle.length < 3 || handle.length > 30) return true;
+  if (!/^[a-z0-9._]+$/.test(handle)) return true;
+  if (!/[a-z]/.test(handle)) return true;
+  if (/^\d{6,}$/.test(handle)) return true;
+  if (GENERIC_OR_BROAD_HANDLES.has(handle)) return true;
+  if (/(coupon|deal|discount|giveaway|meme|fanpage|fan_page|quotes|motivation)/i.test(handle)) {
+    return true;
+  }
+  return false;
+}
+
+function parsePriorHandles(values: string[]): string[] {
+  const handles = new Set<string>();
+  for (const value of values || []) {
+    const [left, right] = String(value || '').split(':');
+    const rawHandle = right ? right : left;
+    const handle = normalizeHandle(rawHandle);
+    if (!handle || looksLowSignalHandle(handle)) continue;
+    handles.add(handle);
+    if (handles.size >= 16) break;
+  }
+  return Array.from(handles);
+}
+
+function normalizeHandle(raw: string): string {
+  return String(raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^@+/, '')
+    .replace(/[^a-z0-9._]/g, '');
+}
+
+function dedupeSuggestions(suggestions: AICompetitorSuggestion[]): AICompetitorSuggestion[] {
+  const seen = new Set<string>();
+  const result: AICompetitorSuggestion[] = [];
+
+  for (const suggestion of suggestions) {
+    const handle = normalizeHandle(suggestion.handle);
+    if (!handle) continue;
+    const key = `${suggestion.platform}:${handle}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push({
+      ...suggestion,
+      handle,
+      relevanceScore: Math.max(0, Math.min(1, suggestion.relevanceScore)),
+    });
+  }
+
+  return result;
+}
+
+async function requestPlatformCompetitors(
+  platform: DiscoveryPlatform,
+  brandName: string,
+  niche: string,
+  description?: string,
+  context: CompetitorSuggestionContext = {}
+): Promise<AICompetitorSuggestion[]> {
+  if (!isOpenAiConfiguredForRealMode()) {
+    return [];
+  }
+
+  const targetCount = Math.max(4, Math.min(12, Number(context.maxPerPlatform || 8)));
+  const minScore = Math.max(0.4, Math.min(0.95, Number(context.minRelevanceScore || 0.6)));
+  const keywordHints = (context.nicheKeywords || []).filter(Boolean).slice(0, 10);
+  const instructionHints = (context.searchInstructions || []).filter(Boolean).slice(0, 8);
+  const priorCompetitors = parsePriorHandles((context.priorCompetitors || []).filter(Boolean)).slice(0, 12);
+  const excludedHandles = (context.excludeHandles || []).map(normalizeHandle).filter(Boolean).slice(0, 20);
+
+  const platformLabel = platform === 'instagram' ? 'Instagram' : 'TikTok';
+  const handlePattern = platform === 'instagram' ? '[a-z0-9._]{3,30}' : '[a-z0-9._]{2,24}';
+  const model = process.env.OPENAI_COMPETITOR_MODEL || 'gpt-4o-mini';
+
+  const prompt = `
+You are a competitor finder for ${platformLabel} direct peers.
+
+Target business:
+- Brand: ${brandName}
+- Niche: ${niche}
+- Description: ${description || 'Not provided'}
+- Audience summary: ${context.audienceSummary || 'Not provided'}
+
+RAG hints:
+- Niche keywords: ${keywordHints.join(', ') || 'n/a'}
+- Search instructions: ${instructionHints.join(' | ') || 'n/a'}
+- Prior accepted competitors: ${priorCompetitors.join(', ') || 'n/a'}
+
+Exclusions:
+- Never include these handles: ${excludedHandles.join(', ') || 'n/a'}
+- Never include the target brand/account itself.
+- Avoid global mega brands unless they are true direct peers.
+
+Requirements:
+1. Suggest ${targetCount} or fewer REAL ${platformLabel} accounts.
+2. Only direct or near-direct peers in the same business problem space and audience.
+3. If uncertain that a handle exists, omit it.
+4. Use handle format regex: ${handlePattern}
+5. Exclude generic quote/coupon/news/fan/celebrity accounts.
+6. Return JSON only.
+
+Response schema:
+{
+  "competitors": [
+    {
+      "name": "Brand Name",
+      "handle": "account_handle_without_at",
+      "relevance": 0.0,
+      "reasoning": "One sentence with evidence"
+    }
+  ]
+}
+`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model,
+      messages: [
+        { role: 'system', content: 'Return valid JSON only.' },
+        { role: 'user', content: prompt },
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0.2,
+      max_tokens: 1200,
+    });
+
+    const content = response.choices[0]?.message?.content || '{"competitors": []}';
+    const parsed = JSON.parse(content) as {
+      competitors?: Array<{
+        name?: string;
+        handle?: string;
+        relevance?: number;
+        reasoning?: string;
+      }>;
+    };
+
+    const results = Array.isArray(parsed.competitors) ? parsed.competitors : [];
+    const normalized = results
+      .map((item) => {
+        const handle = normalizeHandle(item.handle || '');
+        if (!handle) return null;
+        if (excludedHandles.includes(handle)) return null;
+        if (looksLowSignalHandle(handle)) return null;
+
+        return {
+          name: String(item.name || handle),
+          handle,
+          platform,
+          reasoning: String(item.reasoning || 'AI direct-peer suggestion').slice(0, 280),
+          relevanceScore: Math.max(0, Math.min(1, Number(item.relevance ?? 0.6))),
+        } as AICompetitorSuggestion;
+      })
+      .filter((item): item is AICompetitorSuggestion => Boolean(item))
+      .filter((item) => item.relevanceScore >= minScore);
+
+    return dedupeSuggestions(normalized).slice(0, targetCount);
+  } catch (error) {
+    console.error(`[AI] ${platformLabel} competitor suggestion failed:`, error);
+    return [];
+  }
+}
+
 /**
  * Suggests Instagram competitors using AI based on brand profile and niche.
  */
 export async function suggestInstagramCompetitors(
   brandName: string,
   niche: string,
-  description?: string
+  description?: string,
+  context: CompetitorSuggestionContext = {}
 ): Promise<AICompetitorSuggestion[]> {
-    console.log(`[AI] Suggesting Instagram competitors for ${brandName} (${niche})`);
-
-  const prompt = `You are a strategic brand consultant specialized in ${niche}. Find 3-5 REAL, ACTIVE Instagram competitors for "${brandName}".  
-  ${description ? `Brand Description: ${description}` : ''}
-
-  CRITICAL REQUIREMENTS:
-  1. ✅ ONLY suggest accounts that ACTUALLY EXIST on Instagram right now
-  2. ✅ Accounts MUST be in the ${niche} niche or closely related
-  3. ✅ Accounts must be ACTIVE (posting within last 3 months)
-  4. ✅ Minimum 5,000 followers (no micro or inactive accounts)
-  5. ❌ DO NOT suggest mega-celebrities (>5M followers) - they're not real competitors
-  6. ❌ DO NOT suggest accounts outside the ${niche} niche
-  7. ❌ DO NOT make up handles - if you can't find real ones, return fewer results
-  8. ❌ DO NOT suggest: ${brandName} itself, generic accounts, personal blogs, or dead pages
-
-  BEFORE suggesting each account, ask yourself:
-  - "Does this account actually exist on Instagram?"
-  - "Is it in the ${niche} niche?"
-  - "Would ${brandName} actually consider this a competitor?"
-  
-  If the answer to ANY question is "no" or "unsure", DO NOT include it.
-
-  For each competitor, provide:
-  1. Name (actual brand/business name)
-  2. Handle (Instagram username without @)
-  3. Relevance (0-100%) - Only give >70% to true competitors in same niche
-  4. Reasoning (brief explanation why this is a real competitor)
-
-  Return valid JSON:
-  {
-    "competitors": [
-      {
-        "name": "Competitor Name",
-        "handle": "actual_ig_handle",
-        "relevance": 85,
-        "reasoning": "Brief explanation of why this is a competitor"
-      }
-    ]
-  }`;
-
-  try {
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [
-        { role: 'system', content: 'You are a helpful assistant that outputs only valid JSON.' },
-        { role: 'user', content: prompt }
-      ],
-      response_format: { type: 'json_object' },
-      temperature: 0.5,
-    });
-
-    const content = response.choices[0].message.content || '{"competitors": []}';
-    console.log(`[AI] Raw response for ${brandName}:`, content.substring(0, 100) + '...'); // Log preview
-    
-    let parsed;
-    try {
-        parsed = JSON.parse(content);
-    } catch (e) {
-        console.error('[AI] JSON Parse error:', e);
-        return [];
-    }
-    
-    // Handle potential wrapper keys like "competitors": [...]
-    const results = Array.isArray(parsed) ? parsed : (parsed.competitors || []);
-
-    if (!Array.isArray(results)) {
-        console.error('[AI] Parsed result is not an array:', parsed);
-        return [];
-    }
-
-    return results.map((c: any) => ({
-      name: c.name,
-      handle: c.handle,
-      platform: 'instagram' as const,
-      reasoning: c.reasoning || `${c.relevance}% relevance`,
-      relevanceScore: (c.relevance || 70) / 100 // Convert percentage to 0-1 score
-    })).filter(c => c.relevanceScore >= 0.7); // Only return high-confidence suggestions
-
-  } catch (error) {
-    console.error('[AI] Instagram competitor suggestion failed:', error);
-    return [];
-  }
+  console.log(`[AI] Suggesting Instagram competitors for ${brandName} (${niche})`);
+  return requestPlatformCompetitors('instagram', brandName, niche, description, context);
 }
 
 /**
@@ -108,89 +224,11 @@ export async function suggestInstagramCompetitors(
 export async function suggestTikTokCompetitors(
   brandName: string,
   niche: string,
-  description?: string
+  description?: string,
+  context: CompetitorSuggestionContext = {}
 ): Promise<AICompetitorSuggestion[]> {
   console.log(`[AI] Suggesting TikTok competitors for ${brandName} (${niche})`);
-
-  const prompt = `You are a strategic brand consultant specialized in ${niche}. Find 3-5 REAL, ACTIVE TikTok creators/brands for "${brandName}".
-  ${description ? `Brand Description: ${description}` : ''}
-
-  CRITICAL REQUIREMENTS:
-  1. ✅ ONLY suggest accounts that ACTUALLY EXIST on TikTok right now
-  2. ✅ Accounts MUST be in the ${niche} niche or closely related
-  3. ✅ Accounts must be ACTIVE (posting within last month)
-  4. ✅ Minimum 10,000 followers on TikTok
-  5. ❌ DO NOT suggest mega-influencers (>5M followers) - they're not real competitors
-  6. ❌ DO NOT suggest accounts outside the ${niche} niche
-  7. ❌ DO NOT make up handles - if you can't find real ones, return fewer results
-  8. ❌ DO NOT suggest: ${brandName} itself, generic accounts, or inactive pages
-
-  BEFORE suggesting each account, ask yourself:
-  - "Does this account actually exist on TikTok?"
-  - "Is it in the ${niche} niche?"
-  - "Would ${brandName} actually consider this a competitor?"
-  
-  If the answer to ANY question is "no" or "unsure", DO NOT include it.
-
-  For each competitor, provide:
-  1. Name (actual brand/creator name)
-  2. Handle (TikTok username without @)
-  3. Relevance (0-100%) - Only give >70% to true competitors in same niche
-  4. Reasoning (brief explanation why this is a real competitor)
-
-  Return valid JSON:
-  {
-    "competitors": [
-      {
-        "name": "Competitor Name",
-        "handle": "actual_tiktok_handle",
-        "relevance": 85,
-        "reasoning": "Brief explanation of why this is a competitor"
-      }
-    ]
-  }`;
-
-  try {
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [
-        { role: 'system', content: 'You are a helpful assistant that outputs only valid JSON.' },
-        { role: 'user', content: prompt }
-      ],
-      response_format: { type: 'json_object' },
-      temperature: 0.5,
-    });
-
-    const content = response.choices[0].message.content || '{"competitors": []}';
-    console.log(`[AI] Raw TikTok response for ${brandName}:`, content.substring(0, 100) + '...');
-    
-    let parsed;
-    try {
-        parsed = JSON.parse(content);
-    } catch (e) {
-        console.error('[AI] TikTok JSON Parse error:', e);
-        return [];
-    }
-    
-    const results = Array.isArray(parsed) ? parsed : (parsed.competitors || []);
-
-    if (!Array.isArray(results)) {
-        console.error('[AI] TikTok parsed result is not an array:', parsed);
-        return [];
-    }
-
-    return results.map((c: any) => ({
-      name: c.name,
-      handle: c.handle,
-      platform: 'tiktok' as const,
-      reasoning: c.reasoning || `${c.relevance}% relevance`,
-      relevanceScore: (c.relevance || 70) / 100
-    })).filter(c => c.relevanceScore >= 0.7);
-
-  } catch (error) {
-    console.error('[AI] TikTok competitor suggestion failed:', error);
-    return [];
-  }
+  return requestPlatformCompetitors('tiktok', brandName, niche, description, context);
 }
 
 /**
@@ -199,19 +237,19 @@ export async function suggestTikTokCompetitors(
 export async function suggestCompetitorsMultiPlatform(
   brandName: string,
   niche: string,
-  description?: string
+  description?: string,
+  context: CompetitorSuggestionContext = {}
 ): Promise<AICompetitorSuggestion[]> {
   console.log(`[AI] Suggesting multi-platform competitors for ${brandName}`);
-  
   const [instagramCompetitors, tiktokCompetitors] = await Promise.all([
-    suggestInstagramCompetitors(brandName, niche, description),
-    suggestTikTokCompetitors(brandName, niche, description)
+    suggestInstagramCompetitors(brandName, niche, description, context),
+    suggestTikTokCompetitors(brandName, niche, description, context),
   ]);
-  
+
   const total = instagramCompetitors.length + tiktokCompetitors.length;
   console.log(`[AI] Found ${instagramCompetitors.length} Instagram + ${tiktokCompetitors.length} TikTok = ${total} total competitors`);
-  
-  return [...instagramCompetitors, ...tiktokCompetitors];
+
+  return dedupeSuggestions([...instagramCompetitors, ...tiktokCompetitors]);
 }
 
 /**
@@ -223,5 +261,5 @@ export async function suggestCompetitorsWithAI(
   niche: string,
   description?: string
 ): Promise<AICompetitorSuggestion[]> {
-  return suggestInstagramCompetitors(brandName, niche, description);
+  return suggestInstagramCompetitors(brandName, niche, description, {});
 }

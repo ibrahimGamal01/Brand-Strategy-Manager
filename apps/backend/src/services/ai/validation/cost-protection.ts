@@ -12,9 +12,9 @@ export interface CostProtectionConfig {
   requireConfirmation: boolean; // Require explicit confirmation for expensive operations
 }
 
-// Respect MOCK_AI_CALLS environment variable
+// AI fallback mode is explicitly controlled through AI_FALLBACK_MODE.
 export const COST_PROTECTION: CostProtectionConfig = {
-  mockMode: process.env.MOCK_AI_CALLS === 'true',
+  mockMode: String(process.env.AI_FALLBACK_MODE || '').toLowerCase() === 'mock',
   maxTokensPerCall: parseInt(process.env.MAX_TOKENS_PER_CALL || '2000'),
   monthlyBudgetUSD: parseFloat(process.env.MONTHLY_AI_BUDGET || '100'),
   alertThresholdUSD: parseFloat(process.env.COST_ALERT_THRESHOLD || '50'),
@@ -81,7 +81,7 @@ export function getMockAIResponse(prompt: string): any {
           improvements: [
             {
               issue: 'This is a mock response',
-              suggestion: 'Set MOCK_AI_CALLS=false to use real API',
+              suggestion: 'Set AI_FALLBACK_MODE=off to use real API',
               example: 'Real data will be used in production'
             }
           ]

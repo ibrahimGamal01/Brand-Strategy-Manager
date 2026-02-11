@@ -13,7 +13,9 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import { mediaDownloader } from '../media/downloader';
+import { downloadSnapshotMedia } from '../media/downloader';
 import { calculatePostRankings } from '../scrapers/post-ranking-service';
+import { emitResearchJobEvent } from './research-job-events';
 
 const prisma = new PrismaClient();
 const execAsync = promisify(exec);
@@ -26,6 +28,7 @@ export interface ScrapedPost {
   hashtags: string[];
   mentions: string[];
   thumbnailUrl?: string;
+  mediaUrls?: string[];
   
   // Metrics
   likesCount: number;
@@ -54,6 +57,13 @@ export interface ScrapedProfile {
     full_name: string;
     followers: number;
   }>;
+}
+
+export interface ScrapeExecutionContext {
+  runId?: string;
+  source?: string;
+  entityType?: string;
+  entityId?: string;
 }
 
 // Concurrency Control
@@ -89,7 +99,8 @@ export const scraperLock = new ScraperLockManager();
 export async function scrapeProfileSafe(
     researchJobId: string, 
     platform: string, 
-    handle: string
+    handle: string,
+    context: ScrapeExecutionContext = {}
 ) {
     // 1. Concurrency Check
     if (!scraperLock.tryAcquire(platform, handle)) {
@@ -102,7 +113,7 @@ export async function scrapeProfileSafe(
         console.log(`[SocialScraper] Starting safe scrape: ${platform} @${handle}`);
         
         // 2. Execute Core Logic
-        const result = await scrapeProfileIncrementally(researchJobId, platform, handle);
+        const result = await scrapeProfileIncrementally(researchJobId, platform, handle, undefined, context);
         
         const duration = ((Date.now() - start) / 1000).toFixed(1);
         console.log(`[SocialScraper] Completed ${platform} @${handle} in ${duration}s`);
@@ -125,9 +136,30 @@ export async function scrapeProfileSafe(
 export async function scrapeProfileIncrementally(
   researchJobId: string,
   platform: string,
-  handle: string
+  handle: string,
+  postsLimit: number = parseInt(process.env.SOCIAL_SCRAPE_POST_LIMIT || '4', 10),
+  context: ScrapeExecutionContext = {}
 ): Promise<ScrapedProfile | null> {
   console.log(`[SocialScraper] Starting incremental scrape for @${handle} on ${platform}`);
+
+  emitResearchJobEvent({
+    researchJobId,
+    runId: context.runId,
+    source: 'scraper',
+    code: 'scrape.started',
+    level: 'info',
+    message: `Started ${platform} scrape for @${handle}`,
+    platform,
+    handle,
+    entityType: context.entityType,
+    entityId: context.entityId,
+    metrics: {
+      postsLimit,
+    },
+    metadata: {
+      source: context.source || 'manual',
+    },
+  });
   
   // 1. Get existing profile state to find checkpoint
   const existingProfile = await prisma.socialProfile.findUnique({
@@ -142,6 +174,25 @@ export async function scrapeProfileIncrementally(
   
   const lastPostId = existingProfile?.lastPostId;
   console.log(`[SocialScraper] Checkpoint: ${lastPostId ? `Last post ${lastPostId}` : 'None (Full scrape)'}`);
+
+  emitResearchJobEvent({
+    researchJobId,
+    runId: context.runId,
+    source: 'scraper',
+    code: 'scrape.checkpoint',
+    level: 'info',
+    message: lastPostId
+      ? `Resuming ${platform} @${handle} from checkpoint ${lastPostId}`
+      : `No checkpoint for ${platform} @${handle}; running full pass`,
+    platform,
+    handle,
+    entityType: context.entityType,
+    entityId: context.entityId,
+    metrics: {
+      hasCheckpoint: Boolean(lastPostId),
+    },
+    metadata: lastPostId ? { lastPostId } : null,
+  });
   
   // 2. Run platform-specific scraper
   try {
@@ -150,7 +201,7 @@ export async function scrapeProfileIncrementally(
     if (platform === 'instagram') {
       // Use the instagram-service which calls the Python scraper
       const { scrapeInstagramProfile } = await import('../scraper/instagram-service');
-      const result = await scrapeInstagramProfile(handle, 30);
+      const result = await scrapeInstagramProfile(handle, postsLimit);
       
       if (result.success && result.data) {
         scrapedData = {
@@ -163,25 +214,48 @@ export async function scrapeProfileIncrementally(
           bio: result.data.bio,
           website: '',
           isVerified: result.data.is_verified,
-          posts: result.data.posts.map(p => ({
-            externalId: p.external_post_id,
-            url: p.post_url,
-            type: p.is_video ? 'video' : 'image',
-            caption: p.caption,
-            hashtags: extractHashtags(p.caption),
-            mentions: extractMentions(p.caption),
-            thumbnailUrl: p.media_url || p.video_url || undefined,
-            likesCount: p.likes,
-            commentsCount: p.comments,
-            sharesCount: 0,
-            viewsCount: 0,
-            playsCount: 0,
-            duration: 0,
-            postedAt: p.timestamp,
-          })),
+          posts: result.data.posts.map(p => {
+            const mediaUrls = (p as any).media_urls || [];
+            const thumb = (p as any).media_url || (p as any).video_url || mediaUrls[0];
+            return {
+              externalId: p.external_post_id,
+              url: p.post_url,
+              type: p.is_video ? 'video' : 'image',
+              caption: p.caption,
+              hashtags: extractHashtags(p.caption),
+              mentions: extractMentions(p.caption),
+              thumbnailUrl: thumb,
+              likesCount: p.likes,
+              commentsCount: p.comments,
+              sharesCount: 0,
+              viewsCount: 0,
+              playsCount: 0,
+              duration: 0,
+              postedAt: p.timestamp,
+              mediaUrls,
+            };
+          }),
           discoveredCompetitors: result.data.discovered_competitors, // Pass discovered competitors
         };
         console.log(`[SocialScraper] Instagram scraper used: ${result.scraper_used}`);
+
+        if (String(result.scraper_used || '').includes('apify')) {
+          emitResearchJobEvent({
+            researchJobId,
+            runId: context.runId,
+            source: 'scraper',
+            code: 'scrape.apify.used',
+            level: 'info',
+            message: `Apify scraper used for @${handle}`,
+            platform,
+            handle,
+            entityType: context.entityType,
+            entityId: context.entityId,
+            metadata: {
+              scraperUsed: result.scraper_used,
+            },
+          });
+        }
       } else {
         console.warn(`[SocialScraper] Instagram scrape failed: ${result.error}`);
         return null;
@@ -189,7 +263,7 @@ export async function scrapeProfileIncrementally(
     } else if (platform === 'tiktok') {
       // Use the tiktok-service
       const { tiktokService } = await import('../scraper/tiktok-service');
-      const result = await tiktokService.scrapeProfile(handle, 30);
+      const result = await tiktokService.scrapeProfile(handle, postsLimit);
       
       if (result.success && result.profile) {
         scrapedData = {
@@ -202,23 +276,31 @@ export async function scrapeProfileIncrementally(
           bio: '',
           website: '',
           isVerified: false,
-          posts: (result.videos || []).map(v => ({
-            externalId: v.video_id,
-            url: v.url,
-            type: 'video',
-            caption: v.description || v.title,
-            hashtags: extractHashtags(v.description || ''),
-            mentions: [],
-            // Fix: correctly map (v as any).thumbnail which is provided by yt-dlp logic
-            thumbnailUrl: (v as any).thumbnail || (v as any).cover || (v as any).origin_cover || undefined,
-            likesCount: v.like_count || 0,
-            commentsCount: v.comment_count || 0,
-            sharesCount: v.share_count || 0,
-            viewsCount: v.view_count || 0,
-            playsCount: v.view_count || 0,
-            duration: v.duration || 0,
-            postedAt: v.upload_date || new Date().toISOString(),
-          })),
+          posts: (result.videos || []).map(v => {
+            const mediaUrls = [
+              v.url,
+              (v as any).play_url,
+              (v as any).download_url,
+            ].filter(Boolean);
+            const thumb = (v as any).thumbnail || (v as any).cover || (v as any).origin_cover;
+            return {
+              externalId: v.video_id,
+              url: v.url,
+              type: 'video',
+              caption: v.description || v.title,
+              hashtags: extractHashtags(v.description || ''),
+              mentions: [],
+              thumbnailUrl: thumb || mediaUrls[0],
+              likesCount: v.like_count || 0,
+              commentsCount: v.comment_count || 0,
+              sharesCount: v.share_count || 0,
+              viewsCount: v.view_count || 0,
+              playsCount: v.view_count || 0,
+              duration: v.duration || 0,
+              postedAt: v.upload_date || new Date().toISOString(),
+              mediaUrls,
+            };
+          }),
         };
       } else {
         console.warn(`[SocialScraper] TikTok scrape failed: ${result.error}`);
@@ -245,9 +327,36 @@ export async function scrapeProfileIncrementally(
     // 3. Save Profile & Posts to DB (Transactional)
     const savedProfile = await saveScrapedData(researchJobId, scrapedData);
 
+    emitResearchJobEvent({
+      researchJobId,
+      runId: context.runId,
+      source: 'scraper',
+      code: 'scrape.saved',
+      level: 'info',
+      message: `Saved @${handle} with ${scrapedData.posts.length} posts`,
+      platform,
+      handle,
+      entityType: context.entityType,
+      entityId: context.entityId || savedProfile?.id || null,
+      metrics: {
+        postsScraped: scrapedData.posts.length,
+        followers: scrapedData.followers,
+        profilePostsCount: scrapedData.postsCount,
+      },
+      metadata: {
+        source: context.source || 'manual',
+      },
+    });
+
     // 4. Trigger Media Download (Robust/Grep mode)
-    if (savedProfile) {
-        await mediaDownloader.downloadSocialProfileMedia(savedProfile.id);
+    if (savedProfile && scrapedData.posts.length > 0) {
+        // Bound media download scope to the newest scraped posts to keep scrape cycles responsive.
+        const recentPostLimit = Math.max(scrapedData.posts.length, 4);
+        await mediaDownloader.downloadSocialProfileMedia(savedProfile.id, {
+          recentPostLimit,
+          runId: context.runId,
+          source: context.source,
+        });
     }
     
     return scrapedData;
@@ -280,6 +389,9 @@ function extractMentions(text: string): string[] {
  * Updates profile stats and inserts/updates posts
  */
 async function saveScrapedData(researchJobId: string, data: ScrapedProfile) {
+  // Resolve whether this scrape is for the client or a competitor
+  const context = await resolveProfileContext(researchJobId, data.platform, data.handle);
+
   return prisma.$transaction(async (tx) => {
     // 1. Upsert Profile
     const profile = await tx.socialProfile.upsert({
@@ -329,6 +441,10 @@ async function saveScrapedData(researchJobId: string, data: ScrapedProfile) {
     
     for (const post of data.posts) {
       const metadata = rankingsMap.get(post.externalId);
+      const enrichedMetadata = {
+        ...(metadata || {}),
+        media_urls: post.mediaUrls || [],
+      };
       
       // Save Post
       const savedPost = await tx.socialPost.upsert({
@@ -346,7 +462,7 @@ async function saveScrapedData(researchJobId: string, data: ScrapedProfile) {
           viewsCount: post.viewsCount,
           playsCount: post.playsCount,
           thumbnailUrl: post.thumbnailUrl,
-          metadata: metadata as any, // Performance rankings
+          metadata: enrichedMetadata as any, // Performance rankings + media urls
           scrapedAt: new Date(),
         },
         create: {
@@ -364,7 +480,7 @@ async function saveScrapedData(researchJobId: string, data: ScrapedProfile) {
           viewsCount: post.viewsCount,
           duration: post.duration,
           postedAt: safeDate(post.postedAt),
-          metadata: metadata as any, // Performance rankings
+          metadata: enrichedMetadata as any, // Performance rankings + media urls
           scrapedAt: new Date(),
         },
       });
@@ -424,10 +540,251 @@ async function saveScrapedData(researchJobId: string, data: ScrapedProfile) {
         }
         console.log(`[SocialScraper] Saved ${newCompetitors} new competitors discovered via @${data.handle}`);
     }
-    
+
+    // ---------------------------
+    // Snapshot layer (new design)
+    // ---------------------------
+    try {
+      if (context?.type === 'client') {
+        const clientProfile = await tx.clientProfile.upsert({
+          where: {
+            clientId_platform_handle: {
+              clientId: context.clientId,
+              platform: data.platform,
+              handle: data.handle,
+            },
+          },
+          update: {
+            followerCount: data.followers,
+            followingCount: data.following,
+            bio: data.bio,
+            profileImageUrl: data.posts[0]?.thumbnailUrl || undefined,
+            isVerified: data.isVerified,
+            isPrivate: false,
+            lastScrapedAt: new Date(),
+          },
+          create: {
+            clientId: context.clientId,
+            platform: data.platform,
+            handle: data.handle,
+            profileUrl: data.url,
+            followerCount: data.followers,
+            followingCount: data.following,
+            bio: data.bio,
+            profileImageUrl: data.posts[0]?.thumbnailUrl || undefined,
+            isVerified: data.isVerified,
+            isPrivate: false,
+            lastScrapedAt: new Date(),
+          },
+        });
+
+        const snapshot = await tx.clientProfileSnapshot.create({
+          data: {
+            clientProfileId: clientProfile.id,
+            researchJobId,
+            followerCount: data.followers,
+            followingCount: data.following,
+            bio: data.bio,
+            profileImageUrl: data.posts[0]?.thumbnailUrl || undefined,
+            postsCount: data.postsCount,
+            isVerified: data.isVerified,
+            isPrivate: false,
+            scrapedAt: new Date(),
+          },
+        });
+
+        const followerBase = data.followers || 0;
+        for (const post of data.posts) {
+          await tx.clientPostSnapshot.upsert({
+            where: {
+              clientProfileSnapshotId_externalPostId: {
+                clientProfileSnapshotId: snapshot.id,
+                externalPostId: post.externalId,
+              },
+            },
+            update: {
+              likesCount: post.likesCount,
+              commentsCount: post.commentsCount,
+              sharesCount: post.sharesCount,
+              viewsCount: post.viewsCount,
+              playsCount: post.playsCount,
+              engagementRate: followerBase ? (post.likesCount + post.commentsCount) / Math.max(followerBase, 1) : null,
+              scrapedAt: new Date(),
+            },
+            create: {
+              clientProfileSnapshotId: snapshot.id,
+              externalPostId: post.externalId,
+              postUrl: post.url,
+              caption: post.caption,
+              format: post.type,
+              likesCount: post.likesCount,
+              commentsCount: post.commentsCount,
+              sharesCount: post.sharesCount,
+              viewsCount: post.viewsCount,
+              playsCount: post.playsCount,
+              postedAt: safeDate(post.postedAt),
+              engagementRate: followerBase ? (post.likesCount + post.commentsCount) / Math.max(followerBase, 1) : null,
+              scrapedAt: new Date(),
+            },
+          });
+        }
+
+        // Trigger media download for snapshot posts (non-blocking best-effort)
+        downloadSnapshotMedia('client', snapshot.id).catch(err =>
+          console.warn('[SocialScraper] Snapshot media download (client) failed', err?.message)
+        );
+      } else if (context?.type === 'competitor') {
+        const competitorProfile = await tx.competitorProfile.upsert({
+          where: {
+            competitorId_platform_handle: {
+              competitorId: context.competitorId,
+              platform: data.platform,
+              handle: data.handle,
+            },
+          },
+          update: {
+            followerCount: data.followers,
+            followingCount: data.following,
+            bio: data.bio,
+            profileImageUrl: data.posts[0]?.thumbnailUrl || undefined,
+            isVerified: data.isVerified,
+            isPrivate: false,
+            lastScrapedAt: new Date(),
+          },
+          create: {
+            competitorId: context.competitorId,
+            platform: data.platform,
+            handle: data.handle,
+            profileUrl: data.url,
+            followerCount: data.followers,
+            followingCount: data.following,
+            bio: data.bio,
+            profileImageUrl: data.posts[0]?.thumbnailUrl || undefined,
+            isVerified: data.isVerified,
+            isPrivate: false,
+            lastScrapedAt: new Date(),
+          },
+        });
+
+        const snapshot = await tx.competitorProfileSnapshot.create({
+          data: {
+            competitorProfileId: competitorProfile.id,
+            researchJobId,
+            followerCount: data.followers,
+            followingCount: data.following,
+            bio: data.bio,
+            profileImageUrl: data.posts[0]?.thumbnailUrl || undefined,
+            postsCount: data.postsCount,
+            isVerified: data.isVerified,
+            isPrivate: false,
+            scrapedAt: new Date(),
+          },
+        });
+
+        const followerBase = data.followers || 0;
+        for (const post of data.posts) {
+          await tx.competitorPostSnapshot.upsert({
+            where: {
+              competitorProfileSnapshotId_externalPostId: {
+                competitorProfileSnapshotId: snapshot.id,
+                externalPostId: post.externalId,
+              },
+            },
+            update: {
+              likesCount: post.likesCount,
+              commentsCount: post.commentsCount,
+              sharesCount: post.sharesCount,
+              viewsCount: post.viewsCount,
+              playsCount: post.playsCount,
+              engagementRate: followerBase ? (post.likesCount + post.commentsCount) / Math.max(followerBase, 1) : null,
+              scrapedAt: new Date(),
+            },
+            create: {
+              competitorProfileSnapshotId: snapshot.id,
+              externalPostId: post.externalId,
+              postUrl: post.url,
+              caption: post.caption,
+              format: post.type,
+              likesCount: post.likesCount,
+              commentsCount: post.commentsCount,
+              sharesCount: post.sharesCount,
+              viewsCount: post.viewsCount,
+              playsCount: post.playsCount,
+              postedAt: safeDate(post.postedAt),
+              engagementRate: followerBase ? (post.likesCount + post.commentsCount) / Math.max(followerBase, 1) : null,
+              scrapedAt: new Date(),
+            },
+          });
+        }
+
+        downloadSnapshotMedia('competitor', snapshot.id).catch(err =>
+          console.warn('[SocialScraper] Snapshot media download (competitor) failed', err?.message)
+        );
+      }
+    } catch (snapshotError) {
+      console.warn('[SocialScraper] Snapshot write skipped:', (snapshotError as any).message);
+    }
+
     console.log(`[SocialScraper] Saved profile @${data.handle} and ${newPosts} posts`);
     return profile;
   });
+}
+
+/**
+ * Determine whether the scraped profile belongs to the client or a competitor.
+ */
+async function resolveProfileContext(researchJobId: string, platform: string, handle: string): Promise<
+  | { type: 'client'; clientId: string }
+  | { type: 'competitor'; competitorId: string }
+  | null
+> {
+  const job = await prisma.researchJob.findUnique({
+    where: { id: researchJobId },
+    include: {
+      client: {
+        include: { clientAccounts: true },
+      },
+      discoveredCompetitors: true,
+    },
+  });
+
+  if (!job || !job.client) return null;
+
+  const normalizedHandle = handle.toLowerCase();
+  const isClient = job.client.clientAccounts.some(
+    (acc) => acc.platform === platform && acc.handle.toLowerCase() === normalizedHandle
+  );
+
+  if (isClient) {
+    return { type: 'client', clientId: job.client.id };
+  }
+
+  const discovered = job.discoveredCompetitors.find(
+    (dc) => dc.platform === platform && dc.handle.toLowerCase() === normalizedHandle
+  );
+
+  if (discovered?.competitorId) {
+    return { type: 'competitor', competitorId: discovered.competitorId };
+  }
+
+  // If discovered competitor exists but not linked, create competitor record
+  if (discovered) {
+    const competitor = await prisma.competitor.create({
+      data: {
+        clientId: job.client.id,
+        handle: discovered.handle,
+        platform: discovered.platform,
+        isPriority: false,
+      },
+    });
+    await prisma.discoveredCompetitor.update({
+      where: { id: discovered.id },
+      data: { competitorId: competitor.id },
+    });
+    return { type: 'competitor', competitorId: competitor.id };
+  }
+
+  return null;
 }
 
 // Helper to safely parse dates

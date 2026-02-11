@@ -70,11 +70,21 @@ export async function scrapeWithApify(
     
     // Apify expects full URLs, not just usernames
     const profileUrl = `https://www.instagram.com/${cleanUsername}/`;
+    const requestConfig = {
+      params: {
+        token: APIFY_API_TOKEN
+      },
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      timeout: 120000 // 2 minute timeout for actor to run
+    };
     
     const input = {
       directUrls: [profileUrl], // Array of Instagram URLs to scrape
       resultsType: 'posts', // What to scrape: posts, details, or comments
       resultsLimit: postsLimit, // Max posts per profile
+      additionalFields: ['images', 'displayResources', 'carouselItems', 'childPosts'],
       // Use Apify's residential proxies for better reliability
       proxy: {
         useApifyProxy: true,
@@ -84,15 +94,7 @@ export async function scrapeWithApify(
 
     console.log('[Apify] Sending input:', JSON.stringify(input, null, 2));
 
-    const response = await axios.post(endpoint, input, {
-      params: {
-        token: APIFY_API_TOKEN
-      },
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      timeout: 120000 // 2 minute timeout for actor to run
-    });
+    const response = await axios.post(endpoint, input, requestConfig);
 
     const items = response.data;
 
@@ -121,6 +123,7 @@ export async function scrapeWithApify(
     // Apify returns an array of posts directly (not a profile object)
     // We need to extract profile info from the posts themselves (owner data)
     const posts = items;
+    let details: any = null;
     
     console.log(`[Apify] ✓ Scraped ${posts.length} posts`);
 
@@ -132,35 +135,100 @@ export async function scrapeWithApify(
       };
     }
 
-    // Extract profile info from first post's owner data
+    // Extract owner info from first post for auxiliary metadata only.
+    // Important: keep the requested handle as source of truth to avoid
+    // accidental handle drift on collaborative/reposted posts.
     const ownerData = posts[0].ownerUsername ? {
       username: posts[0].ownerUsername,
       fullName: posts[0].ownerFullName,
       profilePicUrl: posts[0].ownerProfilePicUrl
     } : null;
 
+    if (ownerData?.username && ownerData.username.toLowerCase() !== cleanUsername.toLowerCase()) {
+      console.warn(
+        `[Apify] Owner username @${ownerData.username} differs from requested @${cleanUsername}; preserving requested handle`
+      );
+    }
+
+    try {
+      const detailsInput = {
+        directUrls: [profileUrl],
+        resultsType: 'details',
+        resultsLimit: 1,
+        proxy: {
+          useApifyProxy: true,
+          apifyProxyGroups: ['RESIDENTIAL']
+        }
+      };
+      const detailsResponse = await axios.post(endpoint, detailsInput, requestConfig);
+      const detailItems = Array.isArray(detailsResponse.data) ? detailsResponse.data : [];
+      const firstDetail = detailItems[0];
+      if (firstDetail && !firstDetail.error) {
+        details = firstDetail;
+      } else {
+        console.warn('[Apify] Profile details call returned no usable record');
+      }
+    } catch (detailsError: any) {
+      console.warn(`[Apify] Failed to fetch profile details: ${detailsError.message}`);
+    }
+
     // Map to our existing data structure
     const mappedData = {
-      handle: ownerData?.username || cleanUsername,
-      follower_count: 0, // Apify doesn't return this in posts endpoint
-      following_count: 0, // Apify doesn't return this in posts endpoint  
-      bio: '',
-      profile_pic: ownerData?.profilePicUrl || '',
-      is_verified: false,
-      is_private: false,
-      total_posts: posts.length,
-      posts: posts.map((post: any) => ({
-        external_post_id: post.id,
-        post_url: post.url || `https://www.instagram.com/p/${post.shortCode}/`,
-        caption: post.caption || '',
-        likes: post.likesCount || 0,
-        comments: post.commentsCount || 0,
-        timestamp: post.timestamp || new Date().toISOString(),
-        media_url: post.displayUrl || '',
-        is_video: post.type === 'Video',
-        video_url: post.videoUrl || null,
-        typename: post.type || 'GraphImage'
-      })),
+      handle: cleanUsername,
+      follower_count: Number(details?.followersCount || 0),
+      following_count: Number(details?.followsCount || 0),
+      bio: details?.biography || '',
+      profile_pic: details?.profilePicUrlHD || details?.profilePicUrl || ownerData?.profilePicUrl || '',
+      is_verified: Boolean(details?.verified),
+      is_private: Boolean(details?.private),
+      total_posts: Number(details?.postsCount || posts.length),
+      posts: posts.map((post: any) => {
+        const mediaUrls: string[] = [];
+        const push = (u?: string) => { if (u) mediaUrls.push(u); };
+
+        push(post.displayUrl);
+        push(post.videoUrl);
+        if (Array.isArray(post.images)) mediaUrls.push(...post.images);
+        if (Array.isArray(post.displayResources)) {
+          post.displayResources.forEach((r: any) => push(r?.src || r?.url));
+        }
+        if (Array.isArray(post.carouselItems)) {
+          post.carouselItems.forEach((c: any) => {
+            push(c.displayUrl);
+            push(c.videoUrl);
+            if (Array.isArray(c.displayResources)) {
+              c.displayResources.forEach((r: any) => push(r?.src || r?.url));
+            }
+          });
+        }
+        // Apify sidecar children
+        if (Array.isArray(post.childPosts)) {
+          post.childPosts.forEach((c: any) => {
+            push(c.displayUrl);
+            push(c.videoUrl);
+            if (Array.isArray(c.images)) mediaUrls.push(...c.images);
+            if (Array.isArray(c.displayResources)) {
+              c.displayResources.forEach((r: any) => push(r?.src || r?.url));
+            }
+          });
+        }
+
+        const primary = mediaUrls[0] || post.displayUrl || post.videoUrl || '';
+
+        return {
+          external_post_id: post.id,
+          post_url: post.url || `https://www.instagram.com/p/${post.shortCode}/`,
+          caption: post.caption || '',
+          likes: post.likesCount || 0,
+          comments: post.commentsCount || 0,
+          timestamp: post.timestamp || new Date().toISOString(),
+          media_url: primary,
+          is_video: post.type === 'Video',
+          video_url: post.videoUrl || null,
+          typename: post.type || 'GraphImage',
+          media_urls: mediaUrls.filter(Boolean),
+        };
+      }),
       discovered_competitors: [] // Apify doesn't provide this
     };
 

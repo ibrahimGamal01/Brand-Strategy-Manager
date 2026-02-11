@@ -302,28 +302,46 @@ def scrape_profile(handle: str, posts_limit: int = 30, use_proxy: bool = False, 
         print(f"[Scraper] Iterator created. Fetching items...", file=sys.stderr)
         
         for post in post_iterator:
-             if current_count >= posts_limit: break
-             
-             # Random pause every 5 posts to mimic reading
-             if current_count > 0 and current_count % 5 == 0:
-                 pause = random.uniform(10, 20)
-                 print(f"[Scraper] 'Reading' pause for {pause:.1f}s...", file=sys.stderr)
-                 time.sleep(pause)
-             
-             # Extract comments (Top 5 only)
-             post_comments = []
-             if is_logged_in:
-                 try:
-                     for comment in islice(post.get_comments(), 5):
-                         post_comments.append({
-                             'text': comment.text,
-                             'owner': comment.owner.username,
-                             'likes': comment.likes_count
-                         })
-                 except Exception:
-                     pass # Ignore comment errors
+            if current_count >= posts_limit:
+                break
 
-             posts.append({
+            # Random pause every 5 posts to mimic reading
+            if current_count > 0 and current_count % 5 == 0:
+                pause = random.uniform(10, 20)
+                print(f"[Scraper] 'Reading' pause for {pause:.1f}s...", file=sys.stderr)
+                time.sleep(pause)
+
+            # Extract comments (Top 5 only)
+            post_comments = []
+            if is_logged_in:
+                try:
+                    for comment in islice(post.get_comments(), 5):
+                        post_comments.append({
+                            'text': comment.text,
+                            'owner': comment.owner.username,
+                            'likes': comment.likes_count
+                        })
+                except Exception:
+                    pass  # Ignore comment errors
+
+            # Collect all media URLs (handles carousels/sidecars)
+            media_urls = []
+            try:
+                if post.url:
+                    media_urls.append(post.url)
+                if post.video_url:
+                    media_urls.append(post.video_url)
+                # Sidecar children
+                if post.typename == 'GraphSidecar':
+                    for node in post.get_sidecar_nodes():
+                        if node.is_video and node.video_url:
+                            media_urls.append(node.video_url)
+                        elif node.display_url:
+                            media_urls.append(node.display_url)
+            except Exception:
+                pass
+
+            posts.append({
                 'external_post_id': post.shortcode,
                 'post_url': f'https://instagram.com/p/{post.shortcode}/',
                 'caption': post.caption if post.caption else '',
@@ -334,15 +352,16 @@ def scrape_profile(handle: str, posts_limit: int = 30, use_proxy: bool = False, 
                 'is_video': post.is_video,
                 'video_url': post.video_url if post.is_video else None,
                 'typename': post.typename,
-                'top_comments': post_comments # New OASP Field
+                'media_urls': media_urls,
+                'top_comments': post_comments  # New OASP Field
             })
-             
-             current_count += 1
-             limiter.increment(1) # Post fetch cost
-             print(f"[Scraper] Scraped post {current_count}/{posts_limit} (ID: {post.shortcode})", file=sys.stderr)
-             
-             # Standard delay
-             time.sleep(random.uniform(3, 7))
+
+            current_count += 1
+            limiter.increment(1)  # Post fetch cost
+            print(f"[Scraper] Scraped post {current_count}/{posts_limit} (ID: {post.shortcode})", file=sys.stderr)
+
+            # Standard delay
+            time.sleep(random.uniform(3, 7))
         
         if current_count == 0:
              print(f"[Scraper] WARNING: No posts were scraped! Profile posts count is {profile.mediacount}. Is Private? {profile.is_private}", file=sys.stderr)

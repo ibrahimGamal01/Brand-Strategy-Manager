@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma';
 import { scrapeProfileSafe } from '../social/scraper';
+import { emitResearchJobEvent } from '../social/research-job-events';
 
 interface CompetitorScrapingResult {
   competitorId: string;
@@ -39,16 +40,38 @@ export async function scrapeCompetitorIncremental(
   jobId: string,
   competitorId: string,
   platform: string,
-  handle: string
+  handle: string,
+  options: { runId?: string; source?: string } = {}
 ): Promise<CompetitorScrapingResult> {
   console.log(`[CompetitorScraper] Starting scrape for ${platform}:${handle}`);
+
+  emitResearchJobEvent({
+    researchJobId: jobId,
+    runId: options.runId,
+    source: 'competitor',
+    code: 'competitor.scrape.started',
+    level: 'info',
+    message: `Competitor scrape started for ${platform} @${handle}`,
+    platform,
+    handle,
+    entityType: 'competitor',
+    entityId: competitorId,
+    metadata: {
+      source: options.source || 'module',
+    },
+  });
   
   try {
     // 1. Update status to SCRAPING
     await updateCompetitorStatus(competitorId, 'SCRAPING');
     
     // 2. Scrape profile using universal scraper (works for Instagram and TikTok)
-    const result = await scrapeProfileSafe(jobId, platform, handle);
+    const result = await scrapeProfileSafe(jobId, platform, handle, {
+      runId: options.runId,
+      source: options.source || 'competitor-scraper',
+      entityType: 'competitor',
+      entityId: competitorId,
+    });
     
     if (!result.success || !result.data) {
       throw new Error(`Failed to scrape ${platform} profile for ${handle}`);
@@ -57,13 +80,22 @@ export async function scrapeCompetitorIncremental(
     const postsScraped = result.data.posts?.length || 0;
     
     console.log(`[CompetitorScraper] ✓ ${platform} ${handle}: ${postsScraped} posts scraped`);
-    
+
+    // 2.5. Ensure Competitor record exists and update follower count if available
+    const { ensureCompetitorExists } = await import('./competitor-posts-storage');
+    const linkedCompetitorId = await ensureCompetitorExists(competitorId, jobId);
+    const followerCount = result.data.followers || 0;
+    await prisma.competitor.update({
+      where: { id: linkedCompetitorId },
+      data: {
+        lastScrapedAt: new Date(),
+        ...(followerCount > 0 ? { followerCount } : {})
+      }
+    });
+
     // 3. Save posts to database if we got any
     if (postsScraped > 0 && result.data.posts) {
-      const { ensureCompetitorExists, saveCompetitorPosts } = await import('./competitor-posts-storage');
-      
-      // Ensure Competitor record exists
-      const linkedCompetitorId = await ensureCompetitorExists(competitorId, jobId);
+      const { saveCompetitorPosts } = await import('./competitor-posts-storage');
       
       // Save all posts to RawPost → CleanedPost
       await saveCompetitorPosts(linkedCompetitorId, platform, result.data.posts);
@@ -77,6 +109,22 @@ export async function scrapeCompetitorIncremental(
       where: { id: competitorId },
       data: { postsScraped }
     });
+
+    emitResearchJobEvent({
+      researchJobId: jobId,
+      runId: options.runId,
+      source: 'competitor',
+      code: 'competitor.scrape.completed',
+      level: 'info',
+      message: `Competitor scrape completed for ${platform} @${handle}`,
+      platform,
+      handle,
+      entityType: 'competitor',
+      entityId: competitorId,
+      metrics: {
+        postsScraped,
+      },
+    });
     
     return {
       competitorId,
@@ -89,6 +137,22 @@ export async function scrapeCompetitorIncremental(
     
   } catch (error) {
     console.error(`[CompetitorScraper] ✗ Failed to scrape ${platform}:${handle}:`, error);
+
+    emitResearchJobEvent({
+      researchJobId: jobId,
+      runId: options.runId,
+      source: 'competitor',
+      code: 'competitor.scrape.failed',
+      level: 'error',
+      message: `Competitor scrape failed for ${platform} @${handle}`,
+      platform,
+      handle,
+      entityType: 'competitor',
+      entityId: competitorId,
+      metadata: {
+        error: (error as Error).message || 'Unknown scrape error',
+      },
+    });
     
     // Update status to FAILED
     await updateCompetitorStatus(competitorId, 'FAILED');
@@ -118,7 +182,8 @@ export async function scrapeCompetitorsIncremental(
     id: string;
     handle: string;
     platform: string;
-  }>
+  }>,
+  options: { runId?: string; source?: string } = {}
 ): Promise<CompetitorScrapingResult[]> {
   console.log(`[CompetitorScraper] Starting incremental scrape for ${competitors.length} competitors`);
   
@@ -130,7 +195,8 @@ export async function scrapeCompetitorsIncremental(
       jobId,
       competitor.id,
       competitor.platform,
-      competitor.handle
+      competitor.handle,
+      options
     );
     
     results.push(result);

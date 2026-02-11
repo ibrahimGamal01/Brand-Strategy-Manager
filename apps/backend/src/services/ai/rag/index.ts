@@ -129,9 +129,9 @@ export function formatContextForLLM(context: ResearchContext): string {
 
 `;
 
-  // Section 3: AI Strategic Insights (The 12 Questions)
+  // Section 3: AI Strategic Insights (The 13 Questions)
   const aiInsightsCount = Object.keys(context.aiInsights).filter(k => k !== 'qualityScore' && context.aiInsights[k as keyof typeof context.aiInsights]).length;
-  output += `## AI Strategic Insights (${aiInsightsCount}/12 Questions Answered)
+  output += `## AI Strategic Insights (${aiInsightsCount}/13 Questions Answered)
 
 `;
   
@@ -413,7 +413,7 @@ ${context.warnings.map(w => `- ${w}`).join('\n')}
 ## INSTRUCTIONS FOR CONTENT GENERATION
 1. **Use SPECIFIC data** from the research above - cite handles, metrics, exact quotes
 2. **Reference top-performing posts** when making content recommendations
-3. **Base personas on AI insights** from the 12 strategic questions
+3. **Base personas on AI insights** from the 13 strategic questions
 4. **Leverage competitor intelligence** for Blue Ocean opportunities
 5. **Ground all claims in data** - no generic advice
 6. **If data is missing**, explicitly state "Not found in research data"

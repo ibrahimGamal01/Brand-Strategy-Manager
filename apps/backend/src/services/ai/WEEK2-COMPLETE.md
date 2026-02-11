@@ -205,7 +205,7 @@ Plus one-time cost:
 
 ✅ **Only for Development Testing**:
 - `generateMockContent()` in each generator
-- ONLY used when `MOCK_AI_CALLS=true` in .env
+- ONLY used when `AI_FALLBACK_MODE=mock` in non-production
 - Content Analysis throws error if attempted
 - **Never used in production**
 

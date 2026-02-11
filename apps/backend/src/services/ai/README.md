@@ -47,7 +47,7 @@ apps/backend/src/services/ai/validation/
 **Environment Variables**:
 ```bash
 # Enable/disable mocks
-MOCK_AI_CALLS=true          # Force mock mode even in production
+AI_FALLBACK_MODE=mock       # Use only in non-production local testing
 
 # Set limits
 MAX_TOKENS_PER_CALL=2000    # Maximum tokens per API call

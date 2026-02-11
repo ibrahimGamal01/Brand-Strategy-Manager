@@ -13,6 +13,7 @@
 import axios, { AxiosInstance } from 'axios';
 import * as fs from 'fs';
 import * as path from 'path';
+import { extractCsrf } from './instagram-cookie';
 
 /**
  * Instagram GraphQL Document IDs
@@ -30,6 +31,15 @@ const DOC_IDS = {
 const INSTAGRAM_APP_ID = '124024574287414';
 const INSTAGRAM_BASE_URL = 'https://www.instagram.com';
 
+// Rotate multiple session cookies to spread rate limits
+function loadSessionPool(): string[] {
+  const raw = process.env.INSTAGRAM_SESSION_COOKIES || process.env.INSTAGRAM_SESSION_COOKIE || '';
+  return raw
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
 export interface InstagramGraphQLOptions {
   sessionCookie?: string;
   userAgent?: string;
@@ -45,6 +55,7 @@ export interface InstagramProfile {
   follower_count: number;
   following_count: number;
   is_verified: boolean;
+  is_private?: boolean;
   profile_pic_url: string;
   edge_owner_to_timeline_media?: {
     count: number;
@@ -67,9 +78,14 @@ export interface InstagramPost {
 export class InstagramGraphQLScraper {
   private client: AxiosInstance;
   private sessionCookie: string | null = null;
+  private sessionPool: string[] = [];
+  private poolIndex = 0;
 
   constructor(options: InstagramGraphQLOptions = {}) {
-    this.sessionCookie = options.sessionCookie || this.loadSessionFromEnv();
+    this.sessionPool = loadSessionPool();
+    this.sessionCookie = options.sessionCookie || this.pickSession();
+
+    const csrf = extractCsrf(this.sessionCookie);
 
     this.client = axios.create({
       baseURL: INSTAGRAM_BASE_URL,
@@ -82,13 +98,11 @@ export class InstagramGraphQLScraper {
         'X-Requested-With': 'XMLHttpRequest',
         'Referer': 'https://www.instagram.com/',
         'Origin': 'https://www.instagram.com',
+        ...(csrf ? { 'X-CSRFToken': csrf } : {}),
+        ...(this.sessionCookie ? { 'Cookie': this.sessionCookie } : {}),
       },
       timeout: 30000,
     });
-
-    if (this.sessionCookie) {
-      this.client.defaults.headers.common['Cookie'] = this.sessionCookie;
-    }
 
     if (options.useProxy && options.proxyUrl) {
       // TODO: Add proxy support when needed
@@ -97,10 +111,26 @@ export class InstagramGraphQLScraper {
   }
 
   /**
-   * Load session cookie from environment variable
+   * Pick a session cookie from pool (round-robin)
    */
-  private loadSessionFromEnv(): string | null {
-    return process.env.INSTAGRAM_SESSION_COOKIE || null;
+  private pickSession(): string | null {
+    if (this.sessionPool.length === 0) {
+      return process.env.INSTAGRAM_SESSION_COOKIE || null;
+    }
+    const cookie = this.sessionPool[this.poolIndex % this.sessionPool.length];
+    this.poolIndex++;
+    return cookie || null;
+  }
+
+  private rotateSession(): string | null {
+    if (this.sessionPool.length === 0) return this.sessionCookie;
+    this.sessionCookie = this.pickSession();
+    if (this.sessionCookie) {
+      this.client.defaults.headers.common['Cookie'] = this.sessionCookie;
+      const csrf = extractCsrf(this.sessionCookie);
+      if (csrf) this.client.defaults.headers.common['X-CSRFToken'] = csrf;
+    }
+    return this.sessionCookie;
   }
 
   /**
@@ -147,11 +177,14 @@ export class InstagramGraphQLScraper {
            console.error(`[GraphQL] Response body: ${JSON.stringify(error.response.data).substring(0, 500)}`);
         }
 
-        if (error.response?.status === 401) {
+        // Rotate session on auth/rate errors and retry once
+        if (error.response?.status === 401 || error.response?.status === 429) {
+          const newSession = this.rotateSession();
+          if (newSession) {
+            console.warn('[GraphQL] Rotating session cookie and retrying...');
+            return this.graphqlQuery(docId, variables);
+          }
           throw new Error('Session expired or invalid. Please provide a fresh session cookie.');
-        }
-        if (error.response?.status === 429) {
-          throw new Error('Rate limited by Instagram. Please wait before retrying.');
         }
       }
       throw error;
@@ -191,6 +224,7 @@ export class InstagramGraphQLScraper {
       follower_count: userData.edge_followed_by?.count || 0,
       following_count: userData.edge_follow?.count || 0,
       is_verified: userData.is_verified || false,
+      is_private: userData.is_private || false,
       profile_pic_url: userData.profile_pic_url || '',
       edge_owner_to_timeline_media: userData.edge_owner_to_timeline_media,
     };
@@ -262,6 +296,8 @@ export class InstagramGraphQLScraper {
         total_posts: profile.edge_owner_to_timeline_media?.count || 0,
         bio: profile.biography,
         is_verified: profile.is_verified,
+        is_private: profile.is_private || false,
+        profile_pic: profile.profile_pic_url || '',
       },
       posts: posts.map(post => ({
         external_post_id: post.id,

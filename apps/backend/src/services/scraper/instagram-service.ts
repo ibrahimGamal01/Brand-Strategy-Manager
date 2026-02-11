@@ -2,6 +2,8 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import { createGraphQLScraper } from './instagram-graphql';
+import axios from 'axios';
+import { extractCsrf } from './instagram-cookie';
 
 const execAsync = promisify(exec);
 
@@ -23,6 +25,7 @@ export interface InstagramPost {
   is_video: boolean;
   video_url: string | null;
   typename: string;
+  media_urls?: string[];
   top_comments?: InstagramComment[]; // New OASP Field
 }
 
@@ -49,7 +52,74 @@ export interface ScrapeResult {
   success: boolean;
   data?: InstagramProfileData;
   error?: string;
-  scraper_used?: 'apify' | 'graphql' | 'python' | 'puppeteer';
+  scraper_used?: 'apify' | 'graphql' | 'python' | 'puppeteer' | 'web_profile';
+}
+
+// Web profile scraper using /api/v1/users/web_profile_info
+async function scrapeViaWebProfile(username: string, postsLimit: number): Promise<InstagramProfileData | null> {
+  const cookie = process.env.INSTAGRAM_SESSION_COOKIES || process.env.INSTAGRAM_SESSION_COOKIE;
+  if (!cookie) throw new Error('No Instagram session cookies configured');
+  const csrf = extractCsrf(cookie);
+
+  const client = axios.create({
+    baseURL: 'https://www.instagram.com',
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'application/json',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'X-CSRFToken': csrf || '',
+      'Cookie': cookie,
+    },
+    withCredentials: true,
+    timeout: 30000,
+  });
+
+  const url = `/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`;
+  const res = await client.get(url);
+  const user = res.data?.data?.user;
+  if (!user) throw new Error('web_profile_info response missing user');
+
+  const edges = user.edge_owner_to_timeline_media?.edges || [];
+  const posts = edges.slice(0, postsLimit).map((e: any) => {
+    const n = e.node;
+    const isVideo = n.is_video;
+    const mediaUrls: string[] = [];
+    if (n.display_url) mediaUrls.push(n.display_url);
+    if (n.video_url) mediaUrls.push(n.video_url);
+    if (n.edge_sidecar_to_children?.edges) {
+      n.edge_sidecar_to_children.edges.forEach((c: any) => {
+        if (c.node.display_url) mediaUrls.push(c.node.display_url);
+        if (c.node.video_url) mediaUrls.push(c.node.video_url);
+      });
+    }
+    return {
+      external_post_id: n.id,
+      post_url: `https://www.instagram.com/p/${n.shortcode}/`,
+      caption: n.edge_media_to_caption?.edges?.[0]?.node?.text || '',
+      likes: n.edge_media_preview_like?.count || 0,
+      comments: n.edge_media_to_comment?.count || 0,
+      timestamp: new Date(n.taken_at_timestamp * 1000).toISOString(),
+      media_url: n.display_url,
+      is_video: isVideo,
+      video_url: n.video_url || null,
+      typename: n.__typename || (isVideo ? 'GraphVideo' : 'GraphImage'),
+      media_urls: mediaUrls,
+    } as InstagramPost;
+  });
+
+  const profileData: InstagramProfileData = {
+    handle: user.username,
+    follower_count: user.edge_followed_by?.count || 0,
+    following_count: user.edge_follow?.count || 0,
+    bio: user.biography || '',
+    profile_pic: user.profile_pic_url_hd || user.profile_pic_url || '',
+    is_verified: user.is_verified || false,
+    is_private: user.is_private || false,
+    total_posts: user.edge_owner_to_timeline_media?.count || posts.length,
+    posts,
+    discovered_competitors: []
+  };
+  return profileData;
 }
 
 /**
@@ -76,10 +146,31 @@ export async function scrapeInstagramProfile(
     // Check if we got meaningful data with posts
     if (result.success && result.data && result.data.posts && result.data.posts.length > 0) {
       console.log(`[Instagram] ✓ Apify scraper succeeded with ${result.data.posts.length} posts`);
-      return {
-        success: true,
-        data: result.data as any,
-        scraper_used: 'apify'
+    // Enrich Apify result with profile stats when available (Apify posts endpoint omits follower counts)
+    if (!result.data.follower_count || result.data.follower_count === 0) {
+      try {
+        const graphqlScraper = createGraphQLScraper();
+        const profile = await graphqlScraper.scrapeProfile(cleanHandle);
+        result.data = {
+          ...result.data,
+          follower_count: profile.follower_count || result.data.follower_count,
+          following_count: profile.following_count || result.data.following_count,
+          bio: profile.biography || result.data.bio,
+          is_verified: profile.is_verified || result.data.is_verified,
+          is_private: profile.is_private ?? result.data.is_private,
+          profile_pic: profile.profile_pic_url || result.data.profile_pic,
+          total_posts: profile.edge_owner_to_timeline_media?.count || result.data.total_posts,
+        };
+        console.log('[Instagram] ✓ Enriched Apify result with GraphQL profile stats');
+      } catch (enrichError: any) {
+        console.warn(`[Instagram] Failed to enrich Apify profile stats: ${enrichError.message}`);
+      }
+    }
+
+    return {
+      success: true,
+      data: result.data as any,
+      scraper_used: 'apify'
       };
     }
     
@@ -91,25 +182,19 @@ export async function scrapeInstagramProfile(
 
   // Layer 1: Try GraphQL API (fast, but may have rate limits)
   try {
-    console.log(`[Instagram] Attempting GraphQL scraper for @${cleanHandle}...`);
-    
-    const graphqlScraper = createGraphQLScraper();
-    const result = await graphqlScraper.scrapeFullProfile(cleanHandle, postsLimit);
-    
-    // Check if we got meaningful data
-    if (result.success && result.profile && result.posts.length > 0) {
-      console.log(`[Instagram] ✓ GraphQL scraper succeeded with ${result.posts.length} posts`);
+    console.log(`[Instagram] Attempting GraphQL/web-profile scraper for @${cleanHandle}...`);
+    const result = await scrapeViaWebProfile(cleanHandle, postsLimit);
+    if (result && result.posts.length > 0) {
+      console.log(`[Instagram] ✓ Web profile scraper succeeded with ${result.posts.length} posts`);
       return {
         success: true,
-        data: result.profile as any,
-        scraper_used: 'graphql'
+        data: result,
+        scraper_used: 'web_profile'
       };
     }
-    
-    // GraphQL succeeded but returned no posts - try next layer
-    console.log('[Instagram] GraphQL returned no posts, trying Python scraper...');
+    console.log('[Instagram] Web profile returned no posts, trying Python scraper...');
   } catch (error: any) {
-    console.log(`[Instagram] GraphQL scraper failed: ${error.message}, falling back to Python...`);
+    console.log(`[Instagram] Web/GraphQL scraper failed: ${error.message}, falling back to Python...`);
   }
 
   // Layer 1: Try Python Instaloader

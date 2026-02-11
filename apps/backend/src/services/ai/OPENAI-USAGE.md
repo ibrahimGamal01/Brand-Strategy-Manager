@@ -136,9 +136,9 @@ Only when you want to test with real OpenAI API:
 
 ```bash
 # In apps/backend/.env
-MOCK_AI_CALLS=false
+AI_FALLBACK_MODE=off
 NODE_ENV=production
-OPENAI_API_KEY=your-actual-key
+OPENAI_API_KEY=OPENAI_API_KEY_FROM_SECRET_MANAGER
 ```
 
 **WARNING**: This will use real API credits. Only do this when ready for production testing.

@@ -20,7 +20,8 @@ const prisma = new PrismaClient();
 // Rate Limiter: Track last scrape time per profile
 class ScrapeRateLimiter {
   private lastScrapeTime: Map<string, number> = new Map();
-  private readonly RATE_LIMIT_MS = 15 * 60 * 1000; // 15 minutes
+  // Stretch to 30 minutes to reduce ban risk
+  private readonly RATE_LIMIT_MS = 30 * 60 * 1000; // 30 minutes
 
   /**
    * Check if scraping is allowed for this profile

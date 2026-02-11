@@ -39,6 +39,7 @@ router.get('/client/:clientId', async (req: Request, res: Response) => {
 router.post('/discovered/:id/scrape', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const forceUnavailable = Boolean(req.body?.forceUnavailable);
 
     const discovered = await prisma.discoveredCompetitor.findUnique({
       where: { id },
@@ -47,6 +48,23 @@ router.post('/discovered/:id/scrape', async (req: Request, res: Response) => {
 
     if (!discovered) {
       return res.status(404).json({ error: 'Discovered competitor not found' });
+    }
+
+    const selectionState = String(discovered.selectionState || '').toUpperCase();
+    if (selectionState === 'FILTERED_OUT' || selectionState === 'REJECTED') {
+      return res.status(409).json({
+        success: false,
+        error: 'FILTERED_COMPETITOR',
+        message: 'Filtered/rejected competitors are not scrape-eligible',
+      });
+    }
+
+    if (!forceUnavailable && discovered.availabilityStatus !== 'VERIFIED') {
+      return res.status(409).json({
+        success: false,
+        error: 'PROFILE_UNAVAILABLE',
+        message: `Profile is not scrape-ready (${discovered.availabilityStatus})`,
+      });
     }
 
     console.log(`[Competitors API] Triggering scrape for ${discovered.handle} (${discovered.platform})`);

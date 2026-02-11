@@ -2,10 +2,62 @@ import sys
 import json
 import yt_dlp
 import os
+import json
+import tempfile
+
+def _normalize_count(value):
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value.replace(',', '').strip())
+        except Exception:
+            return None
+    return None
+
+def _extract_follower_count(info, entries):
+    candidates = []
+    for key in [
+        'follower_count',
+        'channel_follower_count',
+        'uploader_follower_count',
+        'uploader_followers',
+        'user_follower_count',
+        'channel_followers',
+    ]:
+        candidates.append(_normalize_count(info.get(key)))
+
+    # Sometimes follower counts appear on entries
+    for entry in entries or []:
+        if not entry:
+            continue
+        for key in [
+            'uploader_follower_count',
+            'channel_follower_count',
+            'follower_count',
+            'user_follower_count',
+        ]:
+            candidates.append(_normalize_count(entry.get(key)))
+
+    valid = [c for c in candidates if isinstance(c, int) and c > 0]
+    return max(valid) if valid else 0
 
 def scrape_profile(handle, max_videos):
     url = f"https://www.tiktok.com/@{handle}"
     
+    cookie_header = os.environ.get('TIKTOK_COOKIES')
+    http_headers = {}
+    cookiefile = None
+    if cookie_header:
+        http_headers['Cookie'] = cookie_header
+    else:
+        # optional cookie file path
+        cookiefile_env = os.environ.get('TIKTOK_COOKIE_FILE')
+        if cookiefile_env and os.path.exists(cookiefile_env):
+            cookiefile = cookiefile_env
+
     # Use full extraction (not flat) to get all metadata including thumbnails and dates
     ydl_opts = {
         'quiet': True,
@@ -14,6 +66,8 @@ def scrape_profile(handle, max_videos):
         'playlistend': int(max_videos),
         'skip_download': True,  # Don't download, just extract metadata
         'ignoreerrors': True,   # Continue on errors
+        'http_headers': http_headers,
+        'cookiefile': cookiefile,
     }
 
     try:
@@ -21,11 +75,13 @@ def scrape_profile(handle, max_videos):
             info = ydl.extract_info(url, download=False)
             
             # Process profile info from yt-dlp playlist response
+            follower_count = _extract_follower_count(info, entries)
+
             profile = {
                 "handle": info.get('uploader_id') or info.get('channel_id') or handle,
                 "display_name": info.get('uploader') or info.get('channel') or '',
                 "profile_url": info.get('webpage_url') or url,
-                "follower_count": info.get('follower_count') or 0,
+                "follower_count": follower_count,
                 "bio": info.get('description') or '',
             }
             

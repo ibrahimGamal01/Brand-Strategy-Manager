@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, NextFunction, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 
 const router = Router();
@@ -28,15 +28,14 @@ function getDelegate(type: string) {
  * PUT /:jobId/:dataType/:itemId
  * Update an item
  */
-router.put('/:jobId/:dataType/:itemId', async (req: Request, res: Response) => {
+router.put('/:jobId/:dataType/:itemId', async (req: Request, res: Response, next: NextFunction) => {
   const { jobId, dataType, itemId } = req.params;
   const updates = req.body;
 
   try {
     const delegate = getDelegate(dataType);
     if (!delegate) {
-       res.status(400).json({ error: `Unknown data type: ${dataType}` });
-       return;
+       return next();
     }
 
     // Special handling for social profiles (ClientAccount)
@@ -60,14 +59,13 @@ router.put('/:jobId/:dataType/:itemId', async (req: Request, res: Response) => {
  * DELETE /:jobId/:dataType/:itemId
  * Delete an item
  */
-router.delete('/:jobId/:dataType/:itemId', async (req: Request, res: Response) => {
+router.delete('/:jobId/:dataType/:itemId', async (req: Request, res: Response, next: NextFunction) => {
   const { jobId, dataType, itemId } = req.params;
 
   try {
     const delegate = getDelegate(dataType);
     if (!delegate) {
-       res.status(400).json({ error: `Unknown data type: ${dataType}` });
-       return;
+       return next();
     }
 
     await delegate.delete({
@@ -82,18 +80,50 @@ router.delete('/:jobId/:dataType/:itemId', async (req: Request, res: Response) =
 });
 
 /**
+ * DELETE /:jobId/:dataType
+ * Bulk-delete all items for this job + data type
+ */
+router.delete('/:jobId/:dataType', async (req: Request, res: Response, next: NextFunction) => {
+  const { jobId, dataType } = req.params;
+
+  try {
+    const delegate = getDelegate(dataType);
+    if (!delegate) {
+      return next();
+    }
+
+    if (dataType === 'social-profiles') {
+      const job = await prisma.researchJob.findUnique({ where: { id: jobId }, select: { clientId: true } });
+      if (!job) throw new Error('Research job not found');
+
+      const result = await delegate.deleteMany({
+        where: { clientId: job.clientId },
+      });
+      return res.json({ success: true, deletedCount: result.count });
+    }
+
+    const result = await delegate.deleteMany({
+      where: { researchJobId: jobId },
+    });
+    res.json({ success: true, deletedCount: result.count });
+  } catch (error: any) {
+    console.error(`[DataManagement] Bulk delete failed for ${dataType}:`, error);
+    res.status(500).json({ error: error.message || 'Bulk delete failed' });
+  }
+});
+
+/**
  * POST /:jobId/:dataType
  * Create an item
  */
-router.post('/:jobId/:dataType', async (req: Request, res: Response) => {
+router.post('/:jobId/:dataType', async (req: Request, res: Response, next: NextFunction) => {
   const { jobId, dataType } = req.params;
   const data = req.body;
 
   try {
     const delegate = getDelegate(dataType);
     if (!delegate) {
-       res.status(400).json({ error: `Unknown data type: ${dataType}` });
-       return;
+       return next();
     }
 
     // Most models need researchJobId, except ClientAccount (uses clientId)
@@ -123,14 +153,13 @@ router.post('/:jobId/:dataType', async (req: Request, res: Response) => {
  * GET /:jobId/:dataType
  * List items (Optional, mostly handled by main job GET but useful for pagination/refresh)
  */
-router.get('/:jobId/:dataType', async (req: Request, res: Response) => {
+router.get('/:jobId/:dataType', async (req: Request, res: Response, next: NextFunction) => {
   const { jobId, dataType } = req.params;
   
   try {
      const delegate = getDelegate(dataType);
     if (!delegate) {
-       res.status(400).json({ error: `Unknown data type: ${dataType}` });
-       return;
+       return next();
     }
 
     let items;

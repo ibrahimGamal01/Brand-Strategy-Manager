@@ -94,7 +94,7 @@ export async function getCompletedGatherers(researchJobId: string): Promise<Comp
     hasDDGSearch: rawSearchCount > 10, // At least 10 results means DDG ran
     hasCompetitors: competitorCount > 3, // At least 3 competitors found
     hasSocialProfiles: socialProfileCount > 0,
-    hasAIQuestions: aiQuestionCount >= 10, // At least 10 of 12 questions answered
+    hasAIQuestions: aiQuestionCount >= 11, // At least 11 of 13 questions answered
     hasSearchTrends: searchTrendCount > 0,
     hasCommunityInsights: communityInsightCount > 0,
     counts: {
@@ -523,7 +523,7 @@ export async function gatherInformation(input: GatheringInput): Promise<Informat
   
   if (input.researchJobId) {
     try {
-      console.log(`[InfoGather] Step 4: Running Deep AI Business Analysis (12+ dimensions)...`);
+      console.log(`[InfoGather] Step 4: Running Deep AI Business Analysis (13+ dimensions)...`);
       
       // A. Run the new Deep Questions service
       const deepQuestions = await askAllDeepQuestions(input.researchJobId, {

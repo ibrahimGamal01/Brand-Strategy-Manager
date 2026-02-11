@@ -17,13 +17,19 @@
  * - GROWTH_STRATEGY
  * - PAIN_POINTS
  * - KEY_DIFFERENTIATORS
+ * - COMPETITOR_DISCOVERY_METHOD
  */
 
 import OpenAI from 'openai';
-import { PrismaClient, AiQuestionType } from '@prisma/client';
+import { Prisma, PrismaClient, AiQuestionType } from '@prisma/client';
+import { emitResearchJobEvent } from '../social/research-job-events';
+import { isAiFallbackEnabled, isOpenAiConfiguredForRealMode } from '../../lib/runtime-preflight';
 
 const prisma = new PrismaClient();
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let mockModeBannerLogged = false;
+const AI_AUTH_FAILED_PREFIX = 'AI_AUTH_FAILED';
+const AI_CONFIG_INVALID_PREFIX = 'AI_CONFIG_INVALID';
 
 // Harsh system prefix enforcing critical, evidence-based analysis
 const HARSH_SYSTEM_PREFIX = `
@@ -299,6 +305,35 @@ FORMAT:
 4. **Polarization**: Who should HATE this brand? (Good brands repel the wrong people).
 5. **The Hook**: One sentence that makes someone say "Tell me more."`,
   },
+
+  COMPETITOR_DISCOVERY_METHOD: {
+    question:
+      'Determine the correct competitor discovery identification method for this client and return strict JSON policy.',
+    systemPrompt: `You are setting the competitor discovery policy for a brand-research system.
+
+You MUST return ONLY valid JSON. No markdown. No explanation outside JSON.
+
+Return this exact schema:
+{
+  "discoveryFocus": "social_first | hybrid | web_first",
+  "method": "handle_led | niche_led | account_led | mixed",
+  "surfacePriority": ["instagram","tiktok","youtube","linkedin","x","facebook","website"],
+  "websitePolicy": "evidence_only | fallback_only | peer_candidate",
+  "minimumSocialForShortlist": 0,
+  "confidence": 0.0,
+  "rationale": "short rationale"
+}
+
+Rules:
+1) Choose "social_first" when the brand is primarily social-account led.
+2) Choose "web_first" only when website/search intent dominates and social is weak.
+3) "surfacePriority" must be an ordered list of unique platform names from this set only:
+   instagram,tiktok,youtube,linkedin,x,facebook,website
+4) "minimumSocialForShortlist" is an integer >= 0.
+5) "confidence" is between 0 and 1.
+6) Keep rationale under 180 characters.
+7) Use "evidence_only" for website if social relevance should dominate shortlist quality.`,
+  },
   
   CUSTOM: {
     question: '',
@@ -323,6 +358,259 @@ export interface AskQuestionResult {
   tokensUsed: number;
   durationMs: number;
   alreadyAnswered: boolean;
+}
+
+export interface CompetitorDiscoveryMethodAnswerJson {
+  discoveryFocus: 'social_first' | 'hybrid' | 'web_first';
+  method: 'handle_led' | 'niche_led' | 'account_led' | 'mixed';
+  surfacePriority: Array<'instagram' | 'tiktok' | 'youtube' | 'linkedin' | 'x' | 'facebook' | 'website'>;
+  websitePolicy: 'evidence_only' | 'fallback_only' | 'peer_candidate';
+  minimumSocialForShortlist: number;
+  confidence: number;
+  rationale: string;
+}
+
+function shouldUseMockAnswers(): boolean {
+  return isAiFallbackEnabled();
+}
+
+function getAiMode(): string {
+  return String(process.env.AI_FALLBACK_MODE || 'off').trim().toLowerCase() || 'off';
+}
+
+function emitAiEvent(
+  researchJobId: string,
+  code: 'ai.auth.failed' | 'ai.config.invalid' | 'ai.fallback.used',
+  questionType: AiQuestionType,
+  level: 'info' | 'warn' | 'error',
+  message: string,
+  metadata?: Record<string, unknown>
+) {
+  emitResearchJobEvent({
+    researchJobId,
+    source: 'ai',
+    code,
+    level,
+    message,
+    entityType: 'ai_question',
+    entityId: questionType,
+    metadata: {
+      questionType,
+      ...(metadata || {}),
+    },
+  });
+}
+
+function summarizeContext(context: QuestionContext): string {
+  const lines: string[] = [];
+  if (context.handle) lines.push(`Primary handle: @${context.handle}`);
+  if (context.niche) lines.push(`Niche focus: ${context.niche}`);
+  if (context.bio) lines.push(`Bio signal: ${context.bio}`);
+  if (context.websiteUrl) lines.push(`Website: ${context.websiteUrl}`);
+  return lines.length > 0 ? lines.join('\n') : 'No detailed context available from profile metadata.';
+}
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
+}
+
+function toSurface(raw: unknown): CompetitorDiscoveryMethodAnswerJson['surfacePriority'][number] | null {
+  const value = String(raw || '').trim().toLowerCase();
+  if (value === 'instagram') return 'instagram';
+  if (value === 'tiktok') return 'tiktok';
+  if (value === 'youtube') return 'youtube';
+  if (value === 'linkedin') return 'linkedin';
+  if (value === 'x' || value === 'twitter') return 'x';
+  if (value === 'facebook') return 'facebook';
+  if (value === 'website' || value === 'web' || value === 'site') return 'website';
+  return null;
+}
+
+function parseQuestion13Json(raw: unknown): CompetitorDiscoveryMethodAnswerJson | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const value = raw as Record<string, unknown>;
+  const focus = String(value.discoveryFocus || '').trim().toLowerCase();
+  const method = String(value.method || '').trim().toLowerCase();
+  const websitePolicy = String(value.websitePolicy || '').trim().toLowerCase();
+
+  const validFocus = focus === 'social_first' || focus === 'hybrid' || focus === 'web_first';
+  const validMethod =
+    method === 'handle_led' ||
+    method === 'niche_led' ||
+    method === 'account_led' ||
+    method === 'mixed';
+  const validWebsitePolicy =
+    websitePolicy === 'evidence_only' ||
+    websitePolicy === 'fallback_only' ||
+    websitePolicy === 'peer_candidate';
+
+  const surfacePriority = Array.from(
+    new Set(
+      (Array.isArray(value.surfacePriority) ? value.surfacePriority : [])
+        .map((entry) => toSurface(entry))
+        .filter(
+          (
+            entry
+          ): entry is CompetitorDiscoveryMethodAnswerJson['surfacePriority'][number] => Boolean(entry)
+        )
+    )
+  );
+
+  if (!validFocus || !validMethod || !validWebsitePolicy || surfacePriority.length === 0) {
+    return null;
+  }
+
+  const minimumSocialForShortlist = Math.max(
+    0,
+    Math.floor(Number(value.minimumSocialForShortlist) || 0)
+  );
+
+  return {
+    discoveryFocus: focus as CompetitorDiscoveryMethodAnswerJson['discoveryFocus'],
+    method: method as CompetitorDiscoveryMethodAnswerJson['method'],
+    surfacePriority,
+    websitePolicy: websitePolicy as CompetitorDiscoveryMethodAnswerJson['websitePolicy'],
+    minimumSocialForShortlist,
+    confidence: clamp01(Number(value.confidence)),
+    rationale: String(value.rationale || '').trim().slice(0, 280),
+  };
+}
+
+function parseJsonObjectFromText(value: string): Record<string, unknown> | null {
+  const text = String(value || '').trim();
+  if (!text) return null;
+
+  const stripped = text
+    .replace(/^```(?:json)?/i, '')
+    .replace(/```$/i, '')
+    .trim();
+
+  try {
+    const parsed = JSON.parse(stripped);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // fall through
+  }
+
+  const objectMatch = stripped.match(/\{[\s\S]*\}/);
+  if (!objectMatch) return null;
+  try {
+    const parsed = JSON.parse(objectMatch[0]);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function parseQuestion13AnswerJson(answer: string): CompetitorDiscoveryMethodAnswerJson | null {
+  const object = parseJsonObjectFromText(answer);
+  return parseQuestion13Json(object);
+}
+
+function buildMockAnswer(
+  questionType: AiQuestionType,
+  question: string,
+  context: QuestionContext
+): string {
+  const brand = context.brandName || 'This brand';
+  const contextSummary = summarizeContext(context);
+
+  const titleByType: Record<AiQuestionType, string> = {
+    VALUE_PROPOSITION: 'Value Proposition Draft',
+    TARGET_AUDIENCE: 'Target Audience Draft',
+    CONTENT_PILLARS: 'Content Pillars Draft',
+    BRAND_VOICE: 'Brand Voice Draft',
+    BRAND_PERSONALITY: 'Brand Personality Draft',
+    COMPETITOR_ANALYSIS: 'Competitor Analysis Draft',
+    NICHE_POSITION: 'Niche Position Draft',
+    UNIQUE_STRENGTHS: 'Unique Strengths Draft',
+    CONTENT_OPPORTUNITIES: 'Content Opportunities Draft',
+    GROWTH_STRATEGY: 'Growth Strategy Draft',
+    PAIN_POINTS: 'Pain Points Draft',
+    KEY_DIFFERENTIATORS: 'Key Differentiators Draft',
+    COMPETITOR_DISCOVERY_METHOD: 'Competitor Discovery Method Draft',
+    CUSTOM: 'Custom Strategy Draft',
+  };
+
+  if (questionType === 'COMPETITOR_DISCOVERY_METHOD') {
+    const fallbackJson: CompetitorDiscoveryMethodAnswerJson = {
+      discoveryFocus: context.handle ? 'social_first' : 'hybrid',
+      method: context.handle ? 'handle_led' : 'mixed',
+      surfacePriority: ['instagram', 'tiktok', 'youtube', 'linkedin', 'x', 'facebook', 'website'],
+      websitePolicy: context.websiteUrl ? 'fallback_only' : 'evidence_only',
+      minimumSocialForShortlist: context.handle ? 1 : 0,
+      confidence: 0.42,
+      rationale: 'Fallback inference from available profile signals.',
+    };
+    return JSON.stringify(fallbackJson, null, 2);
+  }
+
+  return [
+    `${titleByType[questionType]} (Fallback)`,
+    '',
+    `Question: ${question}`,
+    '',
+    'Context Used:',
+    contextSummary,
+    '',
+    `Preliminary analysis for ${brand}:`,
+    '- Gathered profile + scrape data suggests a focused niche strategy is required rather than broad positioning.',
+    '- Convert top-performing post themes into repeatable content series with explicit CTA per series.',
+    '- Validate this draft with fresh competitive proof points before final strategy export.',
+    '',
+    'Next validation steps:',
+    '1. Re-run AI generation with a valid OpenAI API key for full depth.',
+    '2. Cross-check this draft against latest competitor snapshots and trend outputs.',
+    '3. Promote only evidence-backed statements into final client strategy.',
+  ].join('\n');
+}
+
+async function upsertAnswer(
+  researchJobId: string,
+  questionType: AiQuestionType,
+  question: string,
+  contextStr: string,
+  fullPrompt: string,
+  answer: string,
+  answerJson: Prisma.InputJsonValue | null,
+  tokensUsed: number,
+  durationMs: number,
+  modelUsed: string
+) {
+  return prisma.aiQuestion.upsert({
+    where: {
+      researchJobId_questionType: { researchJobId, questionType },
+    },
+    update: {
+      answer,
+      answerJson: answerJson || undefined,
+      tokensUsed,
+      durationMs,
+      isAnswered: true,
+      answeredAt: new Date(),
+      modelUsed,
+    },
+    create: {
+      researchJobId,
+      questionType,
+      question,
+      answer,
+      answerJson: answerJson || undefined,
+      contextUsed: contextStr.substring(0, 500),
+      promptUsed: fullPrompt.substring(0, 1000),
+      modelUsed,
+      tokensUsed,
+      durationMs,
+      isAnswered: true,
+      answeredAt: new Date(),
+    },
+  });
 }
 
 /**
@@ -369,7 +657,66 @@ ${context.rawSearchContext ? `\nWeb Research:\n${context.rawSearchContext}` : ''
 `.trim();
 
   const fullPrompt = `${question}\n\nContext:\n${contextStr}`;
-  
+  const aiMode = getAiMode();
+
+  if (!shouldUseMockAnswers() && !isOpenAiConfiguredForRealMode()) {
+    emitAiEvent(
+      researchJobId,
+      'ai.config.invalid',
+      questionType,
+      'error',
+      `AI config invalid for ${questionType}; OPENAI_API_KEY is missing/invalid in real mode (mode=${aiMode}).`,
+      { mode: aiMode }
+    );
+    throw new Error(
+      `${AI_CONFIG_INVALID_PREFIX}: OPENAI_API_KEY is missing/invalid while AI_FALLBACK_MODE=off (mode=${aiMode})`
+    );
+  }
+
+  if (shouldUseMockAnswers()) {
+    if (!mockModeBannerLogged) {
+      console.warn('[AIQuestions] Mock fallback active (AI_FALLBACK_MODE=mock).');
+      mockModeBannerLogged = true;
+    }
+
+    emitAiEvent(
+      researchJobId,
+      'ai.fallback.used',
+      questionType,
+      'info',
+      `AI mock fallback used for ${questionType}.`,
+      { mode: 'mock' }
+    );
+
+    const fallbackAnswer = buildMockAnswer(questionType, question, context);
+    const fallbackAnswerJson =
+      questionType === 'COMPETITOR_DISCOVERY_METHOD'
+        ? (parseQuestion13AnswerJson(fallbackAnswer) as Prisma.InputJsonValue | null)
+        : null;
+    const saved = await upsertAnswer(
+      researchJobId,
+      questionType,
+      question,
+      contextStr,
+      fullPrompt,
+      fallbackAnswer,
+      fallbackAnswerJson,
+      0,
+      0,
+      'mock-deep-questions'
+    );
+
+    return {
+      id: saved.id,
+      questionType,
+      question,
+      answer: fallbackAnswer,
+      tokensUsed: 0,
+      durationMs: 0,
+      alreadyAnswered: false,
+    };
+  }
+
   
   console.log(`[AIQuestions] Asking: ${questionType}...`);
   const startTime = Date.now();
@@ -386,35 +733,25 @@ ${context.rawSearchContext ? `\nWeb Research:\n${context.rawSearchContext}` : ''
     });
     
     const answer = response.choices[0]?.message?.content || '';
+    const answerJson =
+      questionType === 'COMPETITOR_DISCOVERY_METHOD'
+        ? (parseQuestion13AnswerJson(answer) as Prisma.InputJsonValue | null)
+        : null;
     const tokensUsed = response.usage?.total_tokens || 0;
     const durationMs = Date.now() - startTime;
     
-    // Save to DB (upsert to handle race conditions)
-    const saved = await prisma.aiQuestion.upsert({
-      where: {
-        researchJobId_questionType: { researchJobId, questionType },
-      },
-      update: {
-        answer,
-        tokensUsed,
-        durationMs,
-        isAnswered: true,
-        answeredAt: new Date(),
-      },
-      create: {
-        researchJobId,
-        questionType,
-        question,
-        answer,
-        contextUsed: contextStr.substring(0, 500),
-        promptUsed: fullPrompt.substring(0, 1000),
-        modelUsed: 'gpt-4o',
-        tokensUsed,
-        durationMs,
-        isAnswered: true,
-        answeredAt: new Date(),
-      },
-    });
+    const saved = await upsertAnswer(
+      researchJobId,
+      questionType,
+      question,
+      contextStr,
+      fullPrompt,
+      answer,
+      answerJson,
+      tokensUsed,
+      durationMs,
+      'gpt-4o'
+    );
     
     console.log(`[AIQuestions] ${questionType}: ${tokensUsed} tokens, ${durationMs}ms`);
     
@@ -429,7 +766,68 @@ ${context.rawSearchContext ? `\nWeb Research:\n${context.rawSearchContext}` : ''
     };
     
   } catch (error: any) {
-    console.error(`[AIQuestions] Error for ${questionType}:`, error.message);
+    const message = String(error?.message || error || 'Unknown AI error');
+
+    const authFailed =
+      message.includes('401') ||
+      message.toLowerCase().includes('incorrect api key') ||
+      message.toLowerCase().includes('authentication');
+
+    if (authFailed) {
+      emitAiEvent(
+        researchJobId,
+        'ai.auth.failed',
+        questionType,
+        'error',
+        `OpenAI authentication failed for ${questionType}.`,
+        { error: message, mode: aiMode }
+      );
+      console.error(`[AIQuestions] OpenAI auth failed for ${questionType}: ${message}`);
+    } else {
+      console.error(`[AIQuestions] Error for ${questionType}:`, message);
+    }
+
+    if (authFailed && shouldUseMockAnswers()) {
+      emitAiEvent(
+        researchJobId,
+        'ai.fallback.used',
+        questionType,
+        'warn',
+        `AI fallback used after auth failure for ${questionType}.`,
+        { mode: 'mock' }
+      );
+      const fallbackAnswer = buildMockAnswer(questionType, question, context);
+      const fallbackAnswerJson =
+        questionType === 'COMPETITOR_DISCOVERY_METHOD'
+          ? (parseQuestion13AnswerJson(fallbackAnswer) as Prisma.InputJsonValue | null)
+          : null;
+      const saved = await upsertAnswer(
+        researchJobId,
+        questionType,
+        question,
+        contextStr,
+        fullPrompt,
+        fallbackAnswer,
+        fallbackAnswerJson,
+        0,
+        Date.now() - startTime,
+        'mock-deep-questions'
+      );
+
+      return {
+        id: saved.id,
+        questionType,
+        question,
+        answer: fallbackAnswer,
+        tokensUsed: 0,
+        durationMs: Date.now() - startTime,
+        alreadyAnswered: false,
+      };
+    }
+
+    if (authFailed) {
+      throw new Error(`${AI_AUTH_FAILED_PREFIX}: ${message}`);
+    }
     throw error;
   }
 }
@@ -455,6 +853,7 @@ export async function askAllDeepQuestions(
     'GROWTH_STRATEGY',
     'PAIN_POINTS',
     'KEY_DIFFERENTIATORS',
+    'COMPETITOR_DISCOVERY_METHOD',
   ];
   
   console.log(`[AIQuestions] Starting ${questionTypes.length} deep questions for ${context.brandName}...`);
@@ -467,6 +866,13 @@ export async function askAllDeepQuestions(
       results.push(result);
     } catch (error: any) {
       console.error(`[AIQuestions] Failed: ${questionType} - ${error.message}`);
+      const message = String(error?.message || '');
+      if (
+        message.startsWith(`${AI_AUTH_FAILED_PREFIX}:`) ||
+        message.startsWith(`${AI_CONFIG_INVALID_PREFIX}:`)
+      ) {
+        throw error;
+      }
     }
   }
   

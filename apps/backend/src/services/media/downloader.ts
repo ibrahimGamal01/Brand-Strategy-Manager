@@ -1,378 +1,204 @@
-import axios from 'axios';
 import path from 'path';
 import { fileManager, STORAGE_PATHS } from '../storage/file-manager';
 import { prisma } from '../../lib/prisma';
-import sharp from 'sharp';
-import fs from 'fs'; 
 import { tiktokService } from '../scraper/tiktok-service';
-import { exec } from 'child_process';
+import { resolveInstagramMediaViaApify } from '../scraper/apify-instagram-media-downloader';
+import { extractMediaUrls, extractImageMetadata, generateVideoThumbnail } from './download-helpers';
+import { downloadGenericMedia } from './download-generic';
+import { emitResearchJobEvent } from '../social/research-job-events';
 
-/**
- * Download media assets for a post and save to storage
- */
+type EntityType = 'CLIENT' | 'COMPETITOR' | 'SOCIAL';
+
+type MediaSourceOpts = {
+  sourceType?: 'CLIENT_POST_SNAPSHOT' | 'COMPETITOR_POST_SNAPSHOT';
+  sourceId?: string;
+  clientPostSnapshotId?: string;
+  competitorPostSnapshotId?: string;
+  eventContext?: DownloadEventContext;
+};
+
+type DownloadEventContext = {
+  researchJobId?: string;
+  runId?: string;
+  source?: string;
+  platform?: string;
+  handle?: string;
+  entityType?: string;
+  entityId?: string;
+};
+
+const DEFAULT_SOCIAL_MEDIA_POST_LIMIT = Number.parseInt(
+  process.env.SOCIAL_MEDIA_DOWNLOAD_POST_LIMIT || '8',
+  10
+);
+const DEFAULT_SOCIAL_MEDIA_MAX_FAILURES = Number.parseInt(
+  process.env.SOCIAL_MEDIA_MAX_FAILURES || '3',
+  10
+);
+const DEFAULT_SOCIAL_MEDIA_FAILURE_COOLDOWN_MS = Number.parseInt(
+  process.env.SOCIAL_MEDIA_FAILURE_COOLDOWN_MS || String(12 * 60 * 60 * 1000),
+  10
+);
+const ENABLE_TIKTOK_PAGE_DOWNLOAD = String(process.env.ENABLE_TIKTOK_PAGE_DOWNLOAD || '').toLowerCase() === 'true';
+
+function normalizePositiveInt(value: number, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(1, Math.floor(value));
+}
+
+function isInstagramPageUrl(url: string): boolean {
+  return /^https?:\/\/(?:www\.)?instagram\.com\/(?:p|reel|tv|stories)\//i.test(url);
+}
+
+function isInstagramProfileUrl(url: string): boolean {
+  return /^https?:\/\/(?:www\.)?instagram\.com\/(?!p\/|reel\/|tv\/|stories\/|explore\/|accounts\/|api\/|graphql\/|reels\/)[^/?#]+\/?$/i.test(
+    url
+  );
+}
+
+function isTikTokPageUrl(url: string): boolean {
+  return /^https?:\/\/(?:www\.)?tiktok\.com\/@[^/]+\/video\/\d+/i.test(url);
+}
+
+function isObjectRecord(value: unknown): value is Record<string, any> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function getPostDownloadFailureState(metadata: unknown): {
+  failureCount: number;
+  lastFailureAt: Date | null;
+} {
+  if (!isObjectRecord(metadata)) {
+    return { failureCount: 0, lastFailureAt: null };
+  }
+
+  const failureCount = Number.parseInt(String(metadata.downloadFailures || 0), 10) || 0;
+  const lastFailureRaw = metadata.lastDownloadFailureAt;
+  const lastFailureAt =
+    typeof lastFailureRaw === 'string' || lastFailureRaw instanceof Date
+      ? new Date(lastFailureRaw as any)
+      : null;
+
+  return {
+    failureCount,
+    lastFailureAt: lastFailureAt && !Number.isNaN(lastFailureAt.getTime()) ? lastFailureAt : null,
+  };
+}
+
+// Core downloader
 export async function downloadPostMedia(
   postId: string,
   mediaUrls: string[],
-  entityType: 'CLIENT' | 'COMPETITOR' | 'SOCIAL',
-  entityId: string
+  entityType: EntityType,
+  entityId: string,
+  opts: MediaSourceOpts = {}
 ): Promise<string[]> {
   const mediaAssetIds: string[] = [];
+  const preparedUrls: string[] = [];
+  const resolvedPageCache = new Map<string, string[]>();
+  const eventContext = opts.eventContext;
 
-  for (const url of mediaUrls) {
+  for (const sourceUrl of mediaUrls.filter(Boolean)) {
+    if (sourceUrl.includes('lookaside.instagram.com/seo/google_widget/crawler')) {
+      console.warn('[Downloader] Skipping lookaside URL (HTML fallback):', sourceUrl);
+      continue;
+    }
+
+    if (isInstagramProfileUrl(sourceUrl)) {
+      console.warn('[Downloader] Skipping Instagram profile URL (not media):', sourceUrl);
+      continue;
+    }
+
+    if (!isInstagramPageUrl(sourceUrl)) {
+      preparedUrls.push(sourceUrl);
+      continue;
+    }
+
+    if (resolvedPageCache.has(sourceUrl)) {
+      preparedUrls.push(...(resolvedPageCache.get(sourceUrl) || []));
+      continue;
+    }
+
+    const resolved = await resolveInstagramMediaViaApify(sourceUrl, {
+      researchJobId: eventContext?.researchJobId,
+      runId: eventContext?.runId,
+      source: eventContext?.source,
+      platform: eventContext?.platform,
+      handle: eventContext?.handle,
+      entityType: eventContext?.entityType || 'social_post',
+      entityId: eventContext?.entityId || postId,
+    });
+    if (resolved.success && resolved.mediaUrls.length > 0) {
+      console.log(
+        `[Downloader] Resolved ${resolved.mediaUrls.length} media URLs via Apify for ${sourceUrl}`
+      );
+      resolvedPageCache.set(sourceUrl, resolved.mediaUrls);
+      preparedUrls.push(...resolved.mediaUrls);
+      continue;
+    }
+
+    console.warn(
+      `[Downloader] Could not resolve Instagram page URL via Apify: ${sourceUrl} (${resolved.error || 'unknown error'})`
+    );
+  }
+
+  for (const url of Array.from(new Set(preparedUrls))) {
     if (!url) continue;
 
     try {
-      console.log(`[Downloader] Downloading: ${url}`);
-
-      // Determine media type
       const isVideo = url.includes('.mp4') || url.includes('video') || url.includes('tiktok.com');
       const mediaType = isVideo ? 'VIDEO' : 'IMAGE';
-
-      // Generate storage path
-      // Generate storage path
-      let extension = fileManager.getExtension(url);
-      
-      // Fix: Ensure video platforms get mp4 extension even if getExtension defaults to jpg
-      if (isVideo) {
-          extension = 'mp4';
-      }
-      
-      if (!extension) extension = 'jpg';
+      let extension = fileManager.getExtension(url) || (isVideo ? 'mp4' : 'jpg');
+      if (isVideo) extension = 'mp4';
 
       const filename = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${extension}`;
-      
-      // Logic for path construction
-      let storagePath = '';
-      if (entityType === 'CLIENT') {
-          storagePath = path.join(STORAGE_PATHS.clientMedia(entityId, postId), filename);
-      } else if (entityType === 'COMPETITOR') {
-          storagePath = path.join(STORAGE_PATHS.competitorMedia(entityId, postId), filename);
+      const storagePath =
+        entityType === 'CLIENT'
+          ? path.join(STORAGE_PATHS.clientMedia(entityId, postId), filename)
+          : path.join(STORAGE_PATHS.competitorMedia(entityId, postId), filename);
+
+      if (isTikTokPageUrl(url)) {
+        if (!ENABLE_TIKTOK_PAGE_DOWNLOAD) {
+          console.warn(
+            `[Downloader] Skipping TikTok page URL download (set ENABLE_TIKTOK_PAGE_DOWNLOAD=true to enable): ${url}`
+          );
+          continue;
+        }
+
+        const result = await tiktokService.downloadVideo(url, storagePath);
+        if (!result.success) throw new Error(`TikTok download failed: ${result.error}`);
       } else {
-          // SOCIAL
-          // Use competitor path logic for now as it groups by profileId
-          storagePath = path.join(STORAGE_PATHS.competitorMedia(entityId, postId), filename);
+        const headers: Record<string, string> = {
+          Referer: 'https://www.instagram.com/',
+          Origin: 'https://www.instagram.com',
+        };
+        if (url.includes('instagram.com')) {
+          const cookie = process.env.INSTAGRAM_SESSION_COOKIES || '';
+          if (cookie) headers['Cookie'] = cookie;
+          headers['User-Agent'] =
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
+        }
+        await fileManager.downloadAndSave(url, storagePath, headers);
       }
 
-      // Download file with specific headers or specialized downlaoders
-      if (url.includes('tiktok.com')) {
-          // Use TikTok Python Downloader
-          const result = await tiktokService.downloadVideo(url, storagePath);
-          if (!result.success) {
-              throw new Error(`TikTok download failed: ${result.error}`);
-          }
-      } else if (url.includes('instagram.com')) {
-          // Instagram downloads often expire or need auth. 
-          // For now, try standard download with headers, if fails, we might need a python fallback.
-          await fileManager.downloadAndSave(url, storagePath, {
-            'Referer': 'https://www.instagram.com/',
-            'Origin': 'https://www.instagram.com'
-         });
-      } else {
-          // Standard download
-          await fileManager.downloadAndSave(url, storagePath, {
-            'Referer': 'https://www.instagram.com/',
-            'Origin': 'https://www.instagram.com'
-        });
-      }
-
-      // Get file stats
       const stats = fileManager.getStats(storagePath);
       const fileSizeBytes = stats?.size || 0;
 
-      // Extract metadata
-      let width, height, durationSeconds, thumbnailPath;
+      let width: number | undefined;
+      let height: number | undefined;
+      let durationSeconds: number | undefined;
+      let thumbnailPath: string | undefined;
 
       if (mediaType === 'IMAGE') {
         const metadata = await extractImageMetadata(storagePath);
         width = metadata.width;
         height = metadata.height;
-        // Correctly set thumbnail path for images (same as source) so frontend picks it up preferentially
-        thumbnailPath = fileManager.toUrl(storagePath); 
+        thumbnailPath = fileManager.toUrl(storagePath);
       } else {
-        // For videos, extract first frame as thumbnail
         thumbnailPath = await generateVideoThumbnail(storagePath);
       }
 
-      // Create MEDIA_ASSET record
       const mediaAssetData: any = {
-          mediaType,
-          originalUrl: url,
-          blobStoragePath: storagePath,
-          fileSizeBytes,
-          width,
-          height,
-          durationSeconds,
-          thumbnailPath,
-          isDownloaded: true,
-          downloadedAt: new Date(),
-      };
-
-      if (entityType === 'CLIENT') {
-          mediaAssetData.clientPostId = postId;
-      } else if (entityType === 'COMPETITOR') {
-          mediaAssetData.cleanedPostId = postId;
-      } else if (entityType === 'SOCIAL') {
-          mediaAssetData.socialPostId = postId;
-      }
-
-      const mediaAsset = await prisma.mediaAsset.create({
-        data: mediaAssetData,
-      });
-
-      mediaAssetIds.push(mediaAsset.id);
-      console.log(`[Downloader] Saved media asset: ${mediaAsset.id}`);
-    } catch (error: any) {
-      console.error(`[Downloader] Failed to download ${url}:`, error.message);
-      // Continue with other media even if one fails
-    }
-  }
-
-  return mediaAssetIds;
-}
-
-/**
- * Extract image metadata using sharp
- */
-async function extractImageMetadata(imagePath: string) {
-  try {
-    const metadata = await sharp(imagePath).metadata();
-    return {
-      width: metadata.width || 0,
-      height: metadata.height || 0,
-    };
-  } catch (error) {
-    console.error('[Downloader] Error extracting image metadata:', error);
-    return { width: 0, height: 0 };
-  }
-}
-
-/**
- * Generate thumbnail for video (first frame)
- */
-async function generateVideoThumbnail(videoPath: string): Promise<string> {
-  try {
-    const thumbnailFilename = path.basename(videoPath, path.extname(videoPath)) + '_thumb.jpg';
-    const thumbnailPath = path.join(path.dirname(videoPath), thumbnailFilename);
-    
-    // Use ffmpeg to extract first frame
-    const command = `ffmpeg -i "${videoPath}" -vf "select=eq(n\\,0)" -vframes 1 -y "${thumbnailPath}"`;
-    
-    await new Promise((resolve, reject) => {
-      exec(command, (error: any, stdout: any, stderr: any) => {
-        if (error) {
-          console.error('[Downloader] ffmpeg error:', stderr);
-          reject(error);
-        } else {
-          resolve(stdout);
-        }
-      });
-    });
-    
-    console.log(`[Downloader] Generated thumbnail: ${thumbnailPath}`);
-    return thumbnailPath;
-  } catch (error: any) {
-    console.error('[Downloader] Failed to generate video thumbnail:', error.message);
-    return '';
-  }
-}
-
-/**
- * Download all media for client posts
- */
-export async function downloadAllClientMedia(clientId: string) {
-  console.log(`[Downloader] Downloading all media for client ${clientId}`);
-
-  const posts = await prisma.clientPost.findMany({
-    where: {
-      clientAccount: {
-        clientId,
-      },
-      mediaAssets: {
-        none: {}, // Only posts without media downloaded yet
-      },
-    },
-  });
-
-  let downloadedCount = 0;
-
-  for (const post of posts) {
-    try {
-      // Extract media URLs from raw API response
-      const mediaUrls = extractMediaUrls(post.rawApiResponse);
-
-      if (mediaUrls.length > 0) {
-        await downloadPostMedia(post.id, mediaUrls, 'CLIENT', clientId);
-        downloadedCount += mediaUrls.length;
-      }
-    } catch (error: any) {
-      console.error(`[Downloader] Error downloading media for post ${post.id}:`, error);
-    }
-  }
-
-  console.log(`[Downloader] Downloaded ${downloadedCount} media assets for client ${clientId}`);
-  return downloadedCount;
-}
-
-/**
- * Download all media for a specific Social Profile (Research)
- */
-export async function downloadSocialProfileMedia(profileId: string) {
-    console.log(`[Downloader] Downloading media for profile ${profileId}`);
-
-    // Get posts that don't have media assets yet
-    const posts = await prisma.socialPost.findMany({
-        where: {
-            socialProfileId: profileId,
-            mediaAssets: {
-                none: {}
-            }
-        }
-    });
-
-    console.log(`[Downloader] Found ${posts.length} posts without media assets`);
-
-    let downloadedCount = 0;
-    const processedUrls = new Set<string>(); // Track URLs to prevent duplicates
-
-    for (const post of posts) {
-        try {
-            const urlsToDownload: string[] = [];
-            
-            // Prefer explicit URL from fields if available, otherwise heuristics
-            // For now, SocialPost URL is often the post URL itself (e.g. tiktok video link)
-            // or we might have a specific media URL in `thumbnailUrl` (which is often just a static image).
-            
-            if (post.url && post.url.includes('tiktok.com')) {
-                // Skip if we already processed this URL
-                if (!processedUrls.has(post.url)) {
-                    urlsToDownload.push(post.url);
-                    processedUrls.add(post.url);
-                    console.log(`[Downloader] Queued TikTok video: ${post.url}`);
-                } else {
-                    console.log(`[Downloader] Skipping duplicate URL: ${post.url}`);
-                }
-            } else if (post.thumbnailUrl) { // Often holds the media URL for Instagram
-                if (!processedUrls.has(post.thumbnailUrl)) {
-                    urlsToDownload.push(post.thumbnailUrl);
-                    processedUrls.add(post.thumbnailUrl);
-                    console.log(`[Downloader] Queued Instagram media: ${post.thumbnailUrl}`);
-                }
-            }
-
-            if (urlsToDownload.length > 0) {
-                 await downloadPostMedia(post.id, urlsToDownload, 'SOCIAL', profileId);
-                 downloadedCount++;
-                 console.log(`[Downloader] Downloaded media for post ${post.externalId} (${downloadedCount}/${posts.length})`);
-            } else {
-                 console.log(`[Downloader] No media URL found for post ${post.externalId}`);
-            }
-            
-        } catch (error: any) {
-             console.error(`[Downloader] Error downloading media for social post ${post.id}:`, error.message);
-        }
-    }
-    
-    console.log(`[Downloader] Downloaded ${downloadedCount} new assets for profile ${profileId}`);
-    return downloadedCount;
-}
-
-/**
- * Extract media URLs from Instagram API response
- */
-function extractMediaUrls(rawApiResponse: any): string[] {
-  if (!rawApiResponse) return [];
-
-  const urls: string[] = [];
-
-  // Handle Instaloader format
-  if (rawApiResponse.media_url) {
-    urls.push(rawApiResponse.media_url);
-  }
-
-  if (rawApiResponse.video_url) {
-    urls.push(rawApiResponse.video_url);
-  }
-
-  // Handle carousel (multiple media)
-  if (rawApiResponse.media_urls && Array.isArray(rawApiResponse.media_urls)) {
-    urls.push(...rawApiResponse.media_urls);
-  }
-
-  return urls.filter(Boolean);
-}
-
-/**
- * Download media from a generic URL (e.g. DDG Search Result)
- */
-export async function downloadGenericMedia(
-  url: string,
-  referenceId: string, // The DDG Result ID
-  type: 'DDG_VIDEO' | 'DDG_IMAGE',
-  researchJobId: string
-): Promise<string | null> {
-  try {
-    console.log(`[Downloader] Downloading generic media (${type}): ${url}`);
-
-    // Determine media type
-    const isVideo = type === 'DDG_VIDEO';
-    const mediaType = isVideo ? 'VIDEO' : 'IMAGE';
-
-    // Generate storage path
-    const extension = fileManager.getExtension(url) || (isVideo ? 'mp4' : 'jpg');
-    const filename = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${extension}`;
-    
-    // Check if it's a YouTube link
-    const isYoutube = url.includes('youtube.com') || url.includes('youtu.be');
-    
-    // Use absolute path for reliability
-    let storagePath = '';
-    
-    if (isYoutube) {
-       storagePath = path.join(process.cwd(), 'storage', 'research', researchJobId, `youtube_${Date.now()}.txt`);
-       console.log(`[Downloader] YouTube link detected, skipping file download: ${url}`);
-    } else {
-       const storagePathRaw = path.join(process.cwd(), 'storage', 'research', researchJobId, filename);
-       storagePath = storagePathRaw;
-       await fileManager.downloadAndSave(url, storagePath);
-    }
-
-    // Get file stats
-    const stats = fileManager.getStats(storagePath);
-    const fileSizeBytes = stats?.size || 0;
-
-    // Extract metadata
-    let width, height, durationSeconds, thumbnailPath;
-
-    if (mediaType === 'IMAGE') {
-      const metadata = await extractImageMetadata(storagePath);
-      width = metadata.width;
-      height = metadata.height;
-    } else {
-      if (isYoutube) {
-         try {
-             let videoId = '';
-             if (url.includes('v=')) {
-                 videoId = url.split('v=')[1]?.split('&')[0];
-             } else if (url.includes('youtu.be/')) {
-                 videoId = url.split('youtu.be/')[1]?.split('?')[0];
-             }
-             
-             if (videoId) {
-                 thumbnailPath = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
-                 width = 1280;
-                 height = 720; 
-             }
-         } catch (e) {
-             console.log('[Downloader] Could not extract YouTube ID');
-         }
-      } else {
-         thumbnailPath = await generateVideoThumbnail(storagePath);
-      }
-    }
-
-    // Create MEDIA_ASSET record
-    const mediaAsset = await prisma.mediaAsset.create({
-      data: {
         mediaType,
         originalUrl: url,
         blobStoragePath: storagePath,
@@ -383,39 +209,335 @@ export async function downloadGenericMedia(
         thumbnailPath,
         isDownloaded: true,
         downloadedAt: new Date(),
-        // Link to DDG Result
-        ddgVideoResultId: type === 'DDG_VIDEO' ? referenceId : undefined,
-        ddgImageResultId: type === 'DDG_IMAGE' ? referenceId : undefined,
-      },
-    });
+      };
 
-    console.log(`[Downloader] Saved generic media asset: ${mediaAsset.id}`);
-    
-    // Update the DDG Result to mark as downloaded (redundant but good for querying)
-    if (type === 'DDG_VIDEO') {
-        await prisma.ddgVideoResult.update({
-            where: { id: referenceId },
-            data: { isDownloaded: true, mediaAssets: { connect: { id: mediaAsset.id } } }
+      const isClientSnapshot = opts.sourceType === 'CLIENT_POST_SNAPSHOT';
+      const isCompetitorSnapshot = opts.sourceType === 'COMPETITOR_POST_SNAPSHOT';
+
+      if (entityType === 'CLIENT' && !isClientSnapshot) mediaAssetData.clientPostId = postId;
+      if (entityType === 'COMPETITOR' && !isCompetitorSnapshot) mediaAssetData.cleanedPostId = postId;
+      if (entityType === 'SOCIAL') mediaAssetData.socialPostId = postId;
+
+      if (opts.sourceType === 'CLIENT_POST_SNAPSHOT') {
+        mediaAssetData.sourceType = 'CLIENT_POST_SNAPSHOT';
+        mediaAssetData.sourceId = opts.sourceId || postId;
+        mediaAssetData.clientPostSnapshotId = opts.clientPostSnapshotId || null;
+      } else if (opts.sourceType === 'COMPETITOR_POST_SNAPSHOT') {
+        mediaAssetData.sourceType = 'COMPETITOR_POST_SNAPSHOT';
+        mediaAssetData.sourceId = opts.sourceId || postId;
+        mediaAssetData.competitorPostSnapshotId = opts.competitorPostSnapshotId || null;
+      }
+
+      const mediaAsset = await prisma.mediaAsset.create({ data: mediaAssetData });
+      mediaAssetIds.push(mediaAsset.id);
+
+      if (eventContext?.researchJobId) {
+        emitResearchJobEvent({
+          researchJobId: eventContext.researchJobId,
+          runId: eventContext.runId,
+          source: 'downloader',
+          code: 'download.file.saved',
+          level: 'info',
+          message: `Saved ${mediaType.toLowerCase()} media for ${eventContext.platform || 'social'} @${eventContext.handle || 'unknown'}`,
+          platform: eventContext.platform || null,
+          handle: eventContext.handle || null,
+          entityType: eventContext.entityType || null,
+          entityId: eventContext.entityId || postId,
+          metrics: {
+            fileSizeBytes,
+            mediaType,
+          },
+          metadata: {
+            originalUrl: url,
+            storagePath,
+          },
         });
-    } else {
-        await prisma.ddgImageResult.update({
-            where: { id: referenceId },
-            data: { isDownloaded: true, mediaAssets: { connect: { id: mediaAsset.id } } }
+      }
+    } catch (error: any) {
+      console.error(`[Downloader] Failed to download ${url}:`, error.message);
+      if (eventContext?.researchJobId) {
+        emitResearchJobEvent({
+          researchJobId: eventContext.researchJobId,
+          runId: eventContext.runId,
+          source: 'downloader',
+          code: 'download.file.failed',
+          level: 'error',
+          message: `Failed downloading media for ${eventContext.platform || 'social'} @${eventContext.handle || 'unknown'}`,
+          platform: eventContext.platform || null,
+          handle: eventContext.handle || null,
+          entityType: eventContext.entityType || null,
+          entityId: eventContext.entityId || postId,
+          metadata: {
+            originalUrl: url,
+            error: error.message || 'Unknown download error',
+          },
         });
+      }
+    }
+  }
+
+  return mediaAssetIds;
+}
+
+// Download all media for canonical client posts
+export async function downloadAllClientMedia(clientId: string) {
+  const posts = await prisma.clientPost.findMany({
+    where: {
+      clientAccount: { clientId },
+      mediaAssets: { none: {} },
+    },
+  });
+
+  let downloadedCount = 0;
+  for (const post of posts) {
+    const mediaUrls = extractMediaUrls(post.rawApiResponse);
+    if (mediaUrls.length === 0) continue;
+    const ids = await downloadPostMedia(post.id, mediaUrls, 'CLIENT', clientId);
+    downloadedCount += ids.length;
+  }
+  return downloadedCount;
+}
+
+// Download media for research SocialPosts
+export async function downloadSocialProfileMedia(
+  profileId: string,
+  options: { recentPostLimit?: number; runId?: string; source?: string } = {}
+) {
+  const recentPostLimit = normalizePositiveInt(
+    Number(options.recentPostLimit || DEFAULT_SOCIAL_MEDIA_POST_LIMIT),
+    normalizePositiveInt(DEFAULT_SOCIAL_MEDIA_POST_LIMIT, 8)
+  );
+  const maxFailures = normalizePositiveInt(DEFAULT_SOCIAL_MEDIA_MAX_FAILURES, 3);
+  const failureCooldownMs = normalizePositiveInt(DEFAULT_SOCIAL_MEDIA_FAILURE_COOLDOWN_MS, 12 * 60 * 60 * 1000);
+  const profile = await prisma.socialProfile.findUnique({
+    where: { id: profileId },
+    select: {
+      id: true,
+      researchJobId: true,
+      platform: true,
+      handle: true,
+    },
+  });
+
+  if (!profile) {
+    return 0;
+  }
+
+  const baseEventContext: DownloadEventContext = {
+    researchJobId: profile.researchJobId,
+    runId: options.runId,
+    source: options.source || 'scraper',
+    platform: profile.platform,
+    handle: profile.handle,
+    entityType: 'social_profile',
+    entityId: profile.id,
+  };
+
+  const posts = await prisma.socialPost.findMany({
+    where: { socialProfileId: profileId, mediaAssets: { none: {} } },
+    orderBy: { scrapedAt: 'desc' },
+    take: recentPostLimit,
+  });
+
+  let downloadedCount = 0;
+  let postsAttempted = 0;
+  let postsDownloaded = 0;
+  const processedUrls = new Set<string>();
+
+  for (const post of posts) {
+    const postMetadata = isObjectRecord((post as any).metadata) ? ((post as any).metadata as Record<string, any>) : {};
+    const { failureCount, lastFailureAt } = getPostDownloadFailureState(postMetadata);
+    const hasCooldown =
+      failureCount >= maxFailures &&
+      lastFailureAt &&
+      Date.now() - lastFailureAt.getTime() < failureCooldownMs;
+
+    if (hasCooldown) {
+      console.log(
+        `[Downloader] Skipping post ${post.id} after ${failureCount} failures (cooldown active)`
+      );
+      continue;
     }
 
-    return mediaAsset.id;
+    const candidates: string[] = [];
 
-  } catch (error: any) {
-    console.error(`[Downloader] Failed to download generic media ${url}:`, error.message);
-    return null;
+    // Prefer thumbnail/media URLs before page URLs for faster/safer downloads.
+    const preferred = [post.thumbnailUrl, (post as any).videoUrl, (post as any).mediaUrl].filter(
+      (u): u is string => !!u
+    );
+    candidates.push(...preferred);
+
+    // Prefer mediaUrl arrays if scraper provided them
+    const mediaUrls = (post as any).metadata?.media_urls || (post as any).media_urls;
+    if (Array.isArray(mediaUrls)) {
+      candidates.push(...mediaUrls);
+    }
+    if (post.url) candidates.push(post.url);
+
+    const dedupedCandidates: string[] = [];
+    const seen = new Set<string>();
+    for (const url of candidates) {
+      if (!url || seen.has(url)) continue;
+      dedupedCandidates.push(url);
+      seen.add(url);
+    }
+
+    const isLikelyTikTokPost = dedupedCandidates.some((u) => u.includes('tiktok.com'));
+    const nonTikTokPageUrls = dedupedCandidates.filter((u) => !isTikTokPageUrl(u));
+    const perPostCandidates =
+      isLikelyTikTokPost && nonTikTokPageUrls.length > 0
+        ? nonTikTokPageUrls
+        : dedupedCandidates;
+
+    const perPostLimit = isLikelyTikTokPost ? 3 : 8;
+    const urlsToDownload: string[] = [];
+
+    for (const url of perPostCandidates.slice(0, perPostLimit)) {
+      if (!processedUrls.has(url)) {
+        urlsToDownload.push(url);
+        processedUrls.add(url);
+      }
+    }
+
+    if (urlsToDownload.length === 0) continue;
+    postsAttempted++;
+    const ids = await downloadPostMedia(post.id, urlsToDownload, 'SOCIAL', profileId, {
+      eventContext: {
+        ...baseEventContext,
+        entityType: 'social_post',
+        entityId: post.id,
+      },
+    });
+    downloadedCount += ids.length;
+    if (ids.length > 0) {
+      postsDownloaded++;
+    }
+
+    if (ids.length === 0) {
+      await prisma.socialPost.update({
+        where: { id: post.id },
+        data: {
+          metadata: {
+            ...postMetadata,
+            downloadFailures: failureCount + 1,
+            lastDownloadFailureAt: new Date().toISOString(),
+          } as any,
+        },
+      });
+    } else if (failureCount > 0 || postMetadata.lastDownloadFailureAt) {
+      const nextMetadata = { ...postMetadata };
+      delete nextMetadata.downloadFailures;
+      delete nextMetadata.lastDownloadFailureAt;
+      await prisma.socialPost.update({
+        where: { id: post.id },
+        data: { metadata: nextMetadata as any },
+      });
+    }
   }
+
+  emitResearchJobEvent({
+    researchJobId: profile.researchJobId,
+    runId: options.runId,
+    source: 'downloader',
+    code: 'download.summary',
+    level: 'info',
+    message: `Downloader completed for ${profile.platform} @${profile.handle}`,
+    platform: profile.platform,
+    handle: profile.handle,
+    entityType: 'social_profile',
+    entityId: profile.id,
+    metrics: {
+      postsSeen: posts.length,
+      postsAttempted,
+      postsDownloaded,
+      filesSaved: downloadedCount,
+    },
+    metadata: {
+      recentPostLimit,
+      source: options.source || 'scraper',
+    },
+  });
+
+  return downloadedCount;
+}
+
+// Snapshot download (client or competitor)
+export async function downloadSnapshotMedia(snapshotType: 'client' | 'competitor', snapshotId: string) {
+  if (snapshotType === 'client') {
+    const posts = await prisma.clientPostSnapshot.findMany({
+      where: { clientProfileSnapshotId: snapshotId, mediaAssets: { none: {} } },
+    });
+    let downloaded = 0;
+    for (const post of posts) {
+      let urls = extractMediaUrls(post as any);
+      if (!urls.length) {
+        // Fallback: reuse media_urls stored on SocialPost with same externalId
+        const social = await prisma.socialPost.findFirst({
+          where: { externalId: post.externalPostId },
+        });
+        if (social) {
+          const mediaUrls = (social as any).metadata?.media_urls || (social as any).media_urls || [];
+          const candidates = [
+            ...mediaUrls,
+            social.thumbnailUrl,
+            social.url,
+          ].filter(Boolean) as string[];
+          urls = candidates;
+        }
+      }
+      if (!urls.length && (post as any).thumbnailUrl) {
+        urls = [(post as any).thumbnailUrl];
+      }
+      if (urls.length === 0) continue;
+      const ids = await downloadPostMedia(post.id, urls, 'CLIENT', snapshotId, {
+        sourceType: 'CLIENT_POST_SNAPSHOT',
+        sourceId: post.id,
+        clientPostSnapshotId: post.id,
+      });
+      downloaded += ids.length;
+    }
+    return downloaded;
+  }
+
+  const posts = await prisma.competitorPostSnapshot.findMany({
+    where: { competitorProfileSnapshotId: snapshotId, mediaAssets: { none: {} } },
+  });
+  let downloaded = 0;
+  for (const post of posts) {
+    let urls = extractMediaUrls(post as any);
+    if (!urls.length) {
+      const social = await prisma.socialPost.findFirst({
+        where: { externalId: post.externalPostId },
+      });
+      if (social) {
+        const mediaUrls = (social as any).metadata?.media_urls || (social as any).media_urls || [];
+        const candidates = [
+          ...mediaUrls,
+          social.thumbnailUrl,
+          social.url,
+        ].filter(Boolean) as string[];
+        urls = candidates;
+      }
+    }
+    if (!urls.length && (post as any).thumbnailUrl) {
+      urls = [(post as any).thumbnailUrl];
+    }
+    if (urls.length === 0) continue;
+    const ids = await downloadPostMedia(post.id, urls, 'COMPETITOR', snapshotId, {
+      sourceType: 'COMPETITOR_POST_SNAPSHOT',
+      sourceId: post.id,
+      competitorPostSnapshotId: post.id,
+    });
+    downloaded += ids.length;
+  }
+  return downloaded;
 }
 
 export const mediaDownloader = {
   downloadPostMedia,
   downloadAllClientMedia,
   downloadSocialProfileMedia,
+  downloadSnapshotMedia,
   downloadGenericMedia,
   extractMediaUrls,
 };

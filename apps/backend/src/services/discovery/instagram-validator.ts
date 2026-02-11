@@ -10,6 +10,11 @@
 
 import { searchBrandContextDDG, validateHandleDDG } from './duckduckgo-search.js';
 
+const COMPETITOR_VALIDATION_TIMEOUT_MS = Math.max(
+  8000,
+  Number(process.env.COMPETITOR_VALIDATION_TIMEOUT_MS || 15000)
+);
+
 export interface ValidationResult {
   handle: string;
   isValid: boolean;
@@ -128,6 +133,39 @@ function isActiveFromSearchResults(results: string[]): boolean {
   return true;
 }
 
+function tokenizeNicheTerms(niche: string): string[] {
+  return String(niche || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 4);
+}
+
+function computeNicheOverlap(
+  nicheTokens: string[],
+  text: string,
+  handle: string
+): { score: number; matchedTokens: string[] } {
+  if (nicheTokens.length === 0) {
+    return { score: 0.4, matchedTokens: [] };
+  }
+
+  const lowerText = String(text || '').toLowerCase();
+  const matchedTokens: string[] = [];
+  for (const token of nicheTokens) {
+    if (lowerText.includes(token) || handle.toLowerCase().includes(token)) {
+      matchedTokens.push(token);
+    }
+  }
+
+  const coverage = matchedTokens.length / Math.max(1, Math.min(nicheTokens.length, 6));
+  return {
+    score: Math.max(0, Math.min(1, coverage)),
+    matchedTokens: matchedTokens.slice(0, 8),
+  };
+}
+
 /**
  * Validate Instagram handle using search-based verification
  */
@@ -185,7 +223,9 @@ export async function validateInstagramHandle(
   
   // Step 4: Use DDG search to validate existence and extract data
   try {
-    const searchResult = await searchBrandContextDDG(handle);
+    const searchResult = await searchBrandContextDDG(handle, undefined, {
+      timeoutMs: COMPETITOR_VALIDATION_TIMEOUT_MS,
+    });
     
     if (!searchResult.instagram_handle && !searchResult.context_summary) {
       return {
@@ -201,73 +241,64 @@ export async function validateInstagramHandle(
       };
     }
     
-    const searchTexts = searchResult.raw_results?.map(r => `${r.title} ${r.body}`) || [];
-    const combinedText = searchTexts.join(' ');
-    
-    // Extract metadata
+    const rawRows = searchResult.raw_results || [];
+    const searchTexts = rawRows.map(r => `${r.title} ${r.body}`.trim()).filter(Boolean);
+    const combinedText = searchTexts.join(' ').toLowerCase();
+
+    const handleLower = handle.toLowerCase();
+    const exactUrlPattern = `instagram.com/${handleLower}`;
+    const hasExactUrl = rawRows.some((row) =>
+      String(row.href || '').toLowerCase().includes(exactUrlPattern)
+    );
+    const hasExactMention = combinedText.includes(`@${handleLower}`);
+    const exists = Boolean(searchResult.instagram_handle) || hasExactUrl || hasExactMention;
+
+    if (!exists) {
+      return {
+        handle,
+        isValid: false,
+        exists: false,
+        isActive: false,
+        isRelevant: false,
+        followerEstimate: 'unknown',
+        niche: null,
+        confidenceScore: 0.1,
+        reason: 'No reliable account evidence found',
+      };
+    }
+
     const followerEstimate = extractFollowerEstimate(combinedText);
     const isActive = isActiveFromSearchResults(searchTexts);
-    
-    // Check if niche is mentioned or related - EXTREMELY STRICT MATCHING
-    const nicheWords = targetNiche.toLowerCase().split(' ').filter(w => w.length > 3);
-    
-    // For multi-word niches, require ALL words to appear (not just ANY)
-    const hasNicheMatch = nicheWords.length > 0 && nicheWords.every(word => 
-      combinedText.toLowerCase().includes(word)
-    );
-    
-    // EXPANDED Blacklist - filter out irrelevant categories AGGRESSIVELY
-    const blacklistedTerms = [
-      // Government & Official
-      'bank indonesia', 'government official', 'prime minister', 'president of',
-      'ministry of', 'official account', 'government of', 'public service',
-      
-      // Generic Entrepreneurship (NOT Islamic-specific)
-      'boss babe', 'bossbabe', 'girl boss', 'girlboss', 'lady boss',
-      'mompreneur', 'wife boss', 'side hustle', 'hustle culture',
-      'generic business', 'business tips', 'entrepreneur tips',
-      
-      // Celebrities & Influencers
-      'celebrity', 'bollywood', 'hollywood', 'actor', 'actress',
-      'model', 'fashion model', 'lifestyle blog', 'personal blog',
-      'influencer marketing', 'brand ambassador', 'sponsored content',
-      
-      // Personal/Non-Business
-      'personal account', 'personal page', 'my journey', 'lifestyle vlog',
-      'daily vlog', 'vlog life', 'travel blog', 'food blog',
-      
-      // Non-Islamic Finance
-      'crypto only', 'cryptocurrency trading', 'forex trading',
-      'day trading', 'stock tips', 'investment memes',
-      
-      // Random/Unrelated
-      'fashion studio', 'beauty salon', 'makeup artist', 'hair stylist',
-      'fitness coach', 'yoga instructor', 'life coach', 'motivation quotes'
+
+    const nicheTokens = tokenizeNicheTerms(targetNiche);
+    const overlap = computeNicheOverlap(nicheTokens, combinedText, handle);
+    const lowSignalTerms = [
+      'free followers',
+      'follow for follow',
+      'f4f',
+      'giveaway',
+      'coupon',
+      'discount code',
+      'engagement pod',
+      'meme page',
+      'fan page',
+      'bot service',
     ];
-    
-    const hasBlacklistedTerms = blacklistedTerms.some(term => 
-      combinedText.toLowerCase().includes(term)
-    );
-    
-    // Penalty for generic business terms without Islamic context
-    const genericBusinessTerms = ['entrepreneur', 'business', 'startup', 'finance'];
-    const hasGenericOnly = genericBusinessTerms.some(term => 
-      combinedText.toLowerCase().includes(term)
-    ) && !combinedText.toLowerCase().includes('islam') 
-      && !combinedText.toLowerCase().includes('halal')
-      && !combinedText.toLowerCase().includes('sharia');
-    
-    // Calculate confidence score - MUCH STRICTER
-    let confidenceScore = 0.2; // Very low base score (was 0.3)
+    const hasLowSignalTerms = lowSignalTerms.some((term) => combinedText.includes(term));
+
+    let confidenceScore = 0.25;
+    if (hasExactUrl || hasExactMention) confidenceScore += 0.2;
     if (isActive) confidenceScore += 0.15;
-    if (followerEstimate !== 'unknown') confidenceScore += 0.10;
-    if (hasNicheMatch) confidenceScore += 0.45; // Strong boost for niche match
-    if (hasBlacklistedTerms) confidenceScore -= 0.6; // MASSIVE penalty
-    if (hasGenericOnly) confidenceScore -= 0.3; // Penalty for generic business without Islamic context
-    
-    // MUST have niche match AND high score AND no blacklist to be relevant
-    const isRelevant = hasNicheMatch && confidenceScore >= 0.70 && !hasBlacklistedTerms;
-    
+    if (followerEstimate !== 'unknown') confidenceScore += 0.1;
+    confidenceScore += overlap.score * 0.35;
+    if (hasLowSignalTerms) confidenceScore -= 0.25;
+
+    confidenceScore = Math.max(0, Math.min(1, confidenceScore));
+
+    const isRelevant =
+      !hasLowSignalTerms &&
+      (nicheTokens.length === 0 || overlap.score >= 0.18 || (overlap.score >= 0.1 && isActive));
+
     return {
       handle,
       isValid: true,
@@ -275,9 +306,11 @@ export async function validateInstagramHandle(
       isActive,
       isRelevant,
       followerEstimate,
-      niche: hasNicheMatch ? targetNiche : null,
-      confidenceScore: Math.min(confidenceScore, 1.0),
-      reason: isActive ? 'Active Instagram account found' : 'Account found but activity unclear',
+      niche: isRelevant ? targetNiche : null,
+      confidenceScore,
+      reason: isRelevant
+        ? `Relevant account (${overlap.matchedTokens.length} niche signals)`
+        : 'Account exists but relevance signals are weak',
       bio: searchResult.context_summary?.substring(0, 200),
     };
     

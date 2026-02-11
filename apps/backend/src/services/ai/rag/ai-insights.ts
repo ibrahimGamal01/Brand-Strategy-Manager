@@ -37,8 +37,8 @@ export async function getAIInsights(researchJobId: string): Promise<AIInsights> 
   const issues: string[] = [];
   const warnings: string[] = [];
 
-  if (questions.length < 12) {
-    warnings.push(`Only ${questions.length}/12 AI questions answered`);
+  if (questions.length < 13) {
+    warnings.push(`Only ${questions.length}/13 AI questions answered`);
   }
 
   const shortAnswers = questions.filter(q => q.answer && q.answer.length < 100);
@@ -55,7 +55,7 @@ export async function getAIInsights(researchJobId: string): Promise<AIInsights> 
     questions,
     issues,
     warnings,
-    12
+    13
   );
 
   const insights: any = { qualityScore };

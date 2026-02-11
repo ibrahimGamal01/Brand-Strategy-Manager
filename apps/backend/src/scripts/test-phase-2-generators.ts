@@ -2,11 +2,11 @@
  * Test Script for Phase 2 Generators
  * 
  * Verifies that all 9 generators can run orchestrally.
- * Uses robust database seeding and Mock AI mode.
+ * Uses robust database seeding and explicit AI fallback mode.
  */
 
-// Force Mock Mode BEFORE imports load config
-process.env.MOCK_AI_CALLS = 'true';
+// Force mock mode BEFORE imports load config
+process.env.AI_FALLBACK_MODE = 'mock';
 
 import { PrismaClient } from '@prisma/client';
 import { generateStrategyDocument } from '../services/ai/generators/index';
