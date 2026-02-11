@@ -1,12 +1,16 @@
 import { useQuery } from '@tanstack/react-query';
-import axios from 'axios';
-
-const BACKEND_URL = 'http://localhost:3001/api'; // In production this should be env var
+import { apiClient } from '@/lib/api-client';
 
 export interface ResearchJob {
   id: string;
   brandName?: string;
   status: 'PENDING' | 'SCRAPING_CLIENT' | 'DISCOVERING_COMPETITORS' | 'SCRAPING_COMPETITORS' | 'ANALYZING' | 'COMPLETE' | 'FAILED';
+  continuityEnabled?: boolean;
+  continuityIntervalHours?: number;
+  continuityLastRunAt?: string | null;
+  continuityNextRunAt?: string | null;
+  continuityRunning?: boolean;
+  continuityErrorMessage?: string | null;
   competitorsToFind: number;
   discoveredCompetitors: Array<{
     id: string;
@@ -35,17 +39,21 @@ export interface ResearchJob {
   createdAt: string;
 }
 
-export function useResearchJob(id: string) {
+export function useResearchJob(id: string, options: { sseHealthy?: boolean } = {}) {
   return useQuery({
     queryKey: ['researchJob', id],
-    queryFn: async () => {
-      const { data } = await axios.get<ResearchJob>(`${BACKEND_URL}/research-jobs/${id}`);
-      return data;
-    },
+    queryFn: async () => (await apiClient.getResearchJob(id)) as ResearchJob,
     refetchInterval: (data) => {
       // Stop polling if complete or failed
-      if (data?.state.status === 'success' && (data.state.data?.status === 'COMPLETE' || data.state.data?.status === 'FAILED')) {
+      if (
+        data?.state.status === 'success' &&
+        (data.state.data?.status === 'COMPLETE' || data.state.data?.status === 'FAILED') &&
+        !data.state.data?.continuityEnabled
+      ) {
         return false;
+      }
+      if (options.sseHealthy) {
+        return 15000; // Reduce polling load when SSE is healthy
       }
       return 3000; // Poll every 3 seconds
     },
