@@ -15,6 +15,20 @@ import { gatherAllDDG } from '../discovery/duckduckgo-search.js';
 import { buildRedditQueries } from '../discovery/smart-query-builder.js';
 const prisma = new PrismaClient();
 
+const ALLOWED_SOURCES = new Set(['reddit', 'quora', 'trustpilot', 'forum']);
+
+export interface CommunityDetectiveOptions {
+  runId?: string;
+  allowedSources?: Array<'reddit' | 'quora' | 'trustpilot' | 'forum'>;
+}
+
+export interface CommunityDetectiveResult {
+  queriesRun: number;
+  linksCollected: number;
+  insightsSaved: number;
+  skippedExisting: number;
+  filteredOut: number;
+}
 
 
 /**
@@ -24,8 +38,9 @@ export async function runCommunityDetective(
   researchJobId: string,
   brandName: string,
   niche: string,
-  handle?: string
-): Promise<void> {
+  handle?: string,
+  options: CommunityDetectiveOptions = {}
+): Promise<CommunityDetectiveResult> {
   console.log(`[CommunityDetective] Starting investigation for ${brandName} (@${handle || 'no-handle'}) in ${niche}...`);
   
   // Use fixed comprehensive Reddit queries
@@ -46,6 +61,12 @@ export async function runCommunityDetective(
   console.log(`[CommunityDetective] Running ${uniqueQueries.length} queries...`);
   
   let totalInsights = 0;
+  let collectedLinks = 0;
+  let skippedExisting = 0;
+  let filteredOut = 0;
+  const allowedSources = options.allowedSources && options.allowedSources.length > 0
+    ? new Set(options.allowedSources.filter((source) => ALLOWED_SOURCES.has(source)))
+    : null;
   
   for (const query of uniqueQueries) {
     try {
@@ -70,7 +91,10 @@ export async function runCommunityDetective(
           r.href.includes('forum') ||
           r.href.includes('discuss');
 
-        if (!isCommunity) return false;
+        if (!isCommunity) {
+          filteredOut += 1;
+          return false;
+        }
 
         const text = (r.title + ' ' + r.body).toLowerCase();
         
@@ -80,6 +104,7 @@ export async function runCommunityDetective(
         
         if (!hasBrandMention) {
           console.log(`[Filter] Rejected: No brand mention in "${r.title.slice(0, 50)}..."`);
+          filteredOut += 1;
           return false;
         }
         
@@ -92,7 +117,13 @@ export async function runCommunityDetective(
           console.log(`[Info] Weak niche match but has brand mention: "${r.title.slice(0, 50)}..."`);
         }
         
-        return true; // Passed: has brand mention
+        const source = extractSource(r.href);
+        if (allowedSources && !allowedSources.has(source as any)) {
+          filteredOut += 1;
+          return false;
+        }
+
+        return true; // Passed: has brand mention + source filter
       }).slice(0, 5); // Top 5 per query
       
       if (communityLinks.length === 0) {
@@ -101,6 +132,7 @@ export async function runCommunityDetective(
       }
       
       console.log(`[CommunityDetective] Found ${communityLinks.length} community sources`);
+      collectedLinks += communityLinks.length;
       
       for (const link of communityLinks) {
         // Check if already analyzed
@@ -108,7 +140,10 @@ export async function runCommunityDetective(
           where: { researchJobId, url: link.href }
         });
         
-        if (existing) continue;
+        if (existing) {
+          skippedExisting += 1;
+          continue;
+        }
         
         // Build context for storage
         const contentContext = `Source: ${extractSource(link.href)}
@@ -116,21 +151,19 @@ Title: ${link.title}
 Snippet: ${link.body}
 Query Used: ${query}`;
 
-        // AI analysis removed as per user request. Saving raw search results.
-        const analysis = {
-            sentiment: 'neutral',
-            painPoints: [],
-            desires: [],
-            marketingHooks: []
-        };
-
         // Save to DB
         await prisma.communityInsight.create({
           data: {
             researchJobId,
+            brandIntelligenceRunId: options.runId || null,
             source: extractSource(link.href),
             url: link.href,
             content: contentContext,
+            sourceQuery: query,
+            evidence: {
+              title: link.title,
+              snippet: link.body,
+            },
             sentiment: 'neutral',
             painPoints: [],
             desires: [],
@@ -150,13 +183,19 @@ Query Used: ${query}`;
   }
   
   console.log(`[CommunityDetective] Complete! ${totalInsights} new insights gathered.`);
+  return {
+    queriesRun: uniqueQueries.length,
+    linksCollected: collectedLinks,
+    insightsSaved: totalInsights,
+    skippedExisting,
+    filteredOut,
+  };
 }
 
 function extractSource(url: string): string {
   if (url.includes('reddit')) return 'reddit';
   if (url.includes('quora')) return 'quora';
   if (url.includes('trustpilot')) return 'trustpilot';
-  if (url.includes('indiehackers')) return 'indiehackers';
+  if (url.includes('indiehackers')) return 'forum';
   return 'forum';
 }
-

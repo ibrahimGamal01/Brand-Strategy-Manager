@@ -1,6 +1,7 @@
 export type ResearchModuleKey =
   | 'client_profiles'
   | 'search_results'
+  | 'brand_mentions'
   | 'images'
   | 'videos'
   | 'news'
@@ -33,6 +34,58 @@ export interface ResearchJobEvent {
 export interface ResearchJobEventsResponse {
   events: ResearchJobEvent[];
   nextAfterId: number | null;
+}
+
+export type BrandIntelligenceModuleKey = 'brand_mentions' | 'community_insights';
+
+export interface BrandIntelligenceModuleResult {
+  success: boolean;
+  collected: number;
+  filtered: number;
+  persisted: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+  warnings: string[];
+  diagnostics?: Record<string, unknown>;
+}
+
+export interface BrandIntelligenceSummary {
+  modules: BrandIntelligenceModuleKey[];
+  moduleOrder: BrandIntelligenceModuleKey[];
+  totals: {
+    collected: number;
+    filtered: number;
+    persisted: number;
+    updated: number;
+    skipped: number;
+    failed: number;
+  };
+  perModule: Record<BrandIntelligenceModuleKey, BrandIntelligenceModuleResult>;
+}
+
+export interface BrandIntelligenceOrchestrationResponse {
+  success: boolean;
+  runId: string;
+  status: 'RUNNING' | 'COMPLETE' | 'FAILED';
+  summary: BrandIntelligenceSummary;
+  diagnostics: Record<string, unknown>;
+  error?: string;
+  code?: string;
+}
+
+export interface BrandIntelligenceSummaryResponse {
+  success: boolean;
+  runId: string | null;
+  status: string | null;
+  mode: string | null;
+  modules: BrandIntelligenceModuleKey[];
+  moduleOrder: BrandIntelligenceModuleKey[];
+  runReason: string | null;
+  summary: BrandIntelligenceSummary | null;
+  diagnostics: Record<string, unknown> | null;
+  error?: string;
+  code?: string;
 }
 
 export type CompetitorSelectionState =
@@ -81,6 +134,7 @@ export interface OrchestratedCompetitorIdentityGroup {
 export interface CompetitorShortlistResponse {
   success: boolean;
   runId: string | null;
+  controlMode?: 'auto' | 'manual';
   summary: {
     candidatesDiscovered: number;
     candidatesFiltered: number;

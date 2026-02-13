@@ -120,7 +120,7 @@ export default function NewClientPage() {
           className="text-zinc-500 hover:text-white flex items-center gap-2 text-sm font-medium transition-colors"
         >
           <ChevronLeft size={16} />
-          Back to Mission Control
+          Back to BAT Control Center
         </Link>
       </header>
 
@@ -131,7 +131,7 @@ export default function NewClientPage() {
               <div className="w-12 h-12 bg-blue-600/10 text-blue-500 rounded-xl flex items-center justify-center mx-auto mb-4 border border-blue-500/20">
                 <Rocket size={24} />
               </div>
-              <h1 className="text-2xl font-bold text-white mb-2">Initialize Brain V3</h1>
+              <h1 className="text-2xl font-bold text-white mb-2">Initialize BAT Brain</h1>
               <p className="text-zinc-500">
                 Capture business goals, context, and channels so orchestration can run the right sequence.
               </p>
@@ -153,7 +153,7 @@ export default function NewClientPage() {
                 className="w-full bg-white text-zinc-950 hover:bg-zinc-200 py-3.5 px-6 rounded-lg font-bold transition-all transform active:scale-95 disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-2"
               >
                 <Search size={18} />
-                Start Brain ({filledCount} platform{filledCount !== 1 ? 's' : ''})
+                Start BAT Brain ({filledCount} platform{filledCount !== 1 ? 's' : ''})
               </button>
             </form>
           </div>

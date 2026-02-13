@@ -188,6 +188,47 @@ async function materializeCandidateToDiscovered(
   return persisted.id;
 }
 
+/**
+ * Materialize a filtered candidate and set state to SHORTLISTED.
+ * Enables "Add to shortlist" for filtered items.
+ */
+export async function materializeAndShortlistCandidate(
+  researchJobId: string,
+  runId: string,
+  profileId: string
+): Promise<{ discoveredCompetitorId: string | null; success: boolean }> {
+  const profile = await prisma.competitorCandidateProfile.findFirst({
+    where: {
+      id: profileId,
+      researchJobId,
+      orchestrationRunId: runId,
+    },
+  });
+
+  if (!profile) {
+    return { discoveredCompetitorId: null, success: false };
+  }
+
+  await prisma.competitorCandidateProfile.update({
+    where: { id: profileId },
+    data: {
+      state: 'SHORTLISTED',
+      stateReason: 'Added to shortlist by operator',
+    },
+  });
+
+  const discoveredId = await materializeCandidateToDiscovered(researchJobId, runId, {
+    ...profile,
+    state: 'SHORTLISTED',
+    stateReason: 'Added to shortlist by operator',
+  });
+
+  return {
+    discoveredCompetitorId: discoveredId,
+    success: Boolean(discoveredId),
+  };
+}
+
 export async function persistOrchestrationCandidates(input: {
   researchJobId: string;
   runId: string;
@@ -648,12 +689,16 @@ export async function continueQueueFromCandidates(input: {
   candidateProfileIds?: string[];
   onlyPending?: boolean;
   forceUnavailable?: boolean;
+  forceMaterialize?: boolean;
 }): Promise<{ queuedCount: number; skippedCount: number }> {
   const selectedIds = Array.from(new Set((input.candidateProfileIds || []).filter(Boolean)));
+  const forceMaterialize = Boolean(input.forceMaterialize);
 
   const where: Prisma.CompetitorCandidateProfileWhereInput = {
     researchJobId: input.researchJobId,
-    state: { notIn: ['FILTERED_OUT', 'REJECTED'] },
+    state: forceMaterialize
+      ? { notIn: ['REJECTED'] }
+      : { notIn: ['FILTERED_OUT', 'REJECTED'] },
   };
   if (input.runId) where.orchestrationRunId = input.runId;
   if (selectedIds.length > 0) where.id = { in: selectedIds };
@@ -682,9 +727,26 @@ export async function continueQueueFromCandidates(input: {
       continue;
     }
 
+    // If forceMaterialize and profile is FILTERED_OUT, update to SHORTLISTED first
+    let profileToMaterialize = profile;
+    if (forceMaterialize && profile.state === 'FILTERED_OUT') {
+      await prisma.competitorCandidateProfile.update({
+        where: { id: profile.id },
+        data: {
+          state: 'SHORTLISTED',
+          stateReason: 'Materialized for scrape by operator',
+        },
+      });
+      profileToMaterialize = { ...profile, state: 'SHORTLISTED' as const };
+    }
+
     let discoveredId = profile.discoveredCompetitors[0]?.id || null;
     if (!discoveredId) {
-      discoveredId = await materializeCandidateToDiscovered(input.researchJobId, profile.orchestrationRunId, profile);
+      discoveredId = await materializeCandidateToDiscovered(
+        input.researchJobId,
+        profile.orchestrationRunId || input.runId || '',
+        profileToMaterialize
+      );
     }
     if (!discoveredId) {
       skippedCount += 1;

@@ -15,6 +15,9 @@ import dataManagementRouter from './routes/data-management';
 import monitoringRouter from './routes/monitoring';
 import instagramDataRouter from './routes/instagram-data';
 import tiktokDataRouter from './routes/tiktok-data';
+import brandIntelligenceRouter from './routes/research-jobs-brand-intelligence';
+import recoveryRouter from './routes/recovery';
+import orchestrationRouter from './routes/orchestration';
 
 const envLoad = loadBackendEnv();
 console.log('[DEBUG] DATABASE_URL loaded:', process.env.DATABASE_URL?.replace(/:[^:@]*@/, ':***@'));
@@ -72,6 +75,7 @@ app.use((req, res, next) => {
 // API Routes
 app.use('/api/clients', clientsRouter);
 app.use('/api/research-jobs', dataManagementRouter);
+app.use('/api/research-jobs', brandIntelligenceRouter);
 app.use('/api/research-jobs', researchJobsRouter);
 app.use('/api/media', mediaRouter);
 app.use('/api/competitors', competitorsRouter);
@@ -81,6 +85,8 @@ app.use('/api/strategy', aiStrategyRouter);
 app.use('/api/monitoring', monitoringRouter);
 app.use('/api/instagram', instagramDataRouter);
 app.use('/api/tiktok', tiktokDataRouter);
+app.use('/api/recovery', recoveryRouter);
+app.use('/api/research-jobs', orchestrationRouter);
 
 // Error handling
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -119,6 +125,11 @@ async function startServer(): Promise<void> {
     const { startResearchJobEventPruning } = require('./services/social/research-job-events');
     startResearchJobEventPruning();
     console.log('🧹 Research event pruning loop started');
+
+    // Start continuous orchestration scheduler (every 15 minutes)
+    const { startOrchestrationScheduler } = require('./services/orchestration/orchestration-scheduler');
+    startOrchestrationScheduler();
+    console.log('🔄 Continuous orchestration scheduler started (15-minute intervals)');
   });
 }
 

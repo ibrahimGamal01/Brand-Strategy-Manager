@@ -8,7 +8,7 @@ export function ResearchFooter({ jobId }: { jobId: string }) {
             <div className="container mx-auto px-6 flex items-center justify-between text-xs text-muted-foreground">
                 <div className="flex items-center gap-2">
                     <Database className="h-3.5 w-3.5" />
-                    <span>Brand Strategy Intelligence Platform</span>
+                    <span>BAT Intelligence Platform</span>
                 </div>
                 <div className="font-mono">
                     Job ID: {jobId} - Last updated: {new Date().toLocaleString()}

@@ -1,3 +1,9 @@
+/**
+ * @deprecated Legacy dashboard view kept for backwards compatibility while BAT workspace rollout completes.
+ * Use /research/[id] BAT modules instead.
+ */
+'use client';
+
 import { useState } from 'react';
 import { Search, Image, Users, Brain, Database, MessageSquare, Layers, User, ChevronDown, ChevronRight } from 'lucide-react';
 import { mockResearchData } from '@/data/mock-data';

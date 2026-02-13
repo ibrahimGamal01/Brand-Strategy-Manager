@@ -1,7 +1,20 @@
 import { prisma } from '../../lib/prisma';
 
+/**
+ * Extract handle from social URL or raw handle string.
+ * Supports: instagram.com/username, tiktok.com/@username, or plain @username / username.
+ */
 export function normalizeHandle(value: unknown): string {
-  return String(value || '').replace(/^@+/, '').trim().toLowerCase();
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  const igMatch = raw.match(/instagram\.com\/([a-z0-9._]{2,30})/i);
+  if (igMatch) return igMatch[1].toLowerCase();
+
+  const ttMatch = raw.match(/tiktok\.com\/@?([a-z0-9._]{2,30})/i);
+  if (ttMatch) return ttMatch[1].toLowerCase();
+
+  return raw.replace(/^@+/, '').trim().toLowerCase();
 }
 
 export function buildPlatformHandles(payload: any): Record<string, string> {

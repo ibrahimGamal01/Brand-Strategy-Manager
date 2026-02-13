@@ -1,5 +1,7 @@
 import { apiFetch, streamUrl } from './api/http';
 import type {
+  BrandIntelligenceOrchestrationResponse,
+  BrandIntelligenceSummaryResponse,
   CompetitorOrchestrationResponse,
   CompetitorShortlistResponse,
   ResearchJobEventsResponse,
@@ -85,6 +87,9 @@ export const apiClient = {
 
   deleteCompetitorPosts: (discoveredId: string) => del<any>(`/competitors/discovered/${discoveredId}/posts`),
 
+  updateJobSettings: (jobId: string, payload: { controlMode?: 'auto' | 'manual' }) =>
+    patch<{ success: boolean; controlMode?: string }>(`/research-jobs/${jobId}/settings`, payload),
+
   runCompetitorOrchestration: (
     jobId: string,
     payload: {
@@ -103,6 +108,12 @@ export const apiClient = {
     const query = runId ? `?runId=${encodeURIComponent(runId)}` : '';
     return apiFetch<CompetitorShortlistResponse>(`/research-jobs/${jobId}/competitors/shortlist${query}`);
   },
+
+  shortlistCompetitor: (
+    jobId: string,
+    payload: { runId: string; profileId: string }
+  ): Promise<{ success: boolean; discoveredCompetitorId?: string; error?: string }> =>
+    post(`/research-jobs/${jobId}/competitors/shortlist`, payload),
 
   approveAndScrapeCompetitors: (
     jobId: string,
@@ -125,6 +136,7 @@ export const apiClient = {
       onlyPending?: boolean;
       runId?: string;
       forceUnavailable?: boolean;
+      forceMaterialize?: boolean;
     }
   ) =>
     post<{ success: boolean; queuedCount: number; skippedCount?: number; error?: string }>(
@@ -150,6 +162,30 @@ export const apiClient = {
   runModuleAction: (jobId: string, module: ResearchModuleKey, action: ResearchModuleAction) =>
     post<any>(`/research-jobs/${jobId}/modules/${module}/action`, { action }),
 
+  orchestrateBrandIntelligence: (
+    jobId: string,
+    payload: {
+      mode?: 'append' | 'replace';
+      modules?: Array<'brand_mentions' | 'community_insights'>;
+      moduleInputs?: {
+        brand_mentions?: { depth?: 'standard' | 'deep' };
+        community_insights?: { platforms?: Array<'reddit' | 'quora' | 'trustpilot' | 'forum'> };
+      };
+      runReason?: 'manual' | 'resume' | 'continuity' | 'module_action' | 'brain_command';
+    } = {}
+  ) =>
+    post<BrandIntelligenceOrchestrationResponse>(
+      `/research-jobs/${jobId}/brand-intelligence/orchestrate`,
+      payload
+    ),
+
+  getBrandIntelligenceSummary: (jobId: string, runId?: string) => {
+    const query = runId ? `?runId=${encodeURIComponent(runId)}` : '';
+    return apiFetch<BrandIntelligenceSummaryResponse>(
+      `/research-jobs/${jobId}/brand-intelligence/summary${query}`
+    );
+  },
+
   updateResearchContinuity: (jobId: string, config: { enabled?: boolean; intervalHours?: number }) =>
     patch<any>(`/research-jobs/${jobId}/continuity`, config),
 
@@ -170,4 +206,17 @@ export const apiClient = {
 
   updateDataItem: (jobId: string, dataType: string, itemId: string, payload: Record<string, unknown>) =>
     put<any>(`/research-jobs/${jobId}/${dataType}/${itemId}`, payload),
+
+  reRequestAssets: (payload: { targets: Array<{ kind: 'brand_mention' | 'client_post' | 'social_post'; id: string }> }) =>
+    post<any>('/recovery/re-request', payload),
+
+  // Competitor state management
+  updateCompetitorState: (discoveredId: string, payload: { selectionState: string; reason?: string }) =>
+    patch<any>(`/competitors/discovered/${discoveredId}/state`, payload),
+
+  updateCompetitorOrder: (discoveredId: string, payload: { displayOrder: number }) =>
+    patch<any>(`/competitors/discovered/${discoveredId}/order`, payload),
+
+  batchUpdateCompetitorStates: (payload: { updates: Array<{ id: string; selectionState: string; reason?: string }> }) =>
+    patch<any>('/competitors/discovered/batch/state', payload),
 };

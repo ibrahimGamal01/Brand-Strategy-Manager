@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { MessageSquare, Code, ThumbsUp, ThumbsDown, Minus, Tag, Lightbulb } from 'lucide-react';
+import { MessageSquare, Code, ThumbsUp, ThumbsDown, Minus, Tag, Lightbulb, RotateCcw } from 'lucide-react';
 import type { CommunityInsight } from '@/types/brand-strategy';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { apiClient } from '@/lib/api-client';
 
 interface CommunityInsightsProps {
   insights: CommunityInsight[];
@@ -23,9 +24,42 @@ const sourceVariant: Record<string, any> = {
 
 export function CommunityInsights({ insights }: CommunityInsightsProps) {
   const [showJson, setShowJson] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isRequesting, setIsRequesting] = useState(false);
 
   const positiveCount = insights.filter(i => i.sentiment === 'Positive').length;
   const negativeCount = insights.filter(i => i.sentiment === 'Negative').length;
+
+  const toggleSelected = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleReRequest = async () => {
+    if (selectedIds.size === 0) return;
+    try {
+      setIsRequesting(true);
+      const targets = Array.from(selectedIds).map((id) => ({
+        kind: 'brand_mention' as const,
+        id,
+      }));
+      await apiClient.reRequestAssets({ targets });
+      // Simple UX: clear selection after request
+      setSelectedIds(new Set());
+    } catch (error) {
+      // Errors are surfaced via the http/sonner layer; no-op here
+      console.warn('[CommunityInsights] Re-request failed', error);
+    } finally {
+      setIsRequesting(false);
+    }
+  };
 
   return (
     <Card variant="glass">
@@ -49,14 +83,26 @@ export function CommunityInsights({ insights }: CommunityInsightsProps) {
               </div>
             </div>
           </div>
-          <Button 
-            variant="terminal" 
-            size="sm" 
-            onClick={() => setShowJson(!showJson)}
-            className="h-7 px-2"
-          >
-            <Code className="h-3.5 w-3.5" />
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              disabled={selectedIds.size === 0 || isRequesting}
+              onClick={handleReRequest}
+              className="h-7 px-2 text-xs"
+            >
+              <RotateCcw className="h-3.5 w-3.5 mr-1" />
+              Re-request assets
+            </Button>
+            <Button 
+              variant="terminal" 
+              size="sm" 
+              onClick={() => setShowJson(!showJson)}
+              className="h-7 px-2"
+            >
+              <Code className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="p-4">
@@ -73,12 +119,21 @@ export function CommunityInsights({ insights }: CommunityInsightsProps) {
                 <div
                   key={insight.id}
                   className={cn(
-                    "p-4 rounded-lg border",
+                    "p-4 rounded-lg border flex gap-3",
                     insight.sentiment === 'Positive' && "bg-success/5 border-success/20",
                     insight.sentiment === 'Negative' && "bg-destructive/5 border-destructive/20",
                     insight.sentiment === 'Neutral' && "bg-muted/30 border-border/50"
                   )}
                 >
+                  <div className="pt-1">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-border bg-background"
+                      checked={selectedIds.has(insight.id)}
+                      onChange={() => toggleSelected(insight.id)}
+                    />
+                  </div>
+                  <div className="flex-1">
                   <div className="flex items-start justify-between gap-3 mb-3">
                     <div className="flex items-center gap-2">
                       <Badge variant={sourceVariant[insight.source] || 'secondary'} className="text-[10px]">
@@ -126,6 +181,7 @@ export function CommunityInsights({ insights }: CommunityInsightsProps) {
                         </div>
                       </div>
                     )}
+                  </div>
                   </div>
                 </div>
               );

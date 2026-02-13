@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma';
 import { Prisma } from '@prisma/client';
+import { normalizeHandle as normalizeHandleFromUtils } from '../intake/brain-intake-utils';
 import { askAllDeepQuestions } from '../ai/deep-questions';
 import {
   gatherAllDDG,
@@ -10,12 +11,13 @@ import {
   orchestrateCompetitorsForJob,
 } from '../discovery/competitor-orchestrator-v2';
 import { ALL_COMPETITOR_SURFACES, CompetitorSurface } from '../discovery/competitor-platform-detector';
-import { runCommunityDetective } from './community-detective';
 import { scrapeProfileSafe } from './scraper';
+import { orchestrateBrandIntelligenceForJob } from '../brand-intelligence/orchestrator';
 
 export const MODULE_KEYS = [
   'client_profiles',
   'search_results',
+  'brand_mentions',
   'images',
   'videos',
   'news',
@@ -106,7 +108,7 @@ export function isModuleKey(value: string): value is ModuleKey {
 }
 
 function normalizeHandle(value: string): string {
-  return value.replace(/^@+/, '').trim().toLowerCase();
+  return normalizeHandleFromUtils(value);
 }
 
 function dedupeTargets(targets: Array<{ platform: string; handle: string }>) {
@@ -296,6 +298,7 @@ function getAutonomyModuleOrder(job: JobContext): ModuleKey[] {
   const baseOrder: ModuleKey[] = [
     'client_profiles',
     'search_results',
+    'brand_mentions',
     'images',
     'videos',
     'news',
@@ -311,6 +314,7 @@ function getAutonomyModuleOrder(job: JobContext): ModuleKey[] {
       'client_profiles',
       'competitors',
       'search_results',
+      'brand_mentions',
       'images',
       'videos',
       'community_insights',
@@ -324,6 +328,7 @@ function getAutonomyModuleOrder(job: JobContext): ModuleKey[] {
     return [
       'client_profiles',
       'search_results',
+      'brand_mentions',
       'images',
       'videos',
       'community_insights',
@@ -338,6 +343,7 @@ function getAutonomyModuleOrder(job: JobContext): ModuleKey[] {
     return [
       'client_profiles',
       'search_results',
+      'brand_mentions',
       'news',
       'competitors',
       'community_insights',
@@ -487,6 +493,12 @@ async function deleteModuleData(job: JobContext, module: ModuleKey): Promise<{ d
       break;
     }
 
+    case 'brand_mentions': {
+      const deleted = await prisma.brandMention.deleteMany({ where: { clientId: job.clientId } });
+      deletedCount += deleted.count;
+      break;
+    }
+
     case 'images': {
       const deleted = await prisma.ddgImageResult.deleteMany({ where: { researchJobId: job.id } });
       deletedCount += deleted.count;
@@ -592,6 +604,15 @@ async function hasModuleData(jobId: string, module: ModuleKey): Promise<boolean>
       const count = await prisma.rawSearchResult.count({ where: { researchJobId: jobId } });
       return count > 0;
     }
+    case 'brand_mentions': {
+      const job = await prisma.researchJob.findUnique({
+        where: { id: jobId },
+        select: { clientId: true },
+      });
+      if (!job) return false;
+      const count = await prisma.brandMention.count({ where: { clientId: job.clientId } });
+      return count > 0;
+    }
     case 'images': {
       const count = await prisma.ddgImageResult.count({ where: { researchJobId: jobId } });
       return count > 0;
@@ -674,6 +695,26 @@ async function continueModuleData(job: JobContext, module: ModuleKey): Promise<C
         }
       }
 
+      break;
+    }
+
+    case 'brand_mentions': {
+      const hasData = await hasModuleData(job.id, module);
+      if (hasData) {
+        skippedTasks.push('module_already_has_data');
+        break;
+      }
+
+      startedTasks.push('run_brand_mentions_orchestrator');
+      try {
+        await orchestrateBrandIntelligenceForJob(job.id, {
+          mode: 'append',
+          modules: ['brand_mentions'],
+          runReason: 'module_action',
+        });
+      } catch (error) {
+        errors.push(`Brand mentions orchestration failed: ${(error as Error).message}`);
+      }
       break;
     }
 
@@ -778,15 +819,14 @@ async function continueModuleData(job: JobContext, module: ModuleKey): Promise<C
         break;
       }
 
-      startedTasks.push('run_community_detective');
+      startedTasks.push('run_community_insights_orchestrator');
 
       try {
-        await runCommunityDetective(
-          job.id,
-          coreContext.brandName || coreContext.handle,
-          coreContext.niche || 'business',
-          coreContext.handle || undefined
-        );
+        await orchestrateBrandIntelligenceForJob(job.id, {
+          mode: 'append',
+          modules: ['community_insights'],
+          runReason: 'module_action',
+        });
       } catch (error) {
         errors.push(`Community insights failed: ${(error as Error).message}`);
       }
@@ -916,6 +956,8 @@ function getStatusForModule(module: ModuleKey): string {
   switch (module) {
     case 'client_profiles':
       return 'SCRAPING_CLIENT';
+    case 'brand_mentions':
+      return 'DISCOVERING_COMPETITORS';
     case 'search_results':
     case 'images':
     case 'videos':

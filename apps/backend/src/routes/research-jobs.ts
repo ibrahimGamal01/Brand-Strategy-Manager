@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { gatherAllDDG, searchCompetitorsDDG, performDirectCompetitorSearch } from '../services/discovery/duckduckgo-search';
-import { runCommunityDetective } from '../services/social/community-detective';
 import { askAllDeepQuestions } from '../services/ai/deep-questions';
 import { runTrendOrchestrator } from '../services/discovery/trends-orchestrator';
 import { scrapeProfileIncrementally, scrapeProfileSafe } from '../services/social/scraper';
@@ -15,12 +14,14 @@ import {
   getCompetitorShortlist,
   orchestrateCompetitorsForJob,
 } from '../services/discovery/competitor-orchestrator-v2';
+import { materializeAndShortlistCandidate } from '../services/discovery/competitor-materializer';
 import {
   isModuleKey,
   ModuleAction,
   performResearchModuleAction,
   resumeResearchJob,
 } from '../services/social/research-resume';
+import { orchestrateBrandIntelligenceForJob } from '../services/brand-intelligence/orchestrator';
 import {
   continueResearchJob,
   configureResearchJobContinuity,
@@ -219,6 +220,11 @@ router.get('/:id', async (req: Request, res: Response) => {
             },
             clientDocuments: true,
             personas: true,
+            brainProfile: {
+              include: {
+                goals: true,
+              },
+            },
           },
         },
         discoveredCompetitors: {
@@ -252,6 +258,10 @@ router.get('/:id', async (req: Request, res: Response) => {
               }
             }
           }
+        },
+        brainCommands: {
+          orderBy: { createdAt: 'desc' },
+          take: 50,
         },
       },
     });
@@ -398,6 +408,19 @@ router.get('/:id', async (req: Request, res: Response) => {
         orderBy: { createdAt: 'desc' },
         take: 100
     });
+
+    const latestRun = await prisma.competitorOrchestrationRun.findFirst({
+      where: { researchJobId: id },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+
+    const [topPicks, shortlisted, approved, filtered] = await Promise.all([
+      prisma.competitorCandidateProfile.count({ where: { researchJobId: id, state: 'TOP_PICK' } }),
+      prisma.competitorCandidateProfile.count({ where: { researchJobId: id, state: 'SHORTLISTED' } }),
+      prisma.competitorCandidateProfile.count({ where: { researchJobId: id, state: 'APPROVED' } }),
+      prisma.competitorCandidateProfile.count({ where: { researchJobId: id, state: 'FILTERED_OUT' } }),
+    ]);
     
     // Transform socialProfiles posts to match frontend expectations
     // Database uses: likesCount, commentsCount, followers, following, etc.
@@ -467,6 +490,23 @@ router.get('/:id', async (req: Request, res: Response) => {
           posts: transformSnapshotPosts(s.posts || [])
         })),
         socialProfiles: transformedSocialProfiles, // Use transformed profiles
+        brainProfile: job.client?.brainProfile || null,
+        brainCommands: job.brainCommands || [],
+        competitorSummary: {
+          runId: latestRun?.id || null,
+          topPicks,
+          shortlisted,
+          approved,
+          filtered,
+        },
+        continuity: {
+          enabled: Boolean(job.continuityEnabled),
+          intervalHours: Math.max(2, Number(job.continuityIntervalHours || 2)),
+          running: Boolean(job.continuityRunning),
+          lastRunAt: job.continuityLastRunAt || null,
+          nextRunAt: job.continuityNextRunAt || null,
+          errorMessage: job.continuityErrorMessage || null,
+        },
     };
 
     res.json(responseJob);
@@ -1236,6 +1276,38 @@ router.get('/:id/competitors/shortlist', async (req: Request, res: Response) => 
 });
 
 /**
+ * POST /api/research-jobs/:id/competitors/shortlist
+ * Materialize a filtered candidate and add to shortlist (enables scrape).
+ */
+router.post('/:id/competitors/shortlist', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const runId = parseRunId(req.body?.runId);
+    const profileId = typeof req.body?.profileId === 'string' ? req.body.profileId.trim() : null;
+    if (!runId) {
+      return res.status(400).json({ success: false, error: 'runId is required' });
+    }
+    if (!profileId) {
+      return res.status(400).json({ success: false, error: 'profileId is required' });
+    }
+
+    const result = await materializeAndShortlistCandidate(id, runId, profileId);
+    if (!result.success) {
+      return res.status(404).json({ success: false, error: 'Candidate not found or could not be materialized' });
+    }
+
+    res.json({
+      success: true,
+      discoveredCompetitorId: result.discoveredCompetitorId,
+      message: 'Candidate added to shortlist',
+    });
+  } catch (error: any) {
+    console.error('[API] Failed to shortlist competitor:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to shortlist competitor' });
+  }
+});
+
+/**
  * POST /api/research-jobs/:id/competitors/approve-and-scrape
  * Approve selected shortlisted competitors and queue scraping.
  */
@@ -1279,11 +1351,15 @@ router.post('/:id/competitors/continue-scrape', async (req: Request, res: Respon
     const runId = parseRunId(req.body?.runId);
     const onlyPendingRaw = req.body?.onlyPending;
     const forceUnavailableRaw = req.body?.forceUnavailable;
+    const forceMaterializeRaw = req.body?.forceMaterialize;
     if (onlyPendingRaw !== undefined && typeof onlyPendingRaw !== 'boolean') {
       return res.status(400).json({ success: false, error: 'onlyPending must be a boolean when provided' });
     }
     if (forceUnavailableRaw !== undefined && typeof forceUnavailableRaw !== 'boolean') {
       return res.status(400).json({ success: false, error: 'forceUnavailable must be a boolean when provided' });
+    }
+    if (forceMaterializeRaw !== undefined && typeof forceMaterializeRaw !== 'boolean') {
+      return res.status(400).json({ success: false, error: 'forceMaterialize must be a boolean when provided' });
     }
 
     const result = await continueCompetitorScrapeBulk(id, {
@@ -1291,6 +1367,7 @@ router.post('/:id/competitors/continue-scrape', async (req: Request, res: Respon
       onlyPending: Boolean(onlyPendingRaw),
       runId,
       forceUnavailable: Boolean(forceUnavailableRaw),
+      forceMaterialize: Boolean(forceMaterializeRaw),
     });
 
     res.json({ success: true, ...result });
@@ -1494,7 +1571,19 @@ router.post('/:id/rerun/:scraper', async (req: Request, res: Response) => {
       }
 
       case 'community_insights':
-        result = await runCommunityDetective(id, handle, brandName || handle);
+        result = await orchestrateBrandIntelligenceForJob(id, {
+          mode: 'append',
+          modules: ['community_insights'],
+          runReason: 'manual',
+        });
+        break;
+
+      case 'brand_mentions':
+        result = await orchestrateBrandIntelligenceForJob(id, {
+          mode: 'append',
+          modules: ['brand_mentions'],
+          runReason: 'manual',
+        });
         break;
         
       case 'trends':
@@ -1597,6 +1686,38 @@ router.post('/:id/resume', async (req: Request, res: Response) => {
  *   "intervalHours": number >= 2  // optional
  * }
  */
+router.patch('/:id/settings', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const controlMode = req.body?.controlMode;
+    if (controlMode !== undefined && controlMode !== 'auto' && controlMode !== 'manual') {
+      return res.status(400).json({ success: false, error: 'controlMode must be "auto" or "manual"' });
+    }
+
+    const job = await prisma.researchJob.findUnique({
+      where: { id },
+      select: { inputData: true },
+    });
+    if (!job) {
+      return res.status(404).json({ success: false, error: 'Research job not found' });
+    }
+
+    const inputData = (job.inputData as Record<string, unknown>) || {};
+    const updated = { ...inputData };
+    if (controlMode !== undefined) updated.controlMode = controlMode;
+
+    await prisma.researchJob.update({
+      where: { id },
+      data: { inputData: updated as object },
+    });
+
+    res.json({ success: true, controlMode: updated.controlMode ?? 'auto' });
+  } catch (error: any) {
+    console.error('[API] Failed to update job settings:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to update settings' });
+  }
+});
+
 router.patch('/:id/continuity', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -1867,4 +1988,62 @@ router.post('/:id/discover-tiktok', async (req: Request, res: Response) => {
     }
 });
 
+/**
+ * POST /api/research-jobs/:id/scrape-client
+ * Manually trigger client profile scraping (Instagram + TikTok)
+ */
+router.post('/:id/scrape-client', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const job = await prisma.researchJob.findUnique({
+      where: { id },
+      include: {
+        client: {
+          include: {
+            clientAccounts: true
+          }
+        }
+      }
+    });
+
+    if (!job) {
+      return res.status(404).json({ success: false, error: 'Research job not found' });
+    }
+
+    // Import auto-scraper
+    const { autoScrapeClientProfiles } = await import('../services/social/auto-scraper');
+
+    // Trigger scraping in background
+    (async () => {
+      console.log(`[API] Starting client profile scraping for job ${id}...`);
+      const result = await autoScrapeClientProfiles(id);
+      console.log(`[API] Client scraping complete:`, result);
+      
+      // Emit event
+      await emitResearchJobEvent({
+        researchJobId: id,
+        source: 'api',
+        code: 'client.scraping.complete',
+        level: 'info',
+        message: `Client scraping complete: ${result.scraped.length} scraped, ${result.skipped.length} skipped, ${result.errors.length} errors`,
+        metrics: result,
+      });
+    })().catch(err => {
+      console.error(`[API] Client scraping failed:`, err);
+    });
+
+    res.json({
+      success: true,
+      message: 'Client scraping started in background',
+      platforms: ['instagram', 'tiktok']
+    });
+
+  } catch (error: any) {
+    console.error('[API] Client scraping trigger failed:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 export default router;
+

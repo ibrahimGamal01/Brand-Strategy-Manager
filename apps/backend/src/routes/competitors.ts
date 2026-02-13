@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
+import { fileManager } from '../services/storage/file-manager';
 import { competitorAnalyzer } from '../services/ai/competitor-analyzer';
 
 const router = Router();
@@ -50,23 +51,7 @@ router.post('/discovered/:id/scrape', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Discovered competitor not found' });
     }
 
-    const selectionState = String(discovered.selectionState || '').toUpperCase();
-    if (selectionState === 'FILTERED_OUT' || selectionState === 'REJECTED') {
-      return res.status(409).json({
-        success: false,
-        error: 'FILTERED_COMPETITOR',
-        message: 'Filtered/rejected competitors are not scrape-eligible',
-      });
-    }
-
-    if (!forceUnavailable && discovered.availabilityStatus !== 'VERIFIED') {
-      return res.status(409).json({
-        success: false,
-        error: 'PROFILE_UNAVAILABLE',
-        message: `Profile is not scrape-ready (${discovered.availabilityStatus})`,
-      });
-    }
-
+    // REMOVED: Allow scraping ANY competitor regardless of state or availability
     console.log(`[Competitors API] Triggering scrape for ${discovered.handle} (${discovered.platform})`);
 
     // Import scraper and trigger background scraping
@@ -137,9 +122,16 @@ router.post('/discovered/:id/confirm', async (req: Request, res: Response) => {
   }
 });
 
+function pathToUrl(p: string | null | undefined): string | null {
+  if (!p) return null;
+  if (p.startsWith('http://') || p.startsWith('https://')) return p;
+  return fileManager.toUrl(p);
+}
+
 /**
  * GET /api/competitors/discovered/:id/posts
- * Get all scraped posts for a discovered competitor
+ * Get all scraped posts for a discovered competitor.
+ * Merges CleanedPost with CompetitorPostSnapshot media when CleanedPost lacks thumbnails.
  */
 router.get('/discovered/:id/posts', async (req: Request, res: Response) => {
   try {
@@ -173,34 +165,64 @@ router.get('/discovered/:id/posts', async (req: Request, res: Response) => {
       take: 100,
     });
 
-    // Transform posts with engagement metrics
-    const transformedPosts = posts.map(post => {
+    // Fallback: fetch CompetitorPostSnapshot media for posts that lack thumbnails
+    const externalIdsNeedingMedia = posts
+      .filter((p) => !p.mediaAssets?.length)
+      .map((p) => p.externalPostId);
+
+    let snapshotMediaByExternalId: Record<string, { thumbnailUrl: string | null }> = {};
+    if (externalIdsNeedingMedia.length > 0) {
+      const snapshotPosts = await prisma.competitorPostSnapshot.findMany({
+        where: {
+          externalPostId: { in: externalIdsNeedingMedia },
+          competitorProfileSnapshot: {
+            competitorProfile: {
+              competitorId: discovered.competitorId,
+            },
+          },
+        },
+        include: {
+          mediaAssets: true,
+        },
+      });
+
+      for (const sp of snapshotPosts) {
+        const media = sp.mediaAssets?.[0];
+        const thumb = pathToUrl(media?.thumbnailPath || media?.blobStoragePath);
+        if (thumb && !snapshotMediaByExternalId[sp.externalPostId]) {
+          snapshotMediaByExternalId[sp.externalPostId] = { thumbnailUrl: thumb };
+        }
+      }
+    }
+
+    // Transform posts to match frontend expectations
+    const transformedPosts = posts.map((post) => {
       const mediaAsset = post.mediaAssets?.[0];
-      const isVideo = mediaAsset?.mediaType === 'VIDEO';
-      
+      const thumbnailUrl =
+        pathToUrl(mediaAsset?.thumbnailPath || mediaAsset?.blobStoragePath) ||
+        snapshotMediaByExternalId[post.externalPostId]?.thumbnailUrl ||
+        null;
+
       return {
         id: post.id,
         caption: post.caption || '',
-        likes: post.likes || 0,
-        comments: post.comments || 0,
-        views: 0,  // Not stored in CleanedPost
-        shares: post.shares || 0,
-        saves: post.saves || 0,
+        thumbnailUrl,
         postUrl: post.postUrl || '',
-        mediaUrl: mediaAsset?.blobStoragePath || null,
-        videoUrl: isVideo ? mediaAsset?.blobStoragePath : null,
-        isVideo,
-        timestamp: post.postedAt?.toISOString() || post.cleanedAt.toISOString(),
-        engagement: post.engagementRate || 0,
+        likesCount: post.likes || 0,
+        commentsCount: post.comments || 0,
+        viewsCount: 0,
+        postedAt: post.postedAt,
+        createdAt: post.cleanedAt,
       };
     });
 
     res.json({
+      success: true,
       competitor: {
         id: discovered.id,
         handle: discovered.handle,
         platform: discovered.platform,
-        competitorId: discovered.competitorId, // Add this for debugging
+        competitorId: discovered.competitorId,
       },
       posts: transformedPosts,
       total: transformedPosts.length,
@@ -359,6 +381,209 @@ router.delete('/discovered/:id/posts', async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('[Competitors API] Error deleting posts:', error);
     res.status(500).json({ error: 'Failed to delete posts', details: error.message });
+  }
+});
+
+/**
+ * PATCH /api/competitors/discovered/:id/state
+ * Update competitor selection state manually
+ */
+router.patch('/discovered/:id/state', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { selectionState, reason } = req.body;
+
+    if (!selectionState) {
+      return res.status(400).json({ error: 'selectionState is required' });
+    }
+
+    // Validate state value
+    const validStates = ['FILTERED_OUT', 'SHORTLISTED', 'TOP_PICK', 'APPROVED', 'REJECTED'];
+    if (!validStates.includes(selectionState)) {
+      return res.status(400).json({ 
+        error: 'Invalid selectionState', 
+        validStates 
+      });
+    }
+
+    const discovered = await prisma.discoveredCompetitor.findUnique({
+      where: { id },
+      include: { researchJob: true },
+    });
+
+    if (!discovered) {
+      return res.status(404).json({ error: 'Discovered competitor not found' });
+    }
+
+    // Update state
+    const updated = await prisma.discoveredCompetitor.update({
+      where: { id },
+      data: {
+        selectionState: selectionState as any,
+        selectionReason: reason || `Manually set to ${selectionState}`,
+        manuallyModified: true,
+        lastModifiedAt: new Date(),
+        lastModifiedBy: 'user', // TODO: Add actual user ID when auth is implemented
+      },
+    });
+
+    // Emit research job event
+    const { emitResearchJobEvent } = await import('../services/social/research-job-events');
+    emitResearchJobEvent({
+      researchJobId: discovered.researchJobId,
+      source: 'competitors-api',
+      code: 'competitor.state.manual_update',
+      level: 'info',
+      message: `Competitor state manually updated for @${discovered.handle}`,
+      platform: discovered.platform,
+      handle: discovered.handle,
+      entityType: 'discovered_competitor',
+      entityId: id,
+      metadata: {
+        oldState: discovered.selectionState,
+        newState: selectionState,
+        reason: reason || 'Manual update',
+      },
+    });
+
+    console.log(`[Competitors API] Updated state for ${discovered.handle}: ${discovered.selectionState} -> ${selectionState}`);
+
+    res.json({ 
+      success: true, 
+      competitor: updated 
+    });
+  } catch (error: any) {
+    console.error('[Competitors API] Error updating state:', error);
+    res.status(500).json({ error: 'Failed to update state', details: error.message });
+  }
+});
+
+/**
+ * PATCH /api/competitors/discovered/:id/order
+ * Update competitor display order manually
+ */
+router.patch('/discovered/:id/order', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { displayOrder } = req.body;
+
+    if (typeof displayOrder !== 'number') {
+      return res.status(400).json({ error: 'displayOrder must be a number' });
+    }
+
+    const discovered = await prisma.discoveredCompetitor.findUnique({
+      where: { id },
+    });
+
+    if (!discovered) {
+      return res.status(404).json({ error: 'Discovered competitor not found' });
+    }
+
+    // Update order
+    const updated = await prisma.discoveredCompetitor.update({
+      where: { id },
+      data: {
+        displayOrder,
+        manuallyModified: true,
+        lastModifiedAt: new Date(),
+        lastModifiedBy: 'user',
+      },
+    });
+
+    console.log(`[Competitors API] Updated display order for ${discovered.handle}: ${displayOrder}`);
+
+    res.json({ 
+      success: true, 
+      competitor: updated 
+    });
+  } catch (error: any) {
+    console.error('[Competitors API] Error updating order:', error);
+    res.status(500).json({ error: 'Failed to update order', details: error.message });
+  }
+});
+
+/**
+ * PATCH /api/competitors/discovered/batch/state
+ * Batch update competitor states
+ */
+router.patch('/discovered/batch/state', async (req: Request, res: Response) => {
+  try {
+    const { updates } = req.body;
+
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return res.status(400).json({ error: 'updates must be a non-empty array' });
+    }
+
+    // Validate all updates
+    const validStates = ['FILTERED_OUT', 'SHORTLISTED', 'TOP_PICK', 'APPROVED', 'REJECTED'];
+    for (const update of updates) {
+      if (!update.id || !update.selectionState) {
+        return res.status(400).json({ error: 'Each update must have id and selectionState' });
+      }
+      if (!validStates.includes(update.selectionState)) {
+        return res.status(400).json({ 
+          error: `Invalid selectionState: ${update.selectionState}`, 
+          validStates 
+        });
+      }
+    }
+
+    // Perform batch update
+    const updatePromises = updates.map(async (update) => {
+      const discovered = await prisma.discoveredCompetitor.findUnique({
+        where: { id: update.id },
+        include: { researchJob: true },
+      });
+
+      if (!discovered) {
+        return { id: update.id, success: false, error: 'Not found' };
+      }
+
+      await prisma.discoveredCompetitor.update({
+        where: { id: update.id },
+        data: {
+          selectionState: update.selectionState as any,
+          selectionReason: update.reason || `Manually set to ${update.selectionState}`,
+          manuallyModified: true,
+          lastModifiedAt: new Date(),
+          lastModifiedBy: 'user',
+        },
+      });
+
+      // Emit event
+      const { emitResearchJobEvent } = await import('../services/social/research-job-events');
+      emitResearchJobEvent({
+        researchJobId: discovered.researchJobId,
+        source: 'competitors-api',
+        code: 'competitor.state.batch_update',
+        level: 'info',
+        message: `Competitor state updated in batch for @${discovered.handle}`,
+        platform: discovered.platform,
+        handle: discovered.handle,
+        entityType: 'discovered_competitor',
+        entityId: update.id,
+        metadata: {
+          oldState: discovered.selectionState,
+          newState: update.selectionState,
+        },
+      });
+
+      return { id: update.id, success: true };
+    });
+
+    const results = await Promise.all(updatePromises);
+    const successCount = results.filter(r => r.success).length;
+
+    console.log(`[Competitors API] Batch updated ${successCount}/${updates.length} competitors`);
+
+    res.json({ 
+      success: true, 
+      updatedCount: successCount,
+      results 
+    });
+  } catch (error: any) {
+    console.error('[Competitors API] Error in batch update:', error);
+    res.status(500).json({ error: 'Failed to batch update', details: error.message });
   }
 });
 

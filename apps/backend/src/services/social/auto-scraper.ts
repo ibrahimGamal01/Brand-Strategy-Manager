@@ -12,6 +12,7 @@
  */
 
 import { PrismaClient } from '@prisma/client';
+import { normalizeHandle } from '../intake/brain-intake-utils';
 import { scrapeProfileSafe } from './scraper';
 import { mediaDownloader } from '../media/downloader';
 
@@ -165,16 +166,18 @@ function extractClientHandles(job: any): Array<{ platform: string; handle: strin
   if (inputData.handles && typeof inputData.handles === 'object') {
     for (const [platform, handle] of Object.entries(inputData.handles)) {
       if ((platform === 'instagram' || platform === 'tiktok') && typeof handle === 'string' && handle) {
-        handles.push({ platform, handle: handle.toLowerCase().trim() });
+        const normalized = normalizeHandle(handle);
+        if (normalized) handles.push({ platform, handle: normalized });
       }
     }
   }
 
   // Method 2: Check single handle from inputData (legacy format)
   if (handles.length === 0 && inputData.handle) {
-    const platform = inputData.platform || 'instagram';
+    const platform = (inputData.platform || 'instagram') as string;
     if (platform === 'instagram' || platform === 'tiktok') {
-      handles.push({ platform, handle: inputData.handle.toLowerCase().trim() });
+      const normalized = normalizeHandle(inputData.handle);
+      if (normalized) handles.push({ platform, handle: normalized });
     }
   }
 
@@ -182,11 +185,11 @@ function extractClientHandles(job: any): Array<{ platform: string; handle: strin
   if (job.client?.clientAccounts) {
     for (const account of job.client.clientAccounts) {
       if ((account.platform === 'instagram' || account.platform === 'tiktok') && account.handle) {
-        const key = `${account.platform}:${account.handle}`;
+        const normalized = normalizeHandle(account.handle);
+        if (!normalized) continue;
+        const key = `${account.platform}:${normalized}`;
         const exists = handles.some(h => `${h.platform}:${h.handle}` === key);
-        if (!exists) {
-          handles.push({ platform: account.platform, handle: account.handle });
-        }
+        if (!exists) handles.push({ platform: account.platform, handle: normalized });
       }
     }
   }

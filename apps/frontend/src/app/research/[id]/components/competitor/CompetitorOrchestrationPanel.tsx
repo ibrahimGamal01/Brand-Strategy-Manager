@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Loader2, PlayCircle, RefreshCw, Sparkles } from 'lucide-react';
+import { Loader2, PlayCircle, RefreshCw, Sparkles, Eye, ListPlus } from 'lucide-react';
 import {
   apiClient,
   CompetitorShortlistResponse,
@@ -13,6 +13,21 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { CompetitorContentViewer } from './CompetitorContentViewer';
 
 interface CompetitorOrchestrationPanelProps {
   jobId: string;
@@ -48,9 +63,11 @@ function selectionVariant(state: OrchestratedCompetitorProfile['state']):
 }
 
 function isScrapeEligible(profile: OrchestratedCompetitorProfile): boolean {
-  if (profile.state === 'FILTERED_OUT' || profile.state === 'REJECTED') return false;
-  if (profile.availabilityStatus !== 'VERIFIED') return false;
   return Boolean(profile.discoveredCompetitorId);
+}
+
+function isScrapePlatform(platform: string): boolean {
+  return platform === 'instagram' || platform === 'tiktok';
 }
 
 function toAllProfiles(groups: OrchestratedCompetitorIdentityGroup[]): OrchestratedCompetitorProfile[] {
@@ -77,13 +94,23 @@ export function CompetitorOrchestrationPanel({
   const [continuingPending, setContinuingPending] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [continuingByProfile, setContinuingByProfile] = useState<Record<string, boolean>>({});
+  const [viewingContent, setViewingContent] = useState<{
+    discoveredId: string;
+    handle: string;
+    platform: string;
+  } | null>(null);
+  const [shortlistingByProfile, setShortlistingByProfile] = useState<Record<string, boolean>>({});
+  const [addAndScrapeByProfile, setAddAndScrapeByProfile] = useState<Record<string, boolean>>({});
 
   const runId = data?.runId || null;
 
   const selectableProfileIds = useMemo(() => {
     const top = toAllProfiles(data?.topPicks || []);
     const shortlist = toAllProfiles(data?.shortlist || []);
-    return [...top, ...shortlist].filter((profile) => isScrapeEligible(profile)).map((profile) => profile.id);
+    const filtered = toAllProfiles(data?.filteredOut || []);
+    const fromTopShort = [...top, ...shortlist].filter((p) => isScrapeEligible(p)).map((p) => p.id);
+    const fromFiltered = filtered.filter((p) => isScrapePlatform(p.platform)).map((p) => p.id);
+    return Array.from(new Set([...fromTopShort, ...fromFiltered]));
   }, [data]);
 
   const selectedCount = selectedIds.size;
@@ -178,6 +205,68 @@ export function CompetitorOrchestrationPanel({
       });
     } finally {
       setRunningDiscovery(false);
+    }
+  }
+
+  async function handleShortlist(profile: OrchestratedCompetitorProfile) {
+    if (!runId) {
+      toast({ title: 'No run', description: 'Run discovery first.', variant: 'destructive' });
+      return;
+    }
+    try {
+      setShortlistingByProfile((p) => ({ ...p, [profile.id]: true }));
+      const response = await apiClient.shortlistCompetitor(jobId, { runId, profileId: profile.id });
+      if (!response?.success) {
+        throw new Error(response?.error || 'Shortlist failed');
+      }
+      toast({ title: 'Added to shortlist', description: `@${profile.handle} can now be scraped.` });
+      await loadShortlist();
+      onRefresh?.();
+    } catch (error: any) {
+      toast({
+        title: 'Shortlist failed',
+        description: error?.message || `Unable to add @${profile.handle}`,
+        variant: 'destructive',
+      });
+    } finally {
+      setShortlistingByProfile((p) => {
+        const next = { ...p };
+        delete next[profile.id];
+        return next;
+      });
+    }
+  }
+
+  async function handleAddAndScrape(profile: OrchestratedCompetitorProfile) {
+    if (!runId) {
+      toast({ title: 'No run', description: 'Run discovery first.', variant: 'destructive' });
+      return;
+    }
+    try {
+      setAddAndScrapeByProfile((p) => ({ ...p, [profile.id]: true }));
+      const shortlistRes = await apiClient.shortlistCompetitor(jobId, { runId, profileId: profile.id });
+      if (!shortlistRes?.success || !shortlistRes.discoveredCompetitorId) {
+        throw new Error(shortlistRes?.error || 'Could not add to shortlist');
+      }
+      const scrapeRes = await apiClient.scrapeCompetitor(shortlistRes.discoveredCompetitorId);
+      if (!scrapeRes?.success) {
+        throw new Error(scrapeRes?.error || 'Scrape failed');
+      }
+      toast({ title: 'Queued for scrape', description: `@${profile.handle} added and scrape started.` });
+      await loadShortlist();
+      onRefresh?.();
+    } catch (error: any) {
+      toast({
+        title: 'Add & Scrape failed',
+        description: error?.message || `Unable to process @${profile.handle}`,
+        variant: 'destructive',
+      });
+    } finally {
+      setAddAndScrapeByProfile((p) => {
+        const next = { ...p };
+        delete next[profile.id];
+        return next;
+      });
     }
   }
 
@@ -294,6 +383,42 @@ export function CompetitorOrchestrationPanel({
     }
   }
 
+  async function handleStateChange(profile: OrchestratedCompetitorProfile, newState: string) {
+    if (!profile.discoveredCompetitorId) {
+      toast({
+        title: 'Cannot update state',
+        description: 'Profile has no discovered competitor ID',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      const response = await apiClient.updateCompetitorState(profile.discoveredCompetitorId, {
+        selectionState: newState,
+        reason: `Manually changed to ${newState}`,
+      });
+
+      if (!response?.success) {
+        throw new Error('State update failed');
+      }
+
+      toast({
+        title: 'State updated',
+        description: `@${profile.handle} moved to ${newState}`,
+      });
+
+      await loadShortlist();
+      onRefresh?.();
+    } catch (error: any) {
+      toast({
+        title: 'State update failed',
+        description: error?.message || `Unable to update @${profile.handle}`,
+        variant: 'destructive',
+      });
+    }
+  }
+
   function renderGroupCard(
     group: OrchestratedCompetitorIdentityGroup,
     section: 'top' | 'shortlist' | 'filtered'
@@ -314,8 +439,9 @@ export function CompetitorOrchestrationPanel({
           {(group.profiles || []).map((profile) => {
             const checked = selectedIds.has(profile.id);
             const rowScrapeEligible = isScrapeEligible(profile);
+            const isFiltered = section === 'filtered';
+            const rowSelectable = rowScrapeEligible || (isFiltered && isScrapePlatform(profile.platform));
             const rowDisabled =
-              section === 'filtered' ||
               !rowScrapeEligible ||
               profile.discoveredStatus === 'SCRAPING' ||
               Boolean(continuingByProfile[profile.id]);
@@ -328,7 +454,7 @@ export function CompetitorOrchestrationPanel({
                 <Checkbox
                   checked={checked}
                   onCheckedChange={(value) => onCheckedChange(profile.id, value === true)}
-                  disabled={section === 'filtered' || !rowScrapeEligible}
+                  disabled={!rowSelectable}
                   className="mt-0.5"
                 />
 
@@ -344,14 +470,28 @@ export function CompetitorOrchestrationPanel({
                     <Badge variant={availabilityVariant(profile.availabilityStatus)} className="h-5 text-[10px] uppercase">
                       {profile.availabilityStatus.replaceAll('_', ' ')}
                     </Badge>
-                    <Badge variant={selectionVariant(profile.state)} className="h-5 text-[10px] uppercase">
-                      {profile.state.replaceAll('_', ' ')}
-                    </Badge>
                     {profile.discoveredStatus ? (
                       <Badge variant={profile.discoveredStatus === 'SCRAPED' ? 'default' : 'secondary'} className="h-5 text-[10px] uppercase">
                         {profile.discoveredStatus}
                       </Badge>
                     ) : null}
+                    {profile.discoveredCompetitorId && (
+                      <Select
+                        value={profile.state}
+                        onValueChange={(value) => handleStateChange(profile, value)}
+                      >
+                        <SelectTrigger className="h-6 w-[140px] text-[10px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="TOP_PICK">Top Pick</SelectItem>
+                          <SelectItem value="SHORTLISTED">Shortlisted</SelectItem>
+                          <SelectItem value="APPROVED">Approved</SelectItem>
+                          <SelectItem value="FILTERED_OUT">Filtered Out</SelectItem>
+                          <SelectItem value="REJECTED">Rejected</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
                   </div>
 
                   {profile.stateReason ? (
@@ -361,8 +501,8 @@ export function CompetitorOrchestrationPanel({
                     <p className="mt-1 text-xs text-muted-foreground">Availability: {profile.availabilityReason}</p>
                   ) : null}
 
-                  <div className="mt-2">
-                    {section !== 'filtered' && rowScrapeEligible ? (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {rowScrapeEligible ? (
                       <Button
                         size="sm"
                         variant="outline"
@@ -378,10 +518,59 @@ export function CompetitorOrchestrationPanel({
                         )}
                         Continue Scrape
                       </Button>
+                    ) : isFiltered && isScrapePlatform(profile.platform) ? (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleShortlist(profile)}
+                          disabled={Boolean(shortlistingByProfile[profile.id])}
+                          className="h-7 text-[11px]"
+                          title="Add to shortlist"
+                        >
+                          {shortlistingByProfile[profile.id] ? (
+                            <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <ListPlus className="mr-1 h-3.5 w-3.5" />
+                          )}
+                          Add to shortlist
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => handleAddAndScrape(profile)}
+                          disabled={Boolean(addAndScrapeByProfile[profile.id])}
+                          className="h-7 text-[11px]"
+                          title="Add and scrape"
+                        >
+                          {addAndScrapeByProfile[profile.id] ? (
+                            <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <PlayCircle className="mr-1 h-3.5 w-3.5" />
+                          )}
+                          Add & Scrape
+                        </Button>
+                      </>
                     ) : (
                       <span className="text-[11px] text-muted-foreground">
-                        Not scrape-ready: requires verified + shortlisted/approved state
+                        Cannot scrape: competitor not materialized
                       </span>
+                    )}
+                    {profile.discoveredCompetitorId && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setViewingContent({
+                          discoveredId: profile.discoveredCompetitorId!,
+                          handle: profile.handle,
+                          platform: profile.platform,
+                        })}
+                        className="h-7 text-[11px]"
+                        title="View Content"
+                      >
+                        <Eye className="mr-1 h-3.5 w-3.5" />
+                        View Content
+                      </Button>
                     )}
                   </div>
                 </div>
@@ -424,6 +613,39 @@ export function CompetitorOrchestrationPanel({
       {data?.platformMatrix?.selected?.length ? (
         <div className="text-xs text-muted-foreground">
           Surfaces: {data.platformMatrix.selected.join(', ')}
+        </div>
+      ) : null}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-muted-foreground">Control:</span>
+        <Select
+          value={data?.controlMode ?? 'auto'}
+          onValueChange={async (v: 'auto' | 'manual') => {
+            try {
+              await apiClient.updateJobSettings(jobId, { controlMode: v });
+              toast({ title: `Control mode: ${v}`, description: v === 'manual' ? 'You control all actions.' : 'Orchestrator will auto-queue tasks.' });
+              await loadShortlist();
+            } catch (e: any) {
+              toast({ title: 'Failed to update', description: e?.message, variant: 'destructive' });
+            }
+          }}
+        >
+          <SelectTrigger className="h-7 w-[120px] text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="auto">Auto</SelectItem>
+            <SelectItem value="manual">Manual</SelectItem>
+          </SelectContent>
+        </Select>
+        {data?.controlMode === 'manual' && (
+          <span className="text-[10px] text-muted-foreground">(Orchestrator will not auto-queue)</span>
+        )}
+      </div>
+
+      {data?.controlMode === 'manual' ? (
+        <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+          Manual control: Orchestrator will not auto-queue discovery, scraping, or media downloads. Use the buttons below to run actions explicitly.
         </div>
       ) : null}
 
@@ -497,6 +719,26 @@ export function CompetitorOrchestrationPanel({
           ) : null}
         </div>
       )}
+
+      <Dialog open={viewingContent !== null} onOpenChange={(open) => !open && setViewingContent(null)}>
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              Content from @{viewingContent?.handle}
+            </DialogTitle>
+            <DialogDescription>
+              Scraped posts from {viewingContent?.platform}
+            </DialogDescription>
+          </DialogHeader>
+          {viewingContent && (
+            <CompetitorContentViewer
+              discoveredCompetitorId={viewingContent.discoveredId}
+              handle={viewingContent.handle}
+              platform={viewingContent.platform}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

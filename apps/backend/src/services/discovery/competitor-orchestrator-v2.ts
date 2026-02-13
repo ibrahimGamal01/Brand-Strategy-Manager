@@ -45,6 +45,7 @@ export interface CompetitorOrchestrationV2Response {
 
 export interface CompetitorShortlistV2Response {
   runId: string | null;
+  controlMode?: 'auto' | 'manual';
   summary: CompetitorOrchestrationV2Summary;
   platformMatrix: ReturnType<typeof normalizePlatformMatrixForApi> | null;
   diagnostics: Record<string, unknown> | null;
@@ -926,6 +927,29 @@ export async function orchestrateCompetitorsForJob(
       diagnostics,
     });
 
+    // PHASE 2: Second-phase validation to review filtered competitors
+    console.log('[Orchestrator] Starting second-phase validation of filtered competitors...');
+    const { reviewFilteredCompetitors } = await import('./second-phase-validator');
+    const validationResult = await reviewFilteredCompetitors(researchJobId, run.id);
+    
+    if (validationResult.promoted > 0) {
+      console.log(`[Orchestrator] Second-phase validation promoted ${validationResult.promoted} competitors`);
+      
+      emitResearchJobEvent({
+        researchJobId,
+        runId: run.id,
+        source: 'competitor-orchestrator-v2',
+        code: 'competitor.orchestration.second_phase.completed',
+        level: 'info',
+        message: `Second-phase validation complete: ${validationResult.promoted} promoted from filtered`,
+        metrics: {
+          totalReviewed: validationResult.totalReviewed,
+          promoted: validationResult.promoted,
+          keptFiltered: validationResult.keptFiltered,
+        },
+      });
+    }
+
     emitResearchJobEvent({
       researchJobId,
       runId: run.id,
@@ -1047,6 +1071,12 @@ export async function getCompetitorShortlist(
   researchJobId: string,
   runId?: string
 ): Promise<CompetitorShortlistV2Response> {
+  const job = await prisma.researchJob.findUnique({
+    where: { id: researchJobId },
+    select: { inputData: true },
+  });
+  const controlMode = ((job?.inputData as Record<string, unknown>)?.controlMode === 'manual' ? 'manual' : 'auto') as 'auto' | 'manual';
+
   let run = runId
     ? await prisma.competitorOrchestrationRun.findFirst({
         where: { id: runId, researchJobId },
@@ -1071,6 +1101,7 @@ export async function getCompetitorShortlist(
   if (!run) {
     return {
       runId: null,
+      controlMode,
       summary: {
         candidatesDiscovered: 0,
         candidatesFiltered: 0,
@@ -1124,6 +1155,7 @@ export async function getCompetitorShortlist(
 
   return {
     runId: run.id,
+    controlMode,
     summary,
     platformMatrix: parseRunPlatformMatrix(run.platforms || null),
     diagnostics: (run.diagnostics || null) as Record<string, unknown> | null,
@@ -1186,6 +1218,7 @@ export async function continueCompetitorScrape(
     onlyPending?: boolean;
     runId?: string;
     forceUnavailable?: boolean;
+    forceMaterialize?: boolean;
   } = {}
 ): Promise<{ queuedCount: number; skippedCount: number }> {
   return continueQueueFromCandidates({
@@ -1194,5 +1227,6 @@ export async function continueCompetitorScrape(
     candidateProfileIds: input.candidateProfileIds,
     onlyPending: Boolean(input.onlyPending),
     forceUnavailable: Boolean(input.forceUnavailable),
+    forceMaterialize: Boolean(input.forceMaterialize),
   });
 }

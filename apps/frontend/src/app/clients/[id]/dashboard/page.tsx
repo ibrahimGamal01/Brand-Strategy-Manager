@@ -1,61 +1,46 @@
 'use client';
 
-import { useParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
-import { BrandStrategyDashboard } from '@/components/dashboard/BrandStrategyDashboard';
-import { apiClient } from '@/lib/api-client';
+import { useEffect } from 'react';
+import { useParams, useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
+import { apiClient } from '@/lib/api-client';
 
-export default function ClientDashboardPage() {
-    const params = useParams();
-    const id = params.id as string;
+export default function LegacyClientDashboardRedirectPage() {
+  const params = useParams();
+  const router = useRouter();
+  const id = params.id as string;
 
-    // In a real implementation, we would fetch data here and pass it down.
-    // However, the Lovable UI components are currently wired to mock data internally or via props.
-    // For this step, we will render the Dashboard and then incrementally wire up the pieces.
-    // The Dashboard component currently uses mock data by default.
+  useEffect(() => {
+    let cancelled = false;
 
-    // Let's at least verify the client exists
-    const [loading, setLoading] = useState(true);
-    const [client, setClient] = useState<any>(null);
+    async function redirectToBatWorkspace() {
+      try {
+        const clients = await apiClient.getClients();
+        const client = clients.find((item: { id?: string; researchJobs?: Array<{ id?: string }> }) => item.id === id);
+        const latestJobId = client?.researchJobs?.[0]?.id;
 
-    useEffect(() => {
-        if (!id) return;
-
-        async function load() {
-            try {
-                // Fetch basic client info to ensure it exists
-                // The dashboard will hydrate with more data later
-                const clientData = await apiClient.getClients(); // optimization: getClient(id) if available
-                const found = clientData.find((c: any) => c.id === id);
-                if (found) setClient(found);
-            } catch (e) {
-                console.error(e);
-            } finally {
-                setLoading(false);
-            }
+        if (!cancelled) {
+          if (latestJobId) router.replace(`/research/${latestJobId}`);
+          else router.replace('/clients/new');
         }
-        load();
-    }, [id]);
-
-    if (loading) {
-        return (
-            <div className="flex h-screen items-center justify-center bg-background text-foreground">
-                <Loader2 className="animate-spin text-primary" size={32} />
-            </div>
-        );
+      } catch {
+        if (!cancelled) router.replace('/');
+      }
     }
 
-    if (!client) {
-        return (
-            <div className="flex h-screen items-center justify-center bg-background text-foreground">
-                <p>Client not found</p>
-            </div>
-        );
-    }
+    void redirectToBatWorkspace();
 
-    // Render the new dashboard
-    // We can pass real data if we modify BrandStrategyDashboard to accept it
-    // For now, it uses mock data internally, which is fine for visual verification.
-    return <BrandStrategyDashboard />;
+    return () => {
+      cancelled = true;
+    };
+  }, [id, router]);
+
+  return (
+    <div className="flex h-screen items-center justify-center bg-background text-foreground">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-5 w-5 animate-spin" />
+        Redirecting to BAT workspace...
+      </div>
+    </div>
+  );
 }

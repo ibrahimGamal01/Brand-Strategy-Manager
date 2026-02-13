@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma';
+import { normalizeHandle } from '../intake/brain-intake-utils';
 import { scrapeProfileSafe } from './scraper';
 import { randomUUID } from 'crypto';
 import { emitResearchJobEvent } from './research-job-events';
@@ -56,7 +57,8 @@ function collectClientTargets(job: any): Array<{ platform: string; handle: strin
     if (!account?.handle || !account?.platform) continue;
     const platform = String(account.platform).toLowerCase();
     if (platform !== 'instagram' && platform !== 'tiktok') continue;
-    targets.push({ platform, handle: String(account.handle).toLowerCase() });
+    const h = normalizeHandle(account.handle);
+    if (h) targets.push({ platform, handle: h });
   }
 
   const inputData = (job.inputData || {}) as any;
@@ -65,12 +67,14 @@ function collectClientTargets(job: any): Array<{ platform: string; handle: strin
       if (typeof rawHandle !== 'string' || !rawHandle.trim()) continue;
       const platform = String(rawPlatform).toLowerCase();
       if (platform !== 'instagram' && platform !== 'tiktok') continue;
-      targets.push({ platform, handle: rawHandle.replace(/^@+/, '').toLowerCase().trim() });
+      const h = normalizeHandle(rawHandle);
+      if (h) targets.push({ platform, handle: h });
     }
   } else if (inputData?.handle && inputData?.platform) {
     const platform = String(inputData.platform).toLowerCase();
     if ((platform === 'instagram' || platform === 'tiktok') && typeof inputData.handle === 'string') {
-      targets.push({ platform, handle: inputData.handle.replace(/^@+/, '').toLowerCase().trim() });
+      const h = normalizeHandle(inputData.handle);
+      if (h) targets.push({ platform, handle: h });
     }
   }
 

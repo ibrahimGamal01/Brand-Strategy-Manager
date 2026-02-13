@@ -27,7 +27,7 @@ import { analyzeBusinessWithAI, type BusinessAnalysisResult } from '../ai/busine
 import { askAllDeepQuestions } from '../ai/deep-questions';
 import { scrapeProfileIncrementally } from '../social/scraper';
 import { analyzeSearchTrends } from './google-trends';
-import { runCommunityDetective } from '../social/community-detective';
+import { orchestrateBrandIntelligenceForJob } from '../brand-intelligence/orchestrator';
 import { validateCompetitorBatch, filterValidatedCompetitors } from './instagram-validator.js';
 import { PrismaClient } from '@prisma/client';
 
@@ -582,12 +582,11 @@ export async function gatherInformation(input: GatheringInput): Promise<Informat
       
       // === STEP 7: Community Detective (VoC) - Enhanced with Handle Search ===
       console.log(`[InfoGather] Step 7: Running Community Detective (VoC + Reddit Handle Search)...`);
-      await runCommunityDetective(
-        input.researchJobId, 
-        input.brandName || input.handle, 
-        targetIntel.niche || 'business',
-        input.handle // Pass handle for direct Reddit search
-      ).catch(e => console.error(`[InfoGather] Community Detective failed: ${e.message}`));
+      await orchestrateBrandIntelligenceForJob(input.researchJobId, {
+        mode: 'append',
+        modules: ['community_insights'],
+        runReason: 'resume',
+      }).catch(e => console.error(`[InfoGather] Community Detective failed: ${e.message}`));
       
       layersUsed.push('COMMUNITY_DETECTIVE');
       

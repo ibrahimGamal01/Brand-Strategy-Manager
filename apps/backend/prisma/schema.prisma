@@ -7,40 +7,34 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ============================================
-// CORE ENTITIES
-// ============================================
-
 model Client {
-  id                     String   @id @default(uuid())
+  id                     String              @id @default(uuid())
   name                   String
-  businessOverview       String?  @map("business_overview")
-  productsServices       String?  @map("products_services")
-  uniqueValueProposition String?  @map("unique_value_proposition")
-  visionMission          String?  @map("vision_mission")
-  brandStory             String?  @map("brand_story")
-  toneOfVoice            String?  @map("tone_of_voice")
-  brandPersonality       String?  @map("brand_personality")
-  keySellingPoints       String?  @map("key_selling_points")
-  currentSocialPresence  String?  @map("current_social_presence")
+  businessOverview       String?             @map("business_overview")
+  productsServices       String?             @map("products_services")
+  uniqueValueProposition String?             @map("unique_value_proposition")
+  visionMission          String?             @map("vision_mission")
+  brandStory             String?             @map("brand_story")
+  toneOfVoice            String?             @map("tone_of_voice")
+  brandPersonality       String?             @map("brand_personality")
+  keySellingPoints       String?             @map("key_selling_points")
+  currentSocialPresence  String?             @map("current_social_presence")
   challenges             String?
-  goalsKpis              String?  @map("goals_kpis")
-  createdAt              DateTime @default(now()) @map("created_at")
-  updatedAt              DateTime @updatedAt @map("updated_at")
-
-  // Relations
-  personas           Persona[]
-  clientAccounts     ClientAccount[]
-  clientDocuments    ClientDocument[]
-  researchJobs       ResearchJob[]
-  competitors        Competitor[]
-  brandMentions      BrandMention[]
-  contentPillars     ContentPillar[]
-  buyerJourneyStages BuyerJourneyStage[]
-  platformStrategies PlatformStrategy[]
-  monitoringLogs     MonitoringLog[]
-  clientProfiles     ClientProfile[]
-  brainProfile       BrainProfile?
+  goalsKpis              String?             @map("goals_kpis")
+  createdAt              DateTime            @default(now()) @map("created_at")
+  updatedAt              DateTime            @updatedAt @map("updated_at")
+  brainProfile           BrainProfile?
+  brandMentions          BrandMention[]
+  buyerJourneyStages     BuyerJourneyStage[]
+  clientAccounts         ClientAccount[]
+  clientDocuments        ClientDocument[]
+  clientProfiles         ClientProfile[]
+  competitors            Competitor[]
+  contentPillars         ContentPillar[]
+  monitoringLogs         MonitoringLog[]
+  personas               Persona[]
+  platformStrategies     PlatformStrategy[]
+  researchJobs           ResearchJob[]
 
   @@map("clients")
 }
@@ -59,85 +53,69 @@ model Persona {
   blockers            String?
   preferredContent    String? @map("preferred_content")
   onlinePresence      String? @map("online_presence")
-
-  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  client              Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
   @@map("personas")
 }
 
-// ============================================
-// AUTOMATED RESEARCH PIPELINE
-// ============================================
-
-enum ResearchJobStatus {
-  PENDING
-  SCRAPING_CLIENT
-  DISCOVERING_COMPETITORS
-  SCRAPING_COMPETITORS
-  ANALYZING
-  COMPLETE
-  FAILED
-}
-
 model ResearchJob {
-  id                      String            @id @default(uuid())
-  clientId                String            @map("client_id")
-  status                  ResearchJobStatus @default(PENDING)
-  inputData               Json?             @map("input_data")
-  competitorsToFind       Int               @default(10) @map("competitors_to_find")
-  priorityCompetitors     Int               @default(3) @map("priority_competitors")
-  errorMessage            String?           @map("error_message")
-  startedAt               DateTime?         @map("started_at")
-  completedAt             DateTime?         @map("completed_at")
-  continuityEnabled       Boolean           @default(false) @map("continuity_enabled")
-  continuityIntervalHours Int               @default(2) @map("continuity_interval_hours")
-  continuityLastRunAt     DateTime?         @map("continuity_last_run_at")
-  continuityNextRunAt     DateTime?         @map("continuity_next_run_at")
-  continuityRunning       Boolean           @default(false) @map("continuity_running")
-  continuityErrorMessage  String?           @map("continuity_error_message")
-
-  client                      Client                       @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  discoveredCompetitors       DiscoveredCompetitor[]
-  rawSearchResults            RawSearchResult[]
+  id                          String                       @id @default(uuid())
+  clientId                    String                       @map("client_id")
+  status                      ResearchJobStatus            @default(PENDING)
+  inputData                   Json?                        @map("input_data")
+  competitorsToFind           Int                          @default(10) @map("competitors_to_find")
+  priorityCompetitors         Int                          @default(3) @map("priority_competitors")
+  errorMessage                String?                      @map("error_message")
+  startedAt                   DateTime?                    @map("started_at")
+  completedAt                 DateTime?                    @map("completed_at")
+  continuityEnabled           Boolean                      @default(false) @map("continuity_enabled")
+  continuityErrorMessage      String?                      @map("continuity_error_message")
+  continuityIntervalHours     Int                          @default(2) @map("continuity_interval_hours")
+  continuityLastRunAt         DateTime?                    @map("continuity_last_run_at")
+  continuityNextRunAt         DateTime?                    @map("continuity_next_run_at")
+  continuityRunning           Boolean                      @default(false) @map("continuity_running")
+  aiAnalyses                  AiAnalysis[]
   aiBusinessAnalyses          AiBusinessAnalysis[]
   aiQuestions                 AiQuestion[]
+  brainCommands               BrainCommand[]
+  brandIntelligenceRuns       BrandIntelligenceRun[]
+  clientProfileSnapshots      ClientProfileSnapshot[]
+  communityInsights           CommunityInsight[]
+  competitorCandidateProfiles CompetitorCandidateProfile[]
+  competitorIdentities        CompetitorIdentity[]
+  competitorOrchestrationRuns CompetitorOrchestrationRun[]
+  competitorProfileSnapshots  CompetitorProfileSnapshot[]
+  ddgImageResults             DdgImageResult[]
   ddgNewsResults              DdgNewsResult[]
   ddgVideoResults             DdgVideoResult[]
-  ddgImageResults             DdgImageResult[]
+  discoveredCompetitors       DiscoveredCompetitor[]
+  orchestrationPlans          OrchestrationPlan[]
+  rawSearchResults            RawSearchResult[]
+  events                      ResearchJobEvent[]
+  client                      Client                       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  searchTrends                SearchTrend[]
   socialProfiles              SocialProfile[]
   socialTrends                SocialTrend[]
-  searchTrends                SearchTrend[]
-  communityInsights           CommunityInsight[]
-  aiAnalyses                  AiAnalysis[]
-  clientProfileSnapshots      ClientProfileSnapshot[]
-  competitorProfileSnapshots  CompetitorProfileSnapshot[]
-  competitorOrchestrationRuns CompetitorOrchestrationRun[]
-  competitorIdentities        CompetitorIdentity[]
-  competitorCandidateProfiles CompetitorCandidateProfile[]
-  brainCommands               BrainCommand[]
-  orchestrationPlans          OrchestrationPlan[]
-  events                      ResearchJobEvent[]
 
   @@map("research_jobs")
 }
 
 model ResearchJobEvent {
-  id            Int      @id @default(autoincrement())
-  researchJobId String   @map("research_job_id")
-  runId         String?  @map("run_id")
+  id            Int         @id @default(autoincrement())
+  researchJobId String      @map("research_job_id")
+  runId         String?     @map("run_id")
   source        String
   code          String
-  level         String   @default("info")
+  level         String      @default("info")
   message       String
   platform      String?
   handle        String?
-  entityType    String?  @map("entity_type")
-  entityId      String?  @map("entity_id")
+  entityType    String?     @map("entity_type")
+  entityId      String?     @map("entity_id")
   metrics       Json?
   metadata      Json?
-  createdAt     DateTime @default(now()) @map("created_at")
-
-  researchJob ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  createdAt     DateTime    @default(now()) @map("created_at")
+  researchJob   ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
 
   @@index([researchJobId, createdAt])
   @@index([researchJobId, id])
@@ -146,191 +124,154 @@ model ResearchJobEvent {
   @@map("research_job_events")
 }
 
-// Raw search results from DDG/Google for multi-purpose processing
 model RawSearchResult {
-  id            String  @id @default(uuid())
-  researchJobId String  @map("research_job_id")
-  query         String // The search query used
-  source        String  @default("duckduckgo") // duckduckgo, google, etc
+  id            String      @id @default(uuid())
+  researchJobId String      @map("research_job_id")
+  query         String
+  source        String      @default("duckduckgo")
   title         String
-  href          String // URL - unique per research job
+  href          String
   body          String
-  isProcessed   Boolean @default(false) @map("is_processed")
-  extractedData Json?   @map("extracted_data") // Store extracted handles, etc
+  isProcessed   Boolean     @default(false) @map("is_processed")
+  extractedData Json?       @map("extracted_data")
+  firstSeenAt   DateTime    @default(now()) @map("first_seen_at")
+  lastSeenAt    DateTime    @default(now()) @map("last_seen_at")
+  seenCount     Int         @default(1) @map("seen_count")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  researchJob   ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
 
-  // Tracking for repeatable searches
-  firstSeenAt DateTime @default(now()) @map("first_seen_at")
-  lastSeenAt  DateTime @default(now()) @map("last_seen_at")
-  seenCount   Int      @default(1) @map("seen_count")
-
-  createdAt DateTime @default(now()) @map("created_at")
-
-  researchJob ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
-
-  @@unique([researchJobId, href]) // Avoid duplicates: same URL in same job
+  @@unique([researchJobId, href])
   @@index([researchJobId])
   @@index([isProcessed])
   @@map("raw_search_results")
 }
 
-// DDG News Results
 model DdgNewsResult {
-  id            String   @id @default(uuid())
-  researchJobId String   @map("research_job_id")
+  id            String      @id @default(uuid())
+  researchJobId String      @map("research_job_id")
   query         String
   title         String
   body          String?
   url           String
-  source        String? // News source (e.g., "Yahoo Finance")
-  imageUrl      String?  @map("image_url")
-  publishedAt   String?  @map("published_at") // DDG returns string dates
-  createdAt     DateTime @default(now()) @map("created_at")
-
-  researchJob ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  source        String?
+  imageUrl      String?     @map("image_url")
+  publishedAt   String?     @map("published_at")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  researchJob   ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
 
   @@index([researchJobId])
   @@map("ddg_news_results")
 }
 
-// DDG Video Results (YouTube, etc.)
 model DdgVideoResult {
-  id            String   @id @default(uuid())
-  researchJobId String   @map("research_job_id")
+  id            String       @id @default(uuid())
+  researchJobId String       @map("research_job_id")
   query         String
   title         String
   description   String?
-  url           String // Video URL
-  embedUrl      String?  @map("embed_url")
-  duration      String? // e.g., "10:03"
-  publisher     String? // e.g., "YouTube"
-  uploader      String? // Channel name
-  viewCount     Int?     @map("view_count")
-  thumbnailUrl  String?  @map("thumbnail_url")
-  publishedAt   String?  @map("published_at")
-  createdAt     DateTime @default(now()) @map("created_at")
-
-  // Download Tracking
-  isDownloaded Boolean      @default(false) @map("is_downloaded")
-  mediaAssets  MediaAsset[] // Relation to downloaded assets
-
-  researchJob ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  url           String
+  embedUrl      String?      @map("embed_url")
+  duration      String?
+  publisher     String?
+  uploader      String?
+  viewCount     Int?         @map("view_count")
+  thumbnailUrl  String?      @map("thumbnail_url")
+  publishedAt   String?      @map("published_at")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  isDownloaded  Boolean      @default(false) @map("is_downloaded")
+  researchJob   ResearchJob  @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  mediaAssets   MediaAsset[]
 
   @@index([researchJobId])
   @@index([isDownloaded])
   @@map("ddg_video_results")
 }
 
-// DDG Image Results
 model DdgImageResult {
-  id            String   @id @default(uuid())
-  researchJobId String   @map("research_job_id")
+  id            String       @id @default(uuid())
+  researchJobId String       @map("research_job_id")
   query         String
   title         String
-  imageUrl      String   @map("image_url")
-  thumbnailUrl  String?  @map("thumbnail_url")
-  sourceUrl     String   @map("source_url") // Page where image was found
+  imageUrl      String       @map("image_url")
+  thumbnailUrl  String?      @map("thumbnail_url")
+  sourceUrl     String       @map("source_url")
   width         Int?
   height        Int?
-  createdAt     DateTime @default(now()) @map("created_at")
-
-  // Download Tracking
-  isDownloaded Boolean      @default(false) @map("is_downloaded")
-  mediaAssets  MediaAsset[] // Relation to downloaded assets
-
-  researchJob ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  createdAt     DateTime     @default(now()) @map("created_at")
+  isDownloaded  Boolean      @default(false) @map("is_downloaded")
+  researchJob   ResearchJob  @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  mediaAssets   MediaAsset[]
 
   @@index([researchJobId])
   @@index([isDownloaded])
   @@map("ddg_image_results")
 }
 
-// ============================================
-// LAYER 3: SOCIAL SCRAPING & TRENDS
-// ============================================
-
 model SocialProfile {
-  id            String  @id @default(uuid())
-  researchJobId String  @map("research_job_id")
-  platform      String // instagram, tiktok, etc
+  id            String       @id @default(uuid())
+  researchJobId String       @map("research_job_id")
+  platform      String
   handle        String
   url           String?
-
-  // Profile Stats
-  followers  Int?
-  following  Int?
-  postsCount Int?    @map("posts_count")
-  bio        String?
-  website    String?
-  isVerified Boolean @default(false) @map("is_verified")
-
-  // Scraper State (Incremental)
-  lastScrapedAt DateTime? @map("last_scraped_at")
-  lastPostId    String?   @map("last_post_id") // ID of most recent post scraped
-  cursor        String? // Pagination cursor if needed
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  researchJob ResearchJob  @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
-  posts       SocialPost[]
+  followers     Int?
+  following     Int?
+  postsCount    Int?         @map("posts_count")
+  bio           String?
+  website       String?
+  isVerified    Boolean      @default(false) @map("is_verified")
+  lastScrapedAt DateTime?    @map("last_scraped_at")
+  lastPostId    String?      @map("last_post_id")
+  cursor        String?
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+  posts         SocialPost[]
+  researchJob   ResearchJob  @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
 
   @@unique([researchJobId, platform, handle])
   @@map("social_profiles")
 }
 
 model SocialPost {
-  id              String  @id @default(uuid())
-  socialProfileId String  @map("social_profile_id")
-  externalId      String  @map("external_id") // ID from platform
+  id              String        @id @default(uuid())
+  socialProfileId String        @map("social_profile_id")
+  externalId      String        @map("external_id")
   url             String?
-
-  // Content
-  type         String? // image, video, carousel, text
-  caption      String?
-  hashtags     Json? // Array of strings
-  mentions     Json? // Array of strings
-  thumbnailUrl String? @map("thumbnail_url")
-
-  // Meta Info / Metrics
-  likesCount    Int?   @map("likes_count")
-  commentsCount Int?   @map("comments_count")
-  sharesCount   Int?   @map("shares_count")
-  viewsCount    Int?   @map("views_count")
-  playsCount    Int?   @map("plays_count")
-  duration      Float? // Seconds
-  metadata      Json? // Performance rankings and analysis data
-
-  // Timing
-  postedAt  DateTime? @map("posted_at")
-  scrapedAt DateTime  @default(now()) @map("scraped_at")
-
-  socialProfile SocialProfile @relation(fields: [socialProfileId], references: [id], onDelete: Cascade)
-  trends        SocialTrend[] // Trends identified in this post
-  mediaAssets   MediaAsset[]
+  type            String?
+  caption         String?
+  hashtags        Json?
+  mentions        Json?
+  thumbnailUrl    String?       @map("thumbnail_url")
+  likesCount      Int?          @map("likes_count")
+  commentsCount   Int?          @map("comments_count")
+  sharesCount     Int?          @map("shares_count")
+  viewsCount      Int?          @map("views_count")
+  playsCount      Int?          @map("plays_count")
+  duration        Float?
+  metadata        Json?
+  postedAt        DateTime?     @map("posted_at")
+  scrapedAt       DateTime      @default(now()) @map("scraped_at")
+  mediaAssets     MediaAsset[]
+  socialProfile   SocialProfile @relation(fields: [socialProfileId], references: [id], onDelete: Cascade)
+  trends          SocialTrend[]
 
   @@unique([socialProfileId, externalId])
   @@map("social_posts")
 }
 
 model SocialTrend {
-  id            String  @id @default(uuid())
-  researchJobId String? @map("research_job_id") // Can be global or job-specific
-  socialPostId  String? @map("social_post_id") // If linked to specific post
-
-  name     String // Hashtag or topic name
-  platform String?
-  type     String? // hashtag, audio, topic, keyword
-
-  // Meta Info
-  volume     Int? // usage volume
-  growthRate Float?  @map("growth_rate")
-  sentiment  String? // positive, negative, neutral
-
-  firstSeenAt DateTime @default(now()) @map("first_seen_at")
-  lastSeenAt  DateTime @default(now()) @map("last_seen_at")
-
-  researchJob ResearchJob? @relation(fields: [researchJobId], references: [id], onDelete: SetNull)
-  socialPost  SocialPost?  @relation(fields: [socialPostId], references: [id], onDelete: SetNull)
+  id            String       @id @default(uuid())
+  researchJobId String?      @map("research_job_id")
+  socialPostId  String?      @map("social_post_id")
+  name          String
+  platform      String?
+  type          String?
+  volume        Int?
+  growthRate    Float?       @map("growth_rate")
+  sentiment     String?
+  firstSeenAt   DateTime     @default(now()) @map("first_seen_at")
+  lastSeenAt    DateTime     @default(now()) @map("last_seen_at")
+  researchJob   ResearchJob? @relation(fields: [researchJobId], references: [id])
+  socialPost    SocialPost?  @relation(fields: [socialPostId], references: [id])
 
   @@index([name])
   @@index([researchJobId])
@@ -338,136 +279,90 @@ model SocialTrend {
 }
 
 model SearchTrend {
-  id            String @id @default(uuid())
-  researchJobId String @map("research_job_id")
-
-  keyword   String // The term analyzed
-  region    String @default("US")
-  timeframe String @default("today 12-m")
-
-  // Data Points
-  interestOverTime Json? @map("interest_over_time") // Time series data
-  relatedQueries   Json? @map("related_queries") // Rising/Top related queries
-  relatedTopics    Json? @map("related_topics")
-
-  createdAt DateTime @default(now()) @map("created_at")
-
-  researchJob ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  id               String      @id @default(uuid())
+  researchJobId    String      @map("research_job_id")
+  keyword          String
+  region           String      @default("US")
+  timeframe        String      @default("today 12-m")
+  interestOverTime Json?       @map("interest_over_time")
+  relatedQueries   Json?       @map("related_queries")
+  relatedTopics    Json?       @map("related_topics")
+  createdAt        DateTime    @default(now()) @map("created_at")
+  researchJob      ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
 
   @@index([researchJobId])
   @@map("search_trends")
 }
 
 model CommunityInsight {
-  id            String @id @default(uuid())
-  researchJobId String @map("research_job_id")
-
-  source  String // reddit, quora, trustpilot, forum
-  url     String
-  content String // The raw comment/post text
-
-  // AI Analysis
-  sentiment      String? // positive, negative, neutral
-  painPoints     Json? // Extracted friction points []
-  desires        Json? // Extracted unmet needs []
-  marketingHooks Json? // "Vernacular" - phrases to use in copy
-
-  metric      String? // upvotes, likes, stars
-  metricValue Int?    @map("metric_value")
-
-  createdAt DateTime @default(now()) @map("created_at")
-
-  researchJob ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  id                     String                @id @default(uuid())
+  researchJobId          String                @map("research_job_id")
+  source                 String
+  url                    String
+  content                String
+  sentiment              String?
+  painPoints             Json?
+  desires                Json?
+  marketingHooks         Json?
+  metric                 String?
+  metricValue            Int?                  @map("metric_value")
+  createdAt              DateTime              @default(now()) @map("created_at")
+  brandIntelligenceRunId String?               @map("brand_intelligence_run_id")
+  sourceQuery            String?               @map("source_query")
+  evidence               Json?
+  brandIntelligenceRun   BrandIntelligenceRun? @relation(fields: [brandIntelligenceRunId], references: [id])
+  researchJob            ResearchJob           @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
 
   @@index([researchJobId])
+  @@index([brandIntelligenceRunId])
   @@map("community_insights")
 }
 
-// AI-generated business insights (Layer 2)
 model AiBusinessAnalysis {
-  id            String @id @default(uuid())
-  researchJobId String @map("research_job_id")
-
-  // Key business questions answered by AI
-  valueProposition     String? @map("value_proposition")
-  targetAudience       String? @map("target_audience")
-  contentPillars       Json?   @map("content_pillars") // Array of pillars
-  brandVoice           String? @map("brand_voice")
-  brandPersonality     String? @map("brand_personality")
-  competitorAnalysis   String? @map("competitor_analysis")
-  nichePosition        String? @map("niche_position")
-  uniqueStrengths      Json?   @map("unique_strengths") // Array
-  contentOpportunities Json?   @map("content_opportunities") // Array
-
-  // Raw AI response for full context
-  rawAiResponse Json?   @map("raw_ai_response")
-  promptUsed    String? @map("prompt_used")
-  modelUsed     String? @map("model_used")
-  tokensUsed    Int?    @map("tokens_used")
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  researchJob ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  id                   String      @id @default(uuid())
+  researchJobId        String      @map("research_job_id")
+  valueProposition     String?     @map("value_proposition")
+  targetAudience       String?     @map("target_audience")
+  contentPillars       Json?       @map("content_pillars")
+  brandVoice           String?     @map("brand_voice")
+  brandPersonality     String?     @map("brand_personality")
+  competitorAnalysis   String?     @map("competitor_analysis")
+  nichePosition        String?     @map("niche_position")
+  uniqueStrengths      Json?       @map("unique_strengths")
+  contentOpportunities Json?       @map("content_opportunities")
+  rawAiResponse        Json?       @map("raw_ai_response")
+  promptUsed           String?     @map("prompt_used")
+  modelUsed            String?     @map("model_used")
+  tokensUsed           Int?        @map("tokens_used")
+  createdAt            DateTime    @default(now()) @map("created_at")
+  updatedAt            DateTime    @updatedAt @map("updated_at")
+  researchJob          ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
 
   @@index([researchJobId])
   @@map("ai_business_analyses")
 }
 
-// Deep AI Questions - each question is a separate request
-enum AiQuestionType {
-  VALUE_PROPOSITION
-  TARGET_AUDIENCE
-  CONTENT_PILLARS
-  BRAND_VOICE
-  BRAND_PERSONALITY
-  COMPETITOR_ANALYSIS
-  NICHE_POSITION
-  UNIQUE_STRENGTHS
-  CONTENT_OPPORTUNITIES
-  GROWTH_STRATEGY
-  PAIN_POINTS
-  KEY_DIFFERENTIATORS
-  COMPETITOR_DISCOVERY_METHOD
-  CUSTOM
-}
-
 model AiQuestion {
-  id            String @id @default(uuid())
-  researchJobId String @map("research_job_id")
+  id            String         @id @default(uuid())
+  researchJobId String         @map("research_job_id")
+  questionType  AiQuestionType @map("question_type")
+  question      String
+  answer        String?
+  answerJson    Json?          @map("answer_json")
+  contextUsed   String?        @map("context_used")
+  promptUsed    String?        @map("prompt_used")
+  modelUsed     String?        @map("model_used")
+  tokensUsed    Int?           @map("tokens_used")
+  durationMs    Int?           @map("duration_ms")
+  isAnswered    Boolean        @default(false) @map("is_answered")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  answeredAt    DateTime?      @map("answered_at")
+  researchJob   ResearchJob    @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
 
-  questionType AiQuestionType @map("question_type")
-  question     String // The actual question asked
-  answer       String? // AI's answer (can be long)
-  answerJson   Json?          @map("answer_json") // Structured answer if applicable
-
-  // Context provided to AI
-  contextUsed String? @map("context_used") // Summary of context given
-
-  // Tracking
-  promptUsed String? @map("prompt_used")
-  modelUsed  String? @map("model_used")
-  tokensUsed Int?    @map("tokens_used")
-  durationMs Int?    @map("duration_ms")
-
-  isAnswered Boolean   @default(false) @map("is_answered")
-  createdAt  DateTime  @default(now()) @map("created_at")
-  answeredAt DateTime? @map("answered_at")
-
-  researchJob ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
-
-  @@unique([researchJobId, questionType]) // One answer per question type per job
+  @@unique([researchJobId, questionType])
   @@index([researchJobId])
   @@index([questionType])
   @@map("ai_questions")
-}
-
-enum DocumentType {
-  BUSINESS_PLAN
-  VISION_DOC
-  BRAND_GUIDELINES
-  INTAKE_FORM
-  OTHER
 }
 
 model ClientDocument {
@@ -481,11 +376,685 @@ model ClientDocument {
   extractedText String?      @map("extracted_text")
   isProcessed   Boolean      @default(false) @map("is_processed")
   uploadedAt    DateTime     @default(now()) @map("uploaded_at")
-
-  client     Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  aiAnalyses AiAnalysis[]
+  aiAnalyses    AiAnalysis[]
+  client        Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
   @@map("client_documents")
+}
+
+model BrainProfile {
+  id             String      @id @default(uuid())
+  clientId       String      @unique @map("client_id")
+  businessType   String?     @map("business_type")
+  offerModel     String?     @map("offer_model")
+  primaryGoal    String?     @map("primary_goal")
+  secondaryGoals Json?       @map("secondary_goals")
+  targetMarket   String?     @map("target_market")
+  geoScope       String?     @map("geo_scope")
+  websiteDomain  String?     @map("website_domain")
+  channels       Json?
+  constraints    Json?
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+  goals          BrainGoal[]
+  client         Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@map("brain_profiles")
+}
+
+model BrainGoal {
+  id             String       @id @default(uuid())
+  brainProfileId String       @map("brain_profile_id")
+  goalType       String       @map("goal_type")
+  priority       Int          @default(1)
+  targetMetric   String?      @map("target_metric")
+  targetValue    String?      @map("target_value")
+  targetDate     DateTime?    @map("target_date")
+  notes          String?
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  brainProfile   BrainProfile @relation(fields: [brainProfileId], references: [id], onDelete: Cascade)
+
+  @@index([brainProfileId, priority])
+  @@map("brain_goals")
+}
+
+model BrainCommand {
+  id            String             @id @default(uuid())
+  researchJobId String             @map("research_job_id")
+  section       String
+  commandType   BrainCommandType   @map("command_type")
+  instruction   String
+  proposedPatch Json?              @map("proposed_patch")
+  appliedPatch  Json?              @map("applied_patch")
+  status        BrainCommandStatus @default(PENDING)
+  error         String?
+  createdBy     String?            @map("created_by")
+  createdAt     DateTime           @default(now()) @map("created_at")
+  appliedAt     DateTime?          @map("applied_at")
+  researchJob   ResearchJob        @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+
+  @@index([researchJobId, status, createdAt(sort: Desc)])
+  @@map("brain_commands")
+}
+
+model OrchestrationPlan {
+  id            String                  @id @default(uuid())
+  researchJobId String                  @map("research_job_id")
+  runId         String?                 @map("run_id")
+  steps         Json
+  status        OrchestrationStepStatus @default(PENDING)
+  diagnostics   Json?
+  createdAt     DateTime                @default(now()) @map("created_at")
+  updatedAt     DateTime                @updatedAt @map("updated_at")
+  researchJob   ResearchJob             @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+
+  @@index([researchJobId, createdAt(sort: Desc)])
+  @@map("orchestration_plans")
+}
+
+model DiscoveredCompetitor {
+  id                 String                       @id @default(uuid())
+  researchJobId      String                       @map("research_job_id")
+  competitorId       String?                      @map("competitor_id")
+  handle             String
+  platform           String
+  profileUrl         String?                      @map("profile_url")
+  discoveryReason    String?                      @map("discovery_reason")
+  relevanceScore     Float?                       @map("relevance_score")
+  status             DiscoveredCompetitorStatus   @default(SUGGESTED)
+  discoveredAt       DateTime                     @default(now()) @map("discovered_at")
+  scrapedAt          DateTime?                    @map("scraped_at")
+  postsScraped       Int                          @default(0) @map("posts_scraped")
+  lastCheckedAt      DateTime?                    @map("last_checked_at")
+  latestPostId       String?                      @map("latest_post_id")
+  evidence           Json?
+  orchestrationRunId String?                      @map("orchestration_run_id")
+  scoreBreakdown     Json?                        @map("score_breakdown")
+  selectionReason    String?                      @map("selection_reason")
+  selectionState     CompetitorSelectionState     @default(SHORTLISTED) @map("selection_state")
+  candidateProfileId String?                      @map("candidate_profile_id")
+  availabilityStatus CompetitorAvailabilityStatus @default(UNVERIFIED) @map("availability_status")
+  availabilityReason String?                      @map("availability_reason")
+  displayOrder       Int?                         @map("display_order")
+  manuallyModified   Boolean                      @default(false) @map("manually_modified")
+  lastModifiedBy     String?                      @map("last_modified_by")
+  lastModifiedAt     DateTime?                    @map("last_modified_at")
+  candidateProfile   CompetitorCandidateProfile?  @relation(fields: [candidateProfileId], references: [id])
+  competitor         Competitor?                  @relation(fields: [competitorId], references: [id])
+  orchestrationRun   CompetitorOrchestrationRun?  @relation(fields: [orchestrationRunId], references: [id])
+  researchJob        ResearchJob                  @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+
+  @@unique([researchJobId, platform, handle])
+  @@index([researchJobId, selectionState, relevanceScore(sort: Desc)])
+  @@index([orchestrationRunId])
+  @@index([candidateProfileId])
+  @@index([researchJobId, selectionState, relevanceScore(sort: Desc)], map: "discovered_competitors_research_job_id_selection_state_relevanc")
+  @@map("discovered_competitors")
+}
+
+model CompetitorOrchestrationRun {
+  id                    String                       @id @default(uuid())
+  researchJobId         String                       @map("research_job_id")
+  platforms             Json
+  targetCount           Int                          @default(10) @map("target_count")
+  mode                  String                       @default("append")
+  status                String                       @default("RUNNING")
+  summary               Json?
+  startedAt             DateTime                     @default(now()) @map("started_at")
+  completedAt           DateTime?                    @map("completed_at")
+  createdAt             DateTime                     @default(now()) @map("created_at")
+  strategyVersion       String                       @default("v2") @map("strategy_version")
+  configSnapshot        Json?                        @map("config_snapshot")
+  diagnostics           Json?
+  phase                 String?
+  errorCode             String?                      @map("error_code")
+  degradedConnectors    Json?                        @map("degraded_connectors")
+  qualityScore          Float?                       @map("quality_score")
+  candidateProfiles     CompetitorCandidateProfile[]
+  researchJob           ResearchJob                  @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  discoveredCompetitors DiscoveredCompetitor[]
+
+  @@index([researchJobId, createdAt(sort: Desc)])
+  @@map("competitor_orchestration_runs")
+}
+
+model BrandIntelligenceRun {
+  id                String             @id @default(uuid())
+  researchJobId     String             @map("research_job_id")
+  status            String             @default("RUNNING")
+  mode              String             @default("append")
+  modules           Json
+  moduleOrder       Json               @map("module_order")
+  moduleInputs      Json?              @map("module_inputs")
+  runReason         String?            @map("run_reason")
+  diagnostics       Json?
+  summary           Json?
+  startedAt         DateTime           @default(now()) @map("started_at")
+  completedAt       DateTime?          @map("completed_at")
+  createdAt         DateTime           @default(now()) @map("created_at")
+  researchJob       ResearchJob        @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  brandMentions     BrandMention[]
+  communityInsights CommunityInsight[]
+
+  @@index([researchJobId, createdAt(sort: Desc)])
+  @@map("brand_intelligence_runs")
+}
+
+model CompetitorIdentity {
+  id                String                       @id @default(uuid())
+  researchJobId     String                       @map("research_job_id")
+  canonicalName     String                       @map("canonical_name")
+  websiteDomain     String?                      @map("website_domain")
+  businessType      String?                      @map("business_type")
+  audienceSummary   String?                      @map("audience_summary")
+  createdAt         DateTime                     @default(now()) @map("created_at")
+  updatedAt         DateTime                     @updatedAt @map("updated_at")
+  candidateProfiles CompetitorCandidateProfile[]
+  researchJob       ResearchJob                  @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+
+  @@index([researchJobId, canonicalName])
+  @@map("competitor_identities")
+}
+
+model CompetitorCandidateProfile {
+  id                    String                        @id @default(uuid())
+  researchJobId         String                        @map("research_job_id")
+  orchestrationRunId    String                        @map("orchestration_run_id")
+  identityId            String?                       @map("identity_id")
+  platform              String
+  handle                String
+  normalizedHandle      String                        @map("normalized_handle")
+  profileUrl            String?                       @map("profile_url")
+  source                String
+  availabilityStatus    CompetitorAvailabilityStatus  @default(UNVERIFIED) @map("availability_status")
+  availabilityReason    String?                       @map("availability_reason")
+  resolverConfidence    Float?                        @map("resolver_confidence")
+  state                 CompetitorCandidateState      @default(DISCOVERED)
+  stateReason           String?                       @map("state_reason")
+  relevanceScore        Float?                        @map("relevance_score")
+  scoreBreakdown        Json?                         @map("score_breakdown")
+  evidence              Json?
+  createdAt             DateTime                      @default(now()) @map("created_at")
+  updatedAt             DateTime                      @updatedAt @map("updated_at")
+  lastVerifiedAt        DateTime?                     @map("last_verified_at")
+  verificationAttempts  Int                           @default(0) @map("verification_attempts")
+  verificationSource    String?                       @map("verification_source")
+  displayOrder          Int?                          @map("display_order")
+  evidenceRows          CompetitorCandidateEvidence[]
+  identity              CompetitorIdentity?           @relation(fields: [identityId], references: [id])
+  orchestrationRun      CompetitorOrchestrationRun    @relation(fields: [orchestrationRunId], references: [id], onDelete: Cascade)
+  researchJob           ResearchJob                   @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  discoveredCompetitors DiscoveredCompetitor[]
+
+  @@unique([researchJobId, platform, normalizedHandle])
+  @@index([researchJobId, state, relevanceScore(sort: Desc)])
+  @@index([researchJobId, availabilityStatus])
+  @@index([orchestrationRunId, platform])
+  @@index([identityId])
+  @@map("competitor_candidate_profiles")
+}
+
+model CompetitorCandidateEvidence {
+  id                 String                     @id @default(uuid())
+  candidateProfileId String                     @map("candidate_profile_id")
+  sourceType         String                     @map("source_type")
+  query              String?
+  title              String?
+  url                String?
+  snippet            String?
+  signalScore        Float?                     @map("signal_score")
+  createdAt          DateTime                   @default(now()) @map("created_at")
+  candidateProfile   CompetitorCandidateProfile @relation(fields: [candidateProfileId], references: [id], onDelete: Cascade)
+
+  @@index([candidateProfileId])
+  @@map("competitor_candidate_evidence")
+}
+
+model ClientAccount {
+  id              String       @id @default(uuid())
+  clientId        String       @map("client_id")
+  platform        String
+  handle          String
+  profileUrl      String?      @map("profile_url")
+  followerCount   Int?         @map("follower_count")
+  followingCount  Int?         @map("following_count")
+  bio             String?
+  profileImageUrl String?      @map("profile_image_url")
+  lastScrapedAt   DateTime?    @map("last_scraped_at")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  client          Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  clientPosts     ClientPost[]
+
+  @@unique([clientId, platform, handle])
+  @@map("client_accounts")
+}
+
+model ClientPost {
+  id              String        @id @default(uuid())
+  clientAccountId String        @map("client_account_id")
+  externalPostId  String        @unique @map("external_post_id")
+  postUrl         String?       @map("post_url")
+  caption         String?
+  format          String?
+  likes           Int?
+  comments        Int?
+  saves           Int?
+  shares          Int?
+  engagementRate  Float?        @map("engagement_rate")
+  rawApiResponse  Json?         @map("raw_api_response")
+  postedAt        DateTime?     @map("posted_at")
+  scrapedAt       DateTime      @default(now()) @map("scraped_at")
+  aiAnalyses      AiAnalysis[]
+  clientAccount   ClientAccount @relation(fields: [clientAccountId], references: [id], onDelete: Cascade)
+  mediaAssets     MediaAsset[]
+
+  @@map("client_posts")
+}
+
+model Competitor {
+  id                     String                 @id @default(uuid())
+  clientId               String                 @map("client_id")
+  name                   String?
+  handle                 String
+  platform               String
+  isPriority             Boolean                @default(false) @map("is_priority")
+  followerCount          Int?                   @map("follower_count")
+  postingFrequency       String?                @map("posting_frequency")
+  mostUsedFormats        Json?                  @map("most_used_formats")
+  contentPillarsObserved String?                @map("content_pillars_observed")
+  engagementLevel        String?                @map("engagement_level")
+  lastScrapedAt          DateTime?              @map("last_scraped_at")
+  competitorProfiles     CompetitorProfile[]
+  client                 Client                 @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  discoveredCompetitors  DiscoveredCompetitor[]
+  rawPosts               RawPost[]
+
+  @@unique([clientId, platform, handle])
+  @@map("competitors")
+}
+
+model RawPost {
+  id             String        @id @default(uuid())
+  competitorId   String        @map("competitor_id")
+  externalPostId String        @unique @map("external_post_id")
+  platform       String
+  postUrl        String?       @map("post_url")
+  rawApiResponse Json?         @map("raw_api_response")
+  scrapeSource   String?       @map("scrape_source")
+  status         RawPostStatus @default(PENDING)
+  scrapedAt      DateTime      @default(now()) @map("scraped_at")
+  cleanedPost    CleanedPost?
+  competitor     Competitor    @relation(fields: [competitorId], references: [id], onDelete: Cascade)
+
+  @@map("raw_posts")
+}
+
+model CleanedPost {
+  id             String          @id @default(uuid())
+  rawPostId      String          @unique @map("raw_post_id")
+  competitorId   String          @map("competitor_id")
+  externalPostId String          @unique @map("external_post_id")
+  postUrl        String?         @map("post_url")
+  caption        String?
+  format         String?
+  likes          Int?
+  comments       Int?
+  saves          Int?
+  shares         Int?
+  engagementRate Float?          @map("engagement_rate")
+  postedAt       DateTime?       @map("posted_at")
+  cleanedAt      DateTime        @default(now()) @map("cleaned_at")
+  aiAnalyses     AiAnalysis[]
+  rawPost        RawPost         @relation(fields: [rawPostId], references: [id], onDelete: Cascade)
+  mediaAssets    MediaAsset[]
+  pillarExamples PillarExample[]
+
+  @@map("cleaned_posts")
+}
+
+model MediaAsset {
+  id                       String                  @id @default(uuid())
+  clientPostId             String?                 @map("client_post_id")
+  cleanedPostId            String?                 @map("cleaned_post_id")
+  socialPostId             String?                 @map("social_post_id")
+  clientPostSnapshotId     String?                 @map("client_post_snapshot_id")
+  competitorPostSnapshotId String?                 @map("competitor_post_snapshot_id")
+  sourceType               MediaSourceType?        @map("source_type")
+  sourceId                 String?                 @map("source_id")
+  externalMediaId          String?                 @map("external_media_id")
+  mediaType                MediaType               @map("media_type")
+  originalUrl              String?                 @map("original_url")
+  blobStoragePath          String?                 @map("blob_storage_path")
+  fileSizeBytes            Int?                    @map("file_size_bytes")
+  durationSeconds          Int?                    @map("duration_seconds")
+  width                    Int?
+  height                   Int?
+  thumbnailPath            String?                 @map("thumbnail_path")
+  isDownloaded             Boolean                 @default(false) @map("is_downloaded")
+  downloadedAt             DateTime?               @map("downloaded_at")
+  ddgVideoResultId         String?                 @map("ddg_video_result_id")
+  ddgImageResultId         String?                 @map("ddg_image_result_id")
+  aiAnalyses               AiAnalysis[]
+  cleanedPost              CleanedPost?            @relation(fields: [cleanedPostId], references: [id], onDelete: Cascade)
+  clientPost               ClientPost?             @relation(fields: [clientPostId], references: [id], onDelete: Cascade)
+  clientPostSnapshot       ClientPostSnapshot?     @relation(fields: [clientPostSnapshotId], references: [id], onDelete: Cascade)
+  competitorPostSnapshot   CompetitorPostSnapshot? @relation(fields: [competitorPostSnapshotId], references: [id], onDelete: Cascade)
+  ddgImageResult           DdgImageResult?         @relation(fields: [ddgImageResultId], references: [id])
+  ddgVideoResult           DdgVideoResult?         @relation(fields: [ddgVideoResultId], references: [id])
+  socialPost               SocialPost?             @relation(fields: [socialPostId], references: [id], onDelete: Cascade)
+
+  @@index([sourceType, sourceId])
+  @@index([clientPostSnapshotId])
+  @@index([competitorPostSnapshotId])
+  @@map("media_assets")
+}
+
+model ClientProfile {
+  id              String                  @id @default(uuid())
+  clientId        String                  @map("client_id")
+  platform        String
+  handle          String
+  profileUrl      String?                 @map("profile_url")
+  followerCount   Int?                    @map("follower_count")
+  followingCount  Int?                    @map("following_count")
+  bio             String?
+  profileImageUrl String?                 @map("profile_image_url")
+  isVerified      Boolean                 @default(false) @map("is_verified")
+  isPrivate       Boolean                 @default(false) @map("is_private")
+  lastScrapedAt   DateTime?               @map("last_scraped_at")
+  createdAt       DateTime                @default(now()) @map("created_at")
+  updatedAt       DateTime                @updatedAt @map("updated_at")
+  snapshots       ClientProfileSnapshot[]
+  client          Client                  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, platform, handle])
+  @@map("client_profiles")
+}
+
+model ClientProfileSnapshot {
+  id                 String               @id @default(uuid())
+  clientProfileId    String               @map("client_profile_id")
+  researchJobId      String?              @map("research_job_id")
+  followerCount      Int?                 @map("follower_count")
+  followingCount     Int?                 @map("following_count")
+  bio                String?
+  profileImageUrl    String?              @map("profile_image_url")
+  postsCount         Int?                 @map("posts_count")
+  isVerified         Boolean              @default(false) @map("is_verified")
+  isPrivate          Boolean              @default(false) @map("is_private")
+  runId              String?              @map("run_id")
+  orchestrationState Json?                @map("orchestration_state")
+  scrapedAt          DateTime             @default(now()) @map("scraped_at")
+  createdAt          DateTime             @default(now()) @map("created_at")
+  updatedAt          DateTime             @updatedAt @map("updated_at")
+  posts              ClientPostSnapshot[]
+  clientProfile      ClientProfile        @relation(fields: [clientProfileId], references: [id], onDelete: Cascade)
+  researchJob        ResearchJob?         @relation(fields: [researchJobId], references: [id])
+
+  @@index([researchJobId])
+  @@map("client_profile_snapshots")
+}
+
+model ClientPostSnapshot {
+  id                      String                @id @default(uuid())
+  clientProfileSnapshotId String                @map("client_profile_snapshot_id")
+  externalPostId          String                @map("external_post_id")
+  postUrl                 String?               @map("post_url")
+  caption                 String?
+  format                  String?
+  likesCount              Int?                  @map("likes_count")
+  commentsCount           Int?                  @map("comments_count")
+  sharesCount             Int?                  @map("shares_count")
+  savesCount              Int?                  @map("saves_count")
+  viewsCount              Int?                  @map("views_count")
+  playsCount              Int?                  @map("plays_count")
+  engagementRate          Float?                @map("engagement_rate")
+  postedAt                DateTime?             @map("posted_at")
+  scrapedAt               DateTime              @default(now()) @map("scraped_at")
+  clientProfileSnapshot   ClientProfileSnapshot @relation(fields: [clientProfileSnapshotId], references: [id], onDelete: Cascade)
+  mediaAssets             MediaAsset[]
+
+  @@unique([clientProfileSnapshotId, externalPostId])
+  @@map("client_post_snapshots")
+}
+
+model CompetitorProfile {
+  id              String                      @id @default(uuid())
+  competitorId    String                      @map("competitor_id")
+  platform        String
+  handle          String
+  profileUrl      String?                     @map("profile_url")
+  followerCount   Int?                        @map("follower_count")
+  followingCount  Int?                        @map("following_count")
+  bio             String?
+  profileImageUrl String?                     @map("profile_image_url")
+  isVerified      Boolean                     @default(false) @map("is_verified")
+  isPrivate       Boolean                     @default(false) @map("is_private")
+  lastScrapedAt   DateTime?                   @map("last_scraped_at")
+  createdAt       DateTime                    @default(now()) @map("created_at")
+  updatedAt       DateTime                    @updatedAt @map("updated_at")
+  snapshots       CompetitorProfileSnapshot[]
+  competitor      Competitor                  @relation(fields: [competitorId], references: [id], onDelete: Cascade)
+
+  @@unique([competitorId, platform, handle])
+  @@map("competitor_profiles")
+}
+
+model CompetitorProfileSnapshot {
+  id                  String                   @id @default(uuid())
+  competitorProfileId String                   @map("competitor_profile_id")
+  researchJobId       String?                  @map("research_job_id")
+  followerCount       Int?                     @map("follower_count")
+  followingCount      Int?                     @map("following_count")
+  bio                 String?
+  profileImageUrl     String?                  @map("profile_image_url")
+  postsCount          Int?                     @map("posts_count")
+  isVerified          Boolean                  @default(false) @map("is_verified")
+  isPrivate           Boolean                  @default(false) @map("is_private")
+  runId               String?                  @map("run_id")
+  orchestrationState  Json?                    @map("orchestration_state")
+  scrapedAt           DateTime                 @default(now()) @map("scraped_at")
+  createdAt           DateTime                 @default(now()) @map("created_at")
+  updatedAt           DateTime                 @updatedAt @map("updated_at")
+  posts               CompetitorPostSnapshot[]
+  competitorProfile   CompetitorProfile        @relation(fields: [competitorProfileId], references: [id], onDelete: Cascade)
+  researchJob         ResearchJob?             @relation(fields: [researchJobId], references: [id])
+
+  @@index([researchJobId])
+  @@map("competitor_profile_snapshots")
+}
+
+model CompetitorPostSnapshot {
+  id                          String                    @id @default(uuid())
+  competitorProfileSnapshotId String                    @map("competitor_profile_snapshot_id")
+  externalPostId              String                    @map("external_post_id")
+  postUrl                     String?                   @map("post_url")
+  caption                     String?
+  format                      String?
+  likesCount                  Int?                      @map("likes_count")
+  commentsCount               Int?                      @map("comments_count")
+  sharesCount                 Int?                      @map("shares_count")
+  savesCount                  Int?                      @map("saves_count")
+  viewsCount                  Int?                      @map("views_count")
+  playsCount                  Int?                      @map("plays_count")
+  engagementRate              Float?                    @map("engagement_rate")
+  postedAt                    DateTime?                 @map("posted_at")
+  scrapedAt                   DateTime                  @default(now()) @map("scraped_at")
+  competitorProfileSnapshot   CompetitorProfileSnapshot @relation(fields: [competitorProfileSnapshotId], references: [id], onDelete: Cascade)
+  mediaAssets                 MediaAsset[]
+
+  @@unique([competitorProfileSnapshotId, externalPostId])
+  @@map("competitor_post_snapshots")
+}
+
+model BrandMention {
+  id                     String                       @id @default(uuid())
+  clientId               String                       @map("client_id")
+  url                    String
+  title                  String?
+  snippet                String?
+  fullText               String?                      @map("full_text")
+  sourceType             String?                      @map("source_type")
+  scrapedAt              DateTime                     @default(now()) @map("scraped_at")
+  brandIntelligenceRunId String?                      @map("brand_intelligence_run_id")
+  availabilityStatus     CompetitorAvailabilityStatus @default(UNVERIFIED) @map("availability_status")
+  availabilityReason     String?                      @map("availability_reason")
+  resolverConfidence     Float?                       @map("resolver_confidence")
+  evidence               Json?
+  aiAnalyses             AiAnalysis[]
+  brandIntelligenceRun   BrandIntelligenceRun?        @relation(fields: [brandIntelligenceRunId], references: [id])
+  client                 Client                       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([brandIntelligenceRunId])
+  @@map("brand_mentions")
+}
+
+model AiAnalysis {
+  id                    String          @id @default(uuid())
+  researchJobId         String?         @map("research_job_id")
+  clientPostId          String?         @map("client_post_id")
+  cleanedPostId         String?         @map("cleaned_post_id")
+  mediaAssetId          String?         @map("media_asset_id")
+  clientDocumentId      String?         @map("client_document_id")
+  brandMentionId        String?         @map("brand_mention_id")
+  analysisType          AnalysisType    @map("analysis_type")
+  modelUsed             String?         @map("model_used")
+  topic                 String?
+  contentPillarDetected String?         @map("content_pillar_detected")
+  keywordsHooks         String?         @map("keywords_hooks")
+  painPointAddressed    String?         @map("pain_point_addressed")
+  goalAddressed         String?         @map("goal_addressed")
+  visualStyleNotes      String?         @map("visual_style_notes")
+  hookAnalysis          String?         @map("hook_analysis")
+  fullResponse          Json?           @map("full_response")
+  confidenceScore       Float?          @map("confidence_score")
+  tokensUsed            Int?            @map("tokens_used")
+  analyzedAt            DateTime        @default(now()) @map("analyzed_at")
+  brandMention          BrandMention?   @relation(fields: [brandMentionId], references: [id], onDelete: Cascade)
+  cleanedPost           CleanedPost?    @relation(fields: [cleanedPostId], references: [id], onDelete: Cascade)
+  clientDocument        ClientDocument? @relation(fields: [clientDocumentId], references: [id], onDelete: Cascade)
+  clientPost            ClientPost?     @relation(fields: [clientPostId], references: [id], onDelete: Cascade)
+  mediaAsset            MediaAsset?     @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+  researchJob           ResearchJob?    @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+
+  @@map("ai_analyses")
+}
+
+model ContentPillar {
+  id                  String          @id @default(uuid())
+  clientId            String          @map("client_id")
+  name                String
+  purpose             String?
+  rationale           String?
+  emotionalConnection String?         @map("emotional_connection")
+  addressesPainPoints String?         @map("addresses_pain_points")
+  client              Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  pillarExamples      PillarExample[]
+  formats             Format[]        @relation("PillarFormats")
+
+  @@map("content_pillars")
+}
+
+model PillarExample {
+  id            String        @id @default(uuid())
+  pillarId      String        @map("pillar_id")
+  cleanedPostId String?       @map("cleaned_post_id")
+  topicHook     String?       @map("topic_hook")
+  cleanedPost   CleanedPost?  @relation(fields: [cleanedPostId], references: [id])
+  pillar        ContentPillar @relation(fields: [pillarId], references: [id], onDelete: Cascade)
+
+  @@map("pillar_examples")
+}
+
+model Format {
+  id                  String          @id @default(uuid())
+  name                String          @unique
+  description         String?
+  purpose             String?
+  pros                String?
+  cons                String?
+  expectedPerformance String?         @map("expected_performance")
+  clientRequirements  String?         @map("client_requirements")
+  pillars             ContentPillar[] @relation("PillarFormats")
+
+  @@map("formats")
+}
+
+model BuyerJourneyStage {
+  id                 String  @id @default(uuid())
+  clientId           String  @map("client_id")
+  stageName          String  @map("stage_name")
+  stageOrder         Int     @map("stage_order")
+  questions          String?
+  actions            String?
+  relevantPillars    Json?   @map("relevant_pillars")
+  recommendedFormats Json?   @map("recommended_formats")
+  client             Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@map("buyer_journey_stages")
+}
+
+model PlatformStrategy {
+  id             String  @id @default(uuid())
+  clientId       String  @map("client_id")
+  platformName   String  @map("platform_name")
+  isPrimary      Boolean @default(false) @map("is_primary")
+  reason         String?
+  focus          String?
+  repostStrategy String? @map("repost_strategy")
+  kpis           Json?
+  client         Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@map("platform_strategies")
+}
+
+model MonitoringLog {
+  id              String   @id @default(uuid())
+  clientId        String   @map("client_id")
+  lastMonitoredAt DateTime @map("last_monitored_at")
+  profilesScraped Int      @default(0) @map("profiles_scraped")
+  postsDiscovered Int      @default(0) @map("posts_discovered")
+  errors          Json?
+  status          String   @default("SUCCESS")
+  client          Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@map("monitoring_logs")
+}
+
+enum ResearchJobStatus {
+  PENDING
+  SCRAPING_CLIENT
+  DISCOVERING_COMPETITORS
+  SCRAPING_COMPETITORS
+  ANALYZING
+  COMPLETE
+  FAILED
+}
+
+enum AiQuestionType {
+  VALUE_PROPOSITION
+  TARGET_AUDIENCE
+  CONTENT_PILLARS
+  BRAND_VOICE
+  BRAND_PERSONALITY
+  COMPETITOR_ANALYSIS
+  NICHE_POSITION
+  UNIQUE_STRENGTHS
+  CONTENT_OPPORTUNITIES
+  GROWTH_STRATEGY
+  PAIN_POINTS
+  KEY_DIFFERENTIATORS
+  CUSTOM
+  COMPETITOR_DISCOVERY_METHOD
+}
+
+enum DocumentType {
+  BUSINESS_PLAN
+  VISION_DOC
+  BRAND_GUIDELINES
+  INTAKE_FORM
+  OTHER
 }
 
 enum DiscoveredCompetitorStatus {
@@ -547,345 +1116,12 @@ enum OrchestrationStepStatus {
   SKIPPED
 }
 
-model BrainProfile {
-  id             String   @id @default(uuid())
-  clientId       String   @unique @map("client_id")
-  businessType   String?  @map("business_type")
-  offerModel     String?  @map("offer_model")
-  primaryGoal    String?  @map("primary_goal")
-  secondaryGoals Json?    @map("secondary_goals")
-  targetMarket   String?  @map("target_market")
-  geoScope       String?  @map("geo_scope")
-  websiteDomain  String?  @map("website_domain")
-  channels       Json?
-  constraints    Json?
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
-
-  client Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  goals  BrainGoal[]
-
-  @@map("brain_profiles")
-}
-
-model BrainGoal {
-  id             String    @id @default(uuid())
-  brainProfileId String    @map("brain_profile_id")
-  goalType       String    @map("goal_type")
-  priority       Int       @default(1)
-  targetMetric   String?   @map("target_metric")
-  targetValue    String?   @map("target_value")
-  targetDate     DateTime? @map("target_date")
-  notes          String?
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @updatedAt @map("updated_at")
-
-  brainProfile BrainProfile @relation(fields: [brainProfileId], references: [id], onDelete: Cascade)
-
-  @@index([brainProfileId, priority])
-  @@map("brain_goals")
-}
-
-model BrainCommand {
-  id            String             @id @default(uuid())
-  researchJobId String             @map("research_job_id")
-  section       String
-  commandType   BrainCommandType   @map("command_type")
-  instruction   String
-  proposedPatch Json?              @map("proposed_patch")
-  appliedPatch  Json?              @map("applied_patch")
-  status        BrainCommandStatus @default(PENDING)
-  error         String?
-  createdBy     String?            @map("created_by")
-  createdAt     DateTime           @default(now()) @map("created_at")
-  appliedAt     DateTime?          @map("applied_at")
-
-  researchJob ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
-
-  @@index([researchJobId, status, createdAt(sort: Desc)])
-  @@map("brain_commands")
-}
-
-model OrchestrationPlan {
-  id            String                  @id @default(uuid())
-  researchJobId String                  @map("research_job_id")
-  runId         String?                 @map("run_id")
-  steps         Json
-  status        OrchestrationStepStatus @default(PENDING)
-  diagnostics   Json?
-  createdAt     DateTime                @default(now()) @map("created_at")
-  updatedAt     DateTime                @updatedAt @map("updated_at")
-
-  researchJob ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
-
-  @@index([researchJobId, createdAt(sort: Desc)])
-  @@map("orchestration_plans")
-}
-
-model DiscoveredCompetitor {
-  id                 String                       @id @default(uuid())
-  researchJobId      String                       @map("research_job_id")
-  competitorId       String?                      @map("competitor_id")
-  orchestrationRunId String?                      @map("orchestration_run_id")
-  candidateProfileId String?                      @map("candidate_profile_id")
-  handle             String
-  platform           String
-  profileUrl         String?                      @map("profile_url")
-  availabilityStatus CompetitorAvailabilityStatus @default(UNVERIFIED) @map("availability_status")
-  availabilityReason String?                      @map("availability_reason")
-  discoveryReason    String?                      @map("discovery_reason")
-  relevanceScore     Float?                       @map("relevance_score")
-  evidence           Json?
-  scoreBreakdown     Json?                        @map("score_breakdown")
-  selectionState     CompetitorSelectionState     @default(SHORTLISTED) @map("selection_state")
-  selectionReason    String?                      @map("selection_reason")
-  status             DiscoveredCompetitorStatus   @default(SUGGESTED)
-  discoveredAt       DateTime                     @default(now()) @map("discovered_at")
-
-  // Scraping progress tracking
-  scrapedAt    DateTime? @map("scraped_at")
-  postsScraped Int       @default(0) @map("posts_scraped")
-
-  // Daily monitoring tracking
-  lastCheckedAt DateTime? @map("last_checked_at")
-  latestPostId  String?   @map("latest_post_id")
-
-  researchJob      ResearchJob                 @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
-  competitor       Competitor?                 @relation(fields: [competitorId], references: [id])
-  orchestrationRun CompetitorOrchestrationRun? @relation(fields: [orchestrationRunId], references: [id], onDelete: SetNull)
-  candidateProfile CompetitorCandidateProfile? @relation(fields: [candidateProfileId], references: [id], onDelete: SetNull)
-
-  @@unique([researchJobId, platform, handle])
-  @@index([researchJobId, selectionState, relevanceScore(sort: Desc)])
-  @@index([orchestrationRunId])
-  @@index([candidateProfileId])
-  @@map("discovered_competitors")
-}
-
-model CompetitorOrchestrationRun {
-  id                 String    @id @default(uuid())
-  researchJobId      String    @map("research_job_id")
-  platforms          Json
-  targetCount        Int       @default(10) @map("target_count")
-  mode               String    @default("append")
-  status             String    @default("RUNNING")
-  strategyVersion    String    @default("v2") @map("strategy_version")
-  configSnapshot     Json?     @map("config_snapshot")
-  diagnostics        Json?
-  phase              String?
-  errorCode          String?   @map("error_code")
-  qualityScore       Float?    @map("quality_score")
-  degradedConnectors Json?     @map("degraded_connectors")
-  summary            Json?
-  startedAt          DateTime  @default(now()) @map("started_at")
-  completedAt        DateTime? @map("completed_at")
-  createdAt          DateTime  @default(now()) @map("created_at")
-
-  researchJob           ResearchJob                  @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
-  discoveredCompetitors DiscoveredCompetitor[]
-  candidateProfiles     CompetitorCandidateProfile[]
-
-  @@index([researchJobId, createdAt(sort: Desc)])
-  @@map("competitor_orchestration_runs")
-}
-
-model CompetitorIdentity {
-  id              String   @id @default(uuid())
-  researchJobId   String   @map("research_job_id")
-  canonicalName   String   @map("canonical_name")
-  websiteDomain   String?  @map("website_domain")
-  businessType    String?  @map("business_type")
-  audienceSummary String?  @map("audience_summary")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
-
-  researchJob       ResearchJob                  @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
-  candidateProfiles CompetitorCandidateProfile[]
-
-  @@index([researchJobId, canonicalName])
-  @@map("competitor_identities")
-}
-
-model CompetitorCandidateProfile {
-  id                   String                       @id @default(uuid())
-  researchJobId        String                       @map("research_job_id")
-  orchestrationRunId   String                       @map("orchestration_run_id")
-  identityId           String?                      @map("identity_id")
-  platform             String
-  handle               String
-  normalizedHandle     String                       @map("normalized_handle")
-  profileUrl           String?                      @map("profile_url")
-  source               String
-  availabilityStatus   CompetitorAvailabilityStatus @default(UNVERIFIED) @map("availability_status")
-  availabilityReason   String?                      @map("availability_reason")
-  lastVerifiedAt       DateTime?                    @map("last_verified_at")
-  verificationSource   String?                      @map("verification_source")
-  verificationAttempts Int                          @default(0) @map("verification_attempts")
-  resolverConfidence   Float?                       @map("resolver_confidence")
-  state                CompetitorCandidateState     @default(DISCOVERED)
-  stateReason          String?                      @map("state_reason")
-  relevanceScore       Float?                       @map("relevance_score")
-  scoreBreakdown       Json?                        @map("score_breakdown")
-  evidence             Json?
-  createdAt            DateTime                     @default(now()) @map("created_at")
-  updatedAt            DateTime                     @updatedAt @map("updated_at")
-
-  researchJob           ResearchJob                   @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
-  orchestrationRun      CompetitorOrchestrationRun    @relation(fields: [orchestrationRunId], references: [id], onDelete: Cascade)
-  identity              CompetitorIdentity?           @relation(fields: [identityId], references: [id], onDelete: SetNull)
-  evidenceRows          CompetitorCandidateEvidence[]
-  discoveredCompetitors DiscoveredCompetitor[]
-
-  @@unique([researchJobId, platform, normalizedHandle])
-  @@index([researchJobId, state, relevanceScore(sort: Desc)])
-  @@index([researchJobId, availabilityStatus])
-  @@index([orchestrationRunId, platform])
-  @@index([identityId])
-  @@map("competitor_candidate_profiles")
-}
-
-model CompetitorCandidateEvidence {
-  id                 String   @id @default(uuid())
-  candidateProfileId String   @map("candidate_profile_id")
-  sourceType         String   @map("source_type")
-  query              String?
-  title              String?
-  url                String?
-  snippet            String?
-  signalScore        Float?   @map("signal_score")
-  createdAt          DateTime @default(now()) @map("created_at")
-
-  candidateProfile CompetitorCandidateProfile @relation(fields: [candidateProfileId], references: [id], onDelete: Cascade)
-
-  @@index([candidateProfileId])
-  @@map("competitor_candidate_evidence")
-}
-
-// ============================================
-// CLIENT CONTENT PIPELINE
-// ============================================
-
-model ClientAccount {
-  id              String    @id @default(uuid())
-  clientId        String    @map("client_id")
-  platform        String
-  handle          String
-  profileUrl      String?   @map("profile_url")
-  followerCount   Int?      @map("follower_count")
-  followingCount  Int?      @map("following_count")
-  bio             String?
-  profileImageUrl String?   @map("profile_image_url")
-  lastScrapedAt   DateTime? @map("last_scraped_at")
-  createdAt       DateTime  @default(now()) @map("created_at")
-
-  client      Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  clientPosts ClientPost[]
-
-  @@unique([clientId, platform, handle])
-  @@map("client_accounts")
-}
-
-model ClientPost {
-  id              String    @id @default(uuid())
-  clientAccountId String    @map("client_account_id")
-  externalPostId  String    @unique @map("external_post_id")
-  postUrl         String?   @map("post_url")
-  caption         String?
-  format          String?
-  likes           Int?
-  comments        Int?
-  saves           Int?
-  shares          Int?
-  engagementRate  Float?    @map("engagement_rate")
-  rawApiResponse  Json?     @map("raw_api_response")
-  postedAt        DateTime? @map("posted_at")
-  scrapedAt       DateTime  @default(now()) @map("scraped_at")
-
-  clientAccount ClientAccount @relation(fields: [clientAccountId], references: [id], onDelete: Cascade)
-  mediaAssets   MediaAsset[]
-  aiAnalyses    AiAnalysis[]
-
-  @@map("client_posts")
-}
-
-// ============================================
-// COMPETITOR CONTENT PIPELINE
-// ============================================
-
-model Competitor {
-  id                     String    @id @default(uuid())
-  clientId               String    @map("client_id")
-  name                   String?
-  handle                 String
-  platform               String
-  isPriority             Boolean   @default(false) @map("is_priority")
-  followerCount          Int?      @map("follower_count")
-  postingFrequency       String?   @map("posting_frequency")
-  mostUsedFormats        Json?     @map("most_used_formats")
-  contentPillarsObserved String?   @map("content_pillars_observed")
-  engagementLevel        String?   @map("engagement_level")
-  lastScrapedAt          DateTime? @map("last_scraped_at")
-
-  client                Client                 @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  rawPosts              RawPost[]
-  discoveredCompetitors DiscoveredCompetitor[]
-  competitorProfiles    CompetitorProfile[]
-
-  @@unique([clientId, platform, handle])
-  @@map("competitors")
-}
-
 enum RawPostStatus {
   PENDING
   PROCESSING
   CLEANED
   FAILED
 }
-
-model RawPost {
-  id             String        @id @default(uuid())
-  competitorId   String        @map("competitor_id")
-  externalPostId String        @unique @map("external_post_id")
-  platform       String
-  postUrl        String?       @map("post_url")
-  rawApiResponse Json?         @map("raw_api_response")
-  scrapeSource   String?       @map("scrape_source")
-  status         RawPostStatus @default(PENDING)
-  scrapedAt      DateTime      @default(now()) @map("scraped_at")
-
-  competitor  Competitor   @relation(fields: [competitorId], references: [id], onDelete: Cascade)
-  cleanedPost CleanedPost?
-
-  @@map("raw_posts")
-}
-
-model CleanedPost {
-  id             String    @id @default(uuid())
-  rawPostId      String    @unique @map("raw_post_id")
-  competitorId   String    @map("competitor_id")
-  externalPostId String    @unique @map("external_post_id")
-  postUrl        String?   @map("post_url")
-  caption        String?
-  format         String?
-  likes          Int?
-  comments       Int?
-  saves          Int?
-  shares         Int?
-  engagementRate Float?    @map("engagement_rate")
-  postedAt       DateTime? @map("posted_at")
-  cleanedAt      DateTime  @default(now()) @map("cleaned_at")
-
-  rawPost        RawPost         @relation(fields: [rawPostId], references: [id], onDelete: Cascade)
-  mediaAssets    MediaAsset[]
-  aiAnalyses     AiAnalysis[]
-  pillarExamples PillarExample[]
-
-  @@map("cleaned_posts")
-}
-
-// ============================================
-// MEDIA & AI ANALYSIS
-// ============================================
 
 enum MediaType {
   IMAGE
@@ -898,213 +1134,6 @@ enum MediaSourceType {
   COMPETITOR_POST_SNAPSHOT
 }
 
-model MediaAsset {
-  id                       String           @id @default(uuid())
-  clientPostId             String?          @map("client_post_id")
-  cleanedPostId            String?          @map("cleaned_post_id")
-  socialPostId             String?          @map("social_post_id") // Added for Social Scraper
-  clientPostSnapshotId     String?          @map("client_post_snapshot_id")
-  competitorPostSnapshotId String?          @map("competitor_post_snapshot_id")
-  sourceType               MediaSourceType? @map("source_type")
-  sourceId                 String?          @map("source_id")
-  externalMediaId          String?          @map("external_media_id")
-
-  mediaType       MediaType @map("media_type")
-  originalUrl     String?   @map("original_url")
-  blobStoragePath String?   @map("blob_storage_path")
-  fileSizeBytes   Int?      @map("file_size_bytes")
-  durationSeconds Int?      @map("duration_seconds")
-  width           Int?
-  height          Int?
-  thumbnailPath   String?   @map("thumbnail_path")
-  isDownloaded    Boolean   @default(false) @map("is_downloaded")
-  downloadedAt    DateTime? @map("downloaded_at")
-
-  clientPost             ClientPost?             @relation(fields: [clientPostId], references: [id], onDelete: Cascade)
-  cleanedPost            CleanedPost?            @relation(fields: [cleanedPostId], references: [id], onDelete: Cascade)
-  socialPost             SocialPost?             @relation(fields: [socialPostId], references: [id], onDelete: Cascade)
-  clientPostSnapshot     ClientPostSnapshot?     @relation(fields: [clientPostSnapshotId], references: [id], onDelete: Cascade)
-  competitorPostSnapshot CompetitorPostSnapshot? @relation(fields: [competitorPostSnapshotId], references: [id], onDelete: Cascade)
-
-  // DDG Relations
-  ddgVideoResultId String? @map("ddg_video_result_id")
-  ddgImageResultId String? @map("ddg_image_result_id")
-
-  ddgVideoResult DdgVideoResult? @relation(fields: [ddgVideoResultId], references: [id])
-  ddgImageResult DdgImageResult? @relation(fields: [ddgImageResultId], references: [id])
-
-  aiAnalyses AiAnalysis[]
-
-  @@index([sourceType, sourceId])
-  @@index([clientPostSnapshotId])
-  @@index([competitorPostSnapshotId])
-  @@map("media_assets")
-}
-
-// ============================================
-// PROFILES (CANONICAL) AND SNAPSHOTS
-// ============================================
-
-model ClientProfile {
-  id              String    @id @default(uuid())
-  clientId        String    @map("client_id")
-  platform        String
-  handle          String
-  profileUrl      String?   @map("profile_url")
-  followerCount   Int?      @map("follower_count")
-  followingCount  Int?      @map("following_count")
-  bio             String?
-  profileImageUrl String?   @map("profile_image_url")
-  isVerified      Boolean   @default(false) @map("is_verified")
-  isPrivate       Boolean   @default(false) @map("is_private")
-  lastScrapedAt   DateTime? @map("last_scraped_at")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
-
-  client    Client                  @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  snapshots ClientProfileSnapshot[]
-
-  @@unique([clientId, platform, handle])
-  @@map("client_profiles")
-}
-
-model ClientProfileSnapshot {
-  id                 String   @id @default(uuid())
-  clientProfileId    String   @map("client_profile_id")
-  researchJobId      String?  @map("research_job_id")
-  followerCount      Int?     @map("follower_count")
-  followingCount     Int?     @map("following_count")
-  bio                String?
-  profileImageUrl    String?  @map("profile_image_url")
-  postsCount         Int?     @map("posts_count")
-  isVerified         Boolean  @default(false) @map("is_verified")
-  isPrivate          Boolean  @default(false) @map("is_private")
-  runId              String?  @map("run_id")
-  orchestrationState Json?    @map("orchestration_state")
-  scrapedAt          DateTime @default(now()) @map("scraped_at")
-  createdAt          DateTime @default(now()) @map("created_at")
-  updatedAt          DateTime @updatedAt @map("updated_at")
-
-  clientProfile ClientProfile        @relation(fields: [clientProfileId], references: [id], onDelete: Cascade)
-  researchJob   ResearchJob?         @relation(fields: [researchJobId], references: [id], onDelete: SetNull)
-  posts         ClientPostSnapshot[]
-
-  @@index([researchJobId])
-  @@map("client_profile_snapshots")
-}
-
-model ClientPostSnapshot {
-  id                      String    @id @default(uuid())
-  clientProfileSnapshotId String    @map("client_profile_snapshot_id")
-  externalPostId          String    @map("external_post_id")
-  postUrl                 String?   @map("post_url")
-  caption                 String?
-  format                  String?
-  likesCount              Int?      @map("likes_count")
-  commentsCount           Int?      @map("comments_count")
-  sharesCount             Int?      @map("shares_count")
-  savesCount              Int?      @map("saves_count")
-  viewsCount              Int?      @map("views_count")
-  playsCount              Int?      @map("plays_count")
-  engagementRate          Float?    @map("engagement_rate")
-  postedAt                DateTime? @map("posted_at")
-  scrapedAt               DateTime  @default(now()) @map("scraped_at")
-
-  clientProfileSnapshot ClientProfileSnapshot @relation(fields: [clientProfileSnapshotId], references: [id], onDelete: Cascade)
-  mediaAssets           MediaAsset[]
-
-  @@unique([clientProfileSnapshotId, externalPostId])
-  @@map("client_post_snapshots")
-}
-
-model CompetitorProfile {
-  id              String    @id @default(uuid())
-  competitorId    String    @map("competitor_id")
-  platform        String
-  handle          String
-  profileUrl      String?   @map("profile_url")
-  followerCount   Int?      @map("follower_count")
-  followingCount  Int?      @map("following_count")
-  bio             String?
-  profileImageUrl String?   @map("profile_image_url")
-  isVerified      Boolean   @default(false) @map("is_verified")
-  isPrivate       Boolean   @default(false) @map("is_private")
-  lastScrapedAt   DateTime? @map("last_scraped_at")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
-
-  competitor Competitor                  @relation(fields: [competitorId], references: [id], onDelete: Cascade)
-  snapshots  CompetitorProfileSnapshot[]
-
-  @@unique([competitorId, platform, handle])
-  @@map("competitor_profiles")
-}
-
-model CompetitorProfileSnapshot {
-  id                  String   @id @default(uuid())
-  competitorProfileId String   @map("competitor_profile_id")
-  researchJobId       String?  @map("research_job_id")
-  followerCount       Int?     @map("follower_count")
-  followingCount      Int?     @map("following_count")
-  bio                 String?
-  profileImageUrl     String?  @map("profile_image_url")
-  postsCount          Int?     @map("posts_count")
-  isVerified          Boolean  @default(false) @map("is_verified")
-  isPrivate           Boolean  @default(false) @map("is_private")
-  runId               String?  @map("run_id")
-  orchestrationState  Json?    @map("orchestration_state")
-  scrapedAt           DateTime @default(now()) @map("scraped_at")
-  createdAt           DateTime @default(now()) @map("created_at")
-  updatedAt           DateTime @updatedAt @map("updated_at")
-
-  competitorProfile CompetitorProfile        @relation(fields: [competitorProfileId], references: [id], onDelete: Cascade)
-  researchJob       ResearchJob?             @relation(fields: [researchJobId], references: [id], onDelete: SetNull)
-  posts             CompetitorPostSnapshot[]
-
-  @@index([researchJobId])
-  @@map("competitor_profile_snapshots")
-}
-
-model CompetitorPostSnapshot {
-  id                          String    @id @default(uuid())
-  competitorProfileSnapshotId String    @map("competitor_profile_snapshot_id")
-  externalPostId              String    @map("external_post_id")
-  postUrl                     String?   @map("post_url")
-  caption                     String?
-  format                      String?
-  likesCount                  Int?      @map("likes_count")
-  commentsCount               Int?      @map("comments_count")
-  sharesCount                 Int?      @map("shares_count")
-  savesCount                  Int?      @map("saves_count")
-  viewsCount                  Int?      @map("views_count")
-  playsCount                  Int?      @map("plays_count")
-  engagementRate              Float?    @map("engagement_rate")
-  postedAt                    DateTime? @map("posted_at")
-  scrapedAt                   DateTime  @default(now()) @map("scraped_at")
-
-  competitorProfileSnapshot CompetitorProfileSnapshot @relation(fields: [competitorProfileSnapshotId], references: [id], onDelete: Cascade)
-  mediaAssets               MediaAsset[]
-
-  @@unique([competitorProfileSnapshotId, externalPostId])
-  @@map("competitor_post_snapshots")
-}
-
-model BrandMention {
-  id         String   @id @default(uuid())
-  clientId   String   @map("client_id")
-  url        String
-  title      String?
-  snippet    String?
-  fullText   String?  @map("full_text")
-  sourceType String?  @map("source_type") // article, review, social, forum
-  scrapedAt  DateTime @default(now()) @map("scraped_at")
-
-  client     Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  aiAnalyses AiAnalysis[]
-
-  @@map("brand_mentions")
-}
-
 enum AnalysisType {
   CONTENT
   VISUAL
@@ -1113,131 +1142,4 @@ enum AnalysisType {
   CAPTION
   OVERALL
   DOCUMENT
-}
-
-model AiAnalysis {
-  id                    String       @id @default(uuid())
-  researchJobId         String?      @map("research_job_id") // Added for global comparisons
-  clientPostId          String?      @map("client_post_id")
-  cleanedPostId         String?      @map("cleaned_post_id")
-  mediaAssetId          String?      @map("media_asset_id")
-  clientDocumentId      String?      @map("client_document_id")
-  brandMentionId        String?      @map("brand_mention_id")
-  analysisType          AnalysisType @map("analysis_type")
-  modelUsed             String?      @map("model_used")
-  topic                 String?
-  contentPillarDetected String?      @map("content_pillar_detected")
-  keywordsHooks         String?      @map("keywords_hooks")
-  painPointAddressed    String?      @map("pain_point_addressed")
-  goalAddressed         String?      @map("goal_addressed")
-  visualStyleNotes      String?      @map("visual_style_notes")
-  hookAnalysis          String?      @map("hook_analysis")
-  fullResponse          Json?        @map("full_response")
-  confidenceScore       Float?       @map("confidence_score")
-  tokensUsed            Int?         @map("tokens_used")
-  analyzedAt            DateTime     @default(now()) @map("analyzed_at")
-
-  clientPost     ClientPost?     @relation(fields: [clientPostId], references: [id], onDelete: Cascade)
-  cleanedPost    CleanedPost?    @relation(fields: [cleanedPostId], references: [id], onDelete: Cascade)
-  mediaAsset     MediaAsset?     @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
-  clientDocument ClientDocument? @relation(fields: [clientDocumentId], references: [id], onDelete: Cascade)
-  brandMention   BrandMention?   @relation(fields: [brandMentionId], references: [id], onDelete: Cascade)
-  researchJob    ResearchJob?    @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
-
-  @@map("ai_analyses")
-}
-
-// ============================================
-// PHASE 2: STRATEGIC DIRECTION
-// ============================================
-
-model ContentPillar {
-  id                  String  @id @default(uuid())
-  clientId            String  @map("client_id")
-  name                String
-  purpose             String?
-  rationale           String?
-  emotionalConnection String? @map("emotional_connection")
-  addressesPainPoints String? @map("addresses_pain_points")
-
-  client         Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  pillarExamples PillarExample[]
-  formats        Format[]        @relation("PillarFormats")
-
-  @@map("content_pillars")
-}
-
-model PillarExample {
-  id            String  @id @default(uuid())
-  pillarId      String  @map("pillar_id")
-  cleanedPostId String? @map("cleaned_post_id")
-  topicHook     String? @map("topic_hook")
-
-  pillar      ContentPillar @relation(fields: [pillarId], references: [id], onDelete: Cascade)
-  cleanedPost CleanedPost?  @relation(fields: [cleanedPostId], references: [id])
-
-  @@map("pillar_examples")
-}
-
-model Format {
-  id                  String  @id @default(uuid())
-  name                String  @unique
-  description         String?
-  purpose             String?
-  pros                String?
-  cons                String?
-  expectedPerformance String? @map("expected_performance")
-  clientRequirements  String? @map("client_requirements")
-
-  pillars ContentPillar[] @relation("PillarFormats")
-
-  @@map("formats")
-}
-
-model BuyerJourneyStage {
-  id                 String  @id @default(uuid())
-  clientId           String  @map("client_id")
-  stageName          String  @map("stage_name")
-  stageOrder         Int     @map("stage_order")
-  questions          String?
-  actions            String?
-  relevantPillars    Json?   @map("relevant_pillars")
-  recommendedFormats Json?   @map("recommended_formats")
-
-  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
-
-  @@map("buyer_journey_stages")
-}
-
-model PlatformStrategy {
-  id             String  @id @default(uuid())
-  clientId       String  @map("client_id")
-  platformName   String  @map("platform_name")
-  isPrimary      Boolean @default(false) @map("is_primary")
-  reason         String?
-  focus          String?
-  repostStrategy String? @map("repost_strategy")
-  kpis           Json?
-
-  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
-
-  @@map("platform_strategies")
-}
-
-// ============================================
-// MONITORING SYSTEM
-// ============================================
-
-model MonitoringLog {
-  id              String   @id @default(uuid())
-  clientId        String   @map("client_id")
-  lastMonitoredAt DateTime @map("last_monitored_at")
-  profilesScraped Int      @default(0) @map("profiles_scraped")
-  postsDiscovered Int      @default(0) @map("posts_discovered")
-  errors          Json?
-  status          String   @default("SUCCESS") // SUCCESS, PARTIAL, FAILED
-
-  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
-
-  @@map("monitoring_logs")
 }

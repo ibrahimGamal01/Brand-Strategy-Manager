@@ -100,6 +100,22 @@ export async function scrapeCompetitorIncremental(
       // Save all posts to RawPost → CleanedPost
       await saveCompetitorPosts(linkedCompetitorId, platform, result.data.posts);
     }
+
+    // 3.5. Trigger media download for competitor snapshot (scraper already creates snapshot;
+    // this ensures download runs if snapshot exists with posts lacking media)
+    const latestSnapshot = await prisma.competitorProfileSnapshot.findFirst({
+      where: {
+        competitorProfile: { competitorId: linkedCompetitorId },
+      },
+      orderBy: { scrapedAt: 'desc' },
+      select: { id: true },
+    });
+    if (latestSnapshot) {
+      const { downloadSnapshotMedia } = await import('../media/downloader');
+      downloadSnapshotMedia('competitor', latestSnapshot.id).catch((err) =>
+        console.warn('[CompetitorScraper] Media download failed for snapshot:', err?.message)
+      );
+    }
     
     // 4. Update status to SCRAPED
     await updateCompetitorStatus(competitorId, 'SCRAPED');

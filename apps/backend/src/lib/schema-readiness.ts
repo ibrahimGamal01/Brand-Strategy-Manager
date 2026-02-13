@@ -13,6 +13,10 @@ const REQUIRED_TABLES = [
   'competitor_identities',
   'competitor_candidate_profiles',
   'competitor_candidate_evidence',
+  'brand_intelligence_runs',
+  // Brand intelligence v2 columns live on these core tables
+  'brand_mentions',
+  'community_insights',
 ];
 
 const REQUIRED_COLUMNS: Record<string, string[]> = {
@@ -34,6 +38,14 @@ const REQUIRED_COLUMNS: Record<string, string[]> = {
     'availability_status',
     'state',
   ],
+  brand_mentions: [
+    'brand_intelligence_run_id',
+    'availability_status',
+    'availability_reason',
+    'resolver_confidence',
+    'evidence',
+  ],
+  community_insights: ['brand_intelligence_run_id', 'source_query', 'evidence'],
 };
 
 export async function checkSchemaReadiness(): Promise<SchemaReadinessReport> {

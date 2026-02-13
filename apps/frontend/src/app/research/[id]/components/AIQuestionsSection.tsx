@@ -99,7 +99,7 @@ export function AIQuestionsSection({ questions }: AIQuestionsSectionProps) {
                     <Brain className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
                     <h3 className="text-lg font-medium">No Strategic Analysis Yet</h3>
                     <p className="text-sm text-muted-foreground mt-1">
-                        Running 12 strategic questions analysis...
+                        Running 13 strategic questions analysis...
                     </p>
                 </div>
             )}

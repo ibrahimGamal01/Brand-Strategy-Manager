@@ -297,7 +297,7 @@ export async function validateInstagramHandle(
 
     const isRelevant =
       !hasLowSignalTerms &&
-      (nicheTokens.length === 0 || overlap.score >= 0.18 || (overlap.score >= 0.1 && isActive));
+      (nicheTokens.length === 0 || overlap.score >= 0.12 || (overlap.score >= 0.08 && isActive));
 
     return {
       handle,
@@ -317,17 +317,18 @@ export async function validateInstagramHandle(
   } catch (error: any) {
     console.error(`[Validator] Search validation failed for @${handle}:`, error.message);
     
-    // Fallback: If search fails, at least check format
+    // Fallback: If search fails, give benefit of doubt with low confidence
+    // This prevents valid accounts from being filtered due to transient search issues
     return {
       handle,
       isValid: true,  // Format is valid
-      exists: false,  // Can't confirm existence
-      isActive: false,
-      isRelevant: false,
+      exists: true,   // Assume exists (benefit of doubt)
+      isActive: true, // Assume active
+      isRelevant: true, // Assume relevant (will be scored by orchestrator)
       followerEstimate: 'unknown',
-      niche: null,
-      confidenceScore: 0.3,  // Low confidence due to failed validation
-      reason: `Validation incomplete: ${error.message}`,
+      niche: targetNiche,
+      confidenceScore: 0.4,  // Low confidence due to failed validation
+      reason: `Validation incomplete (search failed), assuming valid: ${error.message}`,
     };
   }
 }
@@ -375,7 +376,7 @@ export async function validateCompetitorBatch(
 export function filterValidatedCompetitors<T extends { handle: string; relevanceScore?: number }>(
   competitors: T[],
   validationResults: Map<string, ValidationResult>,
-  minConfidence: number = 0.7  // Raised from 0.5 for stricter filtering
+  minConfidence: number = 0.5  // Reduced from 0.7 to allow more valid competitors through
 ): Array<T & { validationScore: number; followerEstimate?: string }> {
   return competitors
     .map(comp => {

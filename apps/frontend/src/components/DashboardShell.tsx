@@ -1,3 +1,7 @@
+/**
+ * @deprecated Legacy shell retained temporarily.
+ * BAT workspace shell in src/components/workspace is the active UI.
+ */
 'use client';
 
 import { motion } from 'framer-motion';
@@ -34,7 +38,7 @@ export function DashboardLayout({ children, brandName }: { children: React.React
                     <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white">
                         B
                     </div>
-                    <span className="font-space font-bold text-lg tracking-tight">BrandStrat<span className="text-blue-500">.ai</span></span>
+                    <span className="font-space font-bold text-lg tracking-tight">BAT</span>
                 </div>
 
                 <div className="p-4 flex-1 space-y-1">

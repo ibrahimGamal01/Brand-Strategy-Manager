@@ -1,403 +1,524 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useResearchJob } from '@/hooks/useResearchJob';
 import { useResearchJobEvents } from '@/hooks/useResearchJobEvents';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
-import {
-    ClientHeader,
-    ResearchFooter,
-    AllResearchSections
-} from './components';
+import { ResearchFooter } from './components';
 import { ResearchTreeView } from './components/ResearchTreeView';
-import PhaseNavigation, { Phase } from './components/PhaseNavigation';
 import StrategyWorkspace from './components/strategy/StrategyWorkspace';
-import { Button } from '@/components/ui/button';
-import { LayoutGrid, List } from 'lucide-react';
-import { apiClient } from '@/lib/api-client';
-import { LiveActivityFeed } from './components/LiveActivityFeed';
+import { apiClient, ResearchJobEvent } from '@/lib/api-client';
 import { BrainWorkspacePanel } from './components/brain/BrainWorkspacePanel';
+import { LiveActivityFeed } from './components/LiveActivityFeed';
+import { BatWorkspaceShell } from '@/components/workspace/BatWorkspaceShell';
+import { BatClientTopbar } from '@/components/workspace/BatClientTopbar';
+import { BatModuleNav } from '@/components/workspace/BatModuleNav';
+import { BatNotificationRail } from '@/components/workspace/BatNotificationRail';
+import { WorkspaceErrorBoundary } from '@/components/workspace/WorkspaceErrorBoundary';
+import { BrainDataLedger } from '@/components/workspace/BrainDataLedger';
+import { BrainRawInspector } from '@/components/workspace/BrainRawInspector';
+import {
+  buildBrainCoverageReport,
+  type BrainCoverageDatasetKey,
+} from '@/lib/brain-data/coverage-contract';
+import {
+  BAT_WORKSPACE_MODULES,
+  type BatWorkspaceModuleKey,
+} from '@/lib/workspace/module-types';
+import { Badge } from '@/components/ui/badge';
+
+function fmtDate(value?: string | null) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleString();
+}
+
+function ModulePlaceholder({
+  title,
+  description,
+  readiness,
+  requiredKeys,
+}: {
+  title: string;
+  description: string;
+  readiness: Record<BrainCoverageDatasetKey, boolean>;
+  requiredKeys: BrainCoverageDatasetKey[];
+}) {
+  const readyCount = requiredKeys.filter((key) => readiness[key]).length;
+
+  return (
+    <section className="space-y-4 rounded-xl border border-border/70 bg-card/50 p-5">
+      <div>
+        <h2 className="text-lg font-semibold">{title}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+      </div>
+
+      <div className="rounded-lg border border-border/60 bg-background/50 p-3">
+        <div className="mb-2 flex items-center gap-2">
+          <Badge variant="outline" className="text-[10px] uppercase">
+            Readiness
+          </Badge>
+          <span className="text-sm font-medium">
+            {readyCount}/{requiredKeys.length} required datasets available
+          </span>
+        </div>
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          {requiredKeys.map((key) => (
+            <div key={key} className="flex items-center justify-between rounded border border-border/50 bg-card/50 px-2 py-1 text-xs">
+              <span className="font-mono">{key}</span>
+              <Badge variant={readiness[key] ? 'success' : 'warning'} className="text-[10px] uppercase">
+                {readiness[key] ? 'ready' : 'pending'}
+              </Badge>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
 
 export default function ResearchPage() {
-    const params = useParams();
-    const router = useRouter();
-    const { toast } = useToast();
-    const jobId = params.id as string;
-    const [activePhase, setActivePhase] = useState<Phase>('intelligence');
-    const [viewMode, setViewMode] = useState<'list' | 'cards'>('cards');
-    const [isContinuing, setIsContinuing] = useState(false);
-    const [isSavingContinuity, setIsSavingContinuity] = useState(false);
-    const { events, connectionState, isSseHealthy } = useResearchJobEvents(jobId);
-    const { data: job, isLoading, error, refetch } = useResearchJob(jobId, { sseHealthy: isSseHealthy });
+  const params = useParams();
+  const { toast } = useToast();
+  const jobId = params.id as string;
 
-    async function handleContinueNow() {
-        try {
-            setIsContinuing(true);
-            const payload = await apiClient.continueResearchJob(jobId);
+  const [activeModule, setActiveModule] = useState<BatWorkspaceModuleKey>('brain');
+  const [isContinuing, setIsContinuing] = useState(false);
+  const [brainPayload, setBrainPayload] = useState<Record<string, unknown> | null>(null);
 
-            if (!payload || payload.error || !payload.success) {
-                throw new Error(payload?.error || 'Failed to continue research job');
-            }
+  const { events, connectionState, isSseHealthy } = useResearchJobEvents(jobId);
+  const { data: job, isLoading, error, refetch } = useResearchJob(jobId, { sseHealthy: isSseHealthy });
 
-            const result = payload?.result || {};
-            const hadErrors = Array.isArray(result?.errors) && result.errors.length > 0;
-            toast({
-                title: hadErrors ? 'Continuity run finished with warnings' : 'Continuity run started',
-                description: hadErrors
-                    ? result.errors.slice(0, 2).join(' | ')
-                    : `Client targets: ${result.clientProfilesAttempted || 0}, competitor targets: ${result.competitorProfilesAttempted || 0}.`
-            });
+  async function loadBrainPayload() {
+    try {
+      const payload = (await apiClient.getBrain(jobId)) as Record<string, unknown>;
+      setBrainPayload(payload);
+    } catch (requestError: any) {
+      console.warn('[BAT] Failed loading brain payload:', requestError?.message || requestError);
+    }
+  }
 
-            await refetch();
-        } catch (error: any) {
-            toast({
-                title: 'Continue failed',
-                description: error.message || 'Failed to run continuity cycle',
-                variant: 'destructive'
-            });
-        } finally {
-            setIsContinuing(false);
-        }
+  useEffect(() => {
+    void loadBrainPayload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobId]);
+
+  async function handleContinueNow() {
+    try {
+      setIsContinuing(true);
+      const payload = await apiClient.continueResearchJob(jobId);
+
+      if (!payload || payload.error || !payload.success) {
+        throw new Error(payload?.error || 'Failed to continue research job');
+      }
+
+      const result = payload?.result || {};
+      const hadErrors = Array.isArray(result?.errors) && result.errors.length > 0;
+      toast({
+        title: hadErrors ? 'Continuity run finished with warnings' : 'Continuity run started',
+        description: hadErrors
+          ? result.errors.slice(0, 2).join(' | ')
+          : `Client targets: ${result.clientProfilesAttempted || 0}, competitor targets: ${result.competitorProfilesAttempted || 0}.`,
+      });
+
+      await Promise.all([refetch(), loadBrainPayload()]);
+    } catch (requestError: any) {
+      toast({
+        title: 'Continue failed',
+        description: requestError.message || 'Failed to run continuity cycle',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsContinuing(false);
+    }
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto" />
+          <p className="text-muted-foreground font-mono text-sm">Loading BAT workspace...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !job) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center text-destructive">
+          <p>Failed to load BAT workspace</p>
+          <p className="text-sm text-muted-foreground mt-2">{(error as Error)?.message}</p>
+        </div>
+      </div>
+    );
+  }
+
+  const data = job as any;
+  const client = data.client || {};
+  const inputData = data.inputData || {};
+
+  const instagramAccount = client.clientAccounts?.find((acc: any) => acc.platform === 'instagram');
+  const primaryHandle = instagramAccount?.handle || inputData.handle || inputData.handles?.instagram || '';
+  client.handle = primaryHandle;
+
+  const clientPosts = client.clientAccounts?.flatMap((acc: any) => acc.clientPosts || []) || [];
+  const rawSearchResults = data.rawSearchResults || [];
+  const ddgImageResults = data.ddgImageResults || [];
+  const ddgVideoResults = data.ddgVideoResults || [];
+  const ddgNewsResults = data.ddgNewsResults || [];
+  const searchTrends = data.searchTrends || [];
+  const socialTrends = data.socialTrends || [];
+
+  const selectionPriority: Record<string, number> = {
+    TOP_PICK: 5,
+    APPROVED: 4,
+    SHORTLISTED: 3,
+    FILTERED_OUT: 2,
+    REJECTED: 1,
+  };
+  const statusPriority: Record<string, number> = {
+    SCRAPED: 6,
+    SCRAPING: 5,
+    CONFIRMED: 4,
+    SUGGESTED: 3,
+    FAILED: 2,
+    REJECTED: 1,
+  };
+
+  const dedupedCompetitorRows = new Map<string, any>();
+  for (const row of data.discoveredCompetitors || []) {
+    const platform = String(row?.platform || '').toLowerCase();
+    const handle = String(row?.handle || '').toLowerCase();
+    if (!platform || !handle) continue;
+
+    const key = `${platform}:${handle}`;
+    const existing = dedupedCompetitorRows.get(key);
+    if (!existing) {
+      dedupedCompetitorRows.set(key, row);
+      continue;
     }
 
-    async function handleSaveContinuity(config: { enabled: boolean; intervalHours: number }) {
-        try {
-            setIsSavingContinuity(true);
-            const intervalHours = Math.max(2, Math.floor(config.intervalHours || 2));
-            const payload = await apiClient.updateResearchContinuity(jobId, {
-                enabled: config.enabled,
-                intervalHours
-            });
-            if (!payload?.success) throw new Error(payload?.error || 'Failed to save continuity settings');
+    const nextSelectionRank = selectionPriority[String(row?.selectionState || '').toUpperCase()] || 0;
+    const existingSelectionRank = selectionPriority[String(existing?.selectionState || '').toUpperCase()] || 0;
+    const nextStatusRank = statusPriority[String(row?.status || '').toUpperCase()] || 0;
+    const existingStatusRank = statusPriority[String(existing?.status || '').toUpperCase()] || 0;
+    const nextDiscoveredAt = new Date(row?.discoveredAt || 0).getTime();
+    const existingDiscoveredAt = new Date(existing?.discoveredAt || 0).getTime();
 
-            toast({
-                title: 'Continuity settings saved',
-                description: config.enabled
-                    ? `Auto-continue enabled every ${intervalHours}h`
-                    : 'Auto-continue disabled'
-            });
-
-            await refetch();
-        } catch (error: any) {
-            toast({
-                title: 'Save failed',
-                description: error.message || 'Failed to save continuity settings',
-                variant: 'destructive'
-            });
-        } finally {
-            setIsSavingContinuity(false);
-        }
+    if (
+      nextDiscoveredAt > existingDiscoveredAt ||
+      (nextDiscoveredAt === existingDiscoveredAt && nextSelectionRank > existingSelectionRank) ||
+      (nextDiscoveredAt === existingDiscoveredAt &&
+        nextSelectionRank === existingSelectionRank &&
+        nextStatusRank > existingStatusRank)
+    ) {
+      dedupedCompetitorRows.set(key, row);
     }
+  }
 
-    if (isLoading) {
-        return (
-            <div className="min-h-screen bg-background flex items-center justify-center">
-                <div className="text-center space-y-4">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto" />
-                    <p className="text-muted-foreground font-mono text-sm">Loading research data...</p>
-                </div>
-            </div>
-        );
-    }
-
-    if (error || !job) {
-        return (
-            <div className="min-h-screen bg-background flex items-center justify-center">
-                <div className="text-center text-destructive">
-                    <p>Failed to load research data</p>
-                    <p className="text-sm text-muted-foreground mt-2">{(error as Error)?.message}</p>
-                </div>
-            </div>
-        );
-    }
-
-    const data = job as any;
-    const client = data.client || {};
-
-    // Get input data from research job for handle and niche
-    const inputData = data.inputData || {};
-
-    // Extract Instagram handle from clientAccounts or inputData
-    const instagramAccount = client.clientAccounts?.find((acc: any) => acc.platform === 'instagram');
-    const primaryHandle = instagramAccount?.handle || inputData.handle || inputData.handles?.instagram || '';
-
-    // Add handle to client object for backward compatibility
-    client.handle = primaryHandle;
-
-    // Flatten nested data for easier consumption
-    const clientPosts = client.clientAccounts?.flatMap((acc: any) => acc.clientPosts || []) || [];
-    const rawSearchResults = data.rawSearchResults || [];
-    const ddgImageResults = data.ddgImageResults || [];
-    const ddgVideoResults = data.ddgVideoResults || [];
-    const ddgNewsResults = data.ddgNewsResults || [];
-    const searchTrends = data.searchTrends || [];
-    // Deduplicate discovered competitors across stacked runs/jobs by platform+handle.
-    // Keep the row with highest selection/status priority, falling back to newest discoveredAt.
-    const selectionPriority: Record<string, number> = {
-        TOP_PICK: 5,
-        APPROVED: 4,
-        SHORTLISTED: 3,
-        FILTERED_OUT: 2,
-        REJECTED: 1,
-    };
-    const statusPriority: Record<string, number> = {
-        SCRAPED: 6,
-        SCRAPING: 5,
-        CONFIRMED: 4,
-        SUGGESTED: 3,
-        FAILED: 2,
-        REJECTED: 1,
-    };
-    const dedupedCompetitorRows = new Map<string, any>();
-    for (const row of data.discoveredCompetitors || []) {
-        const platform = String(row?.platform || '').toLowerCase();
-        const handle = String(row?.handle || '').toLowerCase();
-        if (!platform || !handle) continue;
-
-        const key = `${platform}:${handle}`;
-        const existing = dedupedCompetitorRows.get(key);
-        if (!existing) {
-            dedupedCompetitorRows.set(key, row);
-            continue;
-        }
-
-        const nextSelectionRank = selectionPriority[String(row?.selectionState || '').toUpperCase()] || 0;
-        const existingSelectionRank = selectionPriority[String(existing?.selectionState || '').toUpperCase()] || 0;
-        const nextStatusRank = statusPriority[String(row?.status || '').toUpperCase()] || 0;
-        const existingStatusRank = statusPriority[String(existing?.status || '').toUpperCase()] || 0;
-        const nextDiscoveredAt = new Date(row?.discoveredAt || 0).getTime();
-        const existingDiscoveredAt = new Date(existing?.discoveredAt || 0).getTime();
-
-        if (
-            nextDiscoveredAt > existingDiscoveredAt ||
-            (nextDiscoveredAt === existingDiscoveredAt && nextSelectionRank > existingSelectionRank) ||
-            (nextDiscoveredAt === existingDiscoveredAt &&
-                nextSelectionRank === existingSelectionRank &&
-                nextStatusRank > existingStatusRank)
-        ) {
-            dedupedCompetitorRows.set(key, row);
-        }
-    }
-
-    // Map discoveredCompetitors to competitors format
-    const competitors = Array.from(dedupedCompetitorRows.values()).map((dc: any) => {
-        const followerCount = dc.competitor?.followerCount ?? dc.followerCount ?? dc.followers;
-        return {
-            id: dc.id,
-            handle: dc.handle,
-            platform: dc.platform,
-            status: dc.status,
-            discoveryReason: dc.discoveryReason,
-            relevanceScore: dc.relevanceScore,
-            postsScraped: dc.postsScraped,
-            profileUrl: dc.profileUrl,
-            followerCount,
-            followers: followerCount,
-            engagement: dc.engagement,
-            selectionState: dc.selectionState,
-            selectionReason: dc.selectionReason,
-            evidence: dc.evidence,
-            scoreBreakdown: dc.scoreBreakdown,
-            orchestrationRunId: dc.orchestrationRunId,
-        };
-    }).sort((a: any, b: any) => {
-        const selectionRank = (state?: string) => {
-            const normalized = String(state || '').toUpperCase();
-            if (normalized === 'TOP_PICK') return 5;
-            if (normalized === 'APPROVED') return 4;
-            if (normalized === 'SHORTLISTED') return 3;
-            if (normalized === 'FILTERED_OUT') return 2;
-            if (normalized === 'REJECTED') return 1;
-            return 0;
-        };
-        const statusRank = (status?: string) => {
-            const normalized = String(status || '').toUpperCase();
-            if (normalized === 'SCRAPED') return 5;
-            if (normalized === 'SCRAPING') return 4;
-            if (normalized === 'CONFIRMED') return 3;
-            if (normalized === 'SUGGESTED') return 2;
-            if (normalized === 'FAILED') return 1;
-            return 0;
-        };
-        const bySelection = selectionRank(b.selectionState) - selectionRank(a.selectionState);
-        if (bySelection !== 0) return bySelection;
-        const byScore = (Number(b.relevanceScore) || 0) - (Number(a.relevanceScore) || 0);
-        if (byScore !== 0) return byScore;
-        return statusRank(b.status) - statusRank(a.status);
-    });
-    const communityInsights = data.communityInsights || [];
-    const mediaAssets = data.mediaAssets || [];
-    const aiQuestions = data.aiQuestions || [];
-
-    // Build specific allowlist of Client handles to prevent Competitor pollution
-    const clientHandles = new Set<string>();
-
-    // Add known client handles to allowlist
-    (client.clientAccounts || []).forEach((acc: any) => {
-        if (acc.handle) clientHandles.add(acc.handle.toLowerCase());
+  const competitors = Array.from(dedupedCompetitorRows.values())
+    .map((dc: any) => {
+      const followerCount = dc.competitor?.followerCount ?? dc.followerCount ?? dc.followers;
+      return {
+        id: dc.id,
+        handle: dc.handle,
+        platform: dc.platform,
+        status: dc.status,
+        discoveryReason: dc.discoveryReason,
+        relevanceScore: dc.relevanceScore,
+        postsScraped: dc.postsScraped,
+        profileUrl: dc.profileUrl,
+        followerCount,
+        followers: followerCount,
+        engagement: dc.engagement,
+        selectionState: dc.selectionState,
+        selectionReason: dc.selectionReason,
+        evidence: dc.evidence,
+        scoreBreakdown: dc.scoreBreakdown,
+        orchestrationRunId: dc.orchestrationRunId,
+      };
+    })
+    .sort((a: any, b: any) => {
+      const selectionRank = (state?: string) => {
+        const normalized = String(state || '').toUpperCase();
+        if (normalized === 'TOP_PICK') return 5;
+        if (normalized === 'APPROVED') return 4;
+        if (normalized === 'SHORTLISTED') return 3;
+        if (normalized === 'FILTERED_OUT') return 2;
+        if (normalized === 'REJECTED') return 1;
+        return 0;
+      };
+      const statusRank = (status?: string) => {
+        const normalized = String(status || '').toUpperCase();
+        if (normalized === 'SCRAPED') return 5;
+        if (normalized === 'SCRAPING') return 4;
+        if (normalized === 'CONFIRMED') return 3;
+        if (normalized === 'SUGGESTED') return 2;
+        if (normalized === 'FAILED') return 1;
+        return 0;
+      };
+      const bySelection = selectionRank(b.selectionState) - selectionRank(a.selectionState);
+      if (bySelection !== 0) return bySelection;
+      const byScore = (Number(b.relevanceScore) || 0) - (Number(a.relevanceScore) || 0);
+      if (byScore !== 0) return byScore;
+      return statusRank(b.status) - statusRank(a.status);
     });
 
-    if (inputData.handle) clientHandles.add(inputData.handle.toLowerCase());
-    if (inputData.handles) {
-        Object.values(inputData.handles).forEach((h: any) => {
-            if (typeof h === 'string' && h) clientHandles.add(h.toLowerCase());
-        });
-    }
+  const communityInsights = data.communityInsights || [];
+  const mediaAssets = data.mediaAssets || [];
+  const aiQuestions = data.aiQuestions || [];
 
-    // Build set of competitor handles to exclude them provided they are indeed competitors
-    const competitorHandles = new Set<string>();
-    competitors.forEach((c: any) => {
-        if (c.handle) competitorHandles.add(c.handle.toLowerCase());
+  const clientHandles = new Set<string>();
+  (client.clientAccounts || []).forEach((acc: any) => {
+    if (acc.handle) clientHandles.add(acc.handle.toLowerCase());
+  });
+
+  if (inputData.handle) clientHandles.add(inputData.handle.toLowerCase());
+  if (inputData.handles) {
+    Object.values(inputData.handles).forEach((handle: any) => {
+      if (typeof handle === 'string' && handle) clientHandles.add(handle.toLowerCase());
     });
+  }
 
-    // Filter API data to ONLY show profiles that match the client's known handles
-    // This fixes the issue where competitor profiles (linked to the same Job ID) were appearing in the Client section
-    const apiSocialProfiles = (data.socialProfiles || []).filter((p: any) => {
-        if (!p.handle) return false;
-        const handleLower = p.handle.toLowerCase();
+  const competitorHandles = new Set<string>();
+  competitors.forEach((comp: any) => {
+    if (comp.handle) competitorHandles.add(comp.handle.toLowerCase());
+  });
 
-        // 1. Check if it matches a known client handle
-        const matchesClientHandle = clientHandles.has(handleLower);
+  const apiSocialProfiles = (data.socialProfiles || []).filter((profile: any) => {
+    if (!profile.handle) return false;
+    const handleLower = profile.handle.toLowerCase();
+    const matchesClientHandle = clientHandles.has(handleLower);
 
-        // 2. Special exception for TikTok: 
-        // If it's TikTok and NOT a known competitor, assume it's the client (or at least valid to show)
-        // This handles cases where the TikTok handle wasn't explicitly entered in the input form
-        const isTikTok = p.platform?.toLowerCase() === 'tiktok';
-        const isCompetitor = competitorHandles.has(handleLower);
+    const isTikTok = profile.platform?.toLowerCase() === 'tiktok';
+    const isCompetitor = competitorHandles.has(handleLower);
+    if (isTikTok && !isCompetitor) return true;
 
-        if (isTikTok && !isCompetitor) return true;
+    return matchesClientHandle;
+  });
 
-        return matchesClientHandle;
-    });
-
-    // Use filtered data if available, otherwise fallback to constructing from accounts
-    let socialProfiles = apiSocialProfiles.length > 0
-        ? apiSocialProfiles
-        : (client.clientAccounts || []).map((acc: any) => ({
-            platform: acc.platform,
-            handle: acc.handle,
-            followers: acc.followerCount || 0,
-            following: acc.followingCount || 0,
-            bio: acc.bio || '',
-            profileImageUrl: acc.profileImageUrl,
+  let socialProfiles =
+    apiSocialProfiles.length > 0
+      ? apiSocialProfiles
+      : (client.clientAccounts || []).map((acc: any) => ({
+          platform: acc.platform,
+          handle: acc.handle,
+          followers: acc.followerCount || 0,
+          following: acc.followingCount || 0,
+          bio: acc.bio || '',
+          profileImageUrl: acc.profileImageUrl,
         }));
 
-    // Sort profiles: Instagram > TikTok > Others
-    socialProfiles = socialProfiles.sort((a: any, b: any) => {
-        const priority = { instagram: 1, tiktok: 2 };
-        const p1 = priority[a.platform?.toLowerCase() as keyof typeof priority] || 99;
-        const p2 = priority[b.platform?.toLowerCase() as keyof typeof priority] || 99;
-        return p1 - p2;
-    });
+  socialProfiles = socialProfiles.sort((a: any, b: any) => {
+    const priority = { instagram: 1, tiktok: 2 };
+    const p1 = priority[a.platform?.toLowerCase() as keyof typeof priority] || 99;
+    const p2 = priority[b.platform?.toLowerCase() as keyof typeof priority] || 99;
+    return p1 - p2;
+  });
 
-    // Combine all data into one object
-    const tiktokProfile = socialProfiles.find((p: any) => p.platform === 'tiktok');
-    const tiktokPosts = tiktokProfile?.posts || [];
+  const tiktokProfile = socialProfiles.find((profile: any) => profile.platform === 'tiktok');
+  const tiktokPosts = tiktokProfile?.posts || [];
 
-    const researchData = {
-        clientPosts,
-        tiktokPosts, // Pass explicit tiktokPosts
-        clientProfileSnapshots: data.clientProfileSnapshots || [],
-        competitorProfileSnapshots: data.competitorProfileSnapshots || [],
-        rawSearchResults,
-        ddgImageResults,
-        ddgVideoResults,
-        ddgNewsResults,
-        searchTrends,
-        competitors,
-        communityInsights,
-        mediaAssets,
-        aiQuestions,
-        socialProfiles,
-        brandMentions: client.brandMentions || [],
-        clientDocuments: client.clientDocuments || [],
-        trendDebug: inputData.trendDebug || undefined,
-    };
+  const researchData = {
+    clientPosts,
+    tiktokPosts,
+    clientProfileSnapshots: data.clientProfileSnapshots || [],
+    competitorProfileSnapshots: data.competitorProfileSnapshots || [],
+    rawSearchResults,
+    ddgImageResults,
+    ddgVideoResults,
+    ddgNewsResults,
+    searchTrends,
+    socialTrends,
+    competitors,
+    communityInsights,
+    mediaAssets,
+    aiQuestions,
+    socialProfiles,
+    brandMentions: client.brandMentions || [],
+    clientDocuments: client.clientDocuments || [],
+    trendDebug: inputData.trendDebug || undefined,
+  };
 
-    return (
-        <div className="min-h-screen bg-background">
-            <ClientHeader
-                client={client}
-                job={data}
-                onContinueNow={handleContinueNow}
-                onSaveContinuity={handleSaveContinuity}
-                isContinuing={isContinuing}
-                isSavingContinuity={isSavingContinuity}
+  const coverageReport = buildBrainCoverageReport({
+    researchJob: data as Record<string, unknown>,
+    brainPayload: brainPayload || undefined,
+    events: events as unknown as Array<Record<string, unknown>>,
+  });
+
+  const readinessMap = {} as Record<BrainCoverageDatasetKey, boolean>;
+  coverageReport.rows.forEach((row) => {
+    readinessMap[row.key] = row.status !== 'missing';
+  });
+
+  const activeModuleLabel =
+    BAT_WORKSPACE_MODULES.find((module) => module.key === activeModule)?.label || 'BAT Brain';
+
+  return (
+    <BatWorkspaceShell
+      topbar={
+        <BatClientTopbar
+          client={client}
+          job={data}
+          activeModuleLabel={activeModuleLabel}
+          onContinueNow={handleContinueNow}
+          isContinuing={isContinuing}
+        />
+      }
+      moduleNav={
+        <BatModuleNav
+          modules={BAT_WORKSPACE_MODULES}
+          activeModule={activeModule}
+          onChange={setActiveModule}
+        />
+      }
+      notificationRail={<BatNotificationRail events={events as ResearchJobEvent[]} connectionState={connectionState} />}
+    >
+      <WorkspaceErrorBoundary title="BAT workspace module failed to render">
+        {activeModule === 'brain' ? (
+          <div className="space-y-4">
+            <BrainWorkspacePanel
+              jobId={jobId}
+              onRefresh={() => {
+                void Promise.all([refetch(), loadBrainPayload()]);
+              }}
             />
-            <LiveActivityFeed events={events} connectionState={connectionState} />
-            <div className="container mx-auto px-6 pt-4">
-                <BrainWorkspacePanel jobId={jobId} onRefresh={() => void refetch()} />
-            </div>
+            <BrainDataLedger report={coverageReport} />
+            <BrainRawInspector
+              researchJob={data as Record<string, unknown>}
+              brainPayload={brainPayload}
+              events={(events as unknown as Array<Record<string, unknown>>) || []}
+              report={coverageReport}
+            />
+          </div>
+        ) : null}
 
-            {/* Phase Navigation */}
-            <PhaseNavigation
-                activePhase={activePhase}
-                onPhaseChange={setActivePhase}
-                strategyStatus={{
-                    generated: false,
-                    sectionsComplete: 0,
-                    totalSections: 9
-                }}
+        {activeModule === 'intelligence' ? (
+          <div className="space-y-4">
+            <ResearchTreeView
+              jobId={data.id}
+              client={client}
+              data={researchData}
+              onRefreshSection={() => {
+                void refetch();
+              }}
             />
 
-            {/* Conditional Content Based on Active Phase */}
-            {activePhase === 'intelligence' ? (
-                <div className="container mx-auto px-6 py-8">
-                    <div className="flex items-center gap-2 mb-6">
-                        <h2 className="text-xl font-semibold tracking-tight">Intelligence Gathering</h2>
-                        <div className="h-px flex-1 bg-border" />
-
-                        {/* View Toggle Buttons */}
-                        <div className="flex gap-1 border rounded-lg p-1">
-                            <Button
-                                variant={viewMode === 'cards' ? 'default' : 'ghost'}
-                                size="sm"
-                                onClick={() => setViewMode('cards')}
-                                className="gap-2"
-                            >
-                                <LayoutGrid className="h-4 w-4" />
-                                Cards
-                            </Button>
-                            <Button
-                                variant={viewMode === 'list' ? 'default' : 'ghost'}
-                                size="sm"
-                                onClick={() => setViewMode('list')}
-                                className="gap-2"
-                            >
-                                <List className="h-4 w-4" />
-                                List
-                            </Button>
-                        </div>
-
-                        <span className="text-xs font-mono text-muted-foreground">
-                            {Object.values(researchData).reduce((acc, arr) => acc + (arr?.length || 0), 0)} total data points
-                        </span>
+            <section className="grid gap-3 lg:grid-cols-2">
+              <div className="rounded-xl border border-border/70 bg-card/50 p-4">
+                <h3 className="mb-2 text-sm font-semibold">Competitor Profile Snapshots</h3>
+                <p className="mb-3 text-xs text-muted-foreground">
+                  Latest archived competitor profile snapshots across continuity runs.
+                </p>
+                <div className="max-h-[320px] space-y-2 overflow-auto custom-scrollbar">
+                  {(researchData.competitorProfileSnapshots || []).slice(0, 30).map((snapshot: any, index: number) => (
+                    <div key={snapshot.id || index} className="rounded border border-border/60 bg-background/60 p-2 text-xs">
+                      <p className="font-medium">
+                        {snapshot?.competitorProfile?.platform || 'platform'} @
+                        {snapshot?.competitorProfile?.handle || 'unknown'}
+                      </p>
+                      <p className="text-muted-foreground">
+                        Posts: {(snapshot?.posts || []).length} • Scraped: {fmtDate(snapshot?.scrapedAt)}
+                      </p>
                     </div>
-
-                    {viewMode === 'cards' ? (
-                        <ResearchTreeView
-                            jobId={data.id}
-                            client={client}
-                            data={researchData}
-                            onRefreshSection={async (section) => {
-                                router.refresh();
-                            }}
-                        />
-                    ) : (
-                        <AllResearchSections
-                            jobId={data.id}
-                            status={data.status}
-                            client={client}
-                            data={researchData}
-                        />
-                    )}
+                  ))}
+                  {(researchData.competitorProfileSnapshots || []).length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No competitor snapshots available yet.</p>
+                  ) : null}
                 </div>
-            ) : (
-                <StrategyWorkspace jobId={data.id} />
-            )}
+              </div>
 
-            <ResearchFooter jobId={data.id} />
-        </div>
-    );
+              <div className="rounded-xl border border-border/70 bg-card/50 p-4">
+                <h3 className="mb-2 text-sm font-semibold">Media Assets + Social Trends</h3>
+                <p className="mb-3 text-xs text-muted-foreground">
+                  Additional aggregated signals used by BAT for planning and performance checks.
+                </p>
+                <div className="space-y-2 text-xs">
+                  <div className="rounded border border-border/60 bg-background/60 px-2 py-1.5">
+                    Media assets tracked: <span className="font-semibold">{(researchData.mediaAssets || []).length}</span>
+                  </div>
+                  <div className="rounded border border-border/60 bg-background/60 px-2 py-1.5">
+                    Social trends tracked: <span className="font-semibold">{(researchData.socialTrends || []).length}</span>
+                  </div>
+                </div>
+
+                <div className="mt-3 max-h-[240px] space-y-2 overflow-auto custom-scrollbar">
+                  {(researchData.socialTrends || []).slice(0, 20).map((trend: any, index: number) => (
+                    <div key={trend.id || index} className="rounded border border-border/50 bg-background/60 p-2 text-xs">
+                      <p className="font-medium">{trend.name || trend.keyword || 'Social Trend'}</p>
+                      <p className="text-muted-foreground">
+                        {trend.platform || 'unknown'} • {trend.type || 'topic'} • Growth{' '}
+                        {trend.growthRate !== null && trend.growthRate !== undefined ? `${trend.growthRate}%` : 'n/a'}
+                      </p>
+                    </div>
+                  ))}
+                  {(researchData.socialTrends || []).length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No social trends available yet.</p>
+                  ) : null}
+                </div>
+              </div>
+            </section>
+          </div>
+        ) : null}
+
+        {activeModule === 'strategy_docs' ? <StrategyWorkspace jobId={data.id} /> : null}
+
+        {activeModule === 'content_calendar' ? (
+          <ModulePlaceholder
+            title="Content Calendar"
+            description="Calendar planning scaffold is active. BAT will anchor scheduling to validated intelligence and BAT Brain constraints."
+            readiness={readinessMap}
+            requiredKeys={['socialProfiles.posts', 'searchTrends', 'aiQuestions', 'brainProfile', 'client.clientAccounts']}
+          />
+        ) : null}
+
+        {activeModule === 'content_generators' ? (
+          <ModulePlaceholder
+            title="Content Generators"
+            description="Generator scaffolding is active. BAT will use memory, strategy sections, and channel signals to power output generation."
+            readiness={readinessMap}
+            requiredKeys={[
+              'brainProfile',
+              'brainCommands',
+              'aiQuestions',
+              'communityInsights',
+              'socialProfiles.posts.mediaAssets',
+            ]}
+          />
+        ) : null}
+
+        {activeModule === 'performance' ? (
+          <div className="space-y-4">
+            <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-xl border border-border/70 bg-card/50 p-3">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Continuity</p>
+                <p className="mt-1 text-sm font-semibold">{data?.continuityEnabled ? 'Enabled' : 'Disabled'}</p>
+                <p className="text-xs text-muted-foreground">Every {Math.max(2, Number(data?.continuityIntervalHours || 2))}h</p>
+              </div>
+              <div className="rounded-xl border border-border/70 bg-card/50 p-3">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Last Run</p>
+                <p className="mt-1 text-sm font-semibold">{fmtDate(data?.continuityLastRunAt)}</p>
+              </div>
+              <div className="rounded-xl border border-border/70 bg-card/50 p-3">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Next Run</p>
+                <p className="mt-1 text-sm font-semibold">{fmtDate(data?.continuityNextRunAt)}</p>
+              </div>
+              <div className="rounded-xl border border-border/70 bg-card/50 p-3">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Social Trends</p>
+                <p className="mt-1 text-sm font-semibold">{(researchData.socialTrends || []).length}</p>
+              </div>
+            </section>
+
+            <LiveActivityFeed events={events as ResearchJobEvent[]} connectionState={connectionState} mode="panel" />
+          </div>
+        ) : null}
+      </WorkspaceErrorBoundary>
+
+      <ResearchFooter jobId={data.id} />
+    </BatWorkspaceShell>
+  );
 }

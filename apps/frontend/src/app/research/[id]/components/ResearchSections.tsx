@@ -26,6 +26,7 @@ import { newsSchema } from './data/schemas/news.schema';
 import { trendsSchema } from './data/schemas/trends.schema';
 import { communityInsightsSchema } from './data/schemas/community-insights.schema';
 import { aiQuestionsSchema } from './data/schemas/ai-questions.schema';
+import { brandMentionsSchema } from './data/schemas/brand-mentions.schema';
 import { useDataCrud } from '../hooks/useDataCrud';
 
 // Legacy components (kept for reference or specific use cases)
@@ -55,6 +56,7 @@ interface AllResearchSectionsProps {
         ddgNewsResults: any[];
         searchTrends: any[];
         competitors: any[];
+        brandMentions: any[];
         communityInsights: any[];
         mediaAssets: any[];
         aiQuestions: any[];
@@ -71,6 +73,7 @@ export function AllResearchSections({ jobId, status, client, data }: AllResearch
     const router = useRouter();
     const { toast } = useToast();
     const [runningScrapers, setRunningScrapers] = useState<Record<string, boolean>>({});
+    const [brandIntelRunning, setBrandIntelRunning] = useState(false);
     const { runModuleAction, isRunning, getLastResult } = useModuleActions(jobId);
 
     // Wrapper for rerun actions
@@ -100,6 +103,37 @@ export function AllResearchSections({ jobId, status, client, data }: AllResearch
     // Handlers for re-run buttons
     function makeRerunHandler(scraper: string) {
         return async () => await rerunScraper(jobId, scraper);
+    }
+
+    async function runBrandIntelligence(modules?: Array<'brand_mentions' | 'community_insights'>) {
+        try {
+            setBrandIntelRunning(true);
+            const response = await apiClient.orchestrateBrandIntelligence(jobId, {
+                mode: 'append',
+                modules,
+                runReason: 'manual',
+            });
+
+            if (!response?.success) {
+                throw new Error(response?.error || 'Brand intelligence orchestration failed');
+            }
+
+            toast({
+                title: 'Brand intelligence started',
+                description: modules?.length
+                    ? `Running ${modules.join(' + ')}`
+                    : 'Running brand mentions + community insights',
+            });
+            router.refresh();
+        } catch (error: any) {
+            toast({
+                title: 'Brand intelligence failed',
+                description: error?.message || 'Unable to start brand intelligence orchestration',
+                variant: 'destructive',
+            });
+        } finally {
+            setBrandIntelRunning(false);
+        }
     }
 
     // Existing declarations (kept for reference, but we will redefine strictly what we need or check for conflicts)
@@ -357,12 +391,52 @@ export function AllResearchSections({ jobId, status, client, data }: AllResearch
                 />
             </DataSourceSection>
 
+            {/* 8. Brand Mentions */}
+            <DataSection
+                title="Brand Mentions"
+                icon={Database}
+                count={data.brandMentions.length}
+                onRefresh={() => runBrandIntelligence(['brand_mentions'])}
+                actions={
+                    <div className="flex items-center gap-2">
+                        <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => runBrandIntelligence()}
+                            disabled={brandIntelRunning}
+                        >
+                            {brandIntelRunning ? (
+                                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                            ) : null}
+                            Run Both
+                        </Button>
+                        <ModuleActionButtons
+                            module="brand_mentions"
+                            runModuleAction={runModuleAction}
+                            isRunning={isRunning}
+                            compact
+                        />
+                    </div>
+                }
+            >
+                <DataGrid
+                    data={data.brandMentions}
+                    config={(item) => ({
+                        schema: brandMentionsSchema,
+                        title: item.title || item.url || 'Brand Mention',
+                        icon: Database,
+                    })}
+                    columns={{ sm: 1, md: 1, lg: 2, xl: 2 }}
+                    emptyMessage="No brand mentions available yet"
+                />
+            </DataSection>
+
             {/* 8. Community Insights (VoC) */}
             <DataSection
                 title="Community Insights (VoC)"
                 icon={MessageSquare}
                 count={data.communityInsights.length}
-                onRefresh={makeRerunHandler('community_insights')}
+                onRefresh={() => runBrandIntelligence(['community_insights'])}
                 actions={
                     <ModuleActionButtons
                         module="community_insights"
@@ -386,7 +460,7 @@ export function AllResearchSections({ jobId, status, client, data }: AllResearch
 
             {/* 10. AI Questions */}
             <DataSection
-                title="Strategic Analysis (12 Questions)"
+                title="Strategic Analysis (13 Questions)"
                 icon={Brain}
                 count={data.aiQuestions.length}
                 onRefresh={makeRerunHandler('ai_analysis')}

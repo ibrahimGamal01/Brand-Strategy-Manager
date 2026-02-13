@@ -16,11 +16,27 @@ export function getFilledHandlesList(handles: Record<PlatformId, string>): strin
     .map((value) => (value.startsWith('@') ? value : `@${value}`));
 }
 
+function extractHandleFromUrlOrRaw(platform: PlatformId, value: string): string {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  if (platform === 'instagram') {
+    const m = raw.match(/instagram\.com\/([a-z0-9._]{2,30})/i);
+    if (m) return m[1].toLowerCase();
+  }
+  if (platform === 'tiktok') {
+    const m = raw.match(/tiktok\.com\/@?([a-z0-9._]{2,30})/i);
+    if (m) return m[1].toLowerCase();
+  }
+
+  return raw.replace(/^@+/, '').trim().toLowerCase();
+}
+
 export function buildChannelsFromHandles(handles: Record<PlatformId, string>): Array<{ platform: PlatformId; handle: string }> {
   return Object.entries(handles)
     .map(([platform, handle]) => ({
       platform: platform as PlatformId,
-      handle: String(handle || '').trim().replace(/^@+/, ''),
+      handle: extractHandleFromUrlOrRaw(platform as PlatformId, handle),
     }))
     .filter((row) => row.handle.length > 0);
 }

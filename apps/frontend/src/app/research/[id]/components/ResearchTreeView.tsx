@@ -15,6 +15,10 @@ import { ClientInfoNode } from './tree/ClientInfoNode';
 import { CompetitorOrchestrationPanel } from './competitor/CompetitorOrchestrationPanel';
 import { useModuleActions } from '../hooks/useModuleActions';
 import { ModuleActionButtons } from './ModuleActionButtons';
+import { apiClient } from '@/lib/api-client';
+import { useToast } from '@/hooks/use-toast';
+import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
 
 interface ResearchTreeViewProps {
     jobId: string;
@@ -56,7 +60,11 @@ export function ResearchTreeView({
     data,
     onRefreshSection
 }: ResearchTreeViewProps) {
+    const router = useRouter();
+    const { toast } = useToast();
     const { runModuleAction, isRunning, getLastResult } = useModuleActions(jobId);
+    const [brandIntelRunning, setBrandIntelRunning] = useState(false);
+    const [brandIntelSummary, setBrandIntelSummary] = useState<any | null>(null);
 
     // Safely handle null/undefined arrays  
     const competitors = data.competitors || [];
@@ -94,6 +102,52 @@ export function ResearchTreeView({
     ).length;
 
     const visibleCompetitors = competitors.filter((c: any) => !isFilteredSelectionState(c?.selectionState));
+
+    async function loadBrandIntelligenceSummary() {
+        try {
+            const response = await apiClient.getBrandIntelligenceSummary(jobId);
+            if (response?.success) {
+                setBrandIntelSummary(response);
+            }
+        } catch {
+            // no-op: we keep the UI functional even if summary endpoint fails
+        }
+    }
+
+    useEffect(() => {
+        void loadBrandIntelligenceSummary();
+    }, [jobId]);
+
+    async function runBrandIntelligence(modules?: Array<'brand_mentions' | 'community_insights'>) {
+        try {
+            setBrandIntelRunning(true);
+            const response = await apiClient.orchestrateBrandIntelligence(jobId, {
+                mode: 'append',
+                modules,
+                runReason: 'manual',
+            });
+            if (!response?.success) {
+                throw new Error(response?.error || 'Brand intelligence orchestration failed');
+            }
+
+            toast({
+                title: 'Brand intelligence started',
+                description: modules?.length
+                    ? `Running ${modules.join(' + ')}`
+                    : 'Running brand mentions + community insights',
+            });
+            router.refresh();
+            void loadBrandIntelligenceSummary();
+        } catch (error: any) {
+            toast({
+                title: 'Brand intelligence failed',
+                description: error?.message || 'Unable to run brand intelligence',
+                variant: 'destructive',
+            });
+        } finally {
+            setBrandIntelRunning(false);
+        }
+    }
 
     return (
         <TreeLayout className="max-w-6xl">
@@ -289,13 +343,52 @@ export function ResearchTreeView({
                     count={brandMentions.length}
                     defaultExpanded={false}
                     level={1}
+                    actions={
+                        <div className="flex items-center gap-1">
+                            <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 px-2 text-xs"
+                                onClick={() => runBrandIntelligence()}
+                                disabled={brandIntelRunning}
+                            >
+                                {brandIntelRunning ? 'Running...' : 'Run Both'}
+                            </Button>
+                            <ModuleActionButtons
+                                module="brand_mentions"
+                                runModuleAction={runModuleAction}
+                                isRunning={isRunning}
+                                compact
+                                hideLabels
+                            />
+                        </div>
+                    }
                 >
+                    {brandIntelSummary?.summary ? (
+                        <div className="mb-3 rounded-md border border-border/60 bg-background/40 p-2 text-xs">
+                            <div className="flex flex-wrap items-center gap-3 text-muted-foreground">
+                                <span>Status: {brandIntelSummary.status || 'unknown'}</span>
+                                <span>Collected: {brandIntelSummary.summary?.totals?.collected ?? 0}</span>
+                                <span>Persisted: {brandIntelSummary.summary?.totals?.persisted ?? 0}</span>
+                                <span>Failed: {brandIntelSummary.summary?.totals?.failed ?? 0}</span>
+                            </div>
+                        </div>
+                    ) : null}
                     <TreeNodeCard
                         title="Web Mentions"
                         icon={<DatabaseIcon className="h-3 w-3" />}
                         count={brandMentions.length}
                         level={2}
                         defaultExpanded={true}
+                        actions={
+                            <ModuleActionButtons
+                                module="brand_mentions"
+                                runModuleAction={runModuleAction}
+                                isRunning={isRunning}
+                                compact
+                                hideLabels
+                            />
+                        }
                     >
                         <DataList
                             items={brandMentions.map((mention: any, idx: number) => ({

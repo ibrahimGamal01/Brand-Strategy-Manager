@@ -55,10 +55,10 @@ export function ClientCard({ client }: ClientCardProps) {
             <div className="flex items-center justify-between text-xs text-zinc-500 pt-4 border-t border-zinc-800/50">
                 <div className="flex items-center gap-1">
                     <Clock size={12} />
-                    <span>Last Active: Recently</span>
+                    <span>Last Active: Recent</span>
                 </div>
-                <div className="flex items-center gap-1 group-hover:translate-x-1 transition-transform text-zinc-400 group-hover:text-blue-400">
-                    <span>View Dossier</span>
+                <div className="flex items-center gap-1 group-hover:translate-x-1 transition-transform text-zinc-400 group-hover:text-primary">
+                    <span>Open Workspace</span>
                     <ArrowRight size={12} />
                 </div>
             </div>

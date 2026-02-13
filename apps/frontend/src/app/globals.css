@@ -1,119 +1,194 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
-
-@import "tailwindcss";
-
-/* 
-  Tailwind v4 compatible theme configuration using @theme directive.
-  This replaces the old @layer base with :root variables.
-*/
+@import 'tailwindcss';
 
 @theme {
-  /* Core surfaces - Softer dark palette (not extreme dark) */
-  --color-background: hsl(222 40% 11%);
-  --color-foreground: hsl(210 40% 96%);
+  /* Semantic tokens – values are overridden per theme below via CSS variables */
+  --color-background: var(--bat-color-background);
+  --color-foreground: var(--bat-color-foreground);
 
-  --color-card: hsl(222 40% 13%);
-  --color-card-foreground: hsl(210 40% 96%);
+  --color-card: var(--bat-color-card);
+  --color-card-foreground: var(--bat-color-card-foreground);
 
-  --color-popover: hsl(222 40% 15%);
-  --color-popover-foreground: hsl(210 40% 96%);
+  --color-popover: var(--bat-color-popover);
+  --color-popover-foreground: var(--bat-color-popover-foreground);
 
-  /* Primary - Cyan/Teal data accent */
-  --color-primary: hsl(187 85% 53%);
-  --color-primary-foreground: hsl(222 40% 11%);
+  --color-primary: var(--bat-color-primary);
+  --color-primary-foreground: var(--bat-color-primary-foreground);
 
-  /* Secondary - Muted slate */
-  --color-secondary: hsl(217 33% 20%);
-  --color-secondary-foreground: hsl(210 40% 85%);
+  --color-secondary: var(--bat-color-secondary);
+  --color-secondary-foreground: var(--bat-color-secondary-foreground);
 
-  /* Muted surfaces */
-  --color-muted: hsl(217 33% 16%);
-  --color-muted-foreground: hsl(215 20% 60%);
+  --color-muted: var(--bat-color-muted);
+  --color-muted-foreground: var(--bat-color-muted-foreground);
 
-  /* Accent - Electric blue */
-  --color-accent: hsl(199 89% 48%);
-  --color-accent-foreground: hsl(222 40% 11%);
+  --color-accent: var(--bat-color-accent);
+  --color-accent-foreground: var(--bat-color-accent-foreground);
 
-  /* Destructive - Warm red */
-  --color-destructive: hsl(0 72% 51%);
-  --color-destructive-foreground: hsl(210 40% 98%);
+  --color-destructive: var(--bat-color-destructive);
+  --color-destructive-foreground: var(--bat-color-destructive-foreground);
 
-  /* Status colors */
-  --color-success: hsl(142 71% 45%);
-  --color-success-foreground: hsl(222 40% 11%);
-  --color-warning: hsl(38 92% 50%);
-  --color-warning-foreground: hsl(222 40% 11%);
-  --color-processing: hsl(262 83% 58%);
-  --color-processing-foreground: hsl(210 40% 98%);
+  --color-success: var(--bat-color-success);
+  --color-success-foreground: var(--bat-color-success-foreground);
+  --color-warning: var(--bat-color-warning);
+  --color-warning-foreground: var(--bat-color-warning-foreground);
+  --color-processing: var(--bat-color-processing);
+  --color-processing-foreground: var(--bat-color-processing-foreground);
 
-  /* Borders and inputs */
-  --color-border: hsl(217 33% 22%);
-  --color-input: hsl(217 33% 22%);
-  --color-ring: hsl(187 85% 53%);
+  --color-border: var(--bat-color-border);
+  --color-input: var(--bat-color-input);
+  --color-ring: var(--bat-color-ring);
 
-  --radius: 0.5rem;
+  --radius: 0.6rem;
 
-  /* Sidebar */
-  --color-sidebar: hsl(222 40% 9%);
-  --color-sidebar-foreground: hsl(210 40% 85%);
-  --color-sidebar-primary: hsl(187 85% 53%);
-  --color-sidebar-accent: hsl(217 33% 16%);
-  --color-sidebar-border: hsl(217 33% 20%);
+  --color-sidebar: var(--bat-color-sidebar);
+  --color-sidebar-foreground: var(--bat-color-sidebar-foreground);
+  --color-sidebar-primary: var(--bat-color-sidebar-primary);
+  --color-sidebar-accent: var(--bat-color-sidebar-accent);
+  --color-sidebar-border: var(--bat-color-sidebar-border);
 }
 
-/* Base styles */
+@layer base {
+  :root {
+    /* Light theme – neutral, no neon */
+    --bat-color-background: hsl(210 20% 98%);
+    --bat-color-foreground: hsl(222 47% 11%);
+
+    --bat-color-card: hsl(0 0% 100%);
+    --bat-color-card-foreground: hsl(222 47% 11%);
+
+    --bat-color-popover: hsl(0 0% 100%);
+    --bat-color-popover-foreground: hsl(222 47% 11%);
+
+    --bat-color-primary: hsl(222 84% 56%);
+    --bat-color-primary-foreground: hsl(0 0% 100%);
+
+    --bat-color-secondary: hsl(210 40% 96%);
+    --bat-color-secondary-foreground: hsl(222 47% 11%);
+
+    --bat-color-muted: hsl(210 40% 96%);
+    --bat-color-muted-foreground: hsl(215 16% 35%);
+
+    --bat-color-accent: hsl(210 100% 50%);
+    --bat-color-accent-foreground: hsl(0 0% 100%);
+
+    --bat-color-destructive: hsl(0 84% 60%);
+    --bat-color-destructive-foreground: hsl(0 0% 100%);
+
+    --bat-color-success: hsl(142 72% 29%);
+    --bat-color-success-foreground: hsl(0 0% 100%);
+
+    --bat-color-warning: hsl(37 92% 50%);
+    --bat-color-warning-foreground: hsl(0 0% 100%);
+
+    --bat-color-processing: hsl(199 89% 48%);
+    --bat-color-processing-foreground: hsl(0 0% 100%);
+
+    --bat-color-border: hsl(214 32% 86%);
+    --bat-color-input: hsl(214 32% 86%);
+    --bat-color-ring: hsl(222 84% 56%);
+
+    --bat-color-sidebar: hsl(210 20% 98%);
+    --bat-color-sidebar-foreground: hsl(224 71% 4%);
+    --bat-color-sidebar-primary: hsl(222 84% 56%);
+    --bat-color-sidebar-accent: hsl(210 40% 96%);
+    --bat-color-sidebar-border: hsl(214 32% 86%);
+  }
+
+  [data-theme='dark'] {
+    /* Dark theme – based on existing design but toned down */
+    --bat-color-background: hsl(222 47% 6%);
+    --bat-color-foreground: hsl(210 40% 96%);
+
+    --bat-color-card: hsl(222 47% 9%);
+    --bat-color-card-foreground: hsl(210 40% 96%);
+
+    --bat-color-popover: hsl(222 47% 9%);
+    --bat-color-popover-foreground: hsl(210 40% 96%);
+
+    --bat-color-primary: hsl(222 84% 56%);
+    --bat-color-primary-foreground: hsl(0 0% 100%);
+
+    --bat-color-secondary: hsl(217 33% 17%);
+    --bat-color-secondary-foreground: hsl(210 40% 96%);
+
+    --bat-color-muted: hsl(217 33% 17%);
+    --bat-color-muted-foreground: hsl(215 20% 65%);
+
+    --bat-color-accent: hsl(199 89% 48%);
+    --bat-color-accent-foreground: hsl(0 0% 100%);
+
+    --bat-color-destructive: hsl(0 72% 51%);
+    --bat-color-destructive-foreground: hsl(0 0% 100%);
+
+    --bat-color-success: hsl(142 72% 37%);
+    --bat-color-success-foreground: hsl(0 0% 100%);
+
+    --bat-color-warning: hsl(37 92% 55%);
+    --bat-color-warning-foreground: hsl(0 0% 5%);
+
+    --bat-color-processing: hsl(199 89% 55%);
+    --bat-color-processing-foreground: hsl(0 0% 100%);
+
+    --bat-color-border: hsl(217 33% 20%);
+    --bat-color-input: hsl(217 33% 20%);
+    --bat-color-ring: hsl(222 84% 56%);
+
+    --bat-color-sidebar: hsl(222 47% 5%);
+    --bat-color-sidebar-foreground: hsl(210 40% 96%);
+    --bat-color-sidebar-primary: hsl(222 84% 56%);
+    --bat-color-sidebar-accent: hsl(217 33% 17%);
+    --bat-color-sidebar-border: hsl(217 33% 20%);
+  }
+}
+
 * {
   border-color: var(--color-border);
 }
 
 body {
-  background-color: var(--color-background);
+  background:
+    radial-gradient(circle at 5% 0%, color-mix(in srgb, var(--color-primary) 8%, transparent), transparent 45%),
+    radial-gradient(circle at 95% 0%, color-mix(in srgb, var(--color-accent) 8%, transparent), transparent 50%),
+    var(--color-background);
   color: var(--color-foreground);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--font-space), 'Space Grotesk', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Terminal/mono text */
 .font-mono {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono), 'JetBrains Mono', monospace;
 }
 
-/* Glass morphism cards */
 .glass-card {
-  background-color: color-mix(in srgb, var(--color-card) 80%, transparent);
-  backdrop-filter: blur(24px);
-  border: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
+  background-color: color-mix(in srgb, var(--color-card) 84%, transparent);
+  backdrop-filter: blur(22px);
+  border: 1px solid color-mix(in srgb, var(--color-border) 68%, transparent);
   box-shadow:
-    0 4px 30px rgba(0, 0, 0, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    0 12px 48px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
-/* Terminal style container */
 .terminal-container {
   background-color: color-mix(in srgb, var(--color-background) 95%, transparent);
   border: 1px solid var(--color-border);
   border-radius: 0.5rem;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono), 'JetBrains Mono', monospace;
   font-size: 0.875rem;
-  box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.5);
+  box-shadow: inset 0 2px 12px rgba(0, 0, 0, 0.45);
 }
 
-/* Animations */
 @keyframes dataPulse {
-
   0%,
   100% {
     opacity: 1;
   }
 
   50% {
-    opacity: 0.7;
+    opacity: 0.72;
   }
 }
 
 @keyframes statusPulse {
-
   0%,
   100% {
     transform: scale(1);
@@ -121,20 +196,19 @@ body {
   }
 
   50% {
-    transform: scale(1.1);
-    opacity: 0.8;
+    transform: scale(1.08);
+    opacity: 0.82;
   }
 }
 
 @keyframes processingGlow {
-
   0%,
   100% {
-    box-shadow: 0 0 20px hsl(199 89% 48% / 0.2);
+    box-shadow: 0 0 18px hsl(152 83% 47% / 0.22);
   }
 
   50% {
-    box-shadow: 0 0 40px hsl(199 89% 48% / 0.4);
+    box-shadow: 0 0 34px hsl(152 83% 47% / 0.38);
   }
 }
 
@@ -159,7 +233,7 @@ body {
 }
 
 .processing-glow {
-  box-shadow: 0 0 30px hsl(199 89% 48% / 0.2);
+  box-shadow: 0 0 24px hsl(152 83% 47% / 0.2);
   animation: processingGlow 2s ease-in-out infinite;
 }
 
@@ -167,25 +241,21 @@ body {
   animation: slideIn 0.3s ease-out forwards;
 }
 
-/* Gradient text */
 .gradient-text {
-  background: linear-gradient(135deg, hsl(187 85% 53%), hsl(199 89% 48%));
+  background: linear-gradient(135deg, hsl(152 83% 47%), hsl(189 82% 58%));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
-/* Glow border */
 .glow-border {
-  box-shadow: 0 0 20px hsl(187 85% 53% / 0.3);
+  box-shadow: 0 0 18px hsl(152 83% 47% / 0.25);
 }
 
-/* Progress bar fill */
 .progress-fill {
-  background: linear-gradient(135deg, hsl(187 85% 53%), hsl(199 89% 48%));
+  background: linear-gradient(135deg, hsl(152 83% 47%), hsl(189 82% 58%));
 }
 
-/* Masonry grid for media */
 .masonry-grid {
   column-count: 4;
   column-gap: 0.75rem;
@@ -208,7 +278,6 @@ body {
   margin-bottom: 0.75rem;
 }
 
-/* Scrollbar styling */
 .custom-scrollbar::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -228,7 +297,6 @@ body {
   background: color-mix(in srgb, var(--color-muted-foreground) 50%, transparent);
 }
 
-/* Stagger delays for lists */
 .stagger-1 {
   animation-delay: 50ms;
 }
