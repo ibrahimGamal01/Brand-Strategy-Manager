@@ -9,15 +9,28 @@ import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
+import { apiClient } from '@/lib/api-client';
 
 interface SocialProfileNodeProps {
+    jobId?: string;
     profile: any;
     index: number;
     onRefreshSection?: (section: string) => void;
 }
 
-export function SocialProfileNode({ profile, index, onRefreshSection }: SocialProfileNodeProps) {
+function displayHandle(handle: string | undefined, platform: string): string {
+    if (!handle) return '';
+    const h = handle.trim();
+    const ig = h.match(/instagram\.com\/([a-z0-9._]{2,30})/i);
+    if (ig) return ig[1];
+    const tt = h.match(/tiktok\.com\/@?([a-z0-9._]{2,30})/i);
+    if (tt) return tt[1];
+    return h.replace(/^@+/, '').trim();
+}
+
+export function SocialProfileNode({ jobId, profile, index, onRefreshSection }: SocialProfileNodeProps) {
     const { toast } = useToast();
+    const handleDisplay = displayHandle(profile.handle, profile.platform || '') || profile.handle || '';
 
     // Determine Icon and Color based on platform
     let ProfileIcon = ExternalLink;
@@ -56,37 +69,45 @@ export function SocialProfileNode({ profile, index, onRefreshSection }: SocialPr
             break;
     }
 
+    const followers = profile.followers ?? profile.followerCount ?? 0;
+    const followersLabel = followers > 0 ? `${followers.toLocaleString()} followers` : '— followers';
+
     // Prepare title with badges
     const richTitle = (
         <div className="flex items-center gap-2 w-full">
             <span className="font-semibold capitalize">{platformName === 'TikTok' ? 'TikTok' : platformName} Profile</span>
             <span className="text-muted-foreground font-normal text-xs invisible group-hover:visible ml-auto mr-2 md:visible md:ml-0 md:mr-0 md:inline-block">
-                @{profile.handle}
+                @{handleDisplay}
             </span>
-            {profile.followers > 0 && (
-                <Badge variant="outline" className={cn("text-[10px] h-5 px-1.5 bg-background", iconColor)}>
-                    {profile.followers.toLocaleString()} followers
-                </Badge>
-            )}
+            <Badge variant="outline" className={cn("text-[10px] h-5 px-1.5 bg-background", iconColor)}>
+                {followersLabel}
+            </Badge>
         </div>
     );
 
     const posts = profile.posts || [];
 
     // Action handlers
+    const isPlaceholder = typeof profile.id === 'string' && profile.id.startsWith('placeholder-');
     const handleScrape = async (e: React.MouseEvent) => {
         e.stopPropagation();
         if (!['instagram', 'tiktok'].includes(platformKey)) return;
 
         try {
+            if (isPlaceholder && jobId && profile.handle) {
+                await apiClient.scrapeClientProfile(jobId, platformKey, profile.handle);
+                toast({ title: "Re-scraping started", description: `Refreshing ${platformName} posts...` });
+                setTimeout(() => onRefreshSection?.('social-profiles'), 3000);
+                return;
+            }
+
             const endpoint = platformKey === 'instagram'
                 ? `/api/instagram/scrape/${profile.id}`
                 : `/api/tiktok/scrape/${profile.id}`;
-
             const response = await fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ postsLimit: 30 })
+                body: JSON.stringify({ postsLimit: 30 }),
             });
 
             if (response.ok) {
@@ -94,7 +115,6 @@ export function SocialProfileNode({ profile, index, onRefreshSection }: SocialPr
                 setTimeout(() => onRefreshSection?.('social-profiles'), 3000);
             } else {
                 const errorText = await response.text();
-                // If it's the 501 Not Implemented for TikTok, explain it
                 if (response.status === 501) {
                     toast({ title: "Feature Pending", description: "TikTok re-scraping is coming soon.", variant: "default" });
                 } else {

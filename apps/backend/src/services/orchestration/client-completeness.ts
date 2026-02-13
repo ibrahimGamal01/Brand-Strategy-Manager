@@ -6,6 +6,7 @@ export interface DataGaps {
     missingTikTok: boolean;
     staleFollowerCounts: string[]; // platforms with stale counts
     missingRecentPosts: boolean;
+    incompleteInstagramMetadata: boolean;
   };
   competitors: {
     unscrapedProfiles: string[]; // discovered competitor IDs
@@ -28,7 +29,41 @@ interface ClientAccount {
   platform: string;
   handle: string;
   followerCount?: number | null;
+  bio?: string | null;
   lastScrapedAt?: Date | null;
+}
+
+/**
+ * Check if the client has an Instagram account with incomplete profile metadata
+ * (e.g. from a non-Apify fallback). Triggers a full scrape so Apify can fill metadata + posts in one call.
+ */
+async function hasIncompleteInstagramMetadata(researchJobId: string): Promise<boolean> {
+  const job = await prisma.researchJob.findUnique({
+    where: { id: researchJobId },
+    include: {
+      client: {
+        include: {
+          clientAccounts: {
+            where: { platform: 'instagram' },
+          },
+        },
+      },
+    },
+  });
+
+  if (!job?.client?.clientAccounts?.length) {
+    return false;
+  }
+
+  for (const account of job.client.clientAccounts) {
+    const missingFollowerCount = account.followerCount == null || account.followerCount === 0;
+    const missingBio = account.bio == null || String(account.bio).trim() === '';
+    if (missingFollowerCount || missingBio) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /**
@@ -85,9 +120,16 @@ async function checkStaleFollowerCounts(researchJobId: string): Promise<string[]
 
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
   const stalePlatforms: string[] = [];
+  const seen = new Set<string>();
 
   for (const account of job.client.clientAccounts) {
-    if (!account.lastScrapedAt || account.lastScrapedAt < sevenDaysAgo) {
+    const key = account.platform;
+    if (seen.has(key)) continue;
+    const scrapedStale = !account.lastScrapedAt || account.lastScrapedAt < sevenDaysAgo;
+    const missingOrZeroFollowers =
+      account.followerCount == null || account.followerCount === 0;
+    if (scrapedStale || missingOrZeroFollowers) {
+      seen.add(key);
       stalePlatforms.push(account.platform);
     }
   }
@@ -121,16 +163,18 @@ async function checkMissingRecentPosts(researchJobId: string): Promise<boolean> 
  * Check client data completeness
  */
 export async function checkClientCompleteness(researchJobId: string): Promise<DataGaps['client']> {
-  const [missingTikTok, staleFollowerCounts, missingRecentPosts] = await Promise.all([
+  const [missingTikTok, staleFollowerCounts, missingRecentPosts, incompleteInstagramMetadata] = await Promise.all([
     checkClientTikTok(researchJobId),
     checkStaleFollowerCounts(researchJobId),
     checkMissingRecentPosts(researchJobId),
+    hasIncompleteInstagramMetadata(researchJobId),
   ]);
 
   return {
     missingTikTok,
     staleFollowerCounts,
     missingRecentPosts,
+    incompleteInstagramMetadata,
   };
 }
 
@@ -140,7 +184,10 @@ export async function checkClientCompleteness(researchJobId: string): Promise<Da
  * auto-scraper rate limiting applies to avoid over-hitting APIs.
  */
 export async function queueClientTasks(researchJobId: string, gaps: DataGaps['client']): Promise<void> {
-  const needsScrape = gaps.missingTikTok || gaps.staleFollowerCounts.length > 0;
+  const needsScrape =
+    gaps.missingTikTok ||
+    gaps.staleFollowerCounts.length > 0 ||
+    gaps.incompleteInstagramMetadata;
 
   if (needsScrape) {
     if (gaps.missingTikTok) {
@@ -148,6 +195,9 @@ export async function queueClientTasks(researchJobId: string, gaps: DataGaps['cl
     }
     if (gaps.staleFollowerCounts.length > 0) {
       console.log(`[ClientCompleteness] Queuing client scrape for stale follower counts: ${gaps.staleFollowerCounts.join(', ')}`);
+    }
+    if (gaps.incompleteInstagramMetadata) {
+      console.log('[ClientCompleteness] Queuing client scrape for incomplete Instagram metadata');
     }
 
     const { autoScrapeClientProfiles } = await import('../social/auto-scraper');

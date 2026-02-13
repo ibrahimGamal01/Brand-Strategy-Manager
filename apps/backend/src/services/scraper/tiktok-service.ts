@@ -6,6 +6,7 @@
  */
 
 import { exec } from 'child_process';
+import { existsSync } from 'fs';
 import { promisify } from 'util';
 import path from 'path';
 import { PrismaClient } from '@prisma/client';
@@ -45,8 +46,13 @@ export interface TikTokScrapeResult {
   error?: string;
 }
 
+function resolveScriptPath(name: string, candidates: string[]): string | null {
+  return candidates.find((p) => existsSync(p)) ?? null;
+}
+
 /**
  * Scrape TikTok profile and recent videos
+ * Primary: Camoufox | Fallback: tiktok_scraper.py (yt-dlp)
  */
 export async function scrapeTikTokProfile(
   handle: string,
@@ -54,39 +60,63 @@ export async function scrapeTikTokProfile(
 ): Promise<TikTokScrapeResult> {
   const cleanHandle = handle.replace('@', '');
   console.log(`[TikTok] Scraping @${cleanHandle}...`);
-  
-  try {
-    const scriptPath = path.join(process.cwd(), 'scripts/tiktok_scraper.py');
-    
-    const { stdout, stderr } = await execAsync(
-      `python3 ${scriptPath} profile "${cleanHandle}" ${maxVideos}`,
-      {
-        cwd: process.cwd(),
-        timeout: 180000, // 3 min timeout
-        maxBuffer: 50 * 1024 * 1024,
+
+  const cwd = process.cwd();
+  const camoufoxCandidates = [
+    path.join(cwd, 'scripts/camoufox_tiktok_scraper.py'),
+    path.join(cwd, 'apps/backend/scripts/camoufox_tiktok_scraper.py'),
+  ];
+  const camoufoxPath = resolveScriptPath('camoufox_tiktok_scraper', camoufoxCandidates);
+
+  if (camoufoxPath) {
+    try {
+      console.log(`[TikTok] Trying Camoufox scraper...`);
+      const { stdout, stderr } = await execAsync(
+        `python3 "${camoufoxPath}" profile "${cleanHandle}" ${maxVideos}`,
+        { cwd, timeout: 180000, maxBuffer: 50 * 1024 * 1024 }
+      );
+      if (stderr) console.log(`[TikTok] ${stderr}`);
+      const result = JSON.parse(stdout);
+      if (result.success && (result.videos?.length > 0 || result.profile)) {
+        console.log(`[TikTok] Camoufox found ${result.total_videos || 0} videos`);
+        return {
+          success: true,
+          profile: result.profile,
+          videos: result.videos,
+          total_videos: result.total_videos,
+        };
       }
-    );
-    
-    if (stderr) {
-      console.log(`[TikTok] ${stderr}`);
+    } catch (e: any) {
+      console.log(`[TikTok] Camoufox failed: ${e.message}, falling back to yt-dlp...`);
     }
-    
+  }
+
+  const ytdlpCandidates = [
+    path.join(cwd, 'scripts/tiktok_scraper.py'),
+    path.join(cwd, 'apps/backend/scripts/tiktok_scraper.py'),
+  ];
+  const scriptPath = resolveScriptPath('tiktok_scraper', ytdlpCandidates);
+  if (!scriptPath) {
+    return { success: false, error: 'tiktok_scraper.py not found' };
+  }
+
+  try {
+    const { stdout, stderr } = await execAsync(
+      `python3 "${scriptPath}" profile "${cleanHandle}" ${maxVideos}`,
+      { cwd, timeout: 180000, maxBuffer: 50 * 1024 * 1024 }
+    );
+    if (stderr) console.log(`[TikTok] ${stderr}`);
     const result = JSON.parse(stdout);
-    
     if (result.error) {
-      console.error(`[TikTok] Error: ${result.error}`);
       return { success: false, error: result.error };
     }
-    
     console.log(`[TikTok] Found ${result.total_videos || 0} videos for @${cleanHandle}`);
-    
     return {
       success: true,
       profile: result.profile,
       videos: result.videos,
       total_videos: result.total_videos,
     };
-    
   } catch (error: any) {
     console.error(`[TikTok] Scrape failed:`, error.message);
     return { success: false, error: error.message };
@@ -95,43 +125,57 @@ export async function scrapeTikTokProfile(
 
 /**
  * Download a TikTok video
+ * Primary: Camoufox | Fallback: tiktok_downloader.ts (Puppeteer)
  */
 export async function downloadTikTokVideo(
   videoUrl: string,
   outputPath: string
 ): Promise<{ success: boolean; path?: string; error?: string }> {
-  console.log(`[TikTok] Downloading (Puppeteer): ${videoUrl}`);
-  
+  console.log(`[TikTok] Downloading: ${videoUrl}`);
+
+  const cwd = process.cwd();
+  const camoufoxCandidates = [
+    path.join(cwd, 'scripts/camoufox_tiktok_downloader.py'),
+    path.join(cwd, 'apps/backend/scripts/camoufox_tiktok_downloader.py'),
+  ];
+  const camoufoxPath = resolveScriptPath('camoufox_tiktok_downloader', camoufoxCandidates);
+
+  if (camoufoxPath) {
+    try {
+      const { stdout } = await execAsync(
+        `python3 "${camoufoxPath}" "${videoUrl}" "${outputPath}"`,
+        { cwd, timeout: 300000 }
+      );
+      const result = JSON.parse(stdout.trim());
+      if (result.success) return result;
+    } catch (e: any) {
+      console.log(`[TikTok] Camoufox download failed: ${e.message}, falling back to Puppeteer...`);
+    }
+  }
+
+  const puppeteerCandidates = [
+    path.join(cwd, 'scripts/tiktok_downloader.ts'),
+    path.join(cwd, 'apps/backend/scripts/tiktok_downloader.ts'),
+  ];
+  const scriptPath = resolveScriptPath('tiktok_downloader', puppeteerCandidates);
+  if (!scriptPath) {
+    return { success: false, error: 'tiktok_downloader.ts not found' };
+  }
+
   try {
-    // USE PUPPETEER SCRIPT INSTEAD OF PYTHON
-    const scriptPath = path.join(process.cwd(), 'scripts/tiktok_downloader.ts');
-    
-    // Using npx tsx to execute the typescript file directly
     const { stdout, stderr } = await execAsync(
-      `npx tsx ${scriptPath} "${videoUrl}" "${outputPath}"`,
-      {
-        cwd: process.cwd(),
-        timeout: 300000, // 5 min timeout for headless browser
-      }
+      `npx tsx "${scriptPath}" "${videoUrl}" "${outputPath}"`,
+      { cwd, timeout: 300000 }
     );
-    
-    // Puppeteer output might be noisy, look for the JSON line
-    // The script prints JSON at the end
     const lines = stdout.trim().split('\n');
     const lastLine = lines[lines.length - 1];
-    
     try {
-        const result = JSON.parse(lastLine);
-        return result;
+      return JSON.parse(lastLine);
     } catch (e) {
-        console.error(`[TikTok] Failed to parse output: ${lastLine}`);
-        // If stderr has content, it might be an error from tsx or puppeteer
-        if (stderr) console.error(`[TikTok] Stderr: ${stderr}`);
-        return { success: false, error: 'Failed to parse downloader output' };
+      if (stderr) console.error(`[TikTok] Stderr: ${stderr}`);
+      return { success: false, error: 'Failed to parse downloader output' };
     }
-    
   } catch (error: any) {
-    console.error(`[TikTok] Download failed:`, error.message);
     return { success: false, error: error.message };
   }
 }

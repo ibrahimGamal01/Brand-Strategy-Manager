@@ -160,6 +160,7 @@ export function ResearchTreeView({
             >
                 {/* Level 1: Client Profile */}
                 <ClientInfoNode
+                    jobId={jobId}
                     client={client}
                     socialProfiles={socialProfiles}
                     clientDocuments={clientDocuments}

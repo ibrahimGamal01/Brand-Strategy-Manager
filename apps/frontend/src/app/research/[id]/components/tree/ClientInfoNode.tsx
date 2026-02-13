@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 
 interface ClientInfoNodeProps {
+    jobId?: string;
     client: any;
     socialProfiles: any[];
     clientProfileSnapshots?: any[];
@@ -22,6 +23,7 @@ interface ClientInfoNodeProps {
 }
 
 export function ClientInfoNode({
+    jobId,
     client,
     socialProfiles,
     clientProfileSnapshots = [],
@@ -62,10 +64,11 @@ export function ClientInfoNode({
             {/* Dynamic Social Profiles */}
             {socialProfiles.map((profile: any, index: number) => (
                 <SocialProfileNode
-                    key={`${profile.platform}-${index}`}
+                    key={profile.id ?? `${profile.platform}-${profile.handle}-${index}`}
+                    jobId={jobId}
                     profile={profile}
                     index={index}
-                    onRefreshSection={onRefreshSection} // Pass the prop
+                    onRefreshSection={onRefreshSection}
                 />
             ))}
 

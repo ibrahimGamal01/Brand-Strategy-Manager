@@ -83,7 +83,7 @@ export async function scrapeWithApify(
     const input = {
       directUrls: [profileUrl], // Array of Instagram URLs to scrape
       resultsType: 'posts', // What to scrape: posts, details, or comments
-      resultsLimit: postsLimit, // Max posts per profile
+      resultsLimit: Math.max(postsLimit, 50), // At least 50 per call (cost is per run)
       additionalFields: ['images', 'displayResources', 'carouselItems', 'childPosts'],
       // Use Apify's residential proxies for better reliability
       proxy: {
@@ -150,6 +150,7 @@ export async function scrapeWithApify(
       );
     }
 
+    // Second call: profile details (followersCount, followsCount, etc.) for follower count and bio
     try {
       const detailsInput = {
         directUrls: [profileUrl],

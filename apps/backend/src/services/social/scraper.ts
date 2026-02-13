@@ -199,9 +199,13 @@ export async function scrapeProfileIncrementally(
     let scrapedData: ScrapedProfile | null = null;
     
     if (platform === 'instagram') {
-      // Use the instagram-service which calls the Python scraper
+      // Instagram: use higher limit so one Apify call returns many posts (cost is per call)
+      const instagramPostsLimit = parseInt(
+        process.env.INSTAGRAM_POST_LIMIT || process.env.SOCIAL_SCRAPE_POST_LIMIT || '50',
+        10
+      );
       const { scrapeInstagramProfile } = await import('../scraper/instagram-service');
-      const result = await scrapeInstagramProfile(handle, postsLimit);
+      const result = await scrapeInstagramProfile(handle, instagramPostsLimit);
       
       if (result.success && result.data) {
         scrapedData = {
@@ -546,6 +550,29 @@ async function saveScrapedData(researchJobId: string, data: ScrapedProfile) {
     // ---------------------------
     try {
       if (context?.type === 'client') {
+        // Preserve last-known-good metadata when scrape returns 0/empty (avoid overwriting with bad data)
+        const existingAccount = await tx.clientAccount.findUnique({
+          where: {
+            clientId_platform_handle: {
+              clientId: context.clientId,
+              platform: data.platform,
+              handle: data.handle,
+            },
+          },
+        });
+        const safeFollowerCount =
+          data.followers != null && data.followers > 0
+            ? data.followers
+            : (existingAccount?.followerCount ?? data.followers ?? undefined);
+        const safeFollowingCount =
+          data.following != null && data.following > 0
+            ? data.following
+            : (existingAccount?.followingCount ?? data.following ?? undefined);
+        const safeBio =
+          data.bio != null && String(data.bio).trim() !== ''
+            ? data.bio
+            : (existingAccount?.bio ?? data.bio ?? undefined);
+
         const clientProfile = await tx.clientProfile.upsert({
           where: {
             clientId_platform_handle: {
@@ -555,9 +582,9 @@ async function saveScrapedData(researchJobId: string, data: ScrapedProfile) {
             },
           },
           update: {
-            followerCount: data.followers,
-            followingCount: data.following,
-            bio: data.bio,
+            followerCount: safeFollowerCount,
+            followingCount: safeFollowingCount,
+            bio: safeBio,
             profileImageUrl: data.posts[0]?.thumbnailUrl || undefined,
             isVerified: data.isVerified,
             isPrivate: false,
@@ -578,13 +605,43 @@ async function saveScrapedData(researchJobId: string, data: ScrapedProfile) {
           },
         });
 
+        // Sync ClientAccount so orchestration (client-completeness) sees lastScrapedAt and followerCount
+        await tx.clientAccount.upsert({
+          where: {
+            clientId_platform_handle: {
+              clientId: context.clientId,
+              platform: data.platform,
+              handle: data.handle,
+            },
+          },
+          update: {
+            followerCount: safeFollowerCount ?? undefined,
+            followingCount: safeFollowingCount ?? undefined,
+            bio: safeBio ?? undefined,
+            profileUrl: data.url ?? undefined,
+            profileImageUrl: data.posts[0]?.thumbnailUrl ?? undefined,
+            lastScrapedAt: new Date(),
+          },
+          create: {
+            clientId: context.clientId,
+            platform: data.platform,
+            handle: data.handle,
+            profileUrl: data.url ?? undefined,
+            followerCount: data.followers ?? undefined,
+            followingCount: data.following ?? undefined,
+            bio: data.bio ?? undefined,
+            profileImageUrl: data.posts[0]?.thumbnailUrl ?? undefined,
+            lastScrapedAt: new Date(),
+          },
+        });
+
         const snapshot = await tx.clientProfileSnapshot.create({
           data: {
             clientProfileId: clientProfile.id,
             researchJobId,
-            followerCount: data.followers,
-            followingCount: data.following,
-            bio: data.bio,
+            followerCount: safeFollowerCount ?? data.followers,
+            followingCount: safeFollowingCount ?? data.following,
+            bio: safeBio ?? data.bio,
             profileImageUrl: data.posts[0]?.thumbnailUrl || undefined,
             postsCount: data.postsCount,
             isVerified: data.isVerified,
@@ -593,7 +650,7 @@ async function saveScrapedData(researchJobId: string, data: ScrapedProfile) {
           },
         });
 
-        const followerBase = data.followers || 0;
+        const followerBase = (safeFollowerCount ?? data.followers) || 0;
         for (const post of data.posts) {
           await tx.clientPostSnapshot.upsert({
             where: {

@@ -191,9 +191,13 @@ def get_profile_and_videos(handle: str, max_videos: int = 30) -> dict:
         
         print(f"[TikTok] Found {len(videos)} videos for @{handle}", file=sys.stderr)
         
+        # Ensure profile always has follower_count key for tiktok-service.ts
+        profile = profile_info if profile_info else {'handle': handle, 'follower_count': 0}
+        if 'follower_count' not in profile:
+            profile['follower_count'] = profile.get('channel_follower_count', 0)
         return {
             'success': True,
-            'profile': profile_info if profile_info else {'handle': handle},
+            'profile': profile,
             'videos': videos,
             'total_videos': len(videos),
         }

@@ -1,8 +1,47 @@
+import { exec } from 'child_process';
+import { existsSync } from 'fs';
 import path from 'path';
+import { promisify } from 'util';
 import { fileManager, STORAGE_PATHS } from '../storage/file-manager';
 import { prisma } from '../../lib/prisma';
 import { tiktokService } from '../scraper/tiktok-service';
 import { resolveInstagramMediaViaApify } from '../scraper/apify-instagram-media-downloader';
+
+const execAsync = promisify(exec);
+
+async function resolveInstagramMediaViaCamoufox(sourceUrl: string): Promise<{
+  success: boolean;
+  mediaUrls: string[];
+  thumbnailUrl?: string;
+  error?: string;
+}> {
+  const cwd = process.cwd();
+  const candidates = [
+    path.join(cwd, 'scripts/camoufox_insta_downloader.py'),
+    path.join(cwd, 'apps/backend/scripts/camoufox_insta_downloader.py'),
+  ];
+  const scriptPath = candidates.find((p) => existsSync(p));
+  if (!scriptPath) {
+    return { success: false, mediaUrls: [], error: 'camoufox_insta_downloader.py not found' };
+  }
+  try {
+    const { stdout } = await execAsync(
+      `python3 "${scriptPath}" "${sourceUrl}"`,
+      { cwd, timeout: 90000 }
+    );
+    const result = JSON.parse(stdout.trim());
+    if (result.success && Array.isArray(result.mediaUrls) && result.mediaUrls.length > 0) {
+      return {
+        success: true,
+        mediaUrls: result.mediaUrls,
+        thumbnailUrl: result.thumbnailUrl,
+      };
+    }
+    return { success: false, mediaUrls: [], error: result.error || 'No media URLs' };
+  } catch (e: any) {
+    return { success: false, mediaUrls: [], error: e.message || 'Camoufox resolve failed' };
+  }
+}
 import { extractMediaUrls, extractImageMetadata, generateVideoThumbnail } from './download-helpers';
 import { downloadGenericMedia } from './download-generic';
 import { emitResearchJobEvent } from '../social/research-job-events';
@@ -57,7 +96,10 @@ function isInstagramProfileUrl(url: string): boolean {
 }
 
 function isTikTokPageUrl(url: string): boolean {
-  return /^https?:\/\/(?:www\.)?tiktok\.com\/@[^/]+\/video\/\d+/i.test(url);
+  return (
+    /^https?:\/\/(?:www\.)?tiktok\.com\/@[^/]+\/video\/\d+/i.test(url) ||
+    /^https?:\/\/(?:www\.)?tiktok\.com\/@[^/]+\/photo\/\d+/i.test(url)
+  );
 }
 
 function isObjectRecord(value: unknown): value is Record<string, any> {
@@ -119,7 +161,7 @@ export async function downloadPostMedia(
       continue;
     }
 
-    const resolved = await resolveInstagramMediaViaApify(sourceUrl, {
+    let resolved = await resolveInstagramMediaViaApify(sourceUrl, {
       researchJobId: eventContext?.researchJobId,
       runId: eventContext?.runId,
       source: eventContext?.source,
@@ -128,17 +170,26 @@ export async function downloadPostMedia(
       entityType: eventContext?.entityType || 'social_post',
       entityId: eventContext?.entityId || postId,
     });
-    if (resolved.success && resolved.mediaUrls.length > 0) {
+    if (!resolved.success || resolved.mediaUrls.length === 0) {
+      resolved = await resolveInstagramMediaViaCamoufox(sourceUrl);
+      if (resolved.success) {
+        console.log(
+          `[Downloader] Resolved ${resolved.mediaUrls.length} media URLs via Camoufox for ${sourceUrl}`
+        );
+      }
+    } else {
       console.log(
         `[Downloader] Resolved ${resolved.mediaUrls.length} media URLs via Apify for ${sourceUrl}`
       );
+    }
+    if (resolved.success && resolved.mediaUrls.length > 0) {
       resolvedPageCache.set(sourceUrl, resolved.mediaUrls);
       preparedUrls.push(...resolved.mediaUrls);
       continue;
     }
 
     console.warn(
-      `[Downloader] Could not resolve Instagram page URL via Apify: ${sourceUrl} (${resolved.error || 'unknown error'})`
+      `[Downloader] Could not resolve Instagram page URL: ${sourceUrl} (${resolved.error || 'unknown error'})`
     );
   }
 
@@ -146,13 +197,17 @@ export async function downloadPostMedia(
     if (!url) continue;
 
     try {
-      const isVideo = url.includes('.mp4') || url.includes('video') || url.includes('tiktok.com');
+      const isTikTokPhoto = /\/photo\/\d+/i.test(url);
+      const isVideo = isTikTokPhoto
+        ? false
+        : url.includes('.mp4') || url.includes('video') || url.includes('tiktok.com');
       const mediaType = isVideo ? 'VIDEO' : 'IMAGE';
       let extension = fileManager.getExtension(url) || (isVideo ? 'mp4' : 'jpg');
-      if (isVideo) extension = 'mp4';
+      if (isTikTokPhoto) extension = 'jpg';
+      else if (isVideo) extension = 'mp4';
 
       const filename = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${extension}`;
-      const storagePath =
+      let storagePath =
         entityType === 'CLIENT'
           ? path.join(STORAGE_PATHS.clientMedia(entityId, postId), filename)
           : path.join(STORAGE_PATHS.competitorMedia(entityId, postId), filename);
@@ -167,6 +222,7 @@ export async function downloadPostMedia(
 
         const result = await tiktokService.downloadVideo(url, storagePath);
         if (!result.success) throw new Error(`TikTok download failed: ${result.error}`);
+        if (result.path) storagePath = result.path;
       } else {
         const headers: Record<string, string> = {
           Referer: 'https://www.instagram.com/',

@@ -1,4 +1,5 @@
 import { exec } from 'child_process';
+import { existsSync } from 'fs';
 import { promisify } from 'util';
 import path from 'path';
 import { createGraphQLScraper } from './instagram-graphql';
@@ -52,7 +53,39 @@ export interface ScrapeResult {
   success: boolean;
   data?: InstagramProfileData;
   error?: string;
-  scraper_used?: 'apify' | 'graphql' | 'python' | 'puppeteer' | 'web_profile';
+  scraper_used?: 'apify' | 'camoufox' | 'graphql' | 'python' | 'puppeteer' | 'web_profile';
+}
+
+/** Returns true when profile metadata is missing or zero (needs GraphQL enrichment). */
+function isProfileMetadataIncomplete(data: InstagramProfileData): boolean {
+  const missingFollower = data.follower_count == null || data.follower_count === 0;
+  const missingFollowing = data.following_count == null || data.following_count === 0;
+  const missingBio = data.bio == null || String(data.bio).trim() === '';
+  const missingTotalPosts = data.total_posts == null || data.total_posts === 0;
+  return missingFollower || missingFollowing || missingBio || missingTotalPosts;
+}
+
+/** Enrich profile data with GraphQL when follower count, bio, etc. are missing. Mutates and returns data. */
+async function enrichProfileMetadataIfNeeded(
+  cleanHandle: string,
+  data: InstagramProfileData
+): Promise<InstagramProfileData> {
+  if (!isProfileMetadataIncomplete(data)) return data;
+  try {
+    const graphqlScraper = createGraphQLScraper();
+    const profile = await graphqlScraper.scrapeProfile(cleanHandle);
+    data.follower_count = profile.follower_count ?? data.follower_count ?? 0;
+    data.following_count = profile.following_count ?? data.following_count ?? 0;
+    data.bio = (profile.biography ?? data.bio ?? '').trim() || data.bio || '';
+    data.is_verified = profile.is_verified ?? data.is_verified;
+    data.is_private = profile.is_private ?? data.is_private;
+    data.profile_pic = profile.profile_pic_url || data.profile_pic || '';
+    data.total_posts = profile.edge_owner_to_timeline_media?.count ?? data.total_posts ?? 0;
+    console.log('[Instagram] ✓ Enriched with GraphQL profile stats');
+  } catch (err: any) {
+    console.warn('[Instagram] GraphQL enrichment failed:', err?.message);
+  }
+  return data;
 }
 
 // Web profile scraper using /api/v1/users/web_profile_info
@@ -146,41 +179,52 @@ export async function scrapeInstagramProfile(
     // Check if we got meaningful data with posts
     if (result.success && result.data && result.data.posts && result.data.posts.length > 0) {
       console.log(`[Instagram] ✓ Apify scraper succeeded with ${result.data.posts.length} posts`);
-    // Enrich Apify result with profile stats when available (Apify posts endpoint omits follower counts)
-    if (!result.data.follower_count || result.data.follower_count === 0) {
-      try {
-        const graphqlScraper = createGraphQLScraper();
-        const profile = await graphqlScraper.scrapeProfile(cleanHandle);
-        result.data = {
-          ...result.data,
-          follower_count: profile.follower_count || result.data.follower_count,
-          following_count: profile.following_count || result.data.following_count,
-          bio: profile.biography || result.data.bio,
-          is_verified: profile.is_verified || result.data.is_verified,
-          is_private: profile.is_private ?? result.data.is_private,
-          profile_pic: profile.profile_pic_url || result.data.profile_pic,
-          total_posts: profile.edge_owner_to_timeline_media?.count || result.data.total_posts,
-        };
-        console.log('[Instagram] ✓ Enriched Apify result with GraphQL profile stats');
-      } catch (enrichError: any) {
-        console.warn(`[Instagram] Failed to enrich Apify profile stats: ${enrichError.message}`);
-      }
-    }
-
-    return {
-      success: true,
-      data: result.data as any,
-      scraper_used: 'apify'
+      await enrichProfileMetadataIfNeeded(cleanHandle, result.data);
+      return {
+        success: true,
+        data: result.data as any,
+        scraper_used: 'apify',
       };
     }
     
     // Apify succeeded but returned no posts - try next layer
-    console.log('[Instagram] Apify returned no posts, trying GraphQL...');
+    console.log('[Instagram] Apify returned no posts, trying Camoufox...');
   } catch (error: any) {
-    console.log(`[Instagram] Apify scraper failed: ${error.message}, falling back to GraphQL...`);
+    console.log(`[Instagram] Apify scraper failed: ${error.message}, falling back to Camoufox...`);
   }
 
-  // Layer 1: Try GraphQL API (fast, but may have rate limits)
+  // Layer 1: Try Camoufox (anti-detect browser fallback)
+  try {
+    console.log(`[Instagram] Attempting Camoufox scraper for @${cleanHandle}...`);
+    const cwd = process.cwd();
+    const candidates = [
+      path.join(cwd, 'scripts/camoufox_instagram_scraper.py'),
+      path.join(cwd, 'apps/backend/scripts/camoufox_instagram_scraper.py'),
+    ];
+    const resolvedPath = candidates.find((p) => existsSync(p));
+    if (!resolvedPath) throw new Error('camoufox_instagram_scraper.py not found');
+
+    const { stdout, stderr } = await execAsync(
+      `python3 "${resolvedPath}" "${cleanHandle}" "${postsLimit}"`,
+      { cwd: process.cwd(), maxBuffer: 10 * 1024 * 1024, timeout: 300000 }
+    );
+    if (stderr) console.log(`[Instagram/Camoufox] ${stderr}`);
+
+    const camResult: InstagramProfileData | { error: string } = JSON.parse(stdout);
+    if ('error' in camResult) throw new Error(camResult.error);
+
+    const data = camResult as InstagramProfileData;
+    if (data.posts && data.posts.length > 0) {
+      console.log(`[Instagram] ✓ Camoufox scraper succeeded with ${data.posts.length} posts`);
+      await enrichProfileMetadataIfNeeded(cleanHandle, data);
+      return { success: true, data, scraper_used: 'camoufox' };
+    }
+    console.log('[Instagram] Camoufox returned no posts, trying GraphQL...');
+  } catch (camoufoxError: any) {
+    console.log(`[Instagram] Camoufox scraper failed: ${camoufoxError.message}, falling back to GraphQL...`);
+  }
+
+  // Layer 2: Try GraphQL API (fast, but may have rate limits)
   try {
     console.log(`[Instagram] Attempting GraphQL/web-profile scraper for @${cleanHandle}...`);
     const result = await scrapeViaWebProfile(cleanHandle, postsLimit);

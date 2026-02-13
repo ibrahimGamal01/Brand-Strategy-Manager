@@ -81,12 +81,19 @@ cd apps/backend/scripts
 pip3 install -r requirements.txt
 ```
 
-### Test scraper:
+### Camoufox (anti-detect browser fallback):
+```bash
+pip3 install camoufox[geoip]
+python3 -m camoufox fetch   # One-time: downloads browser binary (~200-400MB)
+```
+
+### Test scrapers:
 ```bash
 # Test Python scraper directly
 python3 apps/backend/scripts/instagram_scraper.py ummahpreneur 10
 
-# Output will be JSON with profile + posts
+# Test Camoufox scrapers (after: pip install camoufox[geoip] && python3 -m camoufox fetch)
+./apps/backend/scripts/test-camoufox-smoke.sh
 ```
 
 ### Optional: Tor for IP rotation

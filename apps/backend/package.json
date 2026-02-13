@@ -11,7 +11,8 @@
         "db:generate": "prisma generate",
         "db:migrate": "prisma migrate dev",
         "lint": "eslint src/",
-        "check:runtime-config": "tsx src/scripts/check-runtime-config.ts"
+        "check:runtime-config": "tsx src/scripts/check-runtime-config.ts",
+        "test:camoufox": "tsx src/scripts/test-camoufox-integration.ts"
     },
     "dependencies": {
         "@prisma/client": "^6.0.0",

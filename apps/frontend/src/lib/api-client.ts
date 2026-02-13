@@ -155,6 +155,12 @@ export const apiClient = {
 
   rerunScraper: (jobId: string, scraper: string) => post<any>(`/research-jobs/${jobId}/rerun/${scraper}`),
 
+  scrapeClientProfile: (jobId: string, platform: string, handle: string) =>
+    post<{ success: boolean; profileId?: string }>(`/research-jobs/${jobId}/scrape-client-profile`, {
+      platform,
+      handle,
+    }),
+
   continueResearchJob: (jobId: string) => post<any>(`/research-jobs/${jobId}/continuity/continue`),
 
   resumeResearchJob: (jobId: string) => post<any>(`/research-jobs/${jobId}/resume`),

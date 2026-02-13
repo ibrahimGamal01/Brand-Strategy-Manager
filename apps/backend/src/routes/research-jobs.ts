@@ -27,6 +27,7 @@ import {
   configureResearchJobContinuity,
   researchContinuity,
 } from '../services/social/research-continuity';
+import { normalizeHandle as normalizeHandleFromUrl } from '../services/intake/brain-intake-utils';
 import {
   emitResearchJobEvent,
   listResearchJobEvents,
@@ -431,36 +432,134 @@ router.get('/:id', async (req: Request, res: Response) => {
         return fileManager.toUrl(p);
     };
 
-    const transformedSocialProfiles = job.socialProfiles?.map((profile: any) => ({
-        ...profile,
-        followerCount: profile.followers ?? 0,
-        followingCount: profile.following ?? 0,
-        followers: profile.followers ?? 0,
-        following: profile.following ?? 0,
-        posts: profile.posts?.map((post: any) => {
-            const mediaAssets = (post.mediaAssets || []).map((m: any) => ({
-                ...m,
-                url: pathToUrl(m.blobStoragePath),
-                thumbnailUrl: pathToUrl(m.thumbnailPath) || pathToUrl(m.blobStoragePath) || m.originalUrl,
-            }));
-            const firstMediaThumb = mediaAssets[0]?.thumbnailUrl;
-            return {
-                ...post,
-                likes: post.likesCount ?? 0,
-                comments: post.commentsCount ?? 0,
-                shares: post.sharesCount ?? 0,
-                views: post.viewsCount ?? 0,
-                plays: post.playsCount ?? 0,
-                id: post.id,
-                caption: post.caption || '',
-                postUrl: post.url,
-                url: post.url,
-                postedAt: post.postedAt,
-                thumbnailUrl: pathToUrl(post.thumbnailUrl) || firstMediaThumb,
-                mediaAssets,
-            };
-        }) || []
-    })) || [];
+    const clientAccounts = job.client?.clientAccounts || [];
+    // Use URL-aware normalize so "https://www.instagram.com/ummahpreneur" matches account "ummahpreneur"
+    const normalizeHandle = (h: string) => normalizeHandleFromUrl(h) || String(h ?? '').replace(/^@+/, '').trim().toLowerCase();
+
+    const transformedSocialProfiles = job.socialProfiles?.map((profile: any) => {
+        const followers = profile.followers ?? 0;
+        const following = profile.following ?? 0;
+        const acc = clientAccounts.find(
+            (a: any) =>
+                a.platform === profile.platform &&
+                normalizeHandle(a.handle) === normalizeHandle(profile.handle)
+        );
+        let followerCount = followers;
+        let followingCount = following;
+        let bio = profile.bio;
+        if (acc) {
+            if ((followers == null || followers === 0) && acc.followerCount != null && acc.followerCount > 0) {
+                followerCount = acc.followerCount;
+            }
+            if ((following == null || following === 0) && acc.followingCount != null) {
+                followingCount = acc.followingCount;
+            }
+            if ((!bio || String(bio).trim() === '') && acc.bio) {
+                bio = acc.bio;
+            }
+        }
+        const displayHandle = normalizeHandle(profile.handle) || profile.handle;
+        return {
+            ...profile,
+            handle: displayHandle,
+            followerCount: followerCount ?? 0,
+            followingCount: followingCount ?? 0,
+            followers: followerCount ?? 0,
+            following: followingCount ?? 0,
+            bio: bio ?? profile.bio,
+            posts: profile.posts?.map((post: any) => {
+                const mediaAssets = (post.mediaAssets || []).map((m: any) => ({
+                    ...m,
+                    url: pathToUrl(m.blobStoragePath),
+                    thumbnailUrl: pathToUrl(m.thumbnailPath) || pathToUrl(m.blobStoragePath) || m.originalUrl,
+                }));
+                const firstMediaThumb = mediaAssets[0]?.thumbnailUrl;
+                return {
+                    ...post,
+                    likes: post.likesCount ?? 0,
+                    comments: post.commentsCount ?? 0,
+                    shares: post.sharesCount ?? 0,
+                    views: post.viewsCount ?? 0,
+                    plays: post.playsCount ?? 0,
+                    id: post.id,
+                    caption: post.caption || '',
+                    postUrl: post.url,
+                    url: post.url,
+                    postedAt: post.postedAt,
+                    thumbnailUrl: pathToUrl(post.thumbnailUrl) || firstMediaThumb,
+                    mediaAssets,
+                };
+            }) || [],
+        };
+    }) || [];
+
+    // Ensure every client target (inputData.handles + clientAccounts) has a profile so none "disappear"
+    const clientTargets: Array<{ platform: string; handle: string }> = [];
+    const inputHandles = (job.inputData?.handles || {}) as Record<string, string>;
+    for (const [platform, handle] of Object.entries(inputHandles)) {
+        const p = String(platform).toLowerCase();
+        if ((p !== 'instagram' && p !== 'tiktok') || !handle || typeof handle !== 'string') continue;
+        const h = normalizeHandle(handle);
+        if (h) clientTargets.push({ platform: p, handle: h });
+    }
+    for (const acc of clientAccounts) {
+        const p = String(acc.platform || '').toLowerCase();
+        if ((p !== 'instagram' && p !== 'tiktok') || !acc.handle) continue;
+        const h = normalizeHandle(acc.handle);
+        if (h) clientTargets.push({ platform: p, handle: h });
+    }
+    // Legacy fallback: primary handle + platform (matches research-continuity collectClientTargets)
+    const inputData = (job.inputData || {}) as any;
+    if (inputData.handle && inputData.platform) {
+        const p = String(inputData.platform).toLowerCase();
+        if ((p === 'instagram' || p === 'tiktok') && typeof inputData.handle === 'string') {
+            const h = normalizeHandle(inputData.handle);
+            if (h) clientTargets.push({ platform: p, handle: h });
+        }
+    }
+    const seenKey = (p: string, h: string) => `${p}:${h}`;
+    const targetKeys = new Set<string>();
+    const dedupedTargets = clientTargets.filter((t) => {
+        const k = seenKey(t.platform, t.handle);
+        if (targetKeys.has(k)) return false;
+        targetKeys.add(k);
+        return true;
+    });
+    // Infer other platform from same handle so both Instagram and TikTok show when user has one handle
+    const targetsWithBoth: Array<{ platform: string; handle: string }> = [];
+    for (const t of dedupedTargets) {
+        targetsWithBoth.push(t);
+        const other = t.platform === 'instagram' ? 'tiktok' : 'instagram';
+        if (t.platform === 'tiktok' || t.platform === 'instagram') {
+            const kOther = seenKey(other, t.handle);
+            if (!targetKeys.has(kOther)) {
+                targetKeys.add(kOther);
+                targetsWithBoth.push({ platform: other, handle: t.handle });
+            }
+        }
+    }
+    const existingKeys = new Set(
+        transformedSocialProfiles.map((p: any) => seenKey(p.platform, normalizeHandle(p.handle)))
+    );
+    for (const target of targetsWithBoth) {
+        if (existingKeys.has(seenKey(target.platform, target.handle))) continue;
+        const acc = clientAccounts.find(
+            (a: any) => a.platform === target.platform && normalizeHandle(a.handle) === target.handle
+        );
+        transformedSocialProfiles.push({
+            id: `placeholder-${target.platform}-${target.handle}`,
+            researchJobId: job.id,
+            platform: target.platform,
+            handle: target.handle,
+            url: null,
+            followers: acc?.followerCount ?? 0,
+            following: acc?.followingCount ?? 0,
+            followerCount: acc?.followerCount ?? 0,
+            followingCount: acc?.followingCount ?? 0,
+            bio: acc?.bio ?? null,
+            posts: [],
+        });
+    }
 
     // Merge aggregated data into the job response object
     // This makes the frontend show ALL historical data for this client
@@ -1455,6 +1554,53 @@ router.delete('/:id/clear-competitors', async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('[API] Failed to clear competitors:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/research-jobs/:id/scrape-client-profile
+ * Scrape a client profile by platform + handle (creates SocialProfile if missing, e.g. placeholder)
+ */
+router.post('/:id/scrape-client-profile', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { platform, handle } = req.body || {};
+    if (!platform || !handle) {
+      return res.status(400).json({ error: 'platform and handle are required' });
+    }
+    const p = String(platform).toLowerCase();
+    if (p !== 'instagram' && p !== 'tiktok') {
+      return res.status(400).json({ error: 'platform must be instagram or tiktok' });
+    }
+    const job = await prisma.researchJob.findUnique({
+      where: { id },
+      include: { client: true },
+    });
+    if (!job) return res.status(404).json({ error: 'Research job not found' });
+    const normalizedHandle = normalizeHandleFromUrl(handle) || String(handle).replace(/^@+/, '').trim().toLowerCase();
+    const profile = await prisma.socialProfile.upsert({
+      where: {
+        researchJobId_platform_handle: {
+          researchJobId: id,
+          platform: p,
+          handle: normalizedHandle,
+        },
+      },
+      update: {},
+      create: {
+        researchJobId: id,
+        platform: p,
+        handle: normalizedHandle,
+        url: p === 'instagram' ? `https://www.instagram.com/${normalizedHandle}/` : `https://www.tiktok.com/@${normalizedHandle}`,
+      },
+    });
+    scrapeProfileSafe(id, p, normalizedHandle).then(() => {
+      console.log(`[API] Scrape finished for ${p}:@${normalizedHandle}`);
+    });
+    return res.json({ success: true, profileId: profile.id, message: `Scraping ${p} @${normalizedHandle}` });
+  } catch (error: any) {
+    console.error('[API] scrape-client-profile error:', error);
+    return res.status(500).json({ error: error?.message || 'Scrape failed' });
   }
 });
 

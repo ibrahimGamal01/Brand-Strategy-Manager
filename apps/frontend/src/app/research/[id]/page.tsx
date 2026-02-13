@@ -28,6 +28,17 @@ import {
 } from '@/lib/workspace/module-types';
 import { Badge } from '@/components/ui/badge';
 
+/** Normalize handle for matching: extract username from URLs or strip @ and lowercase */
+function normalizeHandleForMatch(handle: string): string {
+  if (!handle || typeof handle !== 'string') return '';
+  const raw = handle.trim();
+  const ig = raw.match(/instagram\.com\/([a-z0-9._]{2,30})/i);
+  if (ig) return ig[1].toLowerCase();
+  const tt = raw.match(/tiktok\.com\/@?([a-z0-9._]{2,30})/i);
+  if (tt) return tt[1].toLowerCase();
+  return raw.replace(/^@+/, '').trim().toLowerCase();
+}
+
 function fmtDate(value?: string | null) {
   if (!value) return '—';
   const date = new Date(value);
@@ -273,14 +284,20 @@ export default function ResearchPage() {
   const aiQuestions = data.aiQuestions || [];
 
   const clientHandles = new Set<string>();
+  const addHandle = (handle: string) => {
+    if (!handle || typeof handle !== 'string') return;
+    const lower = handle.trim().toLowerCase();
+    clientHandles.add(lower);
+    const normalized = normalizeHandleForMatch(handle);
+    if (normalized) clientHandles.add(normalized);
+  };
   (client.clientAccounts || []).forEach((acc: any) => {
-    if (acc.handle) clientHandles.add(acc.handle.toLowerCase());
+    if (acc.handle) addHandle(acc.handle);
   });
-
-  if (inputData.handle) clientHandles.add(inputData.handle.toLowerCase());
+  if (inputData.handle) addHandle(inputData.handle);
   if (inputData.handles) {
     Object.values(inputData.handles).forEach((handle: any) => {
-      if (typeof handle === 'string' && handle) clientHandles.add(handle.toLowerCase());
+      if (typeof handle === 'string' && handle) addHandle(handle);
     });
   }
 
@@ -292,7 +309,9 @@ export default function ResearchPage() {
   const apiSocialProfiles = (data.socialProfiles || []).filter((profile: any) => {
     if (!profile.handle) return false;
     const handleLower = profile.handle.toLowerCase();
-    const matchesClientHandle = clientHandles.has(handleLower);
+    const normalizedProfileHandle = normalizeHandleForMatch(profile.handle);
+    const matchesClientHandle =
+      clientHandles.has(handleLower) || (normalizedProfileHandle !== '' && clientHandles.has(normalizedProfileHandle));
 
     const isTikTok = profile.platform?.toLowerCase() === 'tiktok';
     const isCompetitor = competitorHandles.has(handleLower);

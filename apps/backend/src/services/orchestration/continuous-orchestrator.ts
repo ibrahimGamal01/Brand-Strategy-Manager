@@ -86,9 +86,16 @@ export async function runContinuousOrchestration(researchJobId: string): Promise
     };
 
     // Queue client tasks (skip when manual control mode)
-    if (controlMode === 'auto' && (clientGaps.missingTikTok || clientGaps.staleFollowerCounts.length > 0)) {
+    const hasClientGaps =
+      clientGaps.missingTikTok ||
+      clientGaps.staleFollowerCounts.length > 0 ||
+      clientGaps.incompleteInstagramMetadata;
+    if (controlMode === 'auto' && hasClientGaps) {
       await queueClientTasks(researchJobId, clientGaps);
-      tasksQueued.client = (clientGaps.missingTikTok ? 1 : 0) + clientGaps.staleFollowerCounts.length;
+      tasksQueued.client =
+        (clientGaps.missingTikTok ? 1 : 0) +
+        clientGaps.staleFollowerCounts.length +
+        (clientGaps.incompleteInstagramMetadata ? 1 : 0);
     }
 
     // Queue competitor tasks (skip when manual control mode)
@@ -118,10 +125,11 @@ export async function runContinuousOrchestration(researchJobId: string): Promise
     const duration = Date.now() - startTime;
 
     // Emit summary event
-    const totalGaps = 
+    const totalGaps =
       (clientGaps.missingTikTok ? 1 : 0) +
       clientGaps.staleFollowerCounts.length +
       (clientGaps.missingRecentPosts ? 1 : 0) +
+      (clientGaps.incompleteInstagramMetadata ? 1 : 0) +
       competitorGaps.unscrapedProfiles.length +
       competitorGaps.staleProfiles.length +
       competitorGaps.missingPosts.length +
@@ -142,6 +150,7 @@ export async function runContinuousOrchestration(researchJobId: string): Promise
           missingTikTok: clientGaps.missingTikTok,
           staleFollowerCounts: clientGaps.staleFollowerCounts,
           missingRecentPosts: clientGaps.missingRecentPosts,
+          incompleteInstagramMetadata: clientGaps.incompleteInstagramMetadata,
         },
         competitorGaps: {
           unscraped: competitorGaps.unscrapedProfiles.length,
