@@ -8,6 +8,7 @@ import { useToast } from '@/hooks/use-toast';
 import { ResearchFooter } from './components';
 import { ResearchTreeView } from './components/ResearchTreeView';
 import StrategyWorkspace from './components/strategy/StrategyWorkspace';
+import ContentCalendarWorkspace from './components/calendar/ContentCalendarWorkspace';
 import { apiClient, ResearchJobEvent } from '@/lib/api-client';
 import { BrainWorkspacePanel } from './components/brain/BrainWorkspacePanel';
 import { LiveActivityFeed } from './components/LiveActivityFeed';
@@ -115,6 +116,14 @@ export default function ResearchPage() {
     void loadBrainPayload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId]);
+
+  // Refetch brain when job data changes (e.g. after orchestration) and brainPayload is still missing
+  useEffect(() => {
+    if (job && !brainPayload) {
+      void loadBrainPayload();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job?.updatedAt, job?.status]);
 
   async function handleContinueNow() {
     try {
@@ -323,14 +332,37 @@ export default function ResearchPage() {
   let socialProfiles =
     apiSocialProfiles.length > 0
       ? apiSocialProfiles
-      : (client.clientAccounts || []).map((acc: any) => ({
-          platform: acc.platform,
-          handle: acc.handle,
-          followers: acc.followerCount || 0,
-          following: acc.followingCount || 0,
-          bio: acc.bio || '',
-          profileImageUrl: acc.profileImageUrl,
-        }));
+      : (() => {
+          const fromAccounts = (client.clientAccounts || []).map((acc: any) => ({
+            platform: acc.platform,
+            handle: acc.handle,
+            followers: acc.followerCount || 0,
+            following: acc.followingCount || 0,
+            bio: acc.bio || '',
+            profileImageUrl: acc.profileImageUrl,
+          }));
+          if (fromAccounts.length > 0) return fromAccounts;
+          const fromInput: Array<{ platform: string; handle: string; followers: number; following: number; bio: string; profileImageUrl?: string }> = [];
+          if (inputData.handle && (inputData.platform === 'instagram' || inputData.platform === 'tiktok')) {
+            fromInput.push({
+              platform: String(inputData.platform || 'instagram').toLowerCase(),
+              handle: String(inputData.handle).replace(/^@+/, '').trim(),
+              followers: 0,
+              following: 0,
+              bio: '',
+            });
+          }
+          if (inputData.handles && typeof inputData.handles === 'object') {
+            for (const [platform, handle] of Object.entries(inputData.handles)) {
+              if ((platform === 'instagram' || platform === 'tiktok') && typeof handle === 'string' && handle) {
+                const h = String(handle).replace(/^@+/, '').trim();
+                if (h && !fromInput.some((p) => p.platform === platform && p.handle.toLowerCase() === h.toLowerCase()))
+                  fromInput.push({ platform, handle: h, followers: 0, following: 0, bio: '' });
+              }
+            }
+          }
+          return fromInput;
+        })();
 
   socialProfiles = socialProfiles.sort((a: any, b: any) => {
     const priority = { instagram: 1, tiktok: 2 };
@@ -360,12 +392,31 @@ export default function ResearchPage() {
     socialProfiles,
     brandMentions: client.brandMentions || [],
     clientDocuments: client.clientDocuments || [],
+    analysisScope: data.analysisScope || null,
     trendDebug: inputData.trendDebug || undefined,
   };
 
+  // Use job data as fallback for brain coverage when separate brain fetch hasn't completed or failed
+  const derivedBrainPayload =
+    brainPayload ??
+    (data
+      ? {
+          success: true,
+          brainProfile: data.brainProfile ?? data.client?.brainProfile ?? null,
+          commandHistory: data.brainCommands ?? [],
+          competitorSummary: data.competitorSummary ?? {
+            runId: null,
+            topPicks: 0,
+            shortlisted: 0,
+            approved: 0,
+            filtered: 0,
+          },
+        }
+      : undefined);
+
   const coverageReport = buildBrainCoverageReport({
     researchJob: data as Record<string, unknown>,
-    brainPayload: brainPayload || undefined,
+    brainPayload: derivedBrainPayload,
     events: events as unknown as Array<Record<string, unknown>>,
   });
 
@@ -395,7 +446,19 @@ export default function ResearchPage() {
           onChange={setActiveModule}
         />
       }
-      notificationRail={<BatNotificationRail events={events as ResearchJobEvent[]} connectionState={connectionState} />}
+      notificationRail={
+        <BatNotificationRail
+          events={events as ResearchJobEvent[]}
+          connectionState={connectionState}
+          onSelectEvent={(event) => {
+            setActiveModule('intelligence');
+            toast({
+              title: 'Opened Intelligence',
+              description: event.message,
+            });
+          }}
+        />
+      }
     >
       <WorkspaceErrorBoundary title="BAT workspace module failed to render">
         {activeModule === 'brain' ? (
@@ -484,16 +547,14 @@ export default function ResearchPage() {
           </div>
         ) : null}
 
-        {activeModule === 'strategy_docs' ? <StrategyWorkspace jobId={data.id} /> : null}
-
-        {activeModule === 'content_calendar' ? (
-          <ModulePlaceholder
-            title="Content Calendar"
-            description="Calendar planning scaffold is active. BAT will anchor scheduling to validated intelligence and BAT Brain constraints."
-            readiness={readinessMap}
-            requiredKeys={['socialProfiles.posts', 'searchTrends', 'aiQuestions', 'brainProfile', 'client.clientAccounts']}
+        {activeModule === 'strategy_docs' ? (
+          <StrategyWorkspace
+            jobId={data.id}
+            clientName={client?.name || data?.client?.name || 'Client'}
           />
         ) : null}
+
+        {activeModule === 'content_calendar' ? <ContentCalendarWorkspace jobId={data.id} /> : null}
 
         {activeModule === 'content_generators' ? (
           <ModulePlaceholder

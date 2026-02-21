@@ -162,3 +162,87 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 export function streamUrl(path: string): string {
   return buildUrl(path);
 }
+
+const LONG_REQUEST_TIMEOUT_MS = 600_000; // 10 minutes for strategy generation
+const DEFAULT_DEV_BACKEND_ORIGIN = 'http://localhost:3001';
+
+function getLongRequestBase(): string | null {
+  if (typeof window === 'undefined') return null;
+  const fromEnv = absoluteBrowserApiBase();
+  if (fromEnv) return fromEnv;
+  // Dev fallback: when frontend is on localhost, use backend on 3001 so we bypass Next.js proxy (~30s timeout)
+  try {
+    const origin = window.location?.origin ?? '';
+    if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
+      return `${DEFAULT_DEV_BACKEND_ORIGIN}/api`;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+export interface ApiFetchLongOptions extends RequestInit {
+  /** Timeout in ms (default 10 min). Only used when direct backend URL is used. */
+  timeoutMs?: number;
+}
+
+/**
+ * For long-running requests (e.g. strategy document generate). In the browser,
+ * calls the backend directly when possible (NEXT_PUBLIC_API_ORIGIN or localhost:3001 in dev)
+ * to avoid Next.js rewrite proxy ~30s timeout. Uses a long client timeout so the request can complete.
+ */
+export async function apiFetchLong<T>(
+  path: string,
+  init?: ApiFetchLongOptions
+): Promise<T> {
+  const timeoutMs = init?.timeoutMs ?? LONG_REQUEST_TIMEOUT_MS;
+  const { timeoutMs: _drop, ...fetchInit } = init ?? {};
+
+  const directBase = getLongRequestBase();
+  const url =
+    typeof window !== 'undefined' && directBase
+      ? `${directBase}${path.startsWith('/') ? path : `/${path}`}`
+      : buildUrl(path);
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...fetchInit,
+      signal: controller.signal,
+      headers: {
+        ...(fetchInit.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(fetchInit.headers || {}),
+      },
+    });
+    clearTimeout(timeoutId);
+    const payload = await parseJsonSafe(response);
+    if (!response.ok) {
+      let message = `Request failed with status ${response.status}`;
+      if (payload && typeof payload === 'object' && 'error' in payload) {
+        const rawError = (payload as { error?: unknown }).error;
+        if (typeof rawError === 'string' && rawError.trim().length > 0) {
+          message = rawError;
+        } else if (rawError != null) {
+          message = String(rawError);
+        }
+      }
+      throw new ApiError(message, response.status, payload);
+    }
+    return payload as T;
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err?.name === 'AbortError') {
+      throw new ApiError(
+        `Request timed out after ${timeoutMs / 1000}s. Strategy generation may still be running on the server.`,
+        0,
+        null
+      );
+    }
+    throw err instanceof ApiError
+      ? err
+      : new ApiError(err?.message ?? 'Network error', 0, { error: err?.message });
+  }
+}

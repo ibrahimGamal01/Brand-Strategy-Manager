@@ -3,10 +3,12 @@
 import { useState, useEffect } from 'react';
 import DocumentViewer from './DocumentViewer';
 import ExportButton from './ExportButton';
-import { apiFetch } from '@/lib/api/http';
+import StrategyDocChatPanel from './StrategyDocChatPanel';
+import { apiFetch, apiFetchLong } from '@/lib/api/http';
 
 interface StrategyWorkspaceProps {
     jobId: string;
+    clientName?: string;
 }
 
 interface StrategyDocument {
@@ -23,9 +25,11 @@ interface StrategyDocument {
     };
     generatedAt?: string;
     status: 'COMPLETE' | 'PARTIAL' | 'NONE';
+    sectionsComplete?: number;
+    totalSections?: number;
 }
 
-export default function StrategyWorkspace({ jobId }: StrategyWorkspaceProps) {
+export default function StrategyWorkspace({ jobId, clientName = 'Client' }: StrategyWorkspaceProps) {
     const [document, setDocument] = useState<StrategyDocument | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [isGenerating, setIsGenerating] = useState(false);
@@ -57,7 +61,7 @@ export default function StrategyWorkspace({ jobId }: StrategyWorkspaceProps) {
         setError(null);
 
         try {
-            const data = await apiFetch<StrategyDocument>(`/strategy/${jobId}/generate`, {
+            const data = await apiFetchLong<StrategyDocument>(`/strategy/${jobId}/generate`, {
                 method: 'POST',
                 body: JSON.stringify({ sections: 'all' })
             });
@@ -185,6 +189,10 @@ export default function StrategyWorkspace({ jobId }: StrategyWorkspaceProps) {
         );
     }
 
+    const sectionsComplete = document.sectionsComplete ?? Object.keys(document.sections).length;
+    const totalSections = document.totalSections ?? 9;
+    const isIncomplete = sectionsComplete < totalSections;
+
     // Document exists - show viewer
     return (
         <div className="strategy-document-container">
@@ -195,12 +203,39 @@ export default function StrategyWorkspace({ jobId }: StrategyWorkspaceProps) {
                 </div>
             </div>
 
-            <DocumentViewer
-                sections={document.sections}
-                clientName="Client"
-                generatedAt={document.generatedAt}
-                jobId={jobId}
-            />
+            {isIncomplete && (
+                <div className="mx-auto max-w-4xl px-6 py-3 bg-amber-50 border-b border-amber-200 flex items-center justify-between gap-4 flex-wrap">
+                    <span className="text-sm text-amber-800">
+                        Document is incomplete ({sectionsComplete}/{totalSections} sections).
+                    </span>
+                    <button
+                        onClick={handleGenerate}
+                        disabled={isGenerating}
+                        className="shrink-0 px-3 py-1.5 bg-amber-600 text-white text-sm font-medium rounded hover:bg-amber-700 disabled:opacity-50"
+                    >
+                        {isGenerating ? 'Generating…' : 'Generate all sections'}
+                    </button>
+                </div>
+            )}
+
+            <div className="mx-auto w-full max-w-[1400px] px-4 py-4 lg:px-6">
+                <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+                    <div className="min-w-0">
+                        <DocumentViewer
+                            sections={document.sections}
+                            clientName={clientName}
+                            generatedAt={document.generatedAt}
+                            jobId={jobId}
+                        />
+                    </div>
+                    <div className="xl:sticky xl:top-20">
+                        <StrategyDocChatPanel
+                            jobId={jobId}
+                            sections={document.sections}
+                        />
+                    </div>
+                </div>
+            </div>
         </div>
     );
 }

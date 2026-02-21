@@ -6,6 +6,7 @@ import {
     RefreshCw, Database as DatabaseIcon
 } from 'lucide-react';
 import { TreeLayout, TreeNodeCard, DataList } from './tree';
+import { ContentAndAiAnalysisView, getDeduplicatedMediaCount } from './ContentAndAiAnalysisView';
 import { ImageGallery } from './search/ImageGallery';
 import { VideoGallery } from './search/VideoGallery';
 import { NewsGallery } from './search/NewsGallery';
@@ -40,6 +41,7 @@ interface ResearchTreeViewProps {
         socialProfiles: any[];
         brandMentions: any[];
         clientDocuments: any[];
+        analysisScope?: any;
         trendDebug?: {
             attemptedKeywords?: string[];
             insertedCount?: number;
@@ -72,6 +74,7 @@ export function ResearchTreeView({
     const clientPosts = data.clientPosts || [];
     const tiktokPosts = data.tiktokPosts || []; // Extract tiktokPosts
     const clientProfileSnapshots = data.clientProfileSnapshots || [];
+    const competitorProfileSnapshots = data.competitorProfileSnapshots || [];
     const searchResults = data.rawSearchResults || [];
     const images = data.ddgImageResults || [];
     const videos = data.ddgVideoResults || [];
@@ -403,6 +406,39 @@ export function ResearchTreeView({
                         />
                     </TreeNodeCard>
                 </TreeNodeCard >
+
+                {/* Level 1: Downloaded content & AI analysis (deduplicated by media id) */}
+                {(() => {
+                    const fallbackMediaCount = getDeduplicatedMediaCount(
+                        socialProfiles,
+                        clientProfileSnapshots,
+                        competitorProfileSnapshots,
+                        competitors
+                    );
+                    const scopedWindowCount = Number(data.analysisScope?.analysisWindow || 0);
+                    const mediaCount = scopedWindowCount > 0 ? scopedWindowCount : fallbackMediaCount;
+                    return (
+                        <TreeNodeCard
+                            title="Downloaded content & AI analysis"
+                            icon={<ImageIcon className="h-4 w-4" />}
+                            count={mediaCount}
+                            defaultExpanded={mediaCount > 0}
+                            level={1}
+                        >
+                            <div className="px-4 py-3">
+                                <ContentAndAiAnalysisView
+                                    jobId={jobId}
+                                    socialProfiles={socialProfiles}
+                                    clientProfileSnapshots={clientProfileSnapshots}
+                                    competitorProfileSnapshots={competitorProfileSnapshots}
+                                    discoveredCompetitors={competitors}
+                                    analysisScope={data.analysisScope || null}
+                                    onRefresh={() => onRefreshSection?.('content')}
+                                />
+                            </div>
+                        </TreeNodeCard>
+                    );
+                })()}
 
                 {/* Level 1: Analytics */}
                 < TreeNodeCard

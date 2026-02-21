@@ -16,6 +16,9 @@ export interface ResearchJob {
   status: JobStatus;
   competitorsToFind: number;
   createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  updatedAt?: string;
   progress: {
     stage: number;
     label: string;

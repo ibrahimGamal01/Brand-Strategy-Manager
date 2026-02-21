@@ -22,6 +22,7 @@ interface LiveActivityFeedProps {
   events: ResearchJobEvent[];
   connectionState: ConnectionState;
   mode?: 'panel' | 'rail';
+  onSelectEvent?: (event: ResearchJobEvent) => void;
 }
 
 const FILTER_OPTIONS: Array<{ key: FeedFilter; label: string }> = [
@@ -85,7 +86,7 @@ function getConnectionBadge(connectionState: ConnectionState) {
   );
 }
 
-export function LiveActivityFeed({ events, connectionState, mode = 'panel' }: LiveActivityFeedProps) {
+export function LiveActivityFeed({ events, connectionState, mode = 'panel', onSelectEvent }: LiveActivityFeedProps) {
   const [filter, setFilter] = useState<FeedFilter>('all');
   const [query, setQuery] = useState('');
   const [autoScroll, setAutoScroll] = useState(true);
@@ -224,13 +225,26 @@ export function LiveActivityFeed({ events, connectionState, mode = 'panel' }: Li
               return (
                 <article
                   key={event.id}
+                  role={onSelectEvent ? 'button' : undefined}
+                  tabIndex={onSelectEvent ? 0 : undefined}
+                  onClick={onSelectEvent ? () => onSelectEvent(event) : undefined}
+                  onKeyDown={
+                    onSelectEvent
+                      ? (keyboardEvent) => {
+                          if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') {
+                            keyboardEvent.preventDefault();
+                            onSelectEvent(event);
+                          }
+                        }
+                      : undefined
+                  }
                   className={`rounded-lg border p-3 text-xs transition-colors ${
                     isError
                       ? 'border-destructive/35 bg-destructive/10'
                       : read
                         ? 'border-border/50 bg-background/50'
                         : 'border-primary/25 bg-primary/5'
-                  }`}
+                  } ${onSelectEvent ? 'cursor-pointer hover:border-primary/40' : ''}`}
                 >
                   <div className="mb-1 flex items-center justify-between gap-2">
                     <p className="line-clamp-1 font-medium">{event.message}</p>
@@ -240,7 +254,10 @@ export function LiveActivityFeed({ events, connectionState, mode = 'panel' }: Li
                       </Badge>
                       <button
                         type="button"
-                        onClick={() => toggleRead(event.id)}
+                        onClick={(clickEvent) => {
+                          clickEvent.stopPropagation();
+                          toggleRead(event.id);
+                        }}
                         className="rounded p-0.5 text-muted-foreground hover:bg-background/70 hover:text-foreground"
                         aria-label={read ? 'Mark as unread' : 'Mark as read'}
                       >

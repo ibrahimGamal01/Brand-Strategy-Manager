@@ -1,7 +1,8 @@
 'use client';
 
+import { useState } from 'react';
 import {
-    Instagram, Video, Users, MessageSquare, PlayCircle, ExternalLink, RefreshCw, Trash2
+    Instagram, Video, Users, MessageSquare, PlayCircle, ExternalLink, RefreshCw, Trash2, Brain
 } from 'lucide-react';
 import { TreeNodeCard } from './TreeNodeCard';
 import { PostsGridWithRanking } from '../PostsGridWithRanking';
@@ -30,6 +31,7 @@ function displayHandle(handle: string | undefined, platform: string): string {
 
 export function SocialProfileNode({ jobId, profile, index, onRefreshSection }: SocialProfileNodeProps) {
     const { toast } = useToast();
+    const [analyzing, setAnalyzing] = useState(false);
     const handleDisplay = displayHandle(profile.handle, profile.platform || '') || profile.handle || '';
 
     // Determine Icon and Color based on platform
@@ -219,6 +221,38 @@ export function SocialProfileNode({ jobId, profile, index, onRefreshSection }: S
                 {/* Posts Grid with Ranking and Metrics */}
                 {posts.length > 0 && (
                     <div className="mt-4 pt-4 border-t border-border/40">
+                        {jobId && (
+                            <div className="flex justify-end mb-3">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="gap-2"
+                                    disabled={analyzing}
+                                    onClick={async () => {
+                                        setAnalyzing(true);
+                                        try {
+                                            const res = await apiClient.analyzeJobMedia(jobId, { skipAlreadyAnalyzed: true });
+                                            toast({
+                                                title: 'Analysis complete',
+                                                description: `Analyzed ${res.succeeded} media asset(s).${res.failed ? ` ${res.failed} failed.` : ''}`,
+                                            });
+                                            onRefreshSection?.('social-profiles');
+                                        } catch (e: any) {
+                                            toast({
+                                                title: 'Analysis failed',
+                                                description: e?.message || 'Could not run AI analysis.',
+                                                variant: 'destructive',
+                                            });
+                                        } finally {
+                                            setAnalyzing(false);
+                                        }
+                                    }}
+                                >
+                                    <Brain className="h-3.5 w-3.5" />
+                                    {analyzing ? 'Analyzing…' : 'Analyze with AI'}
+                                </Button>
+                            </div>
+                        )}
                         <PostsGridWithRanking
                             posts={posts.map((p: any) => ({
                                 id: p.id,

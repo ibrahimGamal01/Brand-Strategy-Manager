@@ -4,6 +4,7 @@ import type {
   BrandIntelligenceSummaryResponse,
   CompetitorOrchestrationResponse,
   CompetitorShortlistResponse,
+  MediaAnalysisScopeSummary,
   ResearchJobEventsResponse,
   ResearchModuleAction,
   ResearchModuleKey,
@@ -45,9 +46,48 @@ export const apiClient = {
 
   createClientIntakeV2: (data: Record<string, unknown>) => post<any>('/clients/intake-v2', data),
 
+  suggestIntakeCompletion: (partialPayload: Record<string, unknown>) =>
+    post<{
+      success: boolean;
+      suggested?: Record<string, unknown>;
+      suggestedHandles?: Record<string, string>;
+      suggestedHandleValidation?: {
+        instagram?: { handle: string; isLikelyClient: boolean; confidence: number; reason: string };
+        tiktok?: { handle: string; isLikelyClient: boolean; confidence: number; reason: string };
+      };
+      filledByUser?: string[];
+      confirmationRequired?: boolean;
+      confirmationReasons?: string[];
+    }>('/clients/suggest-intake-completion', partialPayload),
+
   getResearchJob: (jobId: string) => apiFetch<any>(`/research-jobs/${jobId}`),
 
   getResearchJobOverview: (jobId: string) => apiFetch<any>(`/research-jobs/${jobId}/overview`),
+
+  analyzeJobMedia: (
+    jobId: string,
+    options?: {
+      skipAlreadyAnalyzed?: boolean;
+      limit?: number;
+      maxEligibleAssets?: number;
+      maxEligiblePosts?: number;
+      allowDegraded?: boolean;
+    }
+  ) =>
+    post<{
+      success: boolean;
+      runId?: string;
+      requested: number;
+      succeeded: number;
+      failed: number;
+      skipped?: boolean;
+      reason?: string;
+      analysisScope?: MediaAnalysisScopeSummary;
+      errors?: Array<{ mediaAssetId: string; error?: string }>;
+    }>(
+      `/research-jobs/${jobId}/analyze-media`,
+      options ?? {}
+    ),
 
   getResearchJobModule: (jobId: string, module: string, cursor?: string, limit?: number) => {
     const params = new URLSearchParams();
@@ -109,6 +149,13 @@ export const apiClient = {
     return apiFetch<CompetitorShortlistResponse>(`/research-jobs/${jobId}/competitors/shortlist${query}`);
   },
 
+  /** Backfill top picks from intake inspiration links (optionally force-resync). */
+  seedCompetitorsFromIntake: (jobId: string, options?: { force?: boolean }) =>
+    post<{ success: boolean; topPicks?: number; message?: string }>(
+      `/research-jobs/${jobId}/competitors/seed-from-intake${options?.force ? '?force=true' : ''}`,
+      options?.force ? { force: true } : undefined
+    ),
+
   shortlistCompetitor: (
     jobId: string,
     payload: { runId: string; profileId: string }
@@ -141,6 +188,28 @@ export const apiClient = {
   ) =>
     post<{ success: boolean; queuedCount: number; skippedCount?: number; error?: string }>(
       `/research-jobs/${jobId}/competitors/continue-scrape`,
+      payload
+    ),
+
+  recheckCompetitorAvailability: (jobId: string, payload: { candidateProfileId: string }) =>
+    post<{
+      success: boolean;
+      candidateProfileId?: string;
+      handle?: string;
+      platform?: string;
+      availabilityStatus?: string;
+      availabilityReason?: string | null;
+      resolverConfidence?: number | null;
+      error?: string;
+      code?: string;
+    }>(`/research-jobs/${jobId}/competitors/recheck-availability`, payload),
+
+  updateCompetitorCandidateState: (
+    jobId: string,
+    payload: { candidateProfileId: string; state: string; reason?: string }
+  ) =>
+    patch<{ success: boolean; candidateProfile?: Record<string, unknown>; error?: string }>(
+      `/research-jobs/${jobId}/competitors/candidate-state`,
       payload
     ),
 
@@ -195,7 +264,10 @@ export const apiClient = {
   updateResearchContinuity: (jobId: string, config: { enabled?: boolean; intervalHours?: number }) =>
     patch<any>(`/research-jobs/${jobId}/continuity`, config),
 
-  getBrain: (jobId: string) => apiFetch<any>(`/research-jobs/${jobId}/brain`),
+  getBrain: (jobId: string, options?: { resync?: boolean }) => {
+    const q = options?.resync ? '?resync=1' : '';
+    return apiFetch<any>(`/research-jobs/${jobId}/brain${q}`);
+  },
 
   createBrainCommand: (
     jobId: string,
@@ -204,6 +276,14 @@ export const apiClient = {
 
   applyBrainCommand: (jobId: string, commandId: string) =>
     post<any>(`/research-jobs/${jobId}/brain/commands/${commandId}/apply`),
+
+  acceptBrainSuggestion: (jobId: string, suggestionId: string) =>
+    post<{ success: boolean; brainProfile?: Record<string, unknown>; error?: string }>(
+      `/research-jobs/${jobId}/brain/suggestions/${suggestionId}/accept`
+    ),
+
+  rejectBrainSuggestion: (jobId: string, suggestionId: string) =>
+    post<{ success: boolean; error?: string }>(`/research-jobs/${jobId}/brain/suggestions/${suggestionId}/reject`),
 
   listBrainCommands: (jobId: string) => apiFetch<any>(`/research-jobs/${jobId}/brain/commands`),
 

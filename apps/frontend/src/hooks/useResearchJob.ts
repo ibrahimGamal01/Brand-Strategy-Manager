@@ -37,6 +37,23 @@ export interface ResearchJob {
     answer: any;
   }>;
   createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  updatedAt?: string;
+  analysisScope?: {
+    runId: string;
+    status: 'RUNNING' | 'COMPLETE' | 'SKIPPED' | 'FAILED';
+    downloadedTotal: number;
+    qualifiedForAi: number;
+    analysisWindow: number;
+    analyzedInWindow: number;
+    attemptedAssets: number;
+    succeeded: number;
+    failed: number;
+    skippedReason: string | null;
+    startedAt: string;
+    completedAt: string | null;
+  } | null;
 }
 
 export function useResearchJob(id: string, options: { sseHealthy?: boolean } = {}) {

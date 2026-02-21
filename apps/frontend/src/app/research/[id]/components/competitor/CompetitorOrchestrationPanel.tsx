@@ -1,7 +1,18 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Loader2, PlayCircle, RefreshCw, Sparkles, Eye, ListPlus } from 'lucide-react';
+import {
+  Loader2,
+  PlayCircle,
+  RefreshCw,
+  Sparkles,
+  Eye,
+  ListPlus,
+  AlertTriangle,
+  CheckCircle2,
+  Ban,
+  Star,
+} from 'lucide-react';
 import {
   apiClient,
   CompetitorShortlistResponse,
@@ -81,6 +92,20 @@ function groupHeader(group: OrchestratedCompetitorIdentityGroup): string {
   return parts.join(' • ');
 }
 
+function blockerReasonLabel(value?: string | null): string {
+  const code = String(value || '').trim();
+  if (!code) return 'Blocked by pipeline rule';
+  const labels: Record<string, string> = {
+    WEBSITE_ONLY_REQUIRES_SURFACE_RESOLUTION: 'Website-only source needs social surface resolution',
+    UNSUPPORTED_SCRAPE_PLATFORM: 'Unsupported scrape platform',
+    SCRAPE_NOT_ELIGIBLE: 'Not scrape-eligible in current policy',
+    PROFILE_UNAVAILABLE: 'Profile unavailable',
+    INVALID_HANDLE: 'Invalid handle',
+    LOW_MEDIA_COVERAGE_CRITICAL: 'Critical low media coverage',
+  };
+  return labels[code] || code.replaceAll('_', ' ').toLowerCase();
+}
+
 export function CompetitorOrchestrationPanel({
   jobId,
   className,
@@ -101,20 +126,78 @@ export function CompetitorOrchestrationPanel({
   } | null>(null);
   const [shortlistingByProfile, setShortlistingByProfile] = useState<Record<string, boolean>>({});
   const [addAndScrapeByProfile, setAddAndScrapeByProfile] = useState<Record<string, boolean>>({});
+  const [queueingByProfile, setQueueingByProfile] = useState<Record<string, boolean>>({});
+  const [recheckingByProfile, setRecheckingByProfile] = useState<Record<string, boolean>>({});
+  const [syncingClientInputs, setSyncingClientInputs] = useState(false);
+  const [queueingClientInputs, setQueueingClientInputs] = useState(false);
 
   const runId = data?.runId || null;
 
-  const selectableProfileIds = useMemo(() => {
+  const allProfiles = useMemo(() => {
     const top = toAllProfiles(data?.topPicks || []);
     const shortlist = toAllProfiles(data?.shortlist || []);
     const filtered = toAllProfiles(data?.filteredOut || []);
-    const fromTopShort = [...top, ...shortlist].filter((p) => isScrapeEligible(p)).map((p) => p.id);
-    const fromFiltered = filtered.filter((p) => isScrapePlatform(p.platform)).map((p) => p.id);
-    return Array.from(new Set([...fromTopShort, ...fromFiltered]));
+    return [...top, ...shortlist, ...filtered];
+  }, [data]);
+
+  const selectableProfileIds = useMemo(() => {
+    const stage = data?.stageBuckets || {
+      clientInputs: [],
+      discoveredCandidates: [],
+      scrapeQueue: [],
+      scrapedReady: [],
+      blocked: [],
+    };
+    const stageProfiles = [
+      ...toAllProfiles(stage.clientInputs || []),
+      ...toAllProfiles(stage.discoveredCandidates || []),
+      ...toAllProfiles(stage.scrapeQueue || []),
+      ...toAllProfiles(stage.scrapedReady || []),
+      ...toAllProfiles(stage.blocked || []),
+    ];
+    return Array.from(
+      new Set(
+        stageProfiles
+          .filter(
+            (profile) =>
+              isScrapePlatform(profile.platform) &&
+              (isScrapeEligible(profile) || Boolean(profile.scrapeEligible))
+          )
+          .map((profile) => profile.id)
+      )
+    );
   }, [data]);
 
   const selectedCount = selectedIds.size;
   const hasSelectableRows = selectableProfileIds.length > 0;
+  const stageBuckets = useMemo(
+    () =>
+      data?.stageBuckets || {
+        clientInputs: [],
+        discoveredCandidates: [],
+        scrapeQueue: [],
+        scrapedReady: [],
+        blocked: [],
+      },
+    [data]
+  );
+
+  const clientInputProfiles = useMemo(
+    () => toAllProfiles(stageBuckets.clientInputs || []),
+    [stageBuckets]
+  );
+  const clientInputCount = clientInputProfiles.length;
+  const priorityScrapeableProfileIds = useMemo(
+    () =>
+      clientInputProfiles
+        .filter(
+          (profile) =>
+            isScrapePlatform(profile.platform) &&
+            (Boolean(profile.scrapeEligible) || Boolean(profile.discoveredCompetitorId))
+        )
+        .map((profile) => profile.id),
+    [clientInputProfiles]
+  );
 
   async function loadShortlist() {
     try {
@@ -126,15 +209,41 @@ export function CompetitorOrchestrationPanel({
 
       setData(payload);
 
+      const summary = payload?.summary ?? {};
+      const topPicksCount = Number(summary.topPicks ?? 0);
+      const shortlistedCount = Number(summary.shortlisted ?? 0);
+      if (topPicksCount === 0 && shortlistedCount === 0) {
+        try {
+          const seed = await apiClient.seedCompetitorsFromIntake(jobId);
+          if (seed?.success && (seed.topPicks ?? 0) > 0) {
+            await loadShortlist();
+            return;
+          }
+        } catch {
+          // ignore; shortlist stays empty
+        }
+      }
+
       const defaults = new Set<string>();
       const top = toAllProfiles(payload.topPicks || []);
       const shortlist = toAllProfiles(payload.shortlist || []);
+      const clientInputs = toAllProfiles(payload.stageBuckets?.clientInputs || []);
+      const discoveredCandidates = toAllProfiles(payload.stageBuckets?.discoveredCandidates || []);
 
       for (const profile of top) {
-        if (isScrapeEligible(profile)) defaults.add(profile.id);
+        if (isScrapePlatform(profile.platform) && (isScrapeEligible(profile) || profile.scrapeEligible)) {
+          defaults.add(profile.id);
+        }
       }
       for (const profile of shortlist) {
-        if (profile.state === 'APPROVED' && isScrapeEligible(profile)) defaults.add(profile.id);
+        if (isScrapePlatform(profile.platform) && (isScrapeEligible(profile) || profile.scrapeEligible)) {
+          defaults.add(profile.id);
+        }
+      }
+      for (const profile of [...clientInputs, ...discoveredCandidates]) {
+        if (isScrapePlatform(profile.platform) && (isScrapeEligible(profile) || profile.scrapeEligible)) {
+          defaults.add(profile.id);
+        }
       }
 
       setSelectedIds(defaults);
@@ -347,6 +456,68 @@ export function CompetitorOrchestrationPanel({
     }
   }
 
+  async function handleResyncClientInputs() {
+    try {
+      setSyncingClientInputs(true);
+      const response = await apiClient.seedCompetitorsFromIntake(jobId, { force: true });
+      if (!response?.success) {
+        throw new Error(response?.message || 'Failed to resync from intake');
+      }
+      toast({
+        title: 'Client competitors resynced',
+        description:
+          response?.message || `Updated priority list from intake (${response?.topPicks || 0} entries).`,
+      });
+      await loadShortlist();
+      onRefresh?.();
+    } catch (error: any) {
+      toast({
+        title: 'Resync failed',
+        description: error?.message || 'Unable to refresh client-provided competitors',
+        variant: 'destructive',
+      });
+    } finally {
+      setSyncingClientInputs(false);
+    }
+  }
+
+  async function handleQueuePriorityInputs() {
+    if (priorityScrapeableProfileIds.length === 0) {
+      toast({
+        title: 'No priority profiles to queue',
+        description: 'No scrape-eligible client-provided competitors are currently available.',
+      });
+      return;
+    }
+
+    try {
+      setQueueingClientInputs(true);
+      const response = await apiClient.continueCompetitorScrape(jobId, {
+        candidateProfileIds: priorityScrapeableProfileIds,
+        runId: runId || undefined,
+        forceMaterialize: true,
+        forceUnavailable: true,
+      });
+      if (!response?.success) {
+        throw new Error(response?.error || 'Failed to queue priority competitors');
+      }
+      toast({
+        title: 'Priority competitors queued',
+        description: `Queued ${response.queuedCount}, skipped ${response.skippedCount || 0}.`,
+      });
+      await loadShortlist();
+      onRefresh?.();
+    } catch (error: any) {
+      toast({
+        title: 'Priority queue failed',
+        description: error?.message || 'Unable to queue client-provided competitors',
+        variant: 'destructive',
+      });
+    } finally {
+      setQueueingClientInputs(false);
+    }
+  }
+
   async function handleContinueRowScrape(profile: OrchestratedCompetitorProfile) {
     if (!profile.discoveredCompetitorId) {
       toast({
@@ -383,24 +554,84 @@ export function CompetitorOrchestrationPanel({
     }
   }
 
-  async function handleStateChange(profile: OrchestratedCompetitorProfile, newState: string) {
-    if (!profile.discoveredCompetitorId) {
+  async function handleQueueCandidateScrape(
+    profile: OrchestratedCompetitorProfile,
+    forceMaterialize = false
+  ) {
+    try {
+      setQueueingByProfile((previous) => ({ ...previous, [profile.id]: true }));
+      const response = await apiClient.continueCompetitorScrape(jobId, {
+        candidateProfileIds: [profile.id],
+        runId: runId || undefined,
+        forceMaterialize,
+        forceUnavailable: forceMaterialize,
+      });
+
+      if (!response?.success) {
+        throw new Error(response?.error || 'Queue scrape failed');
+      }
+
       toast({
-        title: 'Cannot update state',
-        description: 'Profile has no discovered competitor ID',
+        title: forceMaterialize ? 'Forced into scrape queue' : 'Queued for scrape',
+        description: `@${profile.handle}: queued ${response.queuedCount}, skipped ${response.skippedCount || 0}`,
+      });
+      await loadShortlist();
+      onRefresh?.();
+    } catch (error: any) {
+      toast({
+        title: 'Queue scrape failed',
+        description: error?.message || `Unable to queue @${profile.handle}`,
         variant: 'destructive',
       });
-      return;
+    } finally {
+      setQueueingByProfile((previous) => {
+        const next = { ...previous };
+        delete next[profile.id];
+        return next;
+      });
     }
+  }
 
+  async function handleRecheckAvailability(profile: OrchestratedCompetitorProfile) {
     try {
-      const response = await apiClient.updateCompetitorState(profile.discoveredCompetitorId, {
-        selectionState: newState,
+      setRecheckingByProfile((previous) => ({ ...previous, [profile.id]: true }));
+      const response = await apiClient.recheckCompetitorAvailability(jobId, {
+        candidateProfileId: profile.id,
+      });
+      if (!response?.success) {
+        throw new Error(response?.error || 'Availability recheck failed');
+      }
+      toast({
+        title: 'Availability rechecked',
+        description: `@${profile.handle} -> ${response.availabilityStatus || 'updated'}`,
+      });
+      await loadShortlist();
+      onRefresh?.();
+    } catch (error: any) {
+      toast({
+        title: 'Recheck failed',
+        description: error?.message || `Unable to recheck @${profile.handle}`,
+        variant: 'destructive',
+      });
+    } finally {
+      setRecheckingByProfile((previous) => {
+        const next = { ...previous };
+        delete next[profile.id];
+        return next;
+      });
+    }
+  }
+
+  async function handleStateChange(profile: OrchestratedCompetitorProfile, newState: string) {
+    try {
+      const response = await apiClient.updateCompetitorCandidateState(jobId, {
+        candidateProfileId: profile.id,
+        state: newState,
         reason: `Manually changed to ${newState}`,
       });
 
       if (!response?.success) {
-        throw new Error('State update failed');
+        throw new Error(response?.error || 'State update failed');
       }
 
       toast({
@@ -421,7 +652,15 @@ export function CompetitorOrchestrationPanel({
 
   function renderGroupCard(
     group: OrchestratedCompetitorIdentityGroup,
-    section: 'top' | 'shortlist' | 'filtered'
+    section:
+      | 'top'
+      | 'shortlist'
+      | 'filtered'
+      | 'client_inputs'
+      | 'discovered_candidates'
+      | 'scrape_queue'
+      | 'scraped_ready'
+      | 'blocked'
   ) {
     return (
       <div key={`${group.identityId || group.canonicalName}`} className="rounded-md border border-border/50 bg-muted/10 p-3">
@@ -439,10 +678,12 @@ export function CompetitorOrchestrationPanel({
           {(group.profiles || []).map((profile) => {
             const checked = selectedIds.has(profile.id);
             const rowScrapeEligible = isScrapeEligible(profile);
-            const isFiltered = section === 'filtered';
-            const rowSelectable = rowScrapeEligible || (isFiltered && isScrapePlatform(profile.platform));
+            const isFiltered = section === 'filtered' || section === 'blocked';
+            const isBlockedSection = section === 'blocked';
+            const rowSelectable =
+              isScrapePlatform(profile.platform) &&
+              (rowScrapeEligible || Boolean(profile.scrapeEligible) || isFiltered);
             const rowDisabled =
-              !rowScrapeEligible ||
               profile.discoveredStatus === 'SCRAPING' ||
               Boolean(continuingByProfile[profile.id]);
 
@@ -467,31 +708,50 @@ export function CompetitorOrchestrationPanel({
                     <Badge variant="secondary" className="h-5 text-[10px]">
                       {profileScoreLabel(profile)}
                     </Badge>
+                    {profile.sourceType === 'client_inspiration' ? (
+                      <Badge variant="default" className="h-5 text-[10px] uppercase">
+                        Priority Input
+                      </Badge>
+                    ) : null}
+                    {profile.sourceType ? (
+                      <Badge variant="outline" className="h-5 text-[10px] uppercase">
+                        {profile.sourceType.replaceAll('_', ' ')}
+                      </Badge>
+                    ) : null}
+                    <Badge variant={selectionVariant(profile.state)} className="h-5 text-[10px] uppercase">
+                      {profile.state.replaceAll('_', ' ')}
+                    </Badge>
                     <Badge variant={availabilityVariant(profile.availabilityStatus)} className="h-5 text-[10px] uppercase">
                       {profile.availabilityStatus.replaceAll('_', ' ')}
                     </Badge>
+                    {profile.readinessStatus ? (
+                      <Badge
+                        variant={profile.readinessStatus === 'READY' ? 'default' : profile.readinessStatus === 'DEGRADED' ? 'secondary' : 'destructive'}
+                        className="h-5 text-[10px] uppercase"
+                      >
+                        readiness {profile.readinessStatus.toLowerCase()}
+                      </Badge>
+                    ) : null}
                     {profile.discoveredStatus ? (
                       <Badge variant={profile.discoveredStatus === 'SCRAPED' ? 'default' : 'secondary'} className="h-5 text-[10px] uppercase">
                         {profile.discoveredStatus}
                       </Badge>
                     ) : null}
-                    {profile.discoveredCompetitorId && (
-                      <Select
-                        value={profile.state}
-                        onValueChange={(value) => handleStateChange(profile, value)}
-                      >
-                        <SelectTrigger className="h-6 w-[140px] text-[10px]">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="TOP_PICK">Top Pick</SelectItem>
-                          <SelectItem value="SHORTLISTED">Shortlisted</SelectItem>
-                          <SelectItem value="APPROVED">Approved</SelectItem>
-                          <SelectItem value="FILTERED_OUT">Filtered Out</SelectItem>
-                          <SelectItem value="REJECTED">Rejected</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    )}
+                    <Select
+                      value={profile.state}
+                      onValueChange={(value) => handleStateChange(profile, value)}
+                    >
+                      <SelectTrigger className="h-6 w-[140px] text-[10px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="TOP_PICK">Top Pick</SelectItem>
+                        <SelectItem value="SHORTLISTED">Shortlisted</SelectItem>
+                        <SelectItem value="APPROVED">Approved</SelectItem>
+                        <SelectItem value="FILTERED_OUT">Filtered Out</SelectItem>
+                        <SelectItem value="REJECTED">Rejected</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
 
                   {profile.stateReason ? (
@@ -499,6 +759,16 @@ export function CompetitorOrchestrationPanel({
                   ) : null}
                   {profile.availabilityReason ? (
                     <p className="mt-1 text-xs text-muted-foreground">Availability: {profile.availabilityReason}</p>
+                  ) : null}
+                  {profile.blockerReasonCode ? (
+                    <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                      Blocker: {blockerReasonLabel(profile.blockerReasonCode)}
+                    </p>
+                  ) : null}
+                  {profile.lastStateTransitionAt ? (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Last transition: {new Date(profile.lastStateTransitionAt).toLocaleString()}
+                    </p>
                   ) : null}
 
                   <div className="mt-2 flex flex-wrap gap-2">
@@ -518,6 +788,41 @@ export function CompetitorOrchestrationPanel({
                         )}
                         Continue Scrape
                       </Button>
+                    ) : profile.scrapeEligible && isScrapePlatform(profile.platform) ? (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleQueueCandidateScrape(profile, false)}
+                          disabled={Boolean(queueingByProfile[profile.id])}
+                          className="h-7 text-[11px]"
+                          title="Queue scrape"
+                        >
+                          {queueingByProfile[profile.id] ? (
+                            <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <PlayCircle className="mr-1 h-3.5 w-3.5" />
+                          )}
+                          Queue Scrape
+                        </Button>
+                        {(isBlockedSection || profile.state === 'FILTERED_OUT') ? (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => handleQueueCandidateScrape(profile, true)}
+                            disabled={Boolean(queueingByProfile[profile.id])}
+                            className="h-7 text-[11px]"
+                            title="Force materialize and queue"
+                          >
+                            {queueingByProfile[profile.id] ? (
+                              <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <AlertTriangle className="mr-1 h-3.5 w-3.5" />
+                            )}
+                            Force Materialize
+                          </Button>
+                        ) : null}
+                      </>
                     ) : isFiltered && isScrapePlatform(profile.platform) ? (
                       <>
                         <Button
@@ -556,6 +861,23 @@ export function CompetitorOrchestrationPanel({
                         Cannot scrape: competitor not materialized
                       </span>
                     )}
+                    {isScrapePlatform(profile.platform) ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleRecheckAvailability(profile)}
+                        disabled={Boolean(recheckingByProfile[profile.id])}
+                        className="h-7 text-[11px]"
+                        title="Recheck availability"
+                      >
+                        {recheckingByProfile[profile.id] ? (
+                          <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <RefreshCw className="mr-1 h-3.5 w-3.5" />
+                        )}
+                        Recheck Availability
+                      </Button>
+                    ) : null}
                     {profile.discoveredCompetitorId && (
                       <Button
                         size="sm"
@@ -649,6 +971,55 @@ export function CompetitorOrchestrationPanel({
         </div>
       ) : null}
 
+      <div className="rounded-md border border-primary/30 bg-primary/5 p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <h4 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-primary">
+            <Star className="h-3.5 w-3.5" />
+            Priority Competitors (Client Inputs)
+          </h4>
+          <Badge variant="secondary" className="h-5 text-[10px]">
+            Total {clientInputCount}
+          </Badge>
+          <Badge variant="outline" className="h-5 text-[10px]">
+            Scrape-ready {priorityScrapeableProfileIds.length}
+          </Badge>
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Client-provided competitors are treated as highest-priority inputs in queueing and review.
+        </p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" onClick={handleResyncClientInputs} disabled={syncingClientInputs}>
+            {syncingClientInputs ? (
+              <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="mr-1 h-3.5 w-3.5" />
+            )}
+            Resync from Intake
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={handleQueuePriorityInputs}
+            disabled={queueingClientInputs || priorityScrapeableProfileIds.length === 0}
+          >
+            {queueingClientInputs ? (
+              <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <PlayCircle className="mr-1 h-3.5 w-3.5" />
+            )}
+            Queue Priority Inputs
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setSelectedIds(new Set(priorityScrapeableProfileIds))}
+            disabled={priorityScrapeableProfileIds.length === 0}
+          >
+            Select Priority Only
+          </Button>
+        </div>
+      </div>
+
       <div className="flex flex-wrap gap-2">
         <Button size="sm" onClick={handleContinueDiscovery} disabled={runningDiscovery}>
           {runningDiscovery ? (
@@ -695,26 +1066,109 @@ export function CompetitorOrchestrationPanel({
         </div>
       ) : (
         <div className="space-y-4">
-          {(data?.topPicks?.length || 0) > 0 ? (
+          {(stageBuckets.clientInputs?.length || 0) > 0 ? (
             <div className="space-y-2">
-              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Top Picks</h4>
-              <div className="space-y-2">{(data?.topPicks || []).map((group) => renderGroupCard(group, 'top'))}</div>
+              <h4 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <ListPlus className="h-3.5 w-3.5" />
+                Client Inputs
+              </h4>
+              <div className="space-y-2">
+                {(stageBuckets.clientInputs || []).map((group) =>
+                  renderGroupCard(group, 'client_inputs')
+                )}
+              </div>
             </div>
+          ) : null}
+
+          {(stageBuckets.discoveredCandidates?.length || 0) > 0 ? (
+            <div className="space-y-2">
+              <h4 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <Sparkles className="h-3.5 w-3.5" />
+                Discovered Candidates
+              </h4>
+              <div className="space-y-2">
+                {(stageBuckets.discoveredCandidates || []).map((group) =>
+                  renderGroupCard(group, 'discovered_candidates')
+                )}
+              </div>
+            </div>
+          ) : null}
+
+          {(stageBuckets.scrapeQueue?.length || 0) > 0 ? (
+            <div className="space-y-2">
+              <h4 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <PlayCircle className="h-3.5 w-3.5" />
+                Scrape Queue
+              </h4>
+              <div className="space-y-2">
+                {(stageBuckets.scrapeQueue || []).map((group) =>
+                  renderGroupCard(group, 'scrape_queue')
+                )}
+              </div>
+            </div>
+          ) : null}
+
+          {(stageBuckets.scrapedReady?.length || 0) > 0 ? (
+            <div className="space-y-2">
+              <h4 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                Scraped + Ready
+              </h4>
+              <div className="space-y-2">
+                {(stageBuckets.scrapedReady || []).map((group) =>
+                  renderGroupCard(group, 'scraped_ready')
+                )}
+              </div>
+            </div>
+          ) : null}
+
+          {(stageBuckets.blocked?.length || 0) > 0 ? (
+            <details open className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+              <summary className="flex cursor-pointer items-center gap-2 text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
+                <Ban className="h-3.5 w-3.5" />
+                Blocked ({stageBuckets.blocked.length})
+              </summary>
+              <div className="mt-2 max-h-[400px] space-y-2 overflow-y-auto">
+                {(stageBuckets.blocked || []).map((group) => renderGroupCard(group, 'blocked'))}
+              </div>
+            </details>
+          ) : null}
+
+          {(data?.topPicks?.length || 0) > 0 ? (
+            <details className="rounded-md border border-border/50 bg-muted/10 px-3 py-2">
+              <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Legacy Top Picks ({data?.topPicks?.length || 0})
+              </summary>
+              <div className="space-y-2">{(data?.topPicks || []).map((group) => renderGroupCard(group, 'top'))}</div>
+            </details>
           ) : null}
 
           {(data?.shortlist?.length || 0) > 0 ? (
-            <div className="space-y-2">
-              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Shortlist</h4>
+            <details className="rounded-md border border-border/50 bg-muted/10 px-3 py-2">
+              <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Legacy Shortlist ({data?.shortlist?.length || 0})
+              </summary>
               <div className="space-y-2">{(data?.shortlist || []).map((group) => renderGroupCard(group, 'shortlist'))}</div>
-            </div>
+            </details>
           ) : null}
 
           {(data?.filteredOut?.length || 0) > 0 ? (
-            <details className="rounded-md border border-border/50 bg-muted/10 px-3 py-2">
+            <details open className="rounded-md border border-border/50 bg-muted/10 px-3 py-2">
               <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Filtered Out ({data?.filteredOut.length || 0})
+                Filtered Out / Discovered ({data?.filteredOut.length || 0}) — Click to expand/collapse
               </summary>
-              <div className="mt-2 space-y-2">{(data?.filteredOut || []).map((group) => renderGroupCard(group, 'filtered'))}</div>
+              <div className="mt-2 max-h-[400px] overflow-y-auto space-y-2">{(data?.filteredOut || []).map((group) => renderGroupCard(group, 'filtered'))}</div>
+            </details>
+          ) : null}
+
+          {allProfiles.length > 0 ? (
+            <details open className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
+              <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                All Discovered ({allProfiles.length}) — Full list to select from
+              </summary>
+              <div className="mt-2 max-h-[500px] overflow-y-auto space-y-2">
+                {renderGroupCard({ profiles: allProfiles, identityId: null, canonicalName: 'All', websiteDomain: null, businessType: null, audienceSummary: null, bestScore: 0 }, 'filtered')}
+              </div>
             </details>
           ) : null}
         </div>

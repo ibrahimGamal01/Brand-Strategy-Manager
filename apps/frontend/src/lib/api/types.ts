@@ -36,6 +36,21 @@ export interface ResearchJobEventsResponse {
   nextAfterId: number | null;
 }
 
+export interface MediaAnalysisScopeSummary {
+  runId: string;
+  status: 'RUNNING' | 'COMPLETE' | 'SKIPPED' | 'FAILED';
+  downloadedTotal: number;
+  qualifiedForAi: number;
+  analysisWindow: number;
+  analyzedInWindow: number;
+  attemptedAssets: number;
+  succeeded: number;
+  failed: number;
+  skippedReason: string | null;
+  startedAt: string;
+  completedAt: string | null;
+}
+
 export type BrandIntelligenceModuleKey = 'brand_mentions' | 'community_insights';
 
 export interface BrandIntelligenceModuleResult {
@@ -117,6 +132,17 @@ export interface OrchestratedCompetitorProfile {
   relevanceScore?: number | null;
   discoveredCompetitorId?: string | null;
   discoveredStatus?: 'SUGGESTED' | 'SCRAPING' | 'SCRAPED' | 'FAILED' | 'CONFIRMED' | 'REJECTED' | null;
+  sourceType?: 'client_inspiration' | 'orchestrated' | 'manual' | string;
+  scrapeEligible?: boolean;
+  blockerReasonCode?: string | null;
+  readinessStatus?: 'READY' | 'DEGRADED' | 'BLOCKED' | null;
+  lastStateTransitionAt?: string;
+  pipelineStage?:
+    | 'CLIENT_INPUTS'
+    | 'DISCOVERED_CANDIDATES'
+    | 'SCRAPE_QUEUE'
+    | 'SCRAPED_READY'
+    | 'BLOCKED';
   evidence?: Record<string, unknown> | null;
   scoreBreakdown?: Record<string, unknown> | null;
 }
@@ -155,6 +181,13 @@ export interface CompetitorShortlistResponse {
   topPicks: OrchestratedCompetitorIdentityGroup[];
   shortlist: OrchestratedCompetitorIdentityGroup[];
   filteredOut: OrchestratedCompetitorIdentityGroup[];
+  stageBuckets?: {
+    clientInputs: OrchestratedCompetitorIdentityGroup[];
+    discoveredCandidates: OrchestratedCompetitorIdentityGroup[];
+    scrapeQueue: OrchestratedCompetitorIdentityGroup[];
+    scrapedReady: OrchestratedCompetitorIdentityGroup[];
+    blocked: OrchestratedCompetitorIdentityGroup[];
+  };
 }
 
 export interface CompetitorOrchestrationResponse {

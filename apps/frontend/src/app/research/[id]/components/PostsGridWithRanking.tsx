@@ -3,10 +3,12 @@
 import { useState } from 'react';
 import {
     Heart, MessageCircle, Eye, Share2, ExternalLink,
-    TrendingUp, Users, Clock, Trophy, BarChart3
+    TrendingUp, Users, Clock, Trophy, BarChart3, Brain, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toMediaUrl } from '@/lib/media-url';
+
+export type MediaAssetAnalysis = Record<string, unknown>;
 
 interface Post {
     id: string;
@@ -25,6 +27,11 @@ interface Post {
         thumbnailPath?: string;
         blobStoragePath?: string;
         originalUrl?: string;
+        analysisVisual?: MediaAssetAnalysis | null;
+        analysisTranscript?: MediaAssetAnalysis | null;
+        analysisOverall?: MediaAssetAnalysis | null;
+        extractedTranscript?: string | null;
+        extractedOnScreenText?: Array<{ text: string; timestampSeconds?: number }> | null;
     }>;
 }
 
@@ -203,6 +210,110 @@ function StatsCard({ label, value, icon: Icon, trend }: any) {
     );
 }
 
+// AI analysis block for a post: all media assets with analysis; expanded shows Visual, Transcript, Overall, extracted transcript, on-screen text
+function PostAnalysisBlock({ mediaAssets }: { mediaAssets?: Post['mediaAssets'] }) {
+    const [expanded, setExpanded] = useState(false);
+    const withAnalysis = (mediaAssets || []).filter(
+        (m) => m?.analysisOverall || m?.analysisVisual || m?.analysisTranscript || m?.extractedTranscript || (Array.isArray(m?.extractedOnScreenText) && m.extractedOnScreenText.length > 0)
+    );
+    if (withAnalysis.length === 0) return null;
+    const first = withAnalysis[0];
+    const overall = first?.analysisOverall as Record<string, unknown> | undefined;
+    const visual = first?.analysisVisual as Record<string, unknown> | undefined;
+    const transcript = first?.analysisTranscript as Record<string, unknown> | undefined;
+    const summary =
+        overall?.main_topic ??
+        overall?.content_strategy ??
+        visual?.visual_description ??
+        transcript?.main_topic ??
+        (transcript?.themes as string[])?.[0];
+    const hasDetail =
+        withAnalysis.some(
+            (m) =>
+                m?.analysisOverall ||
+                m?.analysisVisual ||
+                m?.analysisTranscript ||
+                m?.extractedTranscript ||
+                (Array.isArray(m?.extractedOnScreenText) && m.extractedOnScreenText.length > 0)
+        );
+
+    return (
+        <div className="rounded-md border border-primary/20 bg-primary/5 overflow-hidden">
+            <button
+                type="button"
+                onClick={() => setExpanded(!expanded)}
+                className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-xs text-foreground/90 hover:bg-primary/10"
+            >
+                <Brain className="h-3.5 w-3.5 shrink-0 text-primary" />
+                <span className="line-clamp-1 flex-1">
+                    {typeof summary === 'string' ? summary : summary != null ? String(summary) : 'AI analysis'}
+                    {withAnalysis.length > 1 && ` (${withAnalysis.length} assets)`}
+                </span>
+                {hasDetail && (expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
+            </button>
+            {expanded && hasDetail && (
+                <div className="px-2 pb-2 pt-0 max-h-48 overflow-auto text-[10px] text-muted-foreground space-y-2">
+                    {withAnalysis.map((m, idx) => {
+                        const ov = m?.analysisOverall as Record<string, unknown> | undefined;
+                        const vi = m?.analysisVisual as Record<string, unknown> | undefined;
+                        const tr = m?.analysisTranscript as Record<string, unknown> | undefined;
+                        const ext = m?.extractedTranscript;
+                        const onScreen = Array.isArray(m?.extractedOnScreenText) ? m.extractedOnScreenText : [];
+                        const hasAny = ov || vi || tr || (typeof ext === 'string' && ext.trim()) || onScreen.length > 0;
+                        if (!hasAny) return null;
+                        return (
+                            <div key={idx} className="space-y-1.5 border-b border-primary/10 pb-2 last:border-0 last:pb-0">
+                                {withAnalysis.length > 1 && (
+                                    <div className="font-medium text-foreground/80">Media {idx + 1}</div>
+                                )}
+                                {ov && (
+                                    <div>
+                                        <span className="font-medium text-foreground/80">Overall: </span>
+                                        <pre className="whitespace-pre-wrap break-words mt-0.5">{JSON.stringify(ov, null, 2)}</pre>
+                                    </div>
+                                )}
+                                {vi && (
+                                    <div>
+                                        <span className="font-medium text-foreground/80">Visual: </span>
+                                        <pre className="whitespace-pre-wrap break-words mt-0.5">{JSON.stringify(vi, null, 2)}</pre>
+                                    </div>
+                                )}
+                                {tr && (
+                                    <div>
+                                        <span className="font-medium text-foreground/80">Transcript: </span>
+                                        <pre className="whitespace-pre-wrap break-words mt-0.5">{JSON.stringify(tr, null, 2)}</pre>
+                                    </div>
+                                )}
+                                {typeof ext === 'string' && ext.trim() && (
+                                    <div>
+                                        <span className="font-medium text-foreground/80">Extracted transcript: </span>
+                                        <p className="whitespace-pre-wrap break-words mt-0.5">{ext.trim()}</p>
+                                    </div>
+                                )}
+                                {onScreen.length > 0 && (
+                                    <div>
+                                        <span className="font-medium text-foreground/80">On-screen text: </span>
+                                        <ul className="list-disc list-inside mt-0.5 space-y-0.5">
+                                            {onScreen.map((e: { text?: string; timestampSeconds?: number }, i: number) => (
+                                                <li key={i}>
+                                                    {e.text}
+                                                    {e.timestampSeconds != null && (
+                                                        <span className="text-muted-foreground"> @ {e.timestampSeconds}s</span>
+                                                    )}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+        </div>
+    );
+}
+
 // Post Card (Grid View)
 function PostCard({ rankedPost, platform, criteria }: { rankedPost: RankedPost; platform: string; criteria: RankingCriteria }) {
     const { post, rank, score, breakdown } = rankedPost;
@@ -313,6 +424,9 @@ function PostCard({ rankedPost, platform, criteria }: { rankedPost: RankedPost; 
                 <p className="text-xs line-clamp-2 text-foreground/70">
                     {post.caption || 'No caption'}
                 </p>
+
+                {/* AI insight (from first media asset with analysis) */}
+                <PostAnalysisBlock mediaAssets={post.mediaAssets} />
 
                 {/* Stats Row */}
                 <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t">
