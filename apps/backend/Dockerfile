@@ -15,8 +15,8 @@ RUN npm ci --workspace=apps/backend --include-workspace-root
 
 COPY apps/backend apps/backend
 
-RUN npm run build --workspace=apps/backend \
-  && npx prisma generate --schema apps/backend/prisma/schema.prisma \
+RUN npx prisma generate --schema apps/backend/prisma/schema.prisma \
+  && npm run build --workspace=apps/backend \
   && pip3 install --no-cache-dir -r apps/backend/scripts/requirements.txt
 
 FROM node:20-bullseye-slim AS runtime
