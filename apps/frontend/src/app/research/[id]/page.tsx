@@ -9,6 +9,7 @@ import { ResearchFooter } from './components';
 import { ResearchTreeView } from './components/ResearchTreeView';
 import StrategyWorkspace from './components/strategy/StrategyWorkspace';
 import ContentCalendarWorkspace from './components/calendar/ContentCalendarWorkspace';
+import ChatWorkspace from './components/chat/ChatWorkspace';
 import { apiClient, ResearchJobEvent } from '@/lib/api-client';
 import { BrainWorkspacePanel } from './components/brain/BrainWorkspacePanel';
 import { LiveActivityFeed } from './components/LiveActivityFeed';
@@ -27,6 +28,7 @@ import {
   BAT_WORKSPACE_MODULES,
   type BatWorkspaceModuleKey,
 } from '@/lib/workspace/module-types';
+import { QuestionPopup } from '@/components/client-questions/QuestionPopup';
 import { Badge } from '@/components/ui/badge';
 
 /** Normalize handle for matching: extract username from URLs or strip @ and lowercase */
@@ -479,6 +481,8 @@ export default function ResearchPage() {
           </div>
         ) : null}
 
+        {activeModule === 'chat' ? <ChatWorkspace jobId={data.id} /> : null}
+
         {activeModule === 'intelligence' ? (
           <div className="space-y-4">
             <ResearchTreeView
@@ -599,6 +603,7 @@ export default function ResearchPage() {
       </WorkspaceErrorBoundary>
 
       <ResearchFooter jobId={data.id} />
+      <QuestionPopup researchJobId={data.id} />
     </BatWorkspaceShell>
   );
 }

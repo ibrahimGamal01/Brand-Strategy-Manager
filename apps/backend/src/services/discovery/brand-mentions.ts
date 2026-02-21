@@ -62,7 +62,8 @@ async function scrapeBrandMentionsViaDDG(brandName: string): Promise<BrandMentio
  */
 export async function scrapeBrandMentions(brandName: string): Promise<BrandMentionResult[]> {
   try {
-    const scriptPath = path.join(process.cwd(), 'scripts/web_search_scraper.py');
+    // __dirname = dist/services/discovery; climb to repo-level scripts folder
+    const scriptPath = path.resolve(__dirname, '../../../scripts/web_search_scraper.py');
     const { stdout } = await execAsync(
       `python3 ${scriptPath} "${brandName}"`,
       { env: { ...process.env }, timeout: 60000 } // 60 second timeout

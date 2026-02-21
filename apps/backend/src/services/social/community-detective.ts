@@ -92,7 +92,8 @@ export async function runCommunityDetective(
       const communityLinks: CommunityCandidate[] = textResults.map((r) => {
         const text = (r.title + ' ' + r.body + ' ' + r.href).toLowerCase();
         const hasBrandMention = hasTarget ? text.includes(target) : false;
-        const match = hasBrandMention ? 'snippet_or_url' : queryHasTarget ? 'query_only' : 'none';
+        const match: 'snippet_or_url' | 'query_only' | 'none' =
+          hasBrandMention ? 'snippet_or_url' : queryHasTarget ? 'query_only' : 'none';
         return { ...r, match };
       }).filter(r => {
         // 1. Source check

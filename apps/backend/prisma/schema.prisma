@@ -100,7 +100,10 @@ model ResearchJob {
   socialTrends                SocialTrend[]
   contentCalendarRuns         ContentCalendarRun[]
   calendarChatSessions        CalendarChatSession[]
+  chatSessions                ChatSession[]
   strategyDocChatSessions     StrategyDocChatSession[]
+  clientIntakeAnswers         ClientIntakeAnswer[]
+  screenshotAttachments       ScreenshotAttachment[]
 
   @@map("research_jobs")
 }
@@ -1396,6 +1399,129 @@ enum CalendarChatRole {
   USER
   ASSISTANT
   SYSTEM
+}
+
+// ============================================
+// CHAT INTERFACE FOR WORKSPACE
+// ============================================
+
+model ChatSession {
+  id            String   @id @default(uuid())
+  researchJobId String   @map("research_job_id")
+  title         String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  lastActiveAt  DateTime @default(now()) @map("last_active_at")
+
+  researchJob ResearchJob    @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  messages    ChatMessage[]
+  blockEvents ChatBlockEvent[]
+  savedBlocks ChatSavedBlock[]
+
+  @@index([researchJobId, lastActiveAt(sort: Desc)])
+  @@map("chat_sessions")
+}
+
+enum ChatMessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+model ChatMessage {
+  id            String         @id @default(uuid())
+  sessionId     String         @map("session_id")
+  role          ChatMessageRole
+  content       String
+  blocks        Json?
+  designOptions Json?          @map("design_options")
+  createdAt     DateTime       @default(now()) @map("created_at")
+
+  session     ChatSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  blockEvents ChatBlockEvent[]
+  savedBlocks ChatSavedBlock[]
+
+  @@index([sessionId, createdAt])
+  @@map("chat_messages")
+}
+
+enum ChatBlockEventType {
+  VIEW
+  PIN
+  UNPIN
+  SELECT_DESIGN
+  FORM_SUBMIT
+  ATTACH_VIEW
+}
+
+model ChatBlockEvent {
+  id        String             @id @default(uuid())
+  sessionId String             @map("session_id")
+  messageId String             @map("message_id")
+  blockId   String             @map("block_id")
+  eventType ChatBlockEventType @map("event_type")
+  payload   Json?
+  createdAt DateTime           @default(now()) @map("created_at")
+
+  session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  message ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+  @@index([messageId, blockId])
+  @@index([blockId])
+  @@map("chat_block_events")
+}
+
+model ChatSavedBlock {
+  id        String   @id @default(uuid())
+  sessionId String   @map("session_id")
+  blockId   String   @map("block_id")
+  messageId String   @map("message_id")
+  blockData Json     @map("block_data")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  message ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, blockId])
+  @@index([sessionId, createdAt])
+  @@map("chat_saved_blocks")
+}
+
+// Stores answers to the client questioning workflow
+model ClientIntakeAnswer {
+  id            String      @id @default(uuid())
+  researchJobId String      @map("research_job_id")
+  questionSetId String      @map("question_set_id")
+  questionKey   String      @map("question_key")
+  answerType    String      @map("answer_type")
+  answer        Json
+  triggeredBy   String?     @map("triggered_by")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  researchJob   ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+
+  @@index([researchJobId, questionSetId])
+  @@map("client_intake_answers")
+}
+
+// Tracks screenshots pasted into the chat with metadata about what they reference
+model ScreenshotAttachment {
+  id              String      @id @default(uuid())
+  researchJobId   String      @map("research_job_id")
+  chatMessageId   String?     @map("chat_message_id")
+  storagePath     String      @map("storage_path")
+  mimeType        String      @default("image/png") @map("mime_type")
+  fileSizeBytes   Int?        @map("file_size_bytes")
+  isAppScreenshot Boolean     @default(false) @map("is_app_screenshot")
+  recordType      String?     @map("record_type")
+  recordId        String?     @map("record_id")
+  ocrText         String?     @map("ocr_text")
+  aiSummary       String?     @map("ai_summary")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  researchJob     ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+
+  @@index([researchJobId])
+  @@map("screenshot_attachments")
 }
 
 model CalendarChatCommand {

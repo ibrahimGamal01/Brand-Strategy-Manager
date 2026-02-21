@@ -3,6 +3,7 @@ FROM node:20-bullseye-slim AS build
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
+    ffmpeg \
     ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
@@ -24,6 +25,7 @@ FROM node:20-bullseye-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
+    ffmpeg \
     ca-certificates \
     fonts-liberation \
     libappindicator3-1 \

@@ -9,9 +9,36 @@ import { PrismaClient } from '@prisma/client';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
+import { existsSync } from 'fs';
 
 const prisma = new PrismaClient();
 const execAsync = promisify(exec);
+const MAX_TRENDS_ERROR_SNIPPET = 3000;
+
+function resolveGoogleTrendsScriptPath(): string {
+  const cwd = process.cwd();
+  const candidates = [
+    path.join(cwd, 'scripts/google_trends.py'),
+    path.join(cwd, 'apps/backend/scripts/google_trends.py'),
+    path.resolve(cwd, '../backend/scripts/google_trends.py'),
+    path.resolve(__dirname, '../../../scripts/google_trends.py'),
+  ];
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  throw new Error(`google_trends.py not found. Checked: ${candidates.join(', ')}`);
+}
+
+function trimForLog(text: string, maxLength: number = MAX_TRENDS_ERROR_SNIPPET): string {
+  const normalized = String(text || '').trim();
+  if (!normalized) return '';
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(-maxLength)} (truncated)`;
+}
 
 export interface SearchTrendResult {
   keyword: string;
@@ -35,13 +62,22 @@ export async function analyzeSearchTrends(
   const uniqueKeywords = Array.from(new Set(keywords.map(k => k.trim()))).slice(0, 5);
   console.log(`[SearchTrends] Analyzing: ${uniqueKeywords.join(', ')}`);
   
-  const scriptPath = path.join(process.cwd(), 'scripts/google_trends.py');
+  let scriptPath = '';
+  try {
+    scriptPath = resolveGoogleTrendsScriptPath();
+  } catch (error: any) {
+    console.error(`[SearchTrends] ${error?.message || 'google_trends.py missing'}`);
+    return;
+  }
   
   try {
     // 1. Fetch Interest Over Time
     const interestCmd = `python3 ${scriptPath} interest_over_time "${uniqueKeywords.join('" "')}"`;
     console.log(`[SearchTrends] Running: ${interestCmd}`);
-    const { stdout: interestOut } = await execAsync(interestCmd);
+    const { stdout: interestOut, stderr: interestErr } = await execAsync(interestCmd);
+    if (interestErr) {
+      console.warn(`[SearchTrends] interest_over_time stderr: ${trimForLog(interestErr)}`);
+    }
     const interestResponse = JSON.parse(interestOut);
     
     if (interestResponse.error) {
@@ -68,7 +104,10 @@ export async function analyzeSearchTrends(
     // 2. Fetch Related Queries
     const relatedCmd = `python3 ${scriptPath} related_queries "${uniqueKeywords.join('" "')}"`;
     console.log(`[SearchTrends] Running: ${relatedCmd}`);
-    const { stdout: relatedOut } = await execAsync(relatedCmd);
+    const { stdout: relatedOut, stderr: relatedErr } = await execAsync(relatedCmd);
+    if (relatedErr) {
+      console.warn(`[SearchTrends] related_queries stderr: ${trimForLog(relatedErr)}`);
+    }
     const relatedResponse = JSON.parse(relatedOut);
 
     if (relatedResponse.error) {

@@ -13,7 +13,14 @@ import { COST_PROTECTION, costTracker, checkCostLimit } from '../../validation/c
 import { GenerationResult, GenerationAttempt } from './types';
 import { generateMockBusinessUnderstanding } from './mock';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let openaiClient: OpenAI | null = null;
+function getOpenAiClient(): OpenAI | null {
+  if (openaiClient) return openaiClient;
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return null;
+  openaiClient = new OpenAI({ apiKey });
+  return openaiClient;
+}
 
 const MAX_ATTEMPTS = 3;
 
@@ -149,6 +156,11 @@ async function callOpenAI(
   contextString: string,
   previousAttempt?: GenerationAttempt
 ): Promise<string> {
+  
+  const openai = getOpenAiClient();
+  if (!openai) {
+    throw new Error('OPENAI_API_KEY not configured');
+  }
   
   // Use mock in development
   if (COST_PROTECTION.mockMode) {

@@ -1,7 +1,14 @@
 import { OpenAI } from 'openai';
 import { prisma } from '../../lib/prisma';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let openaiClient: OpenAI | null = null;
+function getOpenAiClient(): OpenAI | null {
+  if (openaiClient) return openaiClient;
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return null;
+  openaiClient = new OpenAI({ apiKey });
+  return openaiClient;
+}
 
 /**
  * Competitor Gap Analysis
@@ -72,6 +79,10 @@ Identify:
 Return comprehensive JSON analysis.`;
 
   try {
+    const openai = getOpenAiClient();
+    if (!openai) {
+      throw new Error('OPENAI_API_KEY not configured');
+    }
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [{ role: 'user', content: prompt }],
@@ -155,6 +166,10 @@ Provide:
 Return JSON.`;
 
   try {
+    const openai = getOpenAiClient();
+    if (!openai) {
+      throw new Error('OPENAI_API_KEY not configured');
+    }
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [{ role: 'user', content: prompt }],

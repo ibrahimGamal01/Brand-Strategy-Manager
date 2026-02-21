@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { ExternalLink, Download, Edit2, Trash2, Loader2, CheckCircle, AlertCircle, XCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { CopyForBatButton } from '../CopyForBatButton';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -174,7 +175,12 @@ export function CompetitorRow({
     }
 
     return (
-        <div className={`group p-3 rounded-lg bg-muted/30 border border-border hover:bg-muted/50 hover:border-border/80 transition-all ${className}`}>
+        <div
+            className={`group p-3 rounded-lg bg-muted/30 border border-border hover:bg-muted/50 hover:border-border/80 transition-all ${className}`}
+            data-record-type="competitor"
+            data-record-id={competitor.id}
+            id={`competitor-${competitor.id}`}
+        >
             <div className="flex items-center justify-between">
                 {/* Left: Handle + Platform */}
                 <div className="flex items-center gap-2 flex-1">
@@ -220,6 +226,11 @@ export function CompetitorRow({
 
                 {/* Right: Actions */}
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2">
+                    <CopyForBatButton
+                        recordType="competitor"
+                        recordId={competitor.id}
+                        getNode={() => document.getElementById(`competitor-${competitor.id}`)}
+                    />
                     {onScrape && canContinueScrape && (
                         <Button
                             variant="ghost"

@@ -1,4 +1,5 @@
 import express from 'express';
+import http from 'http';
 import cors from 'cors';
 import path from 'path';
 import { prisma } from './lib/prisma';
@@ -19,7 +20,11 @@ import brandIntelligenceRouter from './routes/research-jobs-brand-intelligence';
 import recoveryRouter from './routes/recovery';
 import orchestrationRouter from './routes/orchestration';
 import contentCalendarRouter from './routes/content-calendar';
+import chatRouter from './routes/research-jobs-chat';
+import screenshotsRouter from './routes/research-jobs-screenshots';
+import questionsRouter from './routes/research-jobs-questions';
 import { STORAGE_ROOT } from './services/storage/storage-root';
+import { attachChatWebSocketServer } from './services/chat/chat-ws';
 
 const envLoad = loadBackendEnv();
 console.log('[DEBUG] DATABASE_URL loaded:', process.env.DATABASE_URL?.replace(/:[^:@]*@/, ':***@'));
@@ -80,6 +85,9 @@ app.use('/api/research-jobs', dataManagementRouter);
 app.use('/api/research-jobs', brandIntelligenceRouter);
 app.use('/api/research-jobs', contentCalendarRouter);
 app.use('/api/research-jobs', researchJobsRouter);
+app.use('/api/research-jobs', chatRouter);
+app.use('/api/research-jobs', screenshotsRouter);
+app.use('/api/research-jobs', questionsRouter);
 app.use('/api/media', mediaRouter);
 app.use('/api/competitors', competitorsRouter);
 app.use('/api/analytics', analyticsRouter);
@@ -104,7 +112,10 @@ async function startServer(): Promise<void> {
   schemaReport = await checkSchemaReadiness();
   assertSchemaReadiness(schemaReport);
 
-  app.listen(PORT, () => {
+  const server = http.createServer(app);
+  attachChatWebSocketServer(server, () => Boolean(schemaReport?.schemaReady));
+
+  server.listen(PORT, () => {
     console.log(`🚀 Backend server running on http://localhost:${PORT}`);
     console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
     console.log(`📁 Storage: http://localhost:${PORT}/storage/`);

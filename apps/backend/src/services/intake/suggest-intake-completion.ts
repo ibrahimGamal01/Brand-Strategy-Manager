@@ -9,7 +9,14 @@ import OpenAI from 'openai';
 import { discoverClientSocialFromWebsite } from './discover-client-social.js';
 import { validateSuggestedProfileIsClient } from './validate-client-profile.js';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let openaiClient: OpenAI | null = null;
+function getOpenAiClient(): OpenAI | null {
+  if (openaiClient) return openaiClient;
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return null;
+  openaiClient = new OpenAI({ apiKey });
+  return openaiClient;
+}
 
 const INTAKE_KEYS = [
   'name',
@@ -94,6 +101,16 @@ function hasPrimaryHandle(handles: Record<string, unknown>): boolean {
 export async function suggestIntakeCompletion(
   partialPayload: Record<string, unknown>
 ): Promise<SuggestIntakeCompletionResult> {
+  const openai = getOpenAiClient();
+  if (!openai) {
+    return {
+      suggested: {},
+      filledByUser: [],
+      confirmationRequired: true,
+      confirmationReasons: ['AI_NOT_CONFIGURED'],
+    };
+  }
+
   const filledByUser: string[] = [];
   const contextParts: string[] = [];
 

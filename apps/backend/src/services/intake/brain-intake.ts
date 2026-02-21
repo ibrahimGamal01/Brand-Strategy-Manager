@@ -340,3 +340,37 @@ export async function processBrainIntake(payload: any): Promise<BrainIntakeResul
     message: 'Client intake initialized',
   };
 }
+
+/**
+ * Patch brain profile fields based on a keyed answer map from intake question workflows.
+ * This is a minimal implementation to avoid blocking downstream workflows; it updates
+ * stored constraints/notes without creating new clients.
+ */
+export async function patchBrainProfileFromAnswers(
+  researchJobId: string,
+  answers: Record<string, string | string[]>
+): Promise<void> {
+  const job = await prisma.researchJob.findUnique({
+    where: { id: researchJobId },
+    select: { clientId: true },
+  });
+  if (!job?.clientId) return;
+
+  // Map a handful of known keys to brain profile fields
+  const updates: any = {};
+  if (answers.primary_goal) updates.primaryGoal = String(answers.primary_goal);
+  if (answers.target_audience) updates.targetMarket = String(answers.target_audience);
+  if (answers.brand_voice) {
+    updates.constraints = {
+      ...(updates.constraints || {}),
+      brandTone: String(answers.brand_voice),
+    };
+  }
+
+  if (Object.keys(updates).length === 0) return;
+
+  await prisma.brainProfile.updateMany({
+    where: { clientId: job.clientId },
+    data: updates,
+  });
+}

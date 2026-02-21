@@ -9,7 +9,15 @@ const execAsync = promisify(exec);
 /** Max duration in seconds to extract for Whisper (to control cost). 10 min default. */
 const MAX_AUDIO_DURATION_SEC = Number(process.env.MEDIA_ANALYZER_MAX_AUDIO_SEC) || 600;
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let openaiClient: OpenAI | null = null;
+
+function getOpenAiClient(): OpenAI | null {
+  if (openaiClient) return openaiClient;
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return null;
+  openaiClient = new OpenAI({ apiKey });
+  return openaiClient;
+}
 
 export interface TranscribeResult {
   success: boolean;
@@ -48,7 +56,8 @@ export async function extractAudioFromVideo(videoPath: string): Promise<{ succes
  * Transcribe audio file using OpenAI Whisper API.
  */
 export async function transcribeAudio(audioPath: string): Promise<TranscribeResult> {
-  if (!process.env.OPENAI_API_KEY) {
+  const openai = getOpenAiClient();
+  if (!openai) {
     return { success: false, error: 'OPENAI_API_KEY not configured' };
   }
   if (!fs.existsSync(audioPath)) {

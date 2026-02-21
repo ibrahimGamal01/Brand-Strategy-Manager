@@ -187,8 +187,22 @@ export async function buildContentCalendarContext(
     } as ProcessorInputPost;
   });
   if (allPosts.length === 0) {
+    const clientStatusCounts = qualifiedPool.readinessSummary.client.reduce(
+      (acc, row) => {
+        acc[row.status] = (acc[row.status] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>
+    );
+    const competitorStatusCounts = qualifiedPool.readinessSummary.competitor.reduce(
+      (acc, row) => {
+        acc[row.status] = (acc[row.status] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>
+    );
     throw new Error(
-      `No readiness-qualified posts with media+metrics were found. Run downloader/readiness first. droppedNoMedia=${qualifiedPool.summary.droppedNoMedia}, droppedNoMetrics=${qualifiedPool.summary.droppedNoMetrics}, droppedOutOfScopeCompetitor=${qualifiedPool.summary.droppedOutOfScopeCompetitor}`
+      `No readiness-qualified posts with media+metrics were found. Run downloader/readiness first. readyClient=${qualifiedPool.summary.readySnapshotCounts.client}, readyCompetitor=${qualifiedPool.summary.readySnapshotCounts.competitor}, droppedNoMedia=${qualifiedPool.summary.droppedNoMedia}, droppedNoMetrics=${qualifiedPool.summary.droppedNoMetrics}, droppedOutOfScopeCompetitor=${qualifiedPool.summary.droppedOutOfScopeCompetitor}, clientStatus=${JSON.stringify(clientStatusCounts)}, competitorStatus=${JSON.stringify(competitorStatusCounts)}`
     );
   }
 

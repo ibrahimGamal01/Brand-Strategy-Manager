@@ -54,7 +54,14 @@ import { runAiAnalysisForJob } from '../services/orchestration/run-job-media-ana
 import { getLatestMediaAnalysisRunSummary } from '../services/orchestration/media-analysis-runs';
 
 const router = Router();
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let openaiClient: OpenAI | null = null;
+function getOpenAiClient(): OpenAI | null {
+  if (openaiClient) return openaiClient;
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return null;
+  openaiClient = new OpenAI({ apiKey });
+  return openaiClient;
+}
 const BRAIN_COMMAND_REPLY_ENABLED = process.env.BRAIN_COMMAND_REPLY_ENABLED === 'true';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -977,7 +984,8 @@ function buildCommandPatch(instruction: string): Record<string, unknown> {
 }
 
 async function generateBrainCommandReply(instruction: string, commandType: string): Promise<string | null> {
-  if (!BRAIN_COMMAND_REPLY_ENABLED || !process.env.OPENAI_API_KEY) return null;
+  const openai = getOpenAiClient();
+  if (!BRAIN_COMMAND_REPLY_ENABLED || !openai) return null;
   try {
     const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',

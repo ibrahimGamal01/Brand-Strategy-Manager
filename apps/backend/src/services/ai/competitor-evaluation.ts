@@ -1,8 +1,13 @@
 import OpenAI from 'openai';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+let openaiClient: OpenAI | null = null;
+function getOpenAiClient(): OpenAI | null {
+  if (openaiClient) return openaiClient;
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return null;
+  openaiClient = new OpenAI({ apiKey });
+  return openaiClient;
+}
 
 export interface CompetitorCandidate {
     handleOrUrl: string;
@@ -50,6 +55,10 @@ export async function evaluateCompetitorRelevance(
     `;
 
     try {
+        const openai = getOpenAiClient();
+        if (!openai) {
+          throw new Error('OPENAI_API_KEY not configured');
+        }
         const completion = await openai.chat.completions.create({
             messages: [{ role: 'system', content: prompt }],
             model: 'gpt-4o',

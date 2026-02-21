@@ -1,5 +1,6 @@
 export type BatWorkspaceModuleKey =
   | 'brain'
+  | 'chat'
   | 'intelligence'
   | 'strategy_docs'
   | 'content_calendar'
@@ -18,6 +19,11 @@ export const BAT_WORKSPACE_MODULES: readonly BatWorkspaceModuleConfig[] = [
     key: 'brain',
     label: 'BAT Brain',
     description: 'Memory, context, command history, and coverage checks.',
+  },
+  {
+    key: 'chat',
+    label: 'Chat',
+    description: 'RAG-grounded assistant with interactive components.',
   },
   {
     key: 'intelligence',

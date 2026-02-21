@@ -1,6 +1,33 @@
 -- Cross-Surface Competitor Orchestrator V2
 -- Safe/idempotent migration for existing development databases.
 
+-- In older dev databases this table already exists (created manually before Prisma was added).
+-- Prisma's shadow database doesn't have it, so ensure a minimal table exists before we ALTER it.
+CREATE TABLE IF NOT EXISTS "competitor_orchestration_runs" (
+  "id" TEXT PRIMARY KEY,
+  "research_job_id" TEXT NOT NULL,
+  "platforms" JSONB NOT NULL,
+  "target_count" INTEGER NOT NULL DEFAULT 10,
+  "mode" TEXT NOT NULL DEFAULT 'append',
+  "status" TEXT NOT NULL DEFAULT 'RUNNING',
+  "summary" JSONB,
+  "started_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "completed_at" TIMESTAMP(3),
+  "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'competitor_orchestration_runs_research_job_id_fkey'
+  ) THEN
+    ALTER TABLE "competitor_orchestration_runs"
+      ADD CONSTRAINT "competitor_orchestration_runs_research_job_id_fkey"
+      FOREIGN KEY ("research_job_id") REFERENCES "research_jobs"("id")
+      ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END$$;
+
 DO $$
 BEGIN
   CREATE TYPE "CompetitorAvailabilityStatus" AS ENUM (

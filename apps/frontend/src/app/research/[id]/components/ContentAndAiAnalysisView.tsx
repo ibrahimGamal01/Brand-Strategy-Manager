@@ -7,6 +7,7 @@ import { toMediaUrl } from '@/lib/media-url';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/hooks/use-toast';
 import type { MediaAnalysisScopeSummary } from '@/lib/api/types';
+import { CopyForBatButton } from './CopyForBatButton';
 
 const MAX_ANALYSIS_WINDOW_ITEMS = 120;
 
@@ -298,6 +299,9 @@ export function ContentAndAiAnalysisView({
             <div
               key={asset.id}
               className="rounded-lg border border-border/60 bg-card overflow-hidden"
+              data-record-type="media_asset"
+              data-record-id={asset.id}
+              id={`media-asset-${asset.id}`}
             >
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4">
                 <div className="space-y-1">
@@ -325,7 +329,14 @@ export function ContentAndAiAnalysisView({
                       </div>
                     )}
                   </div>
-                  <p className="text-[10px] font-medium text-foreground/80">{asset.sourceLabel}</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[10px] font-medium text-foreground/80">{asset.sourceLabel}</p>
+                    <CopyForBatButton
+                      recordType="media_asset"
+                      recordId={asset.id}
+                      getNode={() => document.getElementById(`media-asset-${asset.id}`)}
+                    />
+                  </div>
                   {asset.postCaption && (
                     <p className="text-[10px] text-muted-foreground line-clamp-2">{asset.postCaption}</p>
                   )}
