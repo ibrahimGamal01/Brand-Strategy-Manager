@@ -13,7 +13,7 @@ The safest Railway setup is two services (one per app) plus a managed Postgres i
 2. Add a service from this repo.
 3. Set the Dockerfile path to `apps/backend/Dockerfile`.
 4. Set health check to `/api/health`.
-5. Add a persistent volume (recommended) mounted to `/app/apps/backend/storage`.
+5. Add a persistent volume (recommended) mounted to `/app/apps/backend/storage` (or set `STORAGE_ROOT` and mount there).
 
 ### Frontend service
 1. Add another service from the same repo.
@@ -33,6 +33,7 @@ The safest Railway setup is two services (one per app) plus a managed Postgres i
 ### Backend (optional)
 - `BACKEND_PORT` (not needed if `PORT` is set)
 - `RESEARCH_CONTINUITY_POLL_MS` (default is 60000)
+- `STORAGE_ROOT` (if using a custom mount path for persistent storage)
 
 ### Frontend (required)
 - `NODE_ENV=production`
@@ -40,13 +41,18 @@ The safest Railway setup is two services (one per app) plus a managed Postgres i
 
 ## 3. Database Migration
 
-Run migrations once after the database is created:
+For Railway pre-deploy command, use:
 
 ```bash
-npm run db:deploy --workspace=apps/backend
+npm run db:deploy:railway --workspace=apps/backend
 ```
 
-If you prefer, use `npx prisma migrate deploy --schema apps/backend/prisma/schema.prisma` in a Railway shell.
+Why this command:
+- It runs normal `prisma migrate deploy`.
+- If Railway DB is fresh and hits the known legacy baseline migration failure (`20260211113000_competitor_orchestrator_v2`), it performs a one-time safe bootstrap (`migrate resolve` + `db push` + mark existing migrations as applied) and then re-checks migration state.
+- For all other migration failures, it exits with error (no silent masking).
+
+You can still run `npx prisma migrate deploy --schema apps/backend/prisma/schema.prisma` manually in a Railway shell for day-to-day operations.
 
 ## 4. Verify Deployment
 

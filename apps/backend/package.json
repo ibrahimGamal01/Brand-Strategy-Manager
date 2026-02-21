@@ -11,6 +11,7 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
+    "db:deploy:railway": "bash scripts/railway-predeploy.sh",
         "lint": "eslint src/",
         "check:runtime-config": "tsx src/scripts/check-runtime-config.ts",
         "test:camoufox": "tsx src/scripts/test-camoufox-integration.ts",
