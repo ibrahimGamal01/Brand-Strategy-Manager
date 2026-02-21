@@ -67,6 +67,17 @@ export function ChatMessageItem({
   const avatarLabel = isUser ? 'You' : message.role === 'ASSISTANT' ? 'BAT' : 'SYS';
   const hasAttachments = (message.attachments?.length || 0) > 0;
 
+  const cleanedContent = useMemo(() => {
+    let content = message.content || '';
+    // Remove fenced JSON with blocks/designOptions the model might have echoed.
+    content = content.replace(/```(?:json)?\s*\{[^`]*"blocks"[^`]*"designOptions"[^`]*\}\s*```/gi, '');
+    // Remove inline minimal JSON if it's the only thing left.
+    if (/^\s*\{\s*"blocks"\s*:\s*\[[\s\S]*?\]\s*,\s*"designOptions"\s*:\s*\[[\s\S]*?\]\s*\}\s*$/i.test(content)) {
+      content = '';
+    }
+    return content.trim();
+  }, [message.content]);
+
   return (
     <article
       className={`rounded-xl border px-4 py-3 text-sm shadow-sm ${
@@ -98,12 +109,12 @@ export function ChatMessageItem({
           </div>
 
           {isUser ? (
-            <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
-          ) : (
+            <p className="whitespace-pre-wrap leading-relaxed">{cleanedContent || message.content}</p>
+          ) : cleanedContent ? (
             <div className="prose prose-sm max-w-none text-foreground">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content || ' '}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{cleanedContent}</ReactMarkdown>
             </div>
-          )}
+          ) : null}
 
           {designOptions.length > 0 ? (
             <div className="mt-3 rounded-md border border-border/50 bg-background/70 p-2">
@@ -167,7 +178,7 @@ export function ChatMessageItem({
                       else router.push(targetHref);
                       return;
                     }
-                    if (action === 'run_intel' || action === 'run_orchestrator') {
+                    if (action === 'run_intel' || action === 'run_orchestrator' || action === 'run_intelligence') {
                       const targetHref =
                         href ||
                         `/api/research-jobs/${researchJobId}/brand-intelligence/orchestrate`;

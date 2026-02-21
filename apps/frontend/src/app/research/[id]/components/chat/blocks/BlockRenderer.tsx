@@ -1,7 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import type { ChatBlock } from './types';
+import type {
+  ChatBlock,
+  TableBlock,
+  MetricCardsBlock,
+  InsightBlock,
+  PostGridBlock,
+  ComparisonBlock,
+  SourceListBlock,
+  ActionButtonsBlock,
+  TimelineBlock,
+  FunnelBlock,
+  ChartBlock,
+} from './types';
 import { TableBlockView } from './renderers/TableBlockView';
 import { MetricCardsBlockView } from './renderers/MetricCardsBlockView';
 import { InsightBlockView } from './renderers/InsightBlockView';
@@ -34,6 +46,18 @@ interface BlockRendererProps {
   onUnpin?: (block: ChatBlock) => void;
   onAction?: (action?: string, href?: string) => void;
 }
+
+// Type guards to keep TS happy even with the catch-all BaseBlock in the union
+const isTableBlock = (b: ChatBlock): b is TableBlock => b.type === 'table';
+const isMetricCardsBlock = (b: ChatBlock): b is MetricCardsBlock => b.type === 'metric_cards';
+const isInsightBlock = (b: ChatBlock): b is InsightBlock => b.type === 'insight';
+const isPostGridBlock = (b: ChatBlock): b is PostGridBlock => b.type === 'post_grid';
+const isComparisonBlock = (b: ChatBlock): b is ComparisonBlock => b.type === 'comparison';
+const isSourceListBlock = (b: ChatBlock): b is SourceListBlock => b.type === 'source_list';
+const isActionButtonsBlock = (b: ChatBlock): b is ActionButtonsBlock => b.type === 'action_buttons';
+const isTimelineBlock = (b: ChatBlock): b is TimelineBlock => b.type === 'timeline';
+const isFunnelBlock = (b: ChatBlock): b is FunnelBlock => b.type === 'funnel';
+const isChartBlock = (b: ChatBlock): b is ChartBlock => b.type === 'chart';
 
 export function BlockRenderer({ block, isPinned, onView, onPin, onUnpin, onAction }: BlockRendererProps) {
   const ref = useRef<HTMLDivElement | null>(null);
@@ -87,20 +111,16 @@ export function BlockRenderer({ block, isPinned, onView, onPin, onUnpin, onActio
         </div>
       </div>
 
-      {block.type === 'table' ? (
-        <TableBlockView block={block} />
-      ) : null}
-      {block.type === 'metric_cards' ? (
-        <MetricCardsBlockView block={block} />
-      ) : null}
-      {block.type === 'insight' ? <InsightBlockView block={block} /> : null}
-      {block.type === 'post_grid' ? <PostGridBlockView block={block} /> : null}
-      {block.type === 'comparison' ? <ComparisonBlockView block={block} /> : null}
-      {block.type === 'source_list' ? <SourceListBlockView block={block} /> : null}
-      {block.type === 'action_buttons' ? <ActionButtonsBlockView block={block} onAction={onAction} /> : null}
-      {block.type === 'timeline' ? <TimelineBlockView block={block} /> : null}
-      {block.type === 'funnel' ? <FunnelBlockView block={block} /> : null}
-      {block.type === 'chart' ? <ChartBlockView block={block} /> : null}
+      {isTableBlock(block) ? <TableBlockView block={block} /> : null}
+      {isMetricCardsBlock(block) ? <MetricCardsBlockView block={block} /> : null}
+      {isInsightBlock(block) ? <InsightBlockView block={block} /> : null}
+      {isPostGridBlock(block) ? <PostGridBlockView block={block} /> : null}
+      {isComparisonBlock(block) ? <ComparisonBlockView block={block} /> : null}
+      {isSourceListBlock(block) ? <SourceListBlockView block={block} /> : null}
+      {isActionButtonsBlock(block) ? <ActionButtonsBlockView block={block} onAction={onAction} /> : null}
+      {isTimelineBlock(block) ? <TimelineBlockView block={block} /> : null}
+      {isFunnelBlock(block) ? <FunnelBlockView block={block} /> : null}
+      {isChartBlock(block) ? <ChartBlockView block={block} /> : null}
       {!BLOCK_LABELS[block.type] ? (
         <pre className="text-xs text-muted-foreground whitespace-pre-wrap">{JSON.stringify(block, null, 2)}</pre>
       ) : null}
