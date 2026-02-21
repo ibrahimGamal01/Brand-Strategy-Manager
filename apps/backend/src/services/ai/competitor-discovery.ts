@@ -1,7 +1,15 @@
 import OpenAI from 'openai';
 import { isOpenAiConfiguredForRealMode } from '../../lib/runtime-preflight';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let openaiClient: OpenAI | null = null;
+
+function getOpenAiClient(): OpenAI | null {
+  if (openaiClient) return openaiClient;
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return null;
+  openaiClient = new OpenAI({ apiKey });
+  return openaiClient;
+}
 
 export interface AICompetitorSuggestion {
   name: string;
@@ -102,7 +110,8 @@ async function requestPlatformCompetitors(
   description?: string,
   context: CompetitorSuggestionContext = {}
 ): Promise<AICompetitorSuggestion[]> {
-  if (!isOpenAiConfiguredForRealMode()) {
+  const openai = getOpenAiClient();
+  if (!openai || !isOpenAiConfiguredForRealMode()) {
     return [];
   }
 
@@ -158,7 +167,7 @@ Response schema:
 `;
 
   try {
-    const response = await openai.chat.completions.create({
+  const response = await openai.chat.completions.create({
       model,
       messages: [
         { role: 'system', content: 'Return valid JSON only.' },

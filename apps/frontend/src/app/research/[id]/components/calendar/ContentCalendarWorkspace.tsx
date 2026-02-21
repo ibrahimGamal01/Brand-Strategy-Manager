@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { apiFetch, apiFetchLong } from '@/lib/api/http';
+import { CopyForBatButton } from '../CopyForBatButton';
 
 interface ContentCalendarWorkspaceProps {
   jobId: string;
@@ -375,6 +376,9 @@ export default function ContentCalendarWorkspace({ jobId }: ContentCalendarWorks
               <div
                 key={slotKey}
                 className="rounded-lg border border-border bg-card p-4 shadow-sm flex flex-col"
+                data-record-type="calendar_slot"
+                data-record-id={slot.id || slotKey}
+                id={`calendar-slot-${slot.id || slotKey}`}
               >
                 <div className="flex items-start justify-between gap-2">
                   <div>
@@ -383,18 +387,26 @@ export default function ContentCalendarWorkspace({ jobId }: ContentCalendarWorks
                     </span>
                     <span className="ml-2 text-xs text-muted-foreground">{slot.contentType}</span>
                   </div>
-                  <span
-                    role="status"
-                    title={slot.status === 'READY_TO_GENERATE' ? 'Ready to generate draft' : slot.status === 'BLOCKED' ? 'Blocked: missing inputs or dependency' : 'Planned'}
-                    className={`rounded px-2 py-0.5 text-xs ${slot.status === 'READY_TO_GENERATE'
-                        ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
-                        : slot.status === 'BLOCKED'
-                          ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400'
-                          : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
-                      }`}
-                  >
-                    {slot.status?.replace(/_/g, ' ') || 'planned'}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <CopyForBatButton
+                      recordType="calendar_slot"
+                      recordId={slot.id || slotKey}
+                      getNode={() => document.getElementById(`calendar-slot-${slot.id || slotKey}`)}
+                      size="md"
+                    />
+                    <span
+                      role="status"
+                      title={slot.status === 'READY_TO_GENERATE' ? 'Ready to generate draft' : slot.status === 'BLOCKED' ? 'Blocked: missing inputs or dependency' : 'Planned'}
+                      className={`rounded px-2 py-0.5 text-xs ${slot.status === 'READY_TO_GENERATE'
+                          ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+                          : slot.status === 'BLOCKED'
+                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400'
+                            : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
+                        }`}
+                    >
+                      {slot.status?.replace(/_/g, ' ') || 'planned'}
+                    </span>
+                  </div>
                 </div>
                 <p className="mt-2 text-sm font-medium text-foreground">{scheduledDate}</p>
                 {slot.theme && (

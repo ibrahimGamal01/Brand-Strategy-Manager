@@ -1,0 +1,782 @@
+{
+  "metadata": {
+    "generatedAt": "2026-02-18T15:24:46.029Z",
+    "anonymized": true,
+    "databaseUrlPresent": true,
+    "jobsAnalyzed": 2,
+    "clientsAnalyzed": 2,
+    "hashSaltConfigured": false
+  },
+  "systemTotals": {
+    "clients": 2,
+    "researchJobs": 2,
+    "jobStatusCounts": {
+      "COMPLETE": 1,
+      "DISCOVERING_COMPETITORS": 1
+    },
+    "averageCompletenessScore": 95,
+    "medianCompletenessScore": 95
+  },
+  "referenceCohorts": {
+    "topReference": [
+      {
+        "jobId": "job_f094e15fa1ec",
+        "clientId": "client_df060869004e",
+        "status": "DISCOVERING_COMPETITORS",
+        "startedAt": "2026-02-14T11:10:01.432Z",
+        "completedAt": null,
+        "completenessScore": 100,
+        "intake": {
+          "inputHandleCount": 1,
+          "confirmedChannels": 2,
+          "accountPlatforms": [
+            "tiktok",
+            "instagram"
+          ]
+        },
+        "social": {
+          "profileCount": 9,
+          "postCount": 220,
+          "platforms": [
+            "instagram",
+            "tiktok"
+          ]
+        },
+        "competitors": {
+          "discoveredTotal": 30,
+          "discoveredBySelectionState": {
+            "APPROVED": 1,
+            "SHORTLISTED": 26,
+            "TOP_PICK": 3
+          },
+          "discoveredByStatus": {
+            "SCRAPING": 7,
+            "SUGGESTED": 17,
+            "SCRAPED": 6
+          },
+          "discoveredByAvailability": {
+            "VERIFIED": 13,
+            "UNVERIFIED": 15,
+            "PROFILE_UNAVAILABLE": 2
+          },
+          "scrapeReadyCount": 30,
+          "profilesWithPostsScraped": 6,
+          "candidateTotal": 48,
+          "candidateByState": {
+            "TOP_PICK": 3,
+            "REJECTED": 6,
+            "SHORTLISTED": 21,
+            "FILTERED_OUT": 17,
+            "APPROVED": 1
+          },
+          "candidateByAvailability": {
+            "UNVERIFIED": 15,
+            "VERIFIED": 31,
+            "PROFILE_UNAVAILABLE": 2
+          },
+          "candidateBySource": {
+            "client_inspiration": 3,
+            "ddg_query": 14,
+            "social_search": 21,
+            "ai_finder": 10
+          }
+        },
+        "snapshots": {
+          "clientSnapshotCount": 9,
+          "competitorSnapshotCount": 6,
+          "clientSnapshotPosts": 150,
+          "competitorSnapshotPosts": 70,
+          "totalSnapshotPosts": 220
+        },
+        "media": {
+          "totalAssets": 0,
+          "downloadedAssets": 0,
+          "downloadedRatio": 0
+        },
+        "ai": {
+          "totalAnalyses": 241,
+          "byType": {
+            "VISUAL": 107,
+            "OVERALL": 105,
+            "AUDIO": 20,
+            "DOCUMENT": 9
+          },
+          "documentAnalysisCount": 9,
+          "documentTopicCoverage": 9
+        },
+        "calendar": {
+          "runCount": 6,
+          "completedRuns": 6,
+          "totalSlots": 43
+        },
+        "events": {
+          "total": 1922
+        }
+      },
+      {
+        "jobId": "job_e127668f7278",
+        "clientId": "client_a4d260812370",
+        "status": "COMPLETE",
+        "startedAt": "2026-02-13T09:30:54.702Z",
+        "completedAt": "2026-02-13T09:41:33.683Z",
+        "completenessScore": 90,
+        "intake": {
+          "inputHandleCount": 2,
+          "confirmedChannels": 3,
+          "accountPlatforms": [
+            "tiktok",
+            "instagram"
+          ]
+        },
+        "social": {
+          "profileCount": 23,
+          "postCount": 342,
+          "platforms": [
+            "instagram",
+            "tiktok"
+          ]
+        },
+        "competitors": {
+          "discoveredTotal": 45,
+          "discoveredBySelectionState": {
+            "APPROVED": 3,
+            "SHORTLISTED": 41,
+            "TOP_PICK": 1
+          },
+          "discoveredByStatus": {
+            "SCRAPED": 20,
+            "SCRAPING": 2,
+            "SUGGESTED": 23
+          },
+          "discoveredByAvailability": {
+            "VERIFIED": 20,
+            "PROFILE_UNAVAILABLE": 3,
+            "UNVERIFIED": 22
+          },
+          "scrapeReadyCount": 45,
+          "profilesWithPostsScraped": 20,
+          "candidateTotal": 69,
+          "candidateByState": {
+            "APPROVED": 3,
+            "FILTERED_OUT": 24,
+            "SHORTLISTED": 41,
+            "TOP_PICK": 1
+          },
+          "candidateByAvailability": {
+            "UNVERIFIED": 22,
+            "VERIFIED": 44,
+            "PROFILE_UNAVAILABLE": 3
+          },
+          "candidateBySource": {
+            "ai_cross_surface_hint": 2,
+            "ddg_query": 28,
+            "ai_finder": 10,
+            "social_search": 26,
+            "ddg_direct": 3
+          }
+        },
+        "snapshots": {
+          "clientSnapshotCount": 34,
+          "competitorSnapshotCount": 24,
+          "clientSnapshotPosts": 294,
+          "competitorSnapshotPosts": 255,
+          "totalSnapshotPosts": 549
+        },
+        "media": {
+          "totalAssets": 0,
+          "downloadedAssets": 0,
+          "downloadedRatio": 0
+        },
+        "ai": {
+          "totalAnalyses": 159,
+          "byType": {
+            "DOCUMENT": 9,
+            "AUDIO": 6,
+            "OVERALL": 70,
+            "VISUAL": 74
+          },
+          "documentAnalysisCount": 9,
+          "documentTopicCoverage": 9
+        },
+        "calendar": {
+          "runCount": 0,
+          "completedRuns": 0,
+          "totalSlots": 0
+        },
+        "events": {
+          "total": 3476
+        }
+      }
+    ],
+    "medianReference": [
+      {
+        "jobId": "job_e127668f7278",
+        "clientId": "client_a4d260812370",
+        "status": "COMPLETE",
+        "startedAt": "2026-02-13T09:30:54.702Z",
+        "completedAt": "2026-02-13T09:41:33.683Z",
+        "completenessScore": 90,
+        "intake": {
+          "inputHandleCount": 2,
+          "confirmedChannels": 3,
+          "accountPlatforms": [
+            "tiktok",
+            "instagram"
+          ]
+        },
+        "social": {
+          "profileCount": 23,
+          "postCount": 342,
+          "platforms": [
+            "instagram",
+            "tiktok"
+          ]
+        },
+        "competitors": {
+          "discoveredTotal": 45,
+          "discoveredBySelectionState": {
+            "APPROVED": 3,
+            "SHORTLISTED": 41,
+            "TOP_PICK": 1
+          },
+          "discoveredByStatus": {
+            "SCRAPED": 20,
+            "SCRAPING": 2,
+            "SUGGESTED": 23
+          },
+          "discoveredByAvailability": {
+            "VERIFIED": 20,
+            "PROFILE_UNAVAILABLE": 3,
+            "UNVERIFIED": 22
+          },
+          "scrapeReadyCount": 45,
+          "profilesWithPostsScraped": 20,
+          "candidateTotal": 69,
+          "candidateByState": {
+            "APPROVED": 3,
+            "FILTERED_OUT": 24,
+            "SHORTLISTED": 41,
+            "TOP_PICK": 1
+          },
+          "candidateByAvailability": {
+            "UNVERIFIED": 22,
+            "VERIFIED": 44,
+            "PROFILE_UNAVAILABLE": 3
+          },
+          "candidateBySource": {
+            "ai_cross_surface_hint": 2,
+            "ddg_query": 28,
+            "ai_finder": 10,
+            "social_search": 26,
+            "ddg_direct": 3
+          }
+        },
+        "snapshots": {
+          "clientSnapshotCount": 34,
+          "competitorSnapshotCount": 24,
+          "clientSnapshotPosts": 294,
+          "competitorSnapshotPosts": 255,
+          "totalSnapshotPosts": 549
+        },
+        "media": {
+          "totalAssets": 0,
+          "downloadedAssets": 0,
+          "downloadedRatio": 0
+        },
+        "ai": {
+          "totalAnalyses": 159,
+          "byType": {
+            "DOCUMENT": 9,
+            "AUDIO": 6,
+            "OVERALL": 70,
+            "VISUAL": 74
+          },
+          "documentAnalysisCount": 9,
+          "documentTopicCoverage": 9
+        },
+        "calendar": {
+          "runCount": 0,
+          "completedRuns": 0,
+          "totalSlots": 0
+        },
+        "events": {
+          "total": 3476
+        }
+      },
+      {
+        "jobId": "job_f094e15fa1ec",
+        "clientId": "client_df060869004e",
+        "status": "DISCOVERING_COMPETITORS",
+        "startedAt": "2026-02-14T11:10:01.432Z",
+        "completedAt": null,
+        "completenessScore": 100,
+        "intake": {
+          "inputHandleCount": 1,
+          "confirmedChannels": 2,
+          "accountPlatforms": [
+            "tiktok",
+            "instagram"
+          ]
+        },
+        "social": {
+          "profileCount": 9,
+          "postCount": 220,
+          "platforms": [
+            "instagram",
+            "tiktok"
+          ]
+        },
+        "competitors": {
+          "discoveredTotal": 30,
+          "discoveredBySelectionState": {
+            "APPROVED": 1,
+            "SHORTLISTED": 26,
+            "TOP_PICK": 3
+          },
+          "discoveredByStatus": {
+            "SCRAPING": 7,
+            "SUGGESTED": 17,
+            "SCRAPED": 6
+          },
+          "discoveredByAvailability": {
+            "VERIFIED": 13,
+            "UNVERIFIED": 15,
+            "PROFILE_UNAVAILABLE": 2
+          },
+          "scrapeReadyCount": 30,
+          "profilesWithPostsScraped": 6,
+          "candidateTotal": 48,
+          "candidateByState": {
+            "TOP_PICK": 3,
+            "REJECTED": 6,
+            "SHORTLISTED": 21,
+            "FILTERED_OUT": 17,
+            "APPROVED": 1
+          },
+          "candidateByAvailability": {
+            "UNVERIFIED": 15,
+            "VERIFIED": 31,
+            "PROFILE_UNAVAILABLE": 2
+          },
+          "candidateBySource": {
+            "client_inspiration": 3,
+            "ddg_query": 14,
+            "social_search": 21,
+            "ai_finder": 10
+          }
+        },
+        "snapshots": {
+          "clientSnapshotCount": 9,
+          "competitorSnapshotCount": 6,
+          "clientSnapshotPosts": 150,
+          "competitorSnapshotPosts": 70,
+          "totalSnapshotPosts": 220
+        },
+        "media": {
+          "totalAssets": 0,
+          "downloadedAssets": 0,
+          "downloadedRatio": 0
+        },
+        "ai": {
+          "totalAnalyses": 241,
+          "byType": {
+            "VISUAL": 107,
+            "OVERALL": 105,
+            "AUDIO": 20,
+            "DOCUMENT": 9
+          },
+          "documentAnalysisCount": 9,
+          "documentTopicCoverage": 9
+        },
+        "calendar": {
+          "runCount": 6,
+          "completedRuns": 6,
+          "totalSlots": 43
+        },
+        "events": {
+          "total": 1922
+        }
+      }
+    ],
+    "bottomReference": [
+      {
+        "jobId": "job_e127668f7278",
+        "clientId": "client_a4d260812370",
+        "status": "COMPLETE",
+        "startedAt": "2026-02-13T09:30:54.702Z",
+        "completedAt": "2026-02-13T09:41:33.683Z",
+        "completenessScore": 90,
+        "intake": {
+          "inputHandleCount": 2,
+          "confirmedChannels": 3,
+          "accountPlatforms": [
+            "tiktok",
+            "instagram"
+          ]
+        },
+        "social": {
+          "profileCount": 23,
+          "postCount": 342,
+          "platforms": [
+            "instagram",
+            "tiktok"
+          ]
+        },
+        "competitors": {
+          "discoveredTotal": 45,
+          "discoveredBySelectionState": {
+            "APPROVED": 3,
+            "SHORTLISTED": 41,
+            "TOP_PICK": 1
+          },
+          "discoveredByStatus": {
+            "SCRAPED": 20,
+            "SCRAPING": 2,
+            "SUGGESTED": 23
+          },
+          "discoveredByAvailability": {
+            "VERIFIED": 20,
+            "PROFILE_UNAVAILABLE": 3,
+            "UNVERIFIED": 22
+          },
+          "scrapeReadyCount": 45,
+          "profilesWithPostsScraped": 20,
+          "candidateTotal": 69,
+          "candidateByState": {
+            "APPROVED": 3,
+            "FILTERED_OUT": 24,
+            "SHORTLISTED": 41,
+            "TOP_PICK": 1
+          },
+          "candidateByAvailability": {
+            "UNVERIFIED": 22,
+            "VERIFIED": 44,
+            "PROFILE_UNAVAILABLE": 3
+          },
+          "candidateBySource": {
+            "ai_cross_surface_hint": 2,
+            "ddg_query": 28,
+            "ai_finder": 10,
+            "social_search": 26,
+            "ddg_direct": 3
+          }
+        },
+        "snapshots": {
+          "clientSnapshotCount": 34,
+          "competitorSnapshotCount": 24,
+          "clientSnapshotPosts": 294,
+          "competitorSnapshotPosts": 255,
+          "totalSnapshotPosts": 549
+        },
+        "media": {
+          "totalAssets": 0,
+          "downloadedAssets": 0,
+          "downloadedRatio": 0
+        },
+        "ai": {
+          "totalAnalyses": 159,
+          "byType": {
+            "DOCUMENT": 9,
+            "AUDIO": 6,
+            "OVERALL": 70,
+            "VISUAL": 74
+          },
+          "documentAnalysisCount": 9,
+          "documentTopicCoverage": 9
+        },
+        "calendar": {
+          "runCount": 0,
+          "completedRuns": 0,
+          "totalSlots": 0
+        },
+        "events": {
+          "total": 3476
+        }
+      },
+      {
+        "jobId": "job_f094e15fa1ec",
+        "clientId": "client_df060869004e",
+        "status": "DISCOVERING_COMPETITORS",
+        "startedAt": "2026-02-14T11:10:01.432Z",
+        "completedAt": null,
+        "completenessScore": 100,
+        "intake": {
+          "inputHandleCount": 1,
+          "confirmedChannels": 2,
+          "accountPlatforms": [
+            "tiktok",
+            "instagram"
+          ]
+        },
+        "social": {
+          "profileCount": 9,
+          "postCount": 220,
+          "platforms": [
+            "instagram",
+            "tiktok"
+          ]
+        },
+        "competitors": {
+          "discoveredTotal": 30,
+          "discoveredBySelectionState": {
+            "APPROVED": 1,
+            "SHORTLISTED": 26,
+            "TOP_PICK": 3
+          },
+          "discoveredByStatus": {
+            "SCRAPING": 7,
+            "SUGGESTED": 17,
+            "SCRAPED": 6
+          },
+          "discoveredByAvailability": {
+            "VERIFIED": 13,
+            "UNVERIFIED": 15,
+            "PROFILE_UNAVAILABLE": 2
+          },
+          "scrapeReadyCount": 30,
+          "profilesWithPostsScraped": 6,
+          "candidateTotal": 48,
+          "candidateByState": {
+            "TOP_PICK": 3,
+            "REJECTED": 6,
+            "SHORTLISTED": 21,
+            "FILTERED_OUT": 17,
+            "APPROVED": 1
+          },
+          "candidateByAvailability": {
+            "UNVERIFIED": 15,
+            "VERIFIED": 31,
+            "PROFILE_UNAVAILABLE": 2
+          },
+          "candidateBySource": {
+            "client_inspiration": 3,
+            "ddg_query": 14,
+            "social_search": 21,
+            "ai_finder": 10
+          }
+        },
+        "snapshots": {
+          "clientSnapshotCount": 9,
+          "competitorSnapshotCount": 6,
+          "clientSnapshotPosts": 150,
+          "competitorSnapshotPosts": 70,
+          "totalSnapshotPosts": 220
+        },
+        "media": {
+          "totalAssets": 0,
+          "downloadedAssets": 0,
+          "downloadedRatio": 0
+        },
+        "ai": {
+          "totalAnalyses": 241,
+          "byType": {
+            "VISUAL": 107,
+            "OVERALL": 105,
+            "AUDIO": 20,
+            "DOCUMENT": 9
+          },
+          "documentAnalysisCount": 9,
+          "documentTopicCoverage": 9
+        },
+        "calendar": {
+          "runCount": 6,
+          "completedRuns": 6,
+          "totalSlots": 43
+        },
+        "events": {
+          "total": 1922
+        }
+      }
+    ]
+  },
+  "jobSummaries": [
+    {
+      "jobId": "job_e127668f7278",
+      "clientId": "client_a4d260812370",
+      "status": "COMPLETE",
+      "startedAt": "2026-02-13T09:30:54.702Z",
+      "completedAt": "2026-02-13T09:41:33.683Z",
+      "completenessScore": 90,
+      "intake": {
+        "inputHandleCount": 2,
+        "confirmedChannels": 3,
+        "accountPlatforms": [
+          "tiktok",
+          "instagram"
+        ]
+      },
+      "social": {
+        "profileCount": 23,
+        "postCount": 342,
+        "platforms": [
+          "instagram",
+          "tiktok"
+        ]
+      },
+      "competitors": {
+        "discoveredTotal": 45,
+        "discoveredBySelectionState": {
+          "APPROVED": 3,
+          "SHORTLISTED": 41,
+          "TOP_PICK": 1
+        },
+        "discoveredByStatus": {
+          "SCRAPED": 20,
+          "SCRAPING": 2,
+          "SUGGESTED": 23
+        },
+        "discoveredByAvailability": {
+          "VERIFIED": 20,
+          "PROFILE_UNAVAILABLE": 3,
+          "UNVERIFIED": 22
+        },
+        "scrapeReadyCount": 45,
+        "profilesWithPostsScraped": 20,
+        "candidateTotal": 69,
+        "candidateByState": {
+          "APPROVED": 3,
+          "FILTERED_OUT": 24,
+          "SHORTLISTED": 41,
+          "TOP_PICK": 1
+        },
+        "candidateByAvailability": {
+          "UNVERIFIED": 22,
+          "VERIFIED": 44,
+          "PROFILE_UNAVAILABLE": 3
+        },
+        "candidateBySource": {
+          "ai_cross_surface_hint": 2,
+          "ddg_query": 28,
+          "ai_finder": 10,
+          "social_search": 26,
+          "ddg_direct": 3
+        }
+      },
+      "snapshots": {
+        "clientSnapshotCount": 34,
+        "competitorSnapshotCount": 24,
+        "clientSnapshotPosts": 294,
+        "competitorSnapshotPosts": 255,
+        "totalSnapshotPosts": 549
+      },
+      "media": {
+        "totalAssets": 0,
+        "downloadedAssets": 0,
+        "downloadedRatio": 0
+      },
+      "ai": {
+        "totalAnalyses": 159,
+        "byType": {
+          "DOCUMENT": 9,
+          "AUDIO": 6,
+          "OVERALL": 70,
+          "VISUAL": 74
+        },
+        "documentAnalysisCount": 9,
+        "documentTopicCoverage": 9
+      },
+      "calendar": {
+        "runCount": 0,
+        "completedRuns": 0,
+        "totalSlots": 0
+      },
+      "events": {
+        "total": 3476
+      }
+    },
+    {
+      "jobId": "job_f094e15fa1ec",
+      "clientId": "client_df060869004e",
+      "status": "DISCOVERING_COMPETITORS",
+      "startedAt": "2026-02-14T11:10:01.432Z",
+      "completedAt": null,
+      "completenessScore": 100,
+      "intake": {
+        "inputHandleCount": 1,
+        "confirmedChannels": 2,
+        "accountPlatforms": [
+          "tiktok",
+          "instagram"
+        ]
+      },
+      "social": {
+        "profileCount": 9,
+        "postCount": 220,
+        "platforms": [
+          "instagram",
+          "tiktok"
+        ]
+      },
+      "competitors": {
+        "discoveredTotal": 30,
+        "discoveredBySelectionState": {
+          "APPROVED": 1,
+          "SHORTLISTED": 26,
+          "TOP_PICK": 3
+        },
+        "discoveredByStatus": {
+          "SCRAPING": 7,
+          "SUGGESTED": 17,
+          "SCRAPED": 6
+        },
+        "discoveredByAvailability": {
+          "VERIFIED": 13,
+          "UNVERIFIED": 15,
+          "PROFILE_UNAVAILABLE": 2
+        },
+        "scrapeReadyCount": 30,
+        "profilesWithPostsScraped": 6,
+        "candidateTotal": 48,
+        "candidateByState": {
+          "TOP_PICK": 3,
+          "REJECTED": 6,
+          "SHORTLISTED": 21,
+          "FILTERED_OUT": 17,
+          "APPROVED": 1
+        },
+        "candidateByAvailability": {
+          "UNVERIFIED": 15,
+          "VERIFIED": 31,
+          "PROFILE_UNAVAILABLE": 2
+        },
+        "candidateBySource": {
+          "client_inspiration": 3,
+          "ddg_query": 14,
+          "social_search": 21,
+          "ai_finder": 10
+        }
+      },
+      "snapshots": {
+        "clientSnapshotCount": 9,
+        "competitorSnapshotCount": 6,
+        "clientSnapshotPosts": 150,
+        "competitorSnapshotPosts": 70,
+        "totalSnapshotPosts": 220
+      },
+      "media": {
+        "totalAssets": 0,
+        "downloadedAssets": 0,
+        "downloadedRatio": 0
+      },
+      "ai": {
+        "totalAnalyses": 241,
+        "byType": {
+          "VISUAL": 107,
+          "OVERALL": 105,
+          "AUDIO": 20,
+          "DOCUMENT": 9
+        },
+        "documentAnalysisCount": 9,
+        "documentTopicCoverage": 9
+      },
+      "calendar": {
+        "runCount": 6,
+        "completedRuns": 6,
+        "totalSlots": 43
+      },
+      "events": {
+        "total": 1922
+      }
+    }
+  ]
+}

@@ -13,10 +13,14 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
-// Initialize OpenAI
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+let openaiClient: OpenAI | null = null;
+function getOpenAiClient(): OpenAI | null {
+  if (openaiClient) return openaiClient;
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return null;
+  openaiClient = new OpenAI({ apiKey });
+  return openaiClient;
+}
 
 export interface BusinessAnalysisInput {
   researchJobId: string;
@@ -66,6 +70,10 @@ export async function analyzeBusinessWithAI(
   try {
     console.log(`[AIAnalysis] Calling OpenAI...`);
     
+    const openai = getOpenAiClient();
+    if (!openai) {
+      throw new Error('OPENAI_API_KEY not configured');
+    }
     const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [

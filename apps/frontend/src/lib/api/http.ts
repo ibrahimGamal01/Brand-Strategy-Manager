@@ -82,7 +82,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
       response = await fetch(primaryUrl, {
         ...init,
         headers: {
-          ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+          ...(!init?.body || init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
           ...(init?.headers || {}),
         },
       });
@@ -91,11 +91,11 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
         try {
           response = await fetch(fallbackUrl, {
             ...init,
-            headers: {
-              ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
-              ...(init?.headers || {}),
-            },
-          });
+          headers: {
+            ...(!init?.body || init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+            ...(init?.headers || {}),
+          },
+        });
         } catch (fallbackError: any) {
           if (attempt < maxRetries) {
             await sleep(250 * (attempt + 1));
@@ -125,7 +125,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
         const fallbackResponse = await fetch(fallbackUrl, {
           ...init,
           headers: {
-            ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+            ...(!init?.body || init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
             ...(init?.headers || {}),
           },
         });

@@ -26,10 +26,18 @@ import { emitResearchJobEvent } from '../social/research-job-events';
 import { isAiFallbackEnabled, isOpenAiConfiguredForRealMode } from '../../lib/runtime-preflight';
 
 const prisma = new PrismaClient();
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let openaiClient: OpenAI | null = null;
 let mockModeBannerLogged = false;
 const AI_AUTH_FAILED_PREFIX = 'AI_AUTH_FAILED';
 const AI_CONFIG_INVALID_PREFIX = 'AI_CONFIG_INVALID';
+
+function getOpenAiClient(): OpenAI | null {
+  if (openaiClient) return openaiClient;
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return null;
+  openaiClient = new OpenAI({ apiKey });
+  return openaiClient;
+}
 
 // Harsh system prefix enforcing critical, evidence-based analysis
 const HARSH_SYSTEM_PREFIX = `
@@ -722,6 +730,12 @@ ${context.rawSearchContext ? `\nWeb Research:\n${context.rawSearchContext}` : ''
   const startTime = Date.now();
   
   try {
+    const openai = getOpenAiClient();
+    if (!openai) {
+      throw new Error(
+        `${AI_CONFIG_INVALID_PREFIX}: OPENAI_API_KEY is missing/invalid while AI_FALLBACK_MODE=off (mode=${aiMode})`
+      );
+    }
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [

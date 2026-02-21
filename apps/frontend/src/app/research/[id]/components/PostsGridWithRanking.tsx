@@ -335,7 +335,11 @@ function PostCard({ rankedPost, platform, criteria }: { rankedPost: RankedPost; 
     const isVideo = current?.isVideo || false;
 
     return (
-        <div className="group border rounded-lg bg-card overflow-hidden flex flex-col shadow-sm hover:shadow-lg transition-all relative">
+        <div
+            className="group border rounded-lg bg-card overflow-hidden flex flex-col shadow-sm hover:shadow-lg transition-all relative"
+            data-record-type="social_post"
+            data-record-id={post.id}
+        >
             {/* Rank Badge */}
             <div className="absolute top-2 left-2 z-10 bg-primary text-primary-foreground text-xs font-bold px-2 py-1 rounded-md shadow-lg">
                 #{rank}

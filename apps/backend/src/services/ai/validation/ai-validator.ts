@@ -6,7 +6,14 @@ import OpenAI from 'openai';
 import { ValidationImprovement } from '../types/templates';
 import { COST_PROTECTION, costTracker, getMockAIResponse, checkCostLimit } from './cost-protection';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let openaiClient: OpenAI | null = null;
+function getOpenAiClient(): OpenAI | null {
+  if (openaiClient) return openaiClient;
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return null;
+  openaiClient = new OpenAI({ apiKey });
+  return openaiClient;
+}
 
 /**
  * Use AI to validate quality (RESPECTS COST PROTECTION)
@@ -55,6 +62,10 @@ Return JSON:
 }`;
 
   try {
+    const openai = getOpenAiClient();
+    if (!openai) {
+      throw new Error('OPENAI_API_KEY not configured');
+    }
     const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [

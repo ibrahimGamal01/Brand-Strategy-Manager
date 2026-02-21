@@ -19,6 +19,13 @@ const REQUIRED_TABLES = [
   'community_insights',
   // BAT Brain collaboration surfaces
   'brain_profile_suggestions',
+  // Workspace chat
+  'chat_sessions',
+  'chat_messages',
+  'chat_block_events',
+  'chat_saved_blocks',
+  'client_intake_answers',
+  'screenshot_attachments',
   'strategy_doc_chat_sessions',
   'strategy_doc_chat_messages',
 ];
@@ -51,6 +58,12 @@ const REQUIRED_COLUMNS: Record<string, string[]> = {
   ],
   community_insights: ['brand_intelligence_run_id', 'source_query', 'evidence'],
   brain_profile_suggestions: ['client_id', 'field', 'proposed_value', 'status'],
+  chat_sessions: ['research_job_id', 'title', 'created_at', 'updated_at', 'last_active_at'],
+  chat_messages: ['session_id', 'role', 'content', 'blocks', 'design_options', 'created_at'],
+  chat_block_events: ['session_id', 'message_id', 'block_id', 'event_type', 'created_at'],
+  chat_saved_blocks: ['session_id', 'block_id', 'message_id', 'block_data', 'created_at'],
+  client_intake_answers: ['research_job_id', 'question_set_id', 'question_key', 'answer_type', 'answer', 'created_at'],
+  screenshot_attachments: ['research_job_id', 'storage_path', 'mime_type', 'is_app_screenshot', 'created_at'],
   strategy_doc_chat_sessions: ['research_job_id', 'scope', 'status', 'last_message_at'],
   strategy_doc_chat_messages: ['session_id', 'role', 'content', 'created_at'],
 };
