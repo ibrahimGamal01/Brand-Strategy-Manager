@@ -617,7 +617,8 @@ async function tryPythonDiscovery(handle: string, bio: string, niche: string): P
   const path = await import('path');
   const execAsync = promisify(exec);
 
-  const scriptPath = path.join(process.cwd(), 'scripts/competitor_discovery.py');
+  // __dirname = dist/services/discovery; climb to repo-level scripts folder
+  const scriptPath = path.resolve(__dirname, '../../../scripts/competitor_discovery.py');
   
   const { stdout } = await execAsync(
     `python3 ${scriptPath} "${handle}" "${bio.replace(/"/g, '\\"')}" "${niche}" 10`,
