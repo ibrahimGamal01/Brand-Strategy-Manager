@@ -136,7 +136,7 @@ router.post('/:id/chat/sessions/:sessionId/events', async (req, res) => {
     }
 
     const normalizedType = String(eventType).toUpperCase();
-    const allowed = new Set(['VIEW', 'PIN', 'UNPIN', 'SELECT_DESIGN']);
+    const allowed = new Set(['VIEW', 'PIN', 'UNPIN', 'SELECT_DESIGN', 'FORM_SUBMIT', 'ATTACH_VIEW']);
     if (!allowed.has(normalizedType)) {
       return res.status(400).json({ error: 'Invalid eventType' });
     }

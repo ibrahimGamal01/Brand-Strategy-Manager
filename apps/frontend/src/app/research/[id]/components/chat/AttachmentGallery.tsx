@@ -1,7 +1,24 @@
+import { useEffect, useRef } from 'react';
 import Image from 'next/image';
 import type { ChatAttachment } from './types';
 
-export function AttachmentGallery({ attachments }: { attachments?: ChatAttachment[] | null }) {
+type AttachmentGalleryProps = {
+  attachments?: ChatAttachment[] | null;
+  onView?: (attachment: ChatAttachment) => void;
+};
+
+export function AttachmentGallery({ attachments, onView }: AttachmentGalleryProps) {
+  const viewedRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!attachments || !onView) return;
+    attachments.forEach((att) => {
+      if (!att?.id || viewedRef.current.has(att.id)) return;
+      viewedRef.current.add(att.id);
+      onView(att);
+    });
+  }, [attachments, onView]);
+
   if (!attachments || attachments.length === 0) return null;
   return (
     <div className="mt-2 flex flex-wrap gap-2">

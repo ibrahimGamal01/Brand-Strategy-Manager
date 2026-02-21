@@ -11,6 +11,7 @@ export type ChatRagContext = {
   pinnedBlocks: Array<{ blockId: string; messageId: string; blockData: ChatBlock }>;
   viewedBlocks: Array<{ blockId: string; messageId: string; payload?: Record<string, unknown> | null }>;
   selectedDesigns: Array<{ messageId: string; designId: string }>;
+  recentAttachments: Array<{ id: string; recordType: string | null; recordId: string | null; aiSummary: string | null; isAppScreenshot: boolean }>;
   sourceHandles: string[];
 };
 
@@ -18,6 +19,7 @@ const MAX_HISTORY = 12;
 const MAX_HISTORY_POOL = 40;
 const MAX_PINNED = 12;
 const MAX_VIEWED = 16;
+const MAX_ATTACHMENTS = 12;
 
 function buildSourceHandles(context: ResearchContext): string[] {
   const handles: string[] = ['business_profile', 'brain_profile', 'ai_insights', 'competitor_context'];
@@ -62,6 +64,7 @@ export async function buildChatRagContext(researchJobId: string, sessionId: stri
     orderBy: { createdAt: 'desc' },
     take: MAX_HISTORY_POOL,
   });
+  const messageIds = messages.map((m) => m.id);
   const chronological = [...messages].reverse();
   const recentMessages = chronological.slice(-MAX_HISTORY).map((message) => ({
     role: message.role,
@@ -90,6 +93,12 @@ export async function buildChatRagContext(researchJobId: string, sessionId: stri
     take: MAX_VIEWED,
   });
 
+  const attachments = await prisma.screenshotAttachment.findMany({
+    where: { chatMessageId: { in: messageIds } },
+    orderBy: { createdAt: 'desc' },
+    take: MAX_ATTACHMENTS,
+  });
+
   const designSelections = await findLatestDesignSelections(sessionId);
 
   const selectedDesigns = Array.from(designSelections.entries()).map(([messageId, designId]) => ({
@@ -113,6 +122,13 @@ export async function buildChatRagContext(researchJobId: string, sessionId: stri
       payload: (event.payload as Record<string, unknown>) || null,
     })),
     selectedDesigns,
+    recentAttachments: attachments.map((att) => ({
+      id: att.id,
+      recordType: att.recordType,
+      recordId: att.recordId,
+      aiSummary: (att.aiSummary as string) || null,
+      isAppScreenshot: Boolean(att.isAppScreenshot),
+    })),
     sourceHandles: buildSourceHandles(researchContext),
   };
 }
@@ -173,6 +189,20 @@ export function formatChatContextForLLM(context: ChatRagContext): string {
   output += context.sourceHandles.map((handle) => `- ${handle}`).join('\n');
   output += '\n';
 
+  output += `\n## Recent Screenshot Attachments\n`;
+  if (context.recentAttachments.length === 0) {
+    output += 'None.\n';
+  } else {
+    context.recentAttachments.forEach((att, idx) => {
+      const parts = [
+        att.recordType ? `${att.recordType}:${att.recordId || 'unknown'}` : 'external_image',
+        att.isAppScreenshot ? 'app_screenshot' : 'uploaded',
+      ];
+      if (att.aiSummary) parts.push(`summary: ${att.aiSummary.slice(0, 140)}`);
+      output += `${idx + 1}. ${parts.join(' | ')}\n`;
+    });
+  }
+  output += '\n';
+
   return output;
 }
-

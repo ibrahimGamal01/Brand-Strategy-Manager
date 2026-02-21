@@ -16,6 +16,7 @@ interface ChatMessageItemProps {
   onBlockPin: (message: ChatMessage, block: ChatBlock) => void;
   onBlockUnpin: (message: ChatMessage, block: ChatBlock) => void;
   onSelectDesign: (message: ChatMessage, designId: string) => void;
+  onAttachmentView?: (message: ChatMessage, attachmentId: string, meta?: Record<string, unknown>) => void;
   researchJobId: string;
 }
 
@@ -46,6 +47,7 @@ export function ChatMessageItem({
   onBlockPin,
   onBlockUnpin,
   onSelectDesign,
+  onAttachmentView,
   researchJobId,
 }: ChatMessageItemProps) {
   const router = useRouter();
@@ -136,7 +138,16 @@ export function ChatMessageItem({
             </div>
           ) : null}
 
-          <AttachmentGallery attachments={message.attachments} />
+          <AttachmentGallery
+            attachments={message.attachments}
+            onView={(att) => {
+              onAttachmentView?.(message, att.id, {
+                recordType: att.recordType,
+                recordId: att.recordId,
+                isAppScreenshot: att.isAppScreenshot,
+              });
+            }}
+          />
 
           {activeBlocks.length > 0 ? (
             <div className="mt-3 space-y-2">

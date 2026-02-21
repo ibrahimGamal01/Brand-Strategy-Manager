@@ -57,6 +57,7 @@ export async function listChatMessages(sessionId: string, limit = 200) {
       aiSummary: att.aiSummary,
       recordType: att.recordType,
       recordId: att.recordId,
+      isAppScreenshot: att.isAppScreenshot,
     });
     return acc;
   }, {});

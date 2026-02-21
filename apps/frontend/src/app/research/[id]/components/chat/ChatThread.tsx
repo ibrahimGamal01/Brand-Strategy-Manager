@@ -19,6 +19,7 @@ interface ChatThreadProps {
   onBlockPin: (message: ChatMessage, block: ChatBlock) => void;
   onBlockUnpin: (message: ChatMessage, block: ChatBlock) => void;
   onSelectDesign: (message: ChatMessage, designId: string) => void;
+  onAttachmentView?: (message: ChatMessage, attachmentId: string, meta?: Record<string, unknown>) => void;
   isStreaming?: boolean;
   connectionStatus?: string;
   researchJobId: string;
@@ -37,6 +38,7 @@ export function ChatThread({
   onBlockPin,
   onBlockUnpin,
   onSelectDesign,
+  onAttachmentView,
   isStreaming,
   connectionStatus,
   researchJobId,
@@ -105,6 +107,7 @@ export function ChatThread({
             onBlockPin={onBlockPin}
             onBlockUnpin={onBlockUnpin}
             onSelectDesign={onSelectDesign}
+            onAttachmentView={onAttachmentView}
             researchJobId={researchJobId}
           />
         </motion.div>

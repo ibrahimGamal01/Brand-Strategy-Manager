@@ -35,4 +35,5 @@ export type ChatAttachment = {
   aiSummary?: string | null;
   recordType?: string | null;
   recordId?: string | null;
+  isAppScreenshot?: boolean;
 };
