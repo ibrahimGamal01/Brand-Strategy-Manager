@@ -21,3 +21,9 @@ brand-compass-ref/
 brand-compass-ui/
 apps/backend/reproduction_output.json
 apps/backend/inspect_profiles.js
+# Local artifacts
+apps/backend/scripts/__pycache__/
+apps/backend/storage/
+apps/backend/sessions/
+logs.txt
+server.log

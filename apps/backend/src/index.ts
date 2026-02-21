@@ -19,6 +19,7 @@ import brandIntelligenceRouter from './routes/research-jobs-brand-intelligence';
 import recoveryRouter from './routes/recovery';
 import orchestrationRouter from './routes/orchestration';
 import contentCalendarRouter from './routes/content-calendar';
+import { STORAGE_ROOT } from './services/storage/storage-root';
 
 const envLoad = loadBackendEnv();
 console.log('[DEBUG] DATABASE_URL loaded:', process.env.DATABASE_URL?.replace(/:[^:@]*@/, ':***@'));
@@ -39,7 +40,7 @@ app.use(cors());
 app.use(express.json());
 
 // Serve static files from storage directory
-app.use('/storage', express.static(path.join(__dirname, '../storage')));
+app.use('/storage', express.static(STORAGE_ROOT));
 
 // Health check (always available, even if schema is not ready)
 app.get('/api/health', (req, res) => {

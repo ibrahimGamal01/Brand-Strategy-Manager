@@ -1,0 +1,451 @@
+{
+  "project": {
+    "name": "Brand Strategy Manager",
+    "description": "Fullstack system for brand strategy research, competitor intelligence, media analysis, and content calendar generation. Intake creates a research job, orchestrators scrape/verify data, AI analyzes content, and strategy documents are generated with grounding checks.",
+    "type": "SaaS / Internal Tool",
+    "domain": "Brand strategy, competitor intelligence, social media content planning",
+    "repo": "https://github.com/ibrahimGamal01/Brand-Strategy-Manager"
+  },
+  "architecture": {
+    "structure": "Monorepo (npm workspaces)",
+    "apps": {
+      "frontend": {
+        "path": "apps/frontend",
+        "framework": "Next.js 16 (App Router)",
+        "language": "TypeScript",
+        "port": 3000,
+        "dockerfile": "apps/frontend/Dockerfile",
+        "keyDeps": [
+          "React 19",
+          "TanStack Query",
+          "Radix UI",
+          "Tailwind CSS 4",
+          "Framer Motion",
+          "Zod",
+          "React Hook Form",
+          "Sonner",
+          "Recharts",
+          "react-markdown",
+          "DnD Kit"
+        ]
+      },
+      "backend": {
+        "path": "apps/backend",
+        "framework": "Express.js",
+        "language": "TypeScript",
+        "port": 3001,
+        "entry": "apps/backend/src/index.ts",
+        "dockerfile": "apps/backend/Dockerfile",
+        "keyDeps": [
+          "Prisma",
+          "OpenAI",
+          "Puppeteer + puppeteer-extra-plugin-stealth",
+          "sharp",
+          "fluent-ffmpeg",
+          "node-cron",
+          "python-shell",
+          "Apify",
+          "axios",
+          "multer"
+        ]
+      }
+    },
+    "otherFolders": [
+      "archive/ (old workflows and scrapped approaches)",
+      "docs/ (plans, baselines, debug notes, ERD)",
+      "apps/backend/scripts/ (utility + backfill scripts)",
+      "apps/backend/prisma/ (schema + migrations)"
+    ]
+  },
+  "techStack": {
+    "runtime": "Node.js 20 (Docker image: node:20-bullseye-slim)",
+    "database": "PostgreSQL 14+",
+    "orm": "Prisma 6",
+    "ai": "OpenAI API (gpt-4o-mini default, configurable). Fallback key supported via OPENAI_API_KEY_FALLBACK.",
+    "scraping": {
+      "primary": "Apify (Instagram API scraper actor, TikTok)",
+      "secondaryPython": "Python scrapers via python-shell (Instagram, TikTok, DuckDuckGo search)",
+      "fallback": "Puppeteer (puppeteer-extra with stealth plugin), Camoufox",
+      "proxy": "Rotating proxy pools via env-configured comma-separated URL lists (SCRAPER_PROXY_URLS, INSTAGRAM_SCRAPER_PROXY_URLS, etc.)"
+    },
+    "media": "ffmpeg (via fluent-ffmpeg + ffmpeg-static), sharp for images, optional Whisper transcription",
+    "search": "DuckDuckGo via Python ddg_search.py for competitor discovery and social handle validation"
+  },
+  "deployment": {
+    "platform": "Railway (backend + PostgreSQL), Vercel (frontend)",
+    "frontendUrl": "https://brand-strategy-manager-frontend.vercel.app",
+    "backendPort": 3001,
+    "frontendPort": 3000,
+    "backendDockerfile": "apps/backend/Dockerfile",
+    "frontendDockerfile": "apps/frontend/Dockerfile",
+    "databasePlugin": "Railway managed PostgreSQL with persistent volume (postgres-volume)",
+    "prismaDeployCommand": "npx prisma migrate deploy --schema apps/backend/prisma/schema.prisma",
+    "preDeployStep": "Run prisma migrate deploy before starting the backend on every deploy",
+    "frontendApiProxy": "Next.js rewrites /api/* and /storage/* to NEXT_PUBLIC_API_ORIGIN (backend public URL)",
+    "storageNote": "Backend storage is ephemeral on Railway unless a Volume is mounted at /app/apps/backend/storage",
+    "railwayEnvVarRef": "Use ${{Postgres.DATABASE_URL}} to reference the Railway Postgres plugin's internal URL",
+    "healthcheck": "GET /api/health — returns schema readiness, connector status, AI mode"
+  },
+  "startup": {
+    "sequence": [
+      "1. loadBackendEnv — loads .env overrides and logs DATABASE_URL (redacted)",
+      "2. validateRuntimePreflight — checks NODE_ENV, AI keys, Apify tokens, fallback mode",
+      "3. checkSchemaReadiness — queries Prisma to verify all expected tables/columns exist",
+      "4. assertSchemaReadiness — throws and exits (process.exit(1)) if schema is not ready",
+      "5. app.listen — starts Express on PORT || BACKEND_PORT || 3001",
+      "6. startMonitoringScheduler — daily at 2 AM UTC",
+      "7. startResearchContinuityLoop — polls every RESEARCH_CONTINUITY_POLL_MS (default 60s)",
+      "8. startResearchJobEventPruning — retention + max-per-job cleanup loop",
+      "9. startOrchestrationScheduler — runs continuous orchestrator every ORCHESTRATION_INTERVAL_MINUTES (default 15)"
+    ],
+    "schemaReadiness": "Backend returns 503 BACKEND_NOT_READY to all /api/* routes until schema readiness passes. GET /api/health always responds regardless.",
+    "preflightWarnings": "Logged to console; non-fatal unless required keys are missing."
+  },
+  "database": {
+    "provider": "PostgreSQL",
+    "schemaFile": "apps/backend/prisma/schema.prisma",
+    "migrationsFolder": "apps/backend/prisma/migrations",
+    "keyEntities": {
+      "Client": "Business being strategized. Has BrainProfile, ClientAccounts, ResearchJobs.",
+      "ResearchJob": "Automated research pipeline per client. Status: PENDING → SCRAPING_CLIENT → DISCOVERING_COMPETITORS → SCRAPING_COMPETITORS → ANALYZING → COMPLETE/FAILED.",
+      "ClientAccount": "Client social account (platform + handle).",
+      "DiscoveredCompetitor": "Candidate competitor tied to ResearchJob with status + selectionState.",
+      "Competitor": "Confirmed competitor entity with profile + posts.",
+      "SocialProfile": "Research job social profile (client or competitor scraped data).",
+      "SocialPost": "Individual post tied to SocialProfile.",
+      "MediaAsset": "Downloaded media with analysis + extraction fields.",
+      "AiAnalysis": "AI analysis scoped to content/media/documents.",
+      "BrainProfile": "Structured business context derived from intake; used by RAG and generators.",
+      "BrainProfileSuggestion": "AI-suggested BrainProfile updates (PENDING/ACCEPTED/REJECTED).",
+      "ContentCalendar": "Planned content calendar with slots generated from scoped AI analysis.",
+      "BrandIntelligenceRun": "Brand mentions + community insights orchestration run.",
+      "ResearchJobEvent": "Append-only event log per research job (status changes, errors, progress)."
+    }
+  },
+  "api": {
+    "baseUrl": "http://localhost:3001",
+    "prefix": "/api",
+    "routes": {
+      "health": "GET /api/health",
+      "clients": "GET /api/clients, POST /api/clients, POST /api/clients/intake-v2, POST /api/clients/suggest-intake-completion, PATCH /api/clients/:id/brain-profile",
+      "researchJobs": "GET /api/research-jobs, GET /api/research-jobs/:id, GET /api/research-jobs/:id/overview",
+      "brain": "GET /api/research-jobs/:id/brain, POST /api/research-jobs/:id/brain/commands, POST /api/research-jobs/:id/brain/suggestions/:suggestionId/accept|reject",
+      "competitors": "GET /api/competitors/client/:clientId, POST /api/competitors/discovered/:id/scrape|confirm|reject, PATCH /api/competitors/discovered/:id/state|order",
+      "brandIntelligence": "POST /api/research-jobs/:id/brand-intelligence/orchestrate, GET /api/research-jobs/:id/brand-intelligence/summary",
+      "media": "GET /api/media/post/:postId, POST /api/media/:mediaId/analyze",
+      "orchestration": "GET /api/research-jobs/:id/orchestration/status, POST /api/research-jobs/:id/orchestration/run",
+      "calendar": "GET /api/research-jobs/:id/content-calendar, POST /api/research-jobs/:id/content-calendar",
+      "strategy": "Routes under /api/strategy (AI document generation)",
+      "analytics": "Routes under /api/analytics",
+      "monitoring": "Routes under /api/monitoring",
+      "instagram": "Routes under /api/instagram (raw Instagram data queries)",
+      "tiktok": "Routes under /api/tiktok (raw TikTok data queries)",
+      "scrapers": "Routes under /api/scrapers",
+      "recovery": "POST /api/recovery/re-request"
+    },
+    "frontendProxy": "Next.js rewrites /api/* → NEXT_PUBLIC_API_ORIGIN/api/* and /storage/* → NEXT_PUBLIC_API_ORIGIN/storage/*",
+    "staticFiles": "Backend serves /storage/* from STORAGE_ROOT (defaults to apps/backend/storage/)"
+  },
+  "frontend": {
+    "appRouter": true,
+    "pages": {
+      "/": "Home / client dashboard — lists all clients with ClientCard components",
+      "/clients/new": "New client intake form (POSTs to intake-v2 endpoint)",
+      "/research/[id]": "BAT Workspace — the main research + strategy workspace for a specific research job"
+    },
+    "workspaceShell": {
+      "BatWorkspaceShell": "Root layout shell for the workspace; holds topbar, module nav, notification rail, and main content area",
+      "BatClientTopbar": "Top bar with client name, job status badge, active module label, and 'Continue Now' button",
+      "BatModuleNav": "Left/top navigation that renders the 6 BAT_WORKSPACE_MODULES tabs and handles activeModule state",
+      "BatNotificationRail": "Side panel showing live SSE research job events; clicking an event switches to Intelligence tab",
+      "WorkspaceErrorBoundary": "Error boundary wrapping each module content area"
+    },
+    "workspaceTabs": {
+      "brain": {
+        "key": "brain",
+        "label": "BAT Brain",
+        "description": "Memory, context, command history, and coverage checks.",
+        "components": [
+          "BrainWorkspacePanel — brain commands, suggestions, profile editing (apps/frontend/src/app/research/[id]/components/brain/)",
+          "BrainDataLedger — shows brain coverage report: which datasets are ready vs missing",
+          "BrainRawInspector — raw JSON view of brainPayload, researchJob, and events for debugging"
+        ]
+      },
+      "intelligence": {
+        "key": "intelligence",
+        "label": "Intelligence",
+        "description": "Research signals across client, competitors, trends, and media.",
+        "components": [
+          "ResearchTreeView — hierarchical collapsible tree of all research data (apps/frontend/src/app/research/[id]/components/ResearchTreeView.tsx)",
+          "InstagramSection — client Instagram profile + posts with metrics",
+          "CompetitorsSection — discovered competitor cards with selectionState, relevanceScore, status",
+          "ContentAndAiAnalysisView — content AI analysis per post/media",
+          "SearchResultsList — DDG search results (web, images, videos, news)",
+          "ImageGallery / VideoGallery — media galleries for DDG image/video results",
+          "SocialProfilesSection — all social profiles (Instagram + TikTok) with follower stats",
+          "TrendsSection — search trends and social trends",
+          "CommunityInsightsSection — brand intelligence community insights",
+          "AIQuestionsSection — deep AI questions generated for the business",
+          "PostsGridWithRanking — ranked post grid with engagement metrics and media previews",
+          "VisualComparisonSection — side-by-side visual comparison of client vs competitor content",
+          "Competitor Profile Snapshots — archived competitor profile snapshots per continuity run",
+          "Media Assets + Social Trends — counts and list of tracked media assets and social trend signals"
+        ]
+      },
+      "strategy_docs": {
+        "key": "strategy_docs",
+        "label": "Strategy Docs",
+        "description": "Editable 9-section strategy document workspace.",
+        "components": [
+          "StrategyWorkspace — full strategy document viewer/editor with grounding status (apps/frontend/src/app/research/[id]/components/strategy/)"
+        ]
+      },
+      "content_calendar": {
+        "key": "content_calendar",
+        "label": "Content Calendar",
+        "description": "Campaign and publishing planning scaffold for upcoming rollout.",
+        "badge": "Planned",
+        "components": [
+          "ContentCalendarWorkspace — calendar slot view + generation controls (apps/frontend/src/app/research/[id]/components/calendar/)"
+        ]
+      },
+      "content_generators": {
+        "key": "content_generators",
+        "label": "Content Generators",
+        "description": "Asset and copy generation module scaffold. Shows a readiness checklist of required brain datasets.",
+        "badge": "Planned",
+        "components": [
+          "ModulePlaceholder — readiness display showing which datasets are ready vs pending before generation can proceed"
+        ]
+      },
+      "performance": {
+        "key": "performance",
+        "label": "Performance",
+        "description": "Automation health, continuity status, and live events.",
+        "components": [
+          "Continuity status cards — enabled/disabled, last run, next run, social trends count",
+          "LiveActivityFeed — real-time SSE event feed in panel mode showing all research job events"
+        ]
+      }
+    },
+    "researchWorkspaceData": {
+      "description": "The research page fetches researchJob via useResearchJob and SSE events via useResearchJobEvents, then builds a researchData object passed to tab components.",
+      "researchDataFields": [
+        "clientPosts — posts from all client social accounts",
+        "tiktokPosts — posts from the TikTok profile",
+        "clientProfileSnapshots — archived client profile snapshots",
+        "competitorProfileSnapshots — archived competitor profile snapshots",
+        "rawSearchResults — DuckDuckGo web search results",
+        "ddgImageResults — DDG image results",
+        "ddgVideoResults — DDG video results",
+        "ddgNewsResults — DDG news results",
+        "searchTrends — search trend signals",
+        "socialTrends — social platform trend signals",
+        "competitors — deduped + sorted discovered competitors (dedup by platform:handle, sort by selectionState > relevanceScore > status)",
+        "communityInsights — brand intelligence community insights",
+        "mediaAssets — downloaded media assets for this job",
+        "aiQuestions — deep AI research questions",
+        "socialProfiles — client social profiles (Instagram first, then TikTok)",
+        "brandMentions — brand mention data",
+        "clientDocuments — strategy documents for the client",
+        "analysisScope — scoped AI analysis run metadata"
+      ],
+      "competitorSelectionStates": [
+        "TOP_PICK",
+        "APPROVED",
+        "SHORTLISTED",
+        "FILTERED_OUT",
+        "REJECTED"
+      ],
+      "competitorStatuses": [
+        "SCRAPED",
+        "SCRAPING",
+        "CONFIRMED",
+        "SUGGESTED",
+        "FAILED",
+        "REJECTED"
+      ]
+    },
+    "otherFrontendComponents": {
+      "DashboardShell": "Main layout shell for the dashboard page",
+      "ClientCard": "Card component for each client on the dashboard",
+      "MediaGrid": "Grid component for displaying media assets",
+      "StrategyViewer": "Read-only strategy document viewer",
+      "VoCViewer": "Voice of Customer viewer component",
+      "LiveActivityFeed": "Real-time SSE event log — renders in both full-page and panel modes",
+      "PipelineProgress": "Visual pipeline progress indicator for research job stages"
+    },
+    "apiClient": "apps/frontend/src/lib/api-client.ts",
+    "hooks": [
+      "useResearchJob — fetches research job data with polling, respects SSE health",
+      "useResearchJobEvents — manages SSE connection to research job event stream",
+      "useToast — Sonner toast notifications"
+    ],
+    "brainCoverage": "apps/frontend/src/lib/brain-data/coverage-contract.ts — buildBrainCoverageReport() maps researchJob + brainPayload + events to per-dataset readiness (ready/partial/missing)"
+  },
+  "backendServices": {
+    "ai": {
+      "generators": "Strategy section generators with grounding readiness + quality gates",
+      "grounding": "Grounding report + readiness metrics for strategy doc sections",
+      "rag": "Business + competitor + content intelligence context builder for LLM prompts",
+      "validators": "Document validator + fact-checker + cost protection (monthly budget guard)",
+      "promptModifiers": "Industry-specific prompt modifiers (apps/backend/src/services/ai/prompts/industry-modifiers.ts)",
+      "deepQuestions": "AI-generated deep research questions per business (apps/backend/src/services/ai/deep-questions.ts)"
+    },
+    "intake": {
+      "brain-intake": "Processes intake-v2 payload into BrainProfile + ResearchJob",
+      "suggest-intake-completion": "AI suggests missing intake fields; validates social handles before suggesting (apps/backend/src/services/intake/suggest-intake-completion.ts)",
+      "discover-client-social": "Website-first discovery of Instagram/TikTok handles",
+      "validate-client-profile": "Confidence scoring to confirm suggested social handles"
+    },
+    "discovery": {
+      "competitor-orchestrator-v2": "Multi-surface competitor discovery (DDG + Instagram + TikTok) with validation + scoring",
+      "competitor-materializer": "Materializes candidates; reserves queue slots for client-provided inputs",
+      "competitor-scraper": "Scrapes competitor profiles + posts via Apify, Python, or Puppeteer fallback",
+      "competitor-collector": "DuckDuckGo-based social search surface for competitor candidate collection",
+      "competitor-resolver": "Resolves + validates candidate handles with ConnectorHealthTracker",
+      "connector-health": "ConnectorHealthTracker tracks degraded/ok state per connector (Instagram, TikTok, DDG)"
+    },
+    "orchestration": {
+      "continuous-orchestrator": "Scheduled gap-filling: scrapes client/competitor data, triggers AI analysis, manages competitor tasks",
+      "orchestration-scheduler": "node-cron scheduler that calls the continuous orchestrator",
+      "media-analysis-runs": "Scoped AI analysis runs per job with run metadata + cleanup",
+      "content-readiness": "Readiness checks for clients, competitors, and media before generation"
+    },
+    "media": {
+      "downloader": "Media download pipeline (Apify actor, Camoufox, Puppeteer fallback)",
+      "audio-transcription": "Local or OpenAI Whisper transcription of video/audio",
+      "video-text-extraction": "OCR + on-screen text extraction from video frames"
+    },
+    "brain": {
+      "brain-profile": "BrainProfile CRUD + command execution (refresh, enrich, analyze)",
+      "brain-suggestions": "AI-driven BrainProfileSuggestion generation + accept/reject handling"
+    },
+    "calendar": {
+      "calendar-generator": "Content calendar slot generation from scoped AI analysis",
+      "slot-management": "CRUD for individual calendar slots"
+    },
+    "social": {
+      "instagram-service": "Instagram profile + post fetching (Apify primary, Python fallback, DDG fallback)",
+      "tiktok-service": "TikTok profile + post fetching with Camoufox/Puppeteer",
+      "research-continuity": "Loop that auto-continues paused research jobs",
+      "research-job-events": "Append-only event log management + pruning"
+    },
+    "monitoring": {
+      "monitoring-scheduler": "Daily 2 AM UTC health + cost monitoring run"
+    },
+    "recovery": {
+      "re-request": "Re-triggers failed or stalled research job steps"
+    }
+  },
+  "backgroundJobs": {
+    "monitoringScheduler": "Daily at 2 AM UTC (node-cron)",
+    "researchContinuityLoop": "Polls every RESEARCH_CONTINUITY_POLL_MS (default 60000ms)",
+    "researchJobEventPruning": "Runs on interval; enforces RESEARCH_EVENTS_RETENTION_DAYS and RESEARCH_EVENTS_MAX_PER_JOB",
+    "orchestrationScheduler": "Runs every ORCHESTRATION_INTERVAL_MINUTES (default 15) via node-cron"
+  },
+  "environment": {
+    "required": [
+      "DATABASE_URL",
+      "OPENAI_API_KEY",
+      "APIFY_API_TOKEN",
+      "APIFY_MEDIA_DOWNLOADER_TOKEN"
+    ],
+    "optional": {
+      "OPENAI_API_KEY_FALLBACK": "Secondary key used automatically if primary hits quota/rate limit",
+      "APIFY_ACTOR_ID": "apify~instagram-api-scraper (default)",
+      "APIFY_MEDIA_DOWNLOADER_ACTOR_ID": "igview-owner~instagram-video-downloader (default)",
+      "AI_FALLBACK_MODE": "off | mock (mock for local testing only)",
+      "PORT": "Injected by Railway/Heroku; takes priority over BACKEND_PORT",
+      "BACKEND_PORT": "3001 (local dev fallback)",
+      "NODE_ENV": "production | development",
+      "STORAGE_ROOT": "Override for media storage directory (default: apps/backend/storage)",
+      "INSTAGRAM_SESSION_COOKIES": "Session cookies string for authenticated Instagram scraping",
+      "ORCHESTRATION_ENABLED": "true | false",
+      "ORCHESTRATION_INTERVAL_MINUTES": "15",
+      "ORCHESTRATOR_CLIENT_SCRAPE_THROTTLE_HOURS": "Minimum hours between orchestrator-triggered scrapes per job (default 6)",
+      "RESEARCH_CONTINUITY_POLL_MS": "60000",
+      "RESEARCH_EVENTS_RETENTION_DAYS": "30",
+      "RESEARCH_EVENTS_MAX_PER_JOB": "5000",
+      "RESEARCH_EVENTS_PRUNE_INTERVAL_MS": "21600000",
+      "INSTAGRAM_POST_LIMIT": "50",
+      "SOCIAL_SCRAPE_POST_LIMIT": "Per-run post scrape limit",
+      "SOCIAL_MEDIA_DOWNLOAD_POST_LIMIT": "8",
+      "SOCIAL_MEDIA_MAX_FAILURES": "3",
+      "SOCIAL_MEDIA_FAILURE_COOLDOWN_MS": "43200000",
+      "ENABLE_TIKTOK_PAGE_DOWNLOAD": "false (set true to download TikTok via Camoufox)",
+      "MONTHLY_AI_BUDGET": "200.00 (USD, cost guard)",
+      "COST_ALERT_THRESHOLD": "150.00",
+      "MAX_TOKENS_PER_CALL": "4000",
+      "TIKTOK_SUGGESTION_CONFIDENCE_THRESHOLD": "0.7",
+      "NEXT_PUBLIC_API_ORIGIN": "Frontend env: public URL of backend (e.g. https://backend.up.railway.app)"
+    },
+    "notes": "Never store real secrets in this file. PORT is read first, then BACKEND_PORT, then defaults to 3001."
+  },
+  "qualityGates": {
+    "noHallucinations": true,
+    "groundingRequired": true,
+    "readinessChecks": [
+      "Strategy sections require grounding readiness metadata before generation",
+      "Content calendar uses only scoped AI analysis runs (not raw data)",
+      "Backend blocks all /api/* routes (503) until schema readiness passes on startup"
+    ],
+    "codingRules": [
+      "Files over 350 lines must be broken into a folder with sub-modules",
+      "No mock data in production code paths; all data must flow through the real pipeline",
+      "After any refactor, verify the server starts and the affected feature works end-to-end"
+    ]
+  },
+  "knownIssues": [
+    "AI intake suggestions require validation; TikTok handle suggestions are gated by confidence threshold.",
+    "Railway container storage is ephemeral — requires Volume mount at /app/apps/backend/storage for media persistence.",
+    "NEXT_PUBLIC_API_ORIGIN must be set before the frontend Vercel build (Next.js bakes public env vars at build time)."
+  ],
+  "recentChanges": [
+    "Added grounding readiness metrics + normalized grounding reports",
+    "Scoped media AI analysis runs + cleanup of out-of-scope analyses",
+    "Competitor queue reserves space for client-provided inputs",
+    "TikTok suggestion validation guardrails + UI warnings",
+    "Calendar generation fixed for full requested duration; no default BLOCKED slots",
+    "OpenAI fallback key support added (centralized client with automatic key rotation on quota error)",
+    "Railway deployment configured: backend on Railway with Postgres plugin, frontend on Vercel"
+  ],
+  "fileLocations": {
+    "schema": "apps/backend/prisma/schema.prisma",
+    "migrations": "apps/backend/prisma/migrations/",
+    "backendEntry": "apps/backend/src/index.ts",
+    "backendRoutes": "apps/backend/src/routes/",
+    "backendServices": "apps/backend/src/services/",
+    "backendLib": "apps/backend/src/lib/ (prisma client, env loader, preflight, schema readiness)",
+    "frontendApiClient": "apps/frontend/src/lib/api-client.ts",
+    "nextConfig": "apps/frontend/next.config.ts (defines /api and /storage rewrites)",
+    "backendDockerfile": "apps/backend/Dockerfile",
+    "frontendDockerfile": "apps/frontend/Dockerfile",
+    "intakeSuggestions": "apps/backend/src/services/intake/suggest-intake-completion.ts",
+    "aiPrompts": "apps/backend/src/services/ai/prompts/",
+    "storage": "apps/backend/storage/",
+    "docs": "docs/",
+    "scripts": "apps/backend/scripts/ (backfill, audit, cleanup, integrity test scripts)"
+  },
+  "conventions": {
+    "apiBase": "Frontend uses /api (Next.js proxy rewrite). Backend resolves: process.env.PORT || BACKEND_PORT || 3001.",
+    "ids": "UUIDs for all primary keys. Prisma: @id @default(uuid()).",
+    "casing": "DB columns: snake_case via Prisma @map(). TypeScript: camelCase.",
+    "modularity": "Files over 350 lines must be split into a folder of focused modules.",
+    "errorFormat": "API errors return { error: string, details?: string }. 503 for not-ready, 500 for server errors.",
+    "schemaChanges": "Always use prisma migrate dev locally, prisma migrate deploy in production. Never db push in production."
+  },
+  "commands": {
+    "dev": "npm run dev (runs frontend + backend in parallel)",
+    "backend": "npm run dev:backend",
+    "frontend": "npm run dev:frontend",
+    "build": "npm run build",
+    "db_push_local": "npm run db:push --workspace=apps/backend",
+    "db_migrate_dev": "npm run db:migrate --workspace=apps/backend",
+    "db_migrate_prod": "npm run db:deploy --workspace=apps/backend",
+    "db_studio": "npm run db:studio --workspace=apps/backend",
+    "integrity_test": "npm run test:workflow-integrity --workspace=apps/backend",
+    "check_runtime_config": "npm run check:runtime-config --workspace=apps/backend",
+    "security_scan": "npm run security:scan-main"
+  }
+}

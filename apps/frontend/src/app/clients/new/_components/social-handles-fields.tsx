@@ -55,7 +55,14 @@ export function buildChannelsFromHandles(handles: Record<PlatformId, string>): A
     .filter((row) => row.handle.length > 0);
 }
 
-function SuggestedBadge() {
+function SuggestedBadge({ tone = 'default' }: { tone?: 'default' | 'warn' }) {
+  if (tone === 'warn') {
+    return (
+      <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-normal uppercase">
+        Needs review
+      </span>
+    );
+  }
   return (
     <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-normal uppercase">
       Suggested
@@ -68,6 +75,12 @@ function getConfidenceLabel(validation: SuggestedHandleValidationItem): string {
   if (score >= 0.75) return 'Likely your account';
   if (score >= 0.45) return 'Please confirm';
   return 'Unreliable suggestion';
+}
+
+function getSuggestionTone(validation?: SuggestedHandleValidationItem): 'default' | 'warn' {
+  if (!validation) return 'warn';
+  if (!validation.isLikelyClient || validation.confidence < 0.75) return 'warn';
+  return 'default';
 }
 
 export function SocialHandlesFields({ handles, onChange, suggestedPlatforms, suggestedHandleValidation }: SocialHandlesFieldsProps) {
@@ -87,13 +100,14 @@ export function SocialHandlesFields({ handles, onChange, suggestedPlatforms, sug
           const hasValue = value.trim().length > 0;
           const isSuggested = suggestedPlatforms?.has(platform.id);
           const validation = platform.id === 'instagram' ? suggestedHandleValidation?.instagram : platform.id === 'tiktok' ? suggestedHandleValidation?.tiktok : undefined;
+          const tone = getSuggestionTone(validation);
 
           return (
             <div key={platform.id} className="relative">
               <div className="flex items-center gap-2 mb-1.5">
                 <span className="text-xs font-medium text-zinc-500">
                   {platform.name}
-                  {isSuggested ? <SuggestedBadge /> : null}
+                  {isSuggested ? <SuggestedBadge tone={tone} /> : null}
                 </span>
               </div>
               <div className="relative">
@@ -119,8 +133,12 @@ export function SocialHandlesFields({ handles, onChange, suggestedPlatforms, sug
                   <div className="absolute inset-y-0 right-0 pr-3 flex items-center gap-1.5">
                     {hasValue ? <span className="text-xs text-green-500">✓</span> : null}
                     {isSuggested ? (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 uppercase">
-                        Suggested
+                      <span
+                        className={`text-[10px] px-1.5 py-0.5 rounded uppercase ${
+                          tone === 'warn' ? 'bg-amber-500/20 text-amber-400' : 'bg-blue-500/20 text-blue-400'
+                        }`}
+                      >
+                        {tone === 'warn' ? 'Needs review' : 'Suggested'}
                       </span>
                     ) : null}
                   </div>

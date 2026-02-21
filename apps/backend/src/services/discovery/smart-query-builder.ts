@@ -150,6 +150,37 @@ export function buildRedditQueries(handle: string, niche?: string): string[] {
   ];
 }
 
+/**
+ * Community-focused queries across Reddit/Quora/Trustpilot/forums.
+ * Keeps queries brand/handle-centric to avoid unrelated noise.
+ */
+export function buildCommunityQueries(handle: string, niche?: string, brandName?: string): string[] {
+  const rawHandle = String(handle || '').replace('@', '').trim();
+  const rawBrand = String(brandName || '').trim();
+  const target = rawHandle || rawBrand;
+  const n = niche || 'business';
+  const quoted = target ? `"${target}"` : `"${n}"`;
+
+  const queries = [
+    `site:reddit.com ${quoted}`,
+    `site:quora.com ${quoted}`,
+    `site:trustpilot.com ${quoted}`,
+    `${quoted} reddit`,
+    `${quoted} quora`,
+    `${quoted} forum`,
+    `${quoted} review`,
+    `${quoted} complaints`,
+    `${quoted} experience`,
+  ];
+
+  if (target && n) {
+    queries.push(`site:reddit.com ${quoted} ${n}`);
+    queries.push(`${quoted} ${n} reddit`);
+  }
+
+  return Array.from(new Set(queries.map((q) => q.trim()).filter(Boolean)));
+}
+
 
 /**
  * Get platform-specific search queries

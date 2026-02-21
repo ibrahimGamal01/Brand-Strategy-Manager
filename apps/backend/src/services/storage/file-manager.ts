@@ -8,8 +8,9 @@ import {
   proxyUrlToAxiosConfig,
   sleep,
 } from '../network/proxy-rotation';
+import { STORAGE_ROOT } from './storage-root';
 
-const STORAGE_BASE = path.resolve(process.cwd(), 'storage');
+const STORAGE_BASE = STORAGE_ROOT;
 
 const DOWNLOAD_TIMEOUT_MS = Number.parseInt(process.env.MEDIA_DOWNLOAD_TIMEOUT_MS || '60000', 10);
 const DOWNLOAD_MAX_ATTEMPTS = Number.parseInt(process.env.MEDIA_DOWNLOAD_MAX_ATTEMPTS || '3', 10);

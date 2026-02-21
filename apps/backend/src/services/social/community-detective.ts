@@ -11,8 +11,8 @@
  */
 
 import { PrismaClient } from '@prisma/client';
-import { gatherAllDDG } from '../discovery/duckduckgo-search.js';
-import { buildRedditQueries } from '../discovery/smart-query-builder.js';
+import { searchRawDDG, type RawSearchResult } from '../discovery/duckduckgo-search.js';
+import { buildCommunityQueries } from '../discovery/smart-query-builder.js';
 const prisma = new PrismaClient();
 
 const ALLOWED_SOURCES = new Set(['reddit', 'quora', 'trustpilot', 'forum']);
@@ -30,6 +30,10 @@ export interface CommunityDetectiveResult {
   filteredOut: number;
 }
 
+type CommunityCandidate = RawSearchResult & {
+  match: 'snippet_or_url' | 'query_only' | 'none';
+};
+
 
 /**
  * Main entry point for Community Detective
@@ -44,10 +48,7 @@ export async function runCommunityDetective(
   console.log(`[CommunityDetective] Starting investigation for ${brandName} (@${handle || 'no-handle'}) in ${niche}...`);
   
   // Use fixed comprehensive Reddit queries
-  const redditQueries = buildRedditQueries(handle || brandName, niche);
-  
-  // Add brand-specific queries if different from handle
-  const queries: string[] = [...redditQueries];
+  const queries: string[] = buildCommunityQueries(handle || brandName, niche, brandName);
   
 
   
@@ -72,16 +73,28 @@ export async function runCommunityDetective(
     try {
       console.log(`[CommunityDetective] Searching: "${query}"`);
       
-      const searchResult = await gatherAllDDG(query, niche, researchJobId);
+      const textResults = await searchRawDDG([query], {
+        researchJobId,
+        source: 'community_insights',
+        maxResults: 60,
+        timeoutMs: 60_000,
+      });
       
-      // Filter for community sources (Reddit, Quora, forums)
+      const target = (handle || brandName).toLowerCase().replace('@', '').trim();
+      const hasTarget = target.length >= 3;
+      const queryHasTarget = hasTarget ? query.toLowerCase().includes(target) : false;
+
       // Filter for community sources (Reddit, Quora, forums)
       // STRICT REQUIREMENTS:
       // 1. Must be community source
-      // 2. Must mention brand/handle
-      // 3. Must NOT contain irrelevant keywords
-      // 4. Should relate to niche
-      const communityLinks = searchResult.text_results.filter(r => {
+      // 2. Must mention brand/handle (or be a query-targeted result)
+      // 3. Should relate to niche (soft)
+      const communityLinks: CommunityCandidate[] = textResults.map((r) => {
+        const text = (r.title + ' ' + r.body + ' ' + r.href).toLowerCase();
+        const hasBrandMention = hasTarget ? text.includes(target) : false;
+        const match = hasBrandMention ? 'snippet_or_url' : queryHasTarget ? 'query_only' : 'none';
+        return { ...r, match };
+      }).filter(r => {
         // 1. Source check
         const isCommunity = r.href.includes('reddit.com') || 
           r.href.includes('quora.com') || 
@@ -96,13 +109,8 @@ export async function runCommunityDetective(
           return false;
         }
 
-        const text = (r.title + ' ' + r.body).toLowerCase();
-        
-        // 2. CRITICAL: Must mention brand/handle
-        const target = (handle || brandName).toLowerCase().replace('@', '');
-        const hasBrandMention = text.includes(target);
-        
-        if (!hasBrandMention) {
+        // 2. CRITICAL: Must mention brand/handle (or be a query-targeted hit)
+        if (r.match === 'none') {
           console.log(`[Filter] Rejected: No brand mention in "${r.title.slice(0, 50)}..."`);
           filteredOut += 1;
           return false;
@@ -110,6 +118,7 @@ export async function runCommunityDetective(
         
         // 3. SIMPLE: Just check if it relates to the niche
         const nicheKeywords = niche.toLowerCase().split(' ').filter(w => w.length > 3);
+        const text = (r.title + ' ' + r.body + ' ' + r.href).toLowerCase();
         const hasNicheMatch = nicheKeywords.some(kw => text.includes(kw));
         
         // Log if weak niche match but keep it (brand mention is what matters)
@@ -163,6 +172,8 @@ Query Used: ${query}`;
             evidence: {
               title: link.title,
               snippet: link.body,
+              match: link.match,
+              target,
             },
             sentiment: 'neutral',
             painPoints: [],

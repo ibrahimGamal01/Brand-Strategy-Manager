@@ -83,6 +83,9 @@ function normalizeHandle(raw: unknown): string {
 
 const PRIMARY_CHANNELS = ['instagram', 'tiktok', 'youtube', 'twitter', 'x'] as const;
 const HIGH_CONFIDENCE_THRESHOLD = 0.75;
+const TIKTOK_SUGGESTION_CONFIDENCE = Number(
+  process.env.TIKTOK_SUGGESTION_CONFIDENCE_THRESHOLD || 0.7
+);
 
 function hasPrimaryHandle(handles: Record<string, unknown>): boolean {
   return PRIMARY_CHANNELS.some((platform) => normalizeHandle(handles[platform]).length > 0);
@@ -210,9 +213,28 @@ Return a single JSON object. No explanation.`;
     }
   }
 
-  // Suggest TikTok from Instagram when user already filled Instagram (many brands use same handle).
+  // Suggest TikTok from Instagram when user already filled Instagram (many brands use same handle),
+  // but only if we can validate with decent confidence.
   if (instagramHandle && !tiktokHandle && !suggestedHandles.tiktok) {
-    suggestedHandles.tiktok = instagramHandle;
+    try {
+      const validation = await validateSuggestedProfileIsClient({
+        handle: instagramHandle,
+        platform: 'tiktok',
+        clientWebsite: website,
+        clientName: name,
+      });
+      suggestedHandleValidation.tiktok = {
+        handle: instagramHandle,
+        isLikelyClient: validation.isLikelyClient,
+        confidence: validation.confidence,
+        reason: validation.reason,
+      };
+      if (validation.isLikelyClient && validation.confidence >= TIKTOK_SUGGESTION_CONFIDENCE) {
+        suggestedHandles.tiktok = instagramHandle;
+      }
+    } catch (err: unknown) {
+      console.warn('[SuggestIntake] TikTok-from-Instagram validation failed:', (err as Error)?.message);
+    }
   }
 
   const hasUserPrimaryHandle = hasPrimaryHandle(handles);
