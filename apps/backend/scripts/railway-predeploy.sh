@@ -2,19 +2,22 @@
 set -euo pipefail
 
 LEGACY_BASELINE_MIGRATION="${LEGACY_BASELINE_MIGRATION:-20260211113000_competitor_orchestrator_v2}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BACKEND_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$BACKEND_ROOT/../.." && pwd)"
 
-if [ -f "apps/backend/prisma/schema.prisma" ]; then
-  SCHEMA_PATH="${PRISMA_SCHEMA_PATH:-apps/backend/prisma/schema.prisma}"
-  MIGRATIONS_DIR="${PRISMA_MIGRATIONS_DIR:-apps/backend/prisma/migrations}"
-elif [ -f "prisma/schema.prisma" ]; then
-  SCHEMA_PATH="${PRISMA_SCHEMA_PATH:-prisma/schema.prisma}"
-  MIGRATIONS_DIR="${PRISMA_MIGRATIONS_DIR:-prisma/migrations}"
+if [ -f "$REPO_ROOT/apps/backend/prisma/schema.prisma" ]; then
+  SCHEMA_PATH="${PRISMA_SCHEMA_PATH:-$REPO_ROOT/apps/backend/prisma/schema.prisma}"
+  MIGRATIONS_DIR="${PRISMA_MIGRATIONS_DIR:-$REPO_ROOT/apps/backend/prisma/migrations}"
+elif [ -f "$BACKEND_ROOT/prisma/schema.prisma" ]; then
+  SCHEMA_PATH="${PRISMA_SCHEMA_PATH:-$BACKEND_ROOT/prisma/schema.prisma}"
+  MIGRATIONS_DIR="${PRISMA_MIGRATIONS_DIR:-$BACKEND_ROOT/prisma/migrations}"
 else
   echo "Could not locate Prisma schema file."
   exit 1
 fi
 
-echo "Running Prisma migrate deploy..."
+echo "Running Prisma migrate deploy (schema: $SCHEMA_PATH)..."
 set +e
 MIGRATE_OUTPUT="$(npx prisma migrate deploy --schema "$SCHEMA_PATH" 2>&1)"
 MIGRATE_STATUS=$?

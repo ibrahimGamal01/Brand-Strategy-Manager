@@ -41,10 +41,10 @@ The safest Railway setup is two services (one per app) plus a managed Postgres i
 
 ## 3. Database Migration
 
-For Railway pre-deploy command, use:
+For Railway pre-deploy command, use this direct script command:
 
 ```bash
-npm run db:deploy:railway --workspace=apps/backend
+bash /app/apps/backend/scripts/railway-predeploy.sh
 ```
 
 Why this command:
@@ -52,7 +52,10 @@ Why this command:
 - If Railway DB is fresh and hits the known legacy baseline migration failure (`20260211113000_competitor_orchestrator_v2`), it performs a one-time safe bootstrap (`migrate resolve` + `db push` + mark existing migrations as applied) and then re-checks migration state.
 - For all other migration failures, it exits with error (no silent masking).
 
-You can still run `npx prisma migrate deploy --schema apps/backend/prisma/schema.prisma` manually in a Railway shell for day-to-day operations.
+Alternative:
+- `npm run db:deploy:railway --workspace=apps/backend`
+
+If logs do not show `Running Prisma migrate deploy (schema: ...)`, Railway is not executing the wrapper script yet.
 
 ## 4. Verify Deployment
 
