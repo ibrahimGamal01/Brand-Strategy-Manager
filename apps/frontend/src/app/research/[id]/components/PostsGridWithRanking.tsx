@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toMediaUrl } from '@/lib/media-url';
+import { CopyForBatButton } from './CopyForBatButton';
 
 export type MediaAssetAnalysis = Record<string, unknown>;
 
@@ -339,6 +340,7 @@ function PostCard({ rankedPost, platform, criteria }: { rankedPost: RankedPost; 
             className="group border rounded-lg bg-card overflow-hidden flex flex-col shadow-sm hover:shadow-lg transition-all relative"
             data-record-type="social_post"
             data-record-id={post.id}
+            id={`social-post-${post.id}`}
         >
             {/* Rank Badge */}
             <div className="absolute top-2 left-2 z-10 bg-primary text-primary-foreground text-xs font-bold px-2 py-1 rounded-md shadow-lg">
@@ -346,8 +348,15 @@ function PostCard({ rankedPost, platform, criteria }: { rankedPost: RankedPost; 
             </div>
 
             {/* Score Badge */}
-            <div className="absolute top-2 right-2 z-10 bg-black/70 text-white text-xs font-medium px-2 py-1 rounded-md backdrop-blur-sm">
-                {score.toFixed(1)}
+            <div className="absolute top-2 right-2 z-10 flex items-center gap-2">
+                <CopyForBatButton
+                    recordType="social_post"
+                    recordId={post.id}
+                    getNode={() => document.getElementById(`social-post-${post.id}`)}
+                />
+                <div className="bg-black/70 text-white text-xs font-medium px-2 py-1 rounded-md backdrop-blur-sm">
+                    {score.toFixed(1)}
+                </div>
             </div>
 
             {/* Media */}
