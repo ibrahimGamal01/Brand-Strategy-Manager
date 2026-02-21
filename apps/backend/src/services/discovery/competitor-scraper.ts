@@ -185,6 +185,18 @@ export async function scrapeCompetitorIncremental(
   }
 }
 
+/** Parallel chunk size for competitor scrapes (env: COMPETITOR_SCRAPE_CHUNK_SIZE, default 3). */
+function getScrapeChunkSize(): number {
+  const n = Number(process.env.COMPETITOR_SCRAPE_CHUNK_SIZE);
+  return Number.isFinite(n) && n >= 1 ? Math.min(10, Math.floor(n)) : 3;
+}
+
+/** Delay in ms between chunks (env: COMPETITOR_SCRAPE_CHUNK_DELAY_MS, default 1000). */
+function getScrapeChunkDelayMs(): number {
+  const ms = Number(process.env.COMPETITOR_SCRAPE_CHUNK_DELAY_MS);
+  return Number.isFinite(ms) && ms >= 0 ? ms : 1000;
+}
+
 /**
  * Scrape multiple competitors incrementally
  * - Processes each competitor independently
@@ -201,32 +213,39 @@ export async function scrapeCompetitorsIncremental(
   }>,
   options: { runId?: string; source?: string } = {}
 ): Promise<CompetitorScrapingResult[]> {
-  console.log(`[CompetitorScraper] Starting incremental scrape for ${competitors.length} competitors`);
-  
+  const chunkSize = getScrapeChunkSize();
+  const chunkDelayMs = getScrapeChunkDelayMs();
+  console.log(
+    `[CompetitorScraper] Starting incremental scrape for ${competitors.length} competitors (parallel chunks of ${chunkSize}, ${chunkDelayMs}ms between chunks)`
+  );
+
   const results: CompetitorScrapingResult[] = [];
-  
-  // Process each competitor sequentially to avoid overwhelming the system
-  for (const competitor of competitors) {
-    const result = await scrapeCompetitorIncremental(
-      jobId,
-      competitor.id,
-      competitor.platform,
-      competitor.handle,
-      options
+
+  for (let i = 0; i < competitors.length; i += chunkSize) {
+    const chunk = competitors.slice(i, i + chunkSize);
+    const chunkResults = await Promise.all(
+      chunk.map((competitor) =>
+        scrapeCompetitorIncremental(
+          jobId,
+          competitor.id,
+          competitor.platform,
+          competitor.handle,
+          options
+        )
+      )
     );
-    
-    results.push(result);
-    
-    // Small delay between competitors to be polite to scrapers
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    results.push(...chunkResults);
+    if (i + chunk.length < competitors.length && chunkDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, chunkDelayMs));
+    }
   }
-  
-  const successCount = results.filter(r => r.status === 'SUCCESS').length;
-  const failedCount = results.filter(r => r.status === 'FAILED').length;
+
+  const successCount = results.filter((r) => r.status === 'SUCCESS').length;
+  const failedCount = results.filter((r) => r.status === 'FAILED').length;
   const totalPosts = results.reduce((sum, r) => sum + r.postsScraped, 0);
-  
+
   console.log(`[CompetitorScraper] Completed: ${successCount} success, ${failedCount} failed, ${totalPosts} total posts`);
-  
+
   return results;
 }
 

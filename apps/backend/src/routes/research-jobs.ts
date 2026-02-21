@@ -13,6 +13,7 @@ import {
   getOrchestrationRunDiagnostics,
   getCompetitorShortlist,
   orchestrateCompetitorsForJob,
+  recheckCompetitorAvailability,
 } from '../services/discovery/competitor-orchestrator-v2';
 import { materializeAndShortlistCandidate } from '../services/discovery/competitor-materializer';
 import {
@@ -39,8 +40,22 @@ import {
 
 import { visualAggregationService } from '../services/analytics/visual-aggregation';
 import { fileManager } from '../services/storage/file-manager';
+import { isOpenAiConfiguredForRealMode } from '../lib/runtime-preflight';
+import OpenAI from 'openai';
+import { applyBrainCommand } from '../services/brain/apply-brain-command';
+import {
+  syncInputDataToBrainProfile,
+  isBrainProfileEmpty,
+  hasMeaningfulInputData,
+  getInputDataKeysFound,
+} from '../services/intake/sync-input-to-brain-profile';
+import { syncBrainGoals } from '../services/intake/brain-intake-utils';
+import { runAiAnalysisForJob } from '../services/orchestration/run-job-media-analysis';
+import { getLatestMediaAnalysisRunSummary } from '../services/orchestration/media-analysis-runs';
 
 const router = Router();
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const BRAIN_COMMAND_REPLY_ENABLED = process.env.BRAIN_COMMAND_REPLY_ENABLED === 'true';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -135,6 +150,23 @@ function parseCompetitorIds(value: unknown): string[] | undefined {
   return normalized;
 }
 
+type CandidateStateValue = 'TOP_PICK' | 'SHORTLISTED' | 'APPROVED' | 'FILTERED_OUT' | 'REJECTED';
+
+function parseCandidateState(value: unknown): CandidateStateValue {
+  const normalized = String(value || '').trim().toUpperCase();
+  const validStates: CandidateStateValue[] = [
+    'TOP_PICK',
+    'SHORTLISTED',
+    'APPROVED',
+    'FILTERED_OUT',
+    'REJECTED',
+  ];
+  if (!validStates.includes(normalized as CandidateStateValue)) {
+    throw new Error(`state must be one of: ${validStates.join(', ')}`);
+  }
+  return normalized as CandidateStateValue;
+}
+
 // Helper function
 async function saveCompetitors(
     clientId: string, 
@@ -203,15 +235,19 @@ router.get('/:id', async (req: Request, res: Response) => {
       include: {
         client: {
           include: {
-            clientAccounts: {
-              include: {
-                clientPosts: {
+                clientAccounts: {
                   include: {
-                    mediaAssets: true,
-                    aiAnalyses: true,
-                  },
-                  orderBy: { postedAt: 'desc' },
-                },
+                    clientPosts: {
+                      include: {
+                        mediaAssets: {
+                          include: {
+                            aiAnalyses: true,
+                          },
+                        },
+                        aiAnalyses: true,
+                      },
+                      orderBy: { postedAt: 'desc' },
+                    },
               },
             },
             brandMentions: {
@@ -255,7 +291,11 @@ router.get('/:id', async (req: Request, res: Response) => {
               take: 30, // Increased to show full batch
               orderBy: { postedAt: 'desc' }, // Show recent scrapes first
               include: {
-                mediaAssets: true
+                mediaAssets: {
+                  include: {
+                    aiAnalyses: true,
+                  },
+                },
               }
             }
           }
@@ -393,13 +433,35 @@ router.get('/:id', async (req: Request, res: Response) => {
 
     const clientProfileSnapshots = await prisma.clientProfileSnapshot.findMany({
         where: { researchJobId: { in: clientJobIds } },
-        include: { posts: { include: { mediaAssets: true } }, clientProfile: true },
+        include: {
+          posts: {
+            include: {
+              mediaAssets: {
+                include: {
+                  aiAnalyses: true,
+                },
+              },
+            },
+          },
+          clientProfile: true,
+        },
         orderBy: { scrapedAt: 'desc' }
     });
 
     const competitorProfileSnapshots = await prisma.competitorProfileSnapshot.findMany({
         where: { researchJobId: { in: clientJobIds } },
-        include: { posts: { include: { mediaAssets: true } }, competitorProfile: true },
+        include: {
+          posts: {
+            include: {
+              mediaAssets: {
+                include: {
+                  aiAnalyses: true,
+                },
+              },
+            },
+          },
+          competitorProfile: true,
+        },
         orderBy: { scrapedAt: 'desc' }
     });
 
@@ -415,6 +477,7 @@ router.get('/:id', async (req: Request, res: Response) => {
       orderBy: { createdAt: 'desc' },
       select: { id: true },
     });
+    const latestMediaAnalysisRun = await getLatestMediaAnalysisRunSummary(id);
 
     const [topPicks, shortlisted, approved, filtered] = await Promise.all([
       prisma.competitorCandidateProfile.count({ where: { researchJobId: id, state: 'TOP_PICK' } }),
@@ -430,6 +493,46 @@ router.get('/:id', async (req: Request, res: Response) => {
         if (!p) return undefined;
         if (p.startsWith('http://') || p.startsWith('https://')) return p;
         return fileManager.toUrl(p);
+    };
+
+    const normalizeAiResponse = (value: unknown): Record<string, unknown> | null => {
+      if (!value) return null;
+      if (typeof value === 'string') {
+        try {
+          const parsed = JSON.parse(value);
+          return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : { value };
+        } catch {
+          return { value };
+        }
+      }
+      if (typeof value === 'object') return value as Record<string, unknown>;
+      return { value: String(value) };
+    };
+
+    const hydrateMediaAsset = (mediaAsset: any) => {
+      const analyses = Array.isArray(mediaAsset?.aiAnalyses) ? mediaAsset.aiAnalyses : [];
+      const latestByType = (analysisType: string) =>
+        analyses
+          .filter((row: any) => String(row?.analysisType || '').toUpperCase() === analysisType)
+          .sort(
+            (a: any, b: any) =>
+              new Date(b?.analyzedAt || 0).getTime() - new Date(a?.analyzedAt || 0).getTime()
+          )[0];
+      const visual = latestByType('VISUAL');
+      const transcript = latestByType('AUDIO');
+      const overall = latestByType('OVERALL');
+      const { aiAnalyses, ...rest } = mediaAsset || {};
+      return {
+        ...rest,
+        url: pathToUrl(mediaAsset?.blobStoragePath),
+        thumbnailUrl:
+          pathToUrl(mediaAsset?.thumbnailPath) ||
+          pathToUrl(mediaAsset?.blobStoragePath) ||
+          mediaAsset?.originalUrl,
+        analysisVisual: normalizeAiResponse(visual?.fullResponse),
+        analysisTranscript: normalizeAiResponse(transcript?.fullResponse),
+        analysisOverall: normalizeAiResponse(overall?.fullResponse),
+      };
     };
 
     const clientAccounts = job.client?.clientAccounts || [];
@@ -468,11 +571,7 @@ router.get('/:id', async (req: Request, res: Response) => {
             following: followingCount ?? 0,
             bio: bio ?? profile.bio,
             posts: profile.posts?.map((post: any) => {
-                const mediaAssets = (post.mediaAssets || []).map((m: any) => ({
-                    ...m,
-                    url: pathToUrl(m.blobStoragePath),
-                    thumbnailUrl: pathToUrl(m.thumbnailPath) || pathToUrl(m.blobStoragePath) || m.originalUrl,
-                }));
+                const mediaAssets = (post.mediaAssets || []).map((m: any) => hydrateMediaAsset(m));
                 const firstMediaThumb = mediaAssets[0]?.thumbnailUrl;
                 return {
                     ...post,
@@ -495,7 +594,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 
     // Ensure every client target (inputData.handles + clientAccounts) has a profile so none "disappear"
     const clientTargets: Array<{ platform: string; handle: string }> = [];
-    const inputHandles = (job.inputData?.handles || {}) as Record<string, string>;
+    const inputHandles = ((job.inputData as any)?.handles || {}) as Record<string, string>;
     for (const [platform, handle] of Object.entries(inputHandles)) {
         const p = String(platform).toLowerCase();
         if ((p !== 'instagram' && p !== 'tiktok') || !handle || typeof handle !== 'string') continue;
@@ -564,13 +663,47 @@ router.get('/:id', async (req: Request, res: Response) => {
     // Merge aggregated data into the job response object
     // This makes the frontend show ALL historical data for this client
     const transformSnapshotPosts = (posts: any[]) => posts.map(p => {
-        const mediaAssets = (p.mediaAssets || []).map((m: any) => ({
-            ...m,
-            url: pathToUrl(m.blobStoragePath),
-            thumbnailUrl: pathToUrl(m.thumbnailPath) || pathToUrl(m.blobStoragePath) || m.originalUrl,
-        }));
+        const mediaAssets = (p.mediaAssets || []).map((m: any) => hydrateMediaAsset(m));
         return { ...p, mediaAssets };
     });
+
+    // Sync inputData to BrainProfile when profile is missing or empty (same logic as GET /brain)
+    let jobBrainProfile = job.client?.brainProfile ?? null;
+    if (job.client && isBrainProfileEmpty(jobBrainProfile)) {
+      let inputData = (job.inputData || {}) as Record<string, unknown>;
+      if (Object.keys(inputData).length < 3) {
+        const otherJobs = await prisma.researchJob.findMany({
+          where: { clientId: job.client.id, id: { not: id } },
+          orderBy: { startedAt: 'desc' },
+          take: 5,
+          select: { inputData: true },
+        });
+        for (const j of otherJobs) {
+          const od = (j.inputData || {}) as Record<string, unknown>;
+          if (od && typeof od === 'object' && Object.keys(od).length > Object.keys(inputData).length) {
+            inputData = od;
+            break;
+          }
+        }
+      }
+      const clientFallbacks = {
+        businessOverview: job.client.businessOverview ?? undefined,
+        goalsKpis: job.client.goalsKpis ?? undefined,
+        clientAccounts: (job.client.clientAccounts || []).map((a: { platform: string; handle: string }) => ({ platform: a.platform, handle: a.handle })),
+      };
+      const synced = await syncInputDataToBrainProfile(job.client.id, inputData, clientFallbacks);
+      if (synced) {
+        jobBrainProfile = await prisma.brainProfile.findUnique({
+          where: { clientId: job.client.id },
+          include: { goals: true },
+        });
+      } else if (!jobBrainProfile) {
+        jobBrainProfile = await prisma.brainProfile.create({
+          data: { clientId: job.client.id },
+          include: { goals: true },
+        });
+      }
+    }
 
     const responseJob = {
         ...job,
@@ -589,7 +722,7 @@ router.get('/:id', async (req: Request, res: Response) => {
           posts: transformSnapshotPosts(s.posts || [])
         })),
         socialProfiles: transformedSocialProfiles, // Use transformed profiles
-        brainProfile: job.client?.brainProfile || null,
+        brainProfile: jobBrainProfile ?? job.client?.brainProfile ?? null,
         brainCommands: job.brainCommands || [],
         competitorSummary: {
           runId: latestRun?.id || null,
@@ -606,12 +739,71 @@ router.get('/:id', async (req: Request, res: Response) => {
           nextRunAt: job.continuityNextRunAt || null,
           errorMessage: job.continuityErrorMessage || null,
         },
+        analysisScope: latestMediaAnalysisRun,
     };
 
     res.json(responseJob);
   } catch (error: any) {
     console.error('[API] Error fetching research job:', error);
     res.status(500).json({ error: 'Failed to fetch research job', details: error.message });
+  }
+});
+
+/**
+ * POST /api/research-jobs/:id/analyze-media
+ * Run OpenAI content analysis (vision + Whisper/transcript) on downloaded media for this job.
+ */
+router.post('/:id/analyze-media', async (req: Request, res: Response) => {
+  try {
+    const { id: jobId } = req.params;
+    const skipAlreadyAnalyzed = req.body?.skipAlreadyAnalyzed !== false;
+    const allowDegraded = req.body?.allowDegraded === true;
+    const limit = Math.max(1, Math.min(200, Number(req.body?.limit || 200)));
+    const maxEligibleAssets = req.body?.maxEligibleAssets
+      ? Math.max(20, Math.min(240, Number(req.body.maxEligibleAssets)))
+      : undefined;
+    const maxEligiblePosts = req.body?.maxEligiblePosts
+      ? Math.max(30, Math.min(300, Number(req.body.maxEligiblePosts)))
+      : undefined;
+
+    if (!isUuid(jobId)) {
+      return res.status(400).json({ error: 'Invalid job ID' });
+    }
+    const job = await prisma.researchJob.findUnique({ where: { id: jobId }, select: { id: true } });
+    if (!job) {
+      return res.status(404).json({ error: 'Research job not found' });
+    }
+    if (!isOpenAiConfiguredForRealMode()) {
+      return res.status(400).json({
+        error: 'OpenAI not configured',
+        message: 'OPENAI_API_KEY is required to run media analysis.',
+      });
+    }
+    const result = await runAiAnalysisForJob(jobId, {
+      allowDegraded,
+      skipAlreadyAnalyzed,
+      limit,
+      maxEligibleAssets,
+      maxEligiblePosts,
+    });
+
+    res.json({
+      success: true,
+      runId: result.runId,
+      requested: result.ran,
+      succeeded: result.succeeded,
+      failed: result.failed,
+      skipped: result.skipped,
+      reason: result.reason,
+      analysisScope: result.analysisScope,
+      errors: result.errors?.length ? result.errors : undefined,
+    });
+  } catch (error: any) {
+    console.error('[API] analyze-media error:', error);
+    res.status(500).json({
+      error: 'Analyze media failed',
+      message: error.message || 'Unknown error',
+    });
   }
 });
 
@@ -645,13 +837,130 @@ function parsePagination(req: Request): { limit: number; cursor?: string } {
   return { limit, cursor };
 }
 
+const MUTABLE_BRAIN_PROFILE_FIELDS = new Set([
+  'businessType',
+  'offerModel',
+  'primaryGoal',
+  'targetMarket',
+  'geoScope',
+  'websiteDomain',
+  'secondaryGoals',
+  'channels',
+  'constraints',
+]);
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function toStringList(value: unknown, max = 12): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean)
+      .slice(0, max);
+  }
+  const raw = String(value ?? '').trim();
+  if (!raw) return [];
+  return raw
+    .split(/[\n,]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .slice(0, max);
+}
+
+function normalizeChannelsFromSuggestion(value: unknown): Array<{ platform: string; handle: string }> {
+  const out: Array<{ platform: string; handle: string }> = [];
+  const seen = new Set<string>();
+
+  const push = (platformRaw: unknown, handleRaw: unknown) => {
+    const platform = String(platformRaw || '').trim().toLowerCase();
+    const handle = String(handleRaw || '').trim().replace(/^@+/, '').toLowerCase();
+    if (!platform || !handle) return;
+    const key = `${platform}:${handle}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ platform, handle });
+  };
+
+  if (Array.isArray(value)) {
+    for (const row of value) {
+      if (row && typeof row === 'object') {
+        push((row as Record<string, unknown>).platform, (row as Record<string, unknown>).handle);
+      } else if (typeof row === 'string') {
+        const pair = row.match(
+          /^(instagram|tiktok|youtube|linkedin|facebook|x|twitter)\s*[:=\-]?\s*@?([a-z0-9._-]{1,80})$/i
+        );
+        if (pair) push(pair[1] === 'twitter' ? 'x' : pair[1], pair[2]);
+      }
+    }
+    return out;
+  }
+
+  const raw = String(value ?? '').trim();
+  if (!raw) return out;
+  for (const token of raw.split(/[\n,]+/)) {
+    const pair = token
+      .trim()
+      .match(/^(instagram|tiktok|youtube|linkedin|facebook|x|twitter)\s*[:=\-]?\s*@?([a-z0-9._-]{1,80})$/i);
+    if (pair) push(pair[1] === 'twitter' ? 'x' : pair[1], pair[2]);
+  }
+  return out;
+}
+
+function buildSuggestionProfileUpdate(
+  profile: { constraints?: unknown },
+  field: string,
+  value: unknown
+): Record<string, unknown> {
+  if (!MUTABLE_BRAIN_PROFILE_FIELDS.has(field)) {
+    throw new Error(`Unsupported brain profile field: ${field}`);
+  }
+
+  if (field === 'secondaryGoals') {
+    return { secondaryGoals: toStringList(value, 12) };
+  }
+
+  if (field === 'channels') {
+    return { channels: normalizeChannelsFromSuggestion(value) };
+  }
+
+  if (field === 'constraints') {
+    const existing = asRecord(profile.constraints) || {};
+    const incoming = asRecord(value);
+    return { constraints: incoming ? { ...existing, ...incoming } : existing };
+  }
+
+  const textValue =
+    typeof value === 'string' ? value.trim() : value === null || value === undefined ? '' : String(value).trim();
+  return { [field]: textValue || null };
+}
+
+function extractGoalSyncValues(profile: { primaryGoal?: string | null; secondaryGoals?: unknown }): {
+  primaryGoal: string | null;
+  secondaryGoals: string[];
+} {
+  return {
+    primaryGoal: profile.primaryGoal ? String(profile.primaryGoal).trim() || null : null,
+    secondaryGoals: toStringList(profile.secondaryGoals, 12),
+  };
+}
+
 function inferBrainCommandType(instruction: string): any {
   const text = instruction.toLowerCase();
   if (/(remove|delete).*(competitor)/i.test(text)) return 'REMOVE_COMPETITOR';
   if (/(add|insert|include).*(competitor)/i.test(text)) return 'ADD_COMPETITOR';
-  if (/(goal|kpi|target)/i.test(text)) return 'UPDATE_GOAL';
+  if (
+    /(update|edit|change).*(context|profile|business|target market|target audience|audience|website|domain|geo scope|channel|constraint)/i.test(
+      text
+    )
+  ) {
+    return 'UPDATE_CONTEXT';
+  }
+  if (/\b(goal|kpi|objective|north star)\b/i.test(text)) return 'UPDATE_GOAL';
+  if (/\btarget\b(?!\s*(market|audience|persona|geo|location))/i.test(text)) return 'UPDATE_GOAL';
   if (/(run|execute|refresh).*(section|module)/i.test(text)) return 'RUN_SECTION';
-  if (/(update|edit|change).*(context|profile|business)/i.test(text)) return 'UPDATE_CONTEXT';
   return 'UPDATE_SECTION_DATA';
 }
 
@@ -665,6 +974,32 @@ function buildCommandPatch(instruction: string): Record<string, unknown> {
     platform: platformMatch ? platformMatch[1].toLowerCase() : 'instagram',
     createdAt: new Date().toISOString(),
   };
+}
+
+async function generateBrainCommandReply(instruction: string, commandType: string): Promise<string | null> {
+  if (!BRAIN_COMMAND_REPLY_ENABLED || !process.env.OPENAI_API_KEY) return null;
+  try {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are BAT Brain. Reply in one or two short, friendly sentences to the user. Acknowledge what they asked and what you will do (e.g. add a competitor, run a section, update context). Be concise.',
+        },
+        {
+          role: 'user',
+          content: `User instruction: "${instruction}" (command type: ${commandType}). Reply briefly.`,
+        },
+      ],
+      max_tokens: 120,
+      temperature: 0.4,
+    });
+    const text = response.choices[0]?.message?.content?.trim();
+    return text || null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -855,12 +1190,72 @@ router.get('/:id/modules/:module', async (req: Request, res: Response) => {
 });
 
 /**
+ * GET /api/research-jobs/:id/debug-brain
+ * Diagnostic: return raw inputData, brainProfile, client fallbacks, and sync readiness.
+ */
+router.get('/:id/debug-brain', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const job = await prisma.researchJob.findUnique({
+      where: { id },
+      include: {
+        client: {
+          include: {
+            brainProfile: { include: { goals: true } },
+            clientAccounts: true,
+          },
+        },
+      },
+    });
+    if (!job) {
+      return res.status(404).json({ success: false, error: 'Research job not found' });
+    }
+    const inputData = (job.inputData || {}) as Record<string, unknown>;
+    const clientFallbacks = job.client
+      ? {
+          businessOverview: job.client.businessOverview ?? null,
+          goalsKpis: job.client.goalsKpis ?? null,
+          clientAccounts: (job.client.clientAccounts || []).map((a: { platform: string; handle: string }) => ({
+            platform: a.platform,
+            handle: a.handle,
+          })),
+        }
+      : null;
+    const merged = { ...inputData } as Record<string, unknown>;
+    if (clientFallbacks) {
+      if (!merged.primaryGoal && clientFallbacks.goalsKpis) merged.primaryGoal = clientFallbacks.goalsKpis;
+      if (!merged.description && !merged.businessOverview && clientFallbacks.businessOverview) {
+        merged.description = clientFallbacks.businessOverview;
+        merged.businessOverview = clientFallbacks.businessOverview;
+      }
+      if ((!merged.channels || (Array.isArray(merged.channels) && merged.channels.length === 0)) && clientFallbacks.clientAccounts?.length) {
+        merged.channels = clientFallbacks.clientAccounts;
+      }
+    }
+    return res.json({
+      success: true,
+      researchJobId: id,
+      inputData,
+      brainProfile: job.client?.brainProfile ?? null,
+      clientFallbacks,
+      syncWouldRun: hasMeaningfulInputData(merged),
+      keysFound: getInputDataKeysFound(merged),
+      inputDataKeys: Object.keys(inputData),
+    });
+  } catch (error: any) {
+    console.error('[API] debug-brain error:', error);
+    return res.status(500).json({ success: false, error: error?.message || 'debug-brain failed' });
+  }
+});
+
+/**
  * GET /api/research-jobs/:id/brain
  * Fetch editable brain context for a research job.
  */
 router.get('/:id/brain', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const forceResync = req.query.resync === '1' || req.query.resync === 'true';
     const job = await prisma.researchJob.findUnique({
       where: { id },
       include: {
@@ -881,16 +1276,66 @@ router.get('/:id/brain', async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: 'Research job not found' });
     }
 
+    // Sync inputData to BrainProfile when profile is missing or empty (e.g. client created via import)
+    // ?resync=1 forces sync from inputData + client fallbacks even when profile exists
+    let brainProfile = job.client?.brainProfile;
+    if (job.client && (forceResync || isBrainProfileEmpty(brainProfile))) {
+      let inputData = (job.inputData || {}) as Record<string, unknown>;
+      // If current job's inputData is empty, try other jobs for this client (data may be in a different job)
+      if (Object.keys(inputData).length < 3) {
+        const otherJobs = await prisma.researchJob.findMany({
+          where: { clientId: job.client.id, id: { not: id } },
+          orderBy: { startedAt: 'desc' },
+          take: 5,
+          select: { inputData: true },
+        });
+        for (const j of otherJobs) {
+          const od = (j.inputData || {}) as Record<string, unknown>;
+          if (od && typeof od === 'object' && Object.keys(od).length > Object.keys(inputData).length) {
+            inputData = od;
+            break;
+          }
+        }
+      }
+      const clientFallbacks = {
+        businessOverview: job.client.businessOverview ?? undefined,
+        goalsKpis: job.client.goalsKpis ?? undefined,
+        clientAccounts: (job.client.clientAccounts || []).map((a: { platform: string; handle: string }) => ({ platform: a.platform, handle: a.handle })),
+      };
+      const synced = await syncInputDataToBrainProfile(job.client.id, inputData, clientFallbacks);
+      if (synced) {
+        brainProfile = await prisma.brainProfile.findUnique({
+          where: { clientId: job.client.id },
+          include: { goals: true },
+        });
+      } else if (!brainProfile) {
+        brainProfile = await prisma.brainProfile.create({
+          data: { clientId: job.client.id },
+          include: { goals: true },
+        });
+      }
+    }
+
     const latestRun = await prisma.competitorOrchestrationRun.findFirst({
       where: { researchJobId: id },
       orderBy: { createdAt: 'desc' },
     });
 
-    const [topPicks, shortlisted, approved, filtered] = await Promise.all([
+    const [topPicks, shortlisted, approved, filtered, suggestions] = await Promise.all([
       prisma.competitorCandidateProfile.count({ where: { researchJobId: id, state: 'TOP_PICK' } }),
       prisma.competitorCandidateProfile.count({ where: { researchJobId: id, state: 'SHORTLISTED' } }),
       prisma.competitorCandidateProfile.count({ where: { researchJobId: id, state: 'APPROVED' } }),
       prisma.competitorCandidateProfile.count({ where: { researchJobId: id, state: 'FILTERED_OUT' } }),
+      job.client?.id
+        ? prisma.brainProfileSuggestion.findMany({
+            where: {
+              clientId: job.client.id,
+              status: { in: ['PENDING', 'APPROVED'] },
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 100,
+          })
+        : [],
     ]);
 
     return res.json({
@@ -901,8 +1346,12 @@ router.get('/:id/brain', async (req: Request, res: Response) => {
         name: job.client.name,
         accounts: job.client.clientAccounts,
       },
-      brainProfile: job.client.brainProfile,
+      brainProfile: brainProfile ?? job.client?.brainProfile,
       commandHistory: job.brainCommands,
+      suggestions: (suggestions || []).map((suggestion: any) => ({
+        ...suggestion,
+        source: suggestion.source || 'bat',
+      })),
       competitorSummary: {
         runId: latestRun?.id || null,
         topPicks,
@@ -942,6 +1391,7 @@ router.post('/:id/brain/commands', async (req: Request, res: Response) => {
     const proposedPatch = buildCommandPatch(instruction);
     const requiresApproval =
       commandType === 'REMOVE_COMPETITOR' || commandType === 'UPDATE_SECTION_DATA' || commandType === 'UPDATE_CONTEXT';
+    const generatedReply = await generateBrainCommandReply(instruction, commandType);
 
     const command = await prisma.brainCommand.create({
       data: {
@@ -950,10 +1400,26 @@ router.post('/:id/brain/commands', async (req: Request, res: Response) => {
         commandType,
         instruction,
         proposedPatch: proposedPatch as any,
-        status: dryRun ? 'PENDING' : requiresApproval ? 'PENDING' : 'APPLIED',
+        replyText: generatedReply || null,
+        status: 'PENDING',
         createdBy,
       },
     });
+
+    let autoApplied = false;
+    if (!dryRun && !requiresApproval) {
+      const applyResult = await applyBrainCommand(id, command.id);
+      if (!applyResult.success) {
+        return res.status(500).json({
+          success: false,
+          error: applyResult.error || 'Failed to auto-apply command',
+          commandId: command.id,
+        });
+      }
+      autoApplied = true;
+    }
+
+    const latestCommand = await prisma.brainCommand.findUnique({ where: { id: command.id } });
 
     return res.json({
       success: true,
@@ -961,6 +1427,9 @@ router.post('/:id/brain/commands', async (req: Request, res: Response) => {
       proposedPatch,
       requiresApproval,
       dryRun,
+      autoApplied,
+      command: latestCommand,
+      replyText: generatedReply ?? undefined,
     });
   } catch (error: any) {
     console.error('[API] Error creating brain command:', error);
@@ -975,103 +1444,23 @@ router.post('/:id/brain/commands', async (req: Request, res: Response) => {
 router.post('/:id/brain/commands/:commandId/apply', async (req: Request, res: Response) => {
   try {
     const { id, commandId } = req.params;
+    const result = await applyBrainCommand(id, commandId);
+    if (!result.success) {
+      return res.status(result.error === 'Brain command not found' ? 404 : 500).json({
+        success: false,
+        error: result.error || 'Failed to apply brain command',
+      });
+    }
     const command = await prisma.brainCommand.findFirst({
       where: { id: commandId, researchJobId: id },
-      include: { researchJob: true },
     });
-
-    if (!command) {
-      return res.status(404).json({ success: false, error: 'Brain command not found' });
-    }
-
-    const patch = (command.proposedPatch || {}) as Record<string, unknown>;
-    let appliedPatch: Record<string, unknown> = { ...patch };
-
-    if (command.commandType === 'ADD_COMPETITOR') {
-      const handle = String(patch.handle || '').trim().replace(/^@+/, '');
-      const platform = String(patch.platform || 'instagram').trim().toLowerCase();
-      if (!handle) {
-        throw new Error('ADD_COMPETITOR command missing handle');
-      }
-
-      await prisma.discoveredCompetitor.upsert({
-        where: {
-          researchJobId_platform_handle: {
-            researchJobId: id,
-            platform,
-            handle,
-          },
-        },
-        update: {
-          selectionState: 'APPROVED',
-          status: 'SUGGESTED',
-          availabilityStatus: 'UNVERIFIED',
-          selectionReason: 'Manually added from Brain command',
-          discoveryReason: command.instruction,
-        },
-        create: {
-          researchJobId: id,
-          platform,
-          handle,
-          selectionState: 'APPROVED',
-          status: 'SUGGESTED',
-          availabilityStatus: 'UNVERIFIED',
-          selectionReason: 'Manually added from Brain command',
-          discoveryReason: command.instruction,
-        },
-      });
-      appliedPatch.action = 'competitor_added';
-    } else if (command.commandType === 'REMOVE_COMPETITOR') {
-      const handle = String(patch.handle || '').trim().replace(/^@+/, '');
-      const platform = String(patch.platform || 'instagram').trim().toLowerCase();
-      if (!handle) {
-        throw new Error('REMOVE_COMPETITOR command missing handle');
-      }
-
-      await prisma.discoveredCompetitor.updateMany({
-        where: { researchJobId: id, platform, handle },
-        data: {
-          selectionState: 'REJECTED',
-          status: 'REJECTED',
-          selectionReason: `Removed via Brain command: ${command.instruction}`,
-        },
-      });
-      appliedPatch.action = 'competitor_removed';
-    } else if (command.commandType === 'RUN_SECTION') {
-      const moduleGuess = String(command.section || '').toLowerCase();
-      const moduleKey = isModuleKey(moduleGuess) ? moduleGuess : 'competitors';
-      const result = await performResearchModuleAction(id, moduleKey, 'continue');
-      appliedPatch = {
-        ...appliedPatch,
-        action: 'module_run',
-        module: moduleKey,
-        result,
-      };
-    }
-
-    const updated = await prisma.brainCommand.update({
-      where: { id: command.id },
-      data: {
-        status: 'APPLIED',
-        appliedPatch: appliedPatch as any,
-        appliedAt: new Date(),
-        error: null,
-      },
-    });
-
-    return res.json({ success: true, command: updated });
+    return res.json({ success: true, command });
   } catch (error: any) {
     console.error('[API] Error applying brain command:', error);
-    const message = error?.message || 'Failed to apply brain command';
-    if (req.params.commandId) {
-      await prisma.brainCommand
-        .update({
-          where: { id: req.params.commandId },
-          data: { status: 'FAILED', error: message },
-        })
-        .catch(() => undefined);
-    }
-    return res.status(500).json({ success: false, error: message });
+    return res.status(500).json({
+      success: false,
+      error: error?.message || 'Failed to apply brain command',
+    });
   }
 });
 
@@ -1091,6 +1480,184 @@ router.get('/:id/brain/commands', async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('[API] Error listing brain commands:', error);
     return res.status(500).json({ success: false, error: error?.message || 'Failed to list brain commands' });
+  }
+});
+
+/**
+ * POST /api/research-jobs/:id/brain/suggestions/:suggestionId/accept
+ * Apply a brain profile suggestion and mark it accepted.
+ */
+router.post('/:id/brain/suggestions/:suggestionId/accept', async (req: Request, res: Response) => {
+  try {
+    const { id: jobId, suggestionId } = req.params;
+    const job = await prisma.researchJob.findUnique({
+      where: { id: jobId },
+      select: { clientId: true },
+    });
+    if (!job?.clientId) {
+      return res.status(404).json({ success: false, error: 'Research job or client not found' });
+    }
+    const suggestion = await prisma.brainProfileSuggestion.findFirst({
+      where: { id: suggestionId, clientId: job.clientId, status: { in: ['PENDING', 'APPROVED'] } },
+    });
+    if (!suggestion) {
+      return res.status(404).json({ success: false, error: 'Suggestion not found or already resolved' });
+    }
+
+    let profile = await prisma.brainProfile.findUnique({ where: { clientId: job.clientId } });
+    if (!profile) {
+      profile = await prisma.brainProfile.create({
+        data: { clientId: job.clientId },
+      });
+    }
+
+    const valueToApply = suggestion.approvedValue ?? suggestion.proposedValue;
+    const updateData = buildSuggestionProfileUpdate(profile, suggestion.field, valueToApply);
+    const now = new Date();
+    await prisma.$transaction([
+      prisma.brainProfile.update({
+        where: { id: profile.id },
+        data: updateData as any,
+      }),
+      prisma.brainProfileSuggestion.update({
+        where: { id: suggestionId },
+          data: { status: 'ACCEPTED', resolvedAt: now, resolvedBy: 'user' },
+      }),
+    ]);
+
+    let updated = await prisma.brainProfile.findUnique({
+      where: { id: profile.id },
+      include: { goals: true },
+    });
+    if (updated && (suggestion.field === 'primaryGoal' || suggestion.field === 'secondaryGoals')) {
+      const { primaryGoal, secondaryGoals } = extractGoalSyncValues(updated);
+      await syncBrainGoals(updated.id, primaryGoal, secondaryGoals);
+      updated = await prisma.brainProfile.findUnique({
+        where: { id: profile.id },
+        include: { goals: true },
+      });
+    }
+
+    return res.json({ success: true, brainProfile: updated });
+  } catch (error: any) {
+    console.error('[API] Error accepting brain suggestion:', error);
+    if (String(error?.message || '').startsWith('Unsupported brain profile field')) {
+      return res.status(400).json({ success: false, error: error.message });
+    }
+    return res.status(500).json({ success: false, error: error?.message || 'Failed to accept suggestion' });
+  }
+});
+
+/**
+ * POST /api/research-jobs/:id/brain/suggestions/:suggestionId/reject
+ * Mark a brain profile suggestion as rejected.
+ */
+router.post('/:id/brain/suggestions/:suggestionId/reject', async (req: Request, res: Response) => {
+  try {
+    const { id: jobId, suggestionId } = req.params;
+    const job = await prisma.researchJob.findUnique({
+      where: { id: jobId },
+      select: { clientId: true },
+    });
+    if (!job?.clientId) {
+      return res.status(404).json({ success: false, error: 'Research job or client not found' });
+    }
+    const suggestion = await prisma.brainProfileSuggestion.findFirst({
+      where: { id: suggestionId, clientId: job.clientId, status: 'PENDING' },
+    });
+    if (!suggestion) {
+      return res.status(404).json({ success: false, error: 'Suggestion not found or already resolved' });
+    }
+    const now = new Date();
+    await prisma.brainProfileSuggestion.update({
+      where: { id: suggestionId },
+      data: { status: 'REJECTED', resolvedAt: now, resolvedBy: 'user' },
+    });
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('[API] Error rejecting brain suggestion:', error);
+    return res.status(500).json({ success: false, error: error?.message || 'Failed to reject suggestion' });
+  }
+});
+
+/**
+ * POST /api/research-jobs/:id/brain/suggestions/:suggestionId/approve
+ * Approve a brain profile suggestion.
+ */
+router.post('/:id/brain/suggestions/:suggestionId/approve', async (req: Request, res: Response) => {
+  try {
+    const { id: jobId, suggestionId } = req.params;
+    const approvedValue = req.body?.approvedValue;
+    const applyNow = req.body?.apply === true;
+
+    const job = await prisma.researchJob.findUnique({
+      where: { id: jobId },
+      select: { clientId: true },
+    });
+    if (!job?.clientId) {
+      return res.status(404).json({ success: false, error: 'Research job or client not found' });
+    }
+
+    const suggestion = await prisma.brainProfileSuggestion.findFirst({
+      where: { id: suggestionId, clientId: job.clientId, status: 'PENDING' },
+    });
+    if (!suggestion) return res.status(404).json({ success: false, error: 'Suggestion not found' });
+
+    const resolvedApprovedValue = approvedValue ?? suggestion.proposedValue;
+    if (!applyNow) {
+      const updatedSuggestion = await prisma.brainProfileSuggestion.update({
+        where: { id: suggestionId },
+        data: {
+          status: 'APPROVED',
+          approvedValue: resolvedApprovedValue as any,
+        },
+      });
+      return res.json({ success: true, suggestion: updatedSuggestion, applied: false });
+    }
+
+    let profile = await prisma.brainProfile.findUnique({ where: { clientId: job.clientId } });
+    if (!profile) {
+      profile = await prisma.brainProfile.create({ data: { clientId: job.clientId } });
+    }
+
+    const updateData = buildSuggestionProfileUpdate(profile, suggestion.field, resolvedApprovedValue);
+    const now = new Date();
+    await prisma.$transaction([
+      prisma.brainProfile.update({
+        where: { id: profile.id },
+        data: updateData as any,
+      }),
+      prisma.brainProfileSuggestion.update({
+        where: { id: suggestionId },
+        data: {
+          status: 'ACCEPTED',
+          approvedValue: resolvedApprovedValue as any,
+          resolvedAt: now,
+          resolvedBy: 'user',
+        },
+      }),
+    ]);
+
+    let updatedProfile = await prisma.brainProfile.findUnique({
+      where: { id: profile.id },
+      include: { goals: true },
+    });
+    if (updatedProfile && (suggestion.field === 'primaryGoal' || suggestion.field === 'secondaryGoals')) {
+      const { primaryGoal, secondaryGoals } = extractGoalSyncValues(updatedProfile);
+      await syncBrainGoals(updatedProfile.id, primaryGoal, secondaryGoals);
+      updatedProfile = await prisma.brainProfile.findUnique({
+        where: { id: profile.id },
+        include: { goals: true },
+      });
+    }
+
+    return res.json({ success: true, applied: true, brainProfile: updatedProfile });
+  } catch (error: any) {
+    console.error('[API] Error approving suggestion:', error);
+    if (String(error?.message || '').startsWith('Unsupported brain profile field')) {
+      return res.status(400).json({ success: false, error: error.message });
+    }
+    return res.status(500).json({ success: false, error: error?.message });
   }
 });
 
@@ -1375,6 +1942,53 @@ router.get('/:id/competitors/shortlist', async (req: Request, res: Response) => 
 });
 
 /**
+ * POST /api/research-jobs/:id/competitors/seed-from-intake
+ * Backfill top picks from job inputData.competitorInspirationLinks when none exist yet.
+ */
+router.post('/:id/competitors/seed-from-intake', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const forceRaw = Array.isArray(req.query.force) ? req.query.force[0] : req.query.force;
+    const force =
+      String(forceRaw ?? req.body?.force ?? '')
+        .trim()
+        .toLowerCase() === 'true';
+    const job = await prisma.researchJob.findUnique({
+      where: { id },
+      select: { inputData: true },
+    });
+    if (!job) {
+      return res.status(404).json({ success: false, error: 'Research job not found' });
+    }
+    const inputData = (job.inputData || {}) as Record<string, unknown>;
+    const links = Array.isArray(inputData.competitorInspirationLinks)
+      ? (inputData.competitorInspirationLinks as string[]).filter((u) => typeof u === 'string' && u.trim())
+      : [];
+    if (links.length === 0) {
+      return res.json({ success: true, topPicks: 0, message: 'No inspiration links in intake' });
+    }
+    const existing = await prisma.competitorCandidateProfile.count({
+      where: { researchJobId: id, source: 'client_inspiration' },
+    });
+    if (existing > 0 && !force) {
+      return res.json({ success: true, topPicks: existing, message: 'Already seeded' });
+    }
+    const { seedTopPicksFromInspirationLinks } = await import('../services/discovery/seed-intake-competitors');
+    const { topPicks } = await seedTopPicksFromInspirationLinks(id, links);
+    res.json({
+      success: true,
+      topPicks,
+      message: force
+        ? `Resynced ${topPicks} top picks from inspiration links`
+        : `Seeded ${topPicks} top picks from inspiration links`,
+    });
+  } catch (error: any) {
+    console.error('[API] Seed from intake failed:', error);
+    res.status(500).json({ success: false, error: error.message || 'Seed from intake failed' });
+  }
+});
+
+/**
  * POST /api/research-jobs/:id/competitors/shortlist
  * Materialize a filtered candidate and add to shortlist (enables scrape).
  */
@@ -1480,6 +2094,131 @@ router.post('/:id/competitors/continue-scrape', async (req: Request, res: Respon
       return res.status(400).json({ success: false, error: error.message });
     }
     res.status(500).json({ success: false, error: error.message || 'Continue scrape failed' });
+  }
+});
+
+/**
+ * PATCH /api/research-jobs/:id/competitors/candidate-state
+ * Update candidate profile state directly (works even before discovered competitor materialization).
+ */
+router.patch('/:id/competitors/candidate-state', async (req: Request, res: Response) => {
+  try {
+    const { id: researchJobId } = req.params;
+    const candidateProfileId = String(req.body?.candidateProfileId || '').trim();
+    const reasonRaw = String(req.body?.reason || '').trim();
+    const nextState = parseCandidateState(req.body?.state);
+    const reason = reasonRaw || `Manually changed to ${nextState}`;
+
+    if (!candidateProfileId) {
+      return res.status(400).json({ success: false, error: 'candidateProfileId is required' });
+    }
+
+    const candidate = await prisma.competitorCandidateProfile.findFirst({
+      where: { id: candidateProfileId, researchJobId },
+      select: {
+        id: true,
+        platform: true,
+        handle: true,
+        state: true,
+      },
+    });
+
+    if (!candidate) {
+      return res.status(404).json({ success: false, error: 'Candidate profile not found' });
+    }
+
+    const updatedCandidate = await prisma.competitorCandidateProfile.update({
+      where: { id: candidateProfileId },
+      data: {
+        state: nextState,
+        stateReason: reason,
+      },
+    });
+
+    const discoveredRows = await prisma.discoveredCompetitor.findMany({
+      where: {
+        researchJobId,
+        OR: [
+          { candidateProfileId },
+          {
+            platform: candidate.platform,
+            handle: candidate.handle,
+          },
+        ],
+      },
+      select: { id: true },
+    });
+
+    if (discoveredRows.length > 0) {
+      await prisma.discoveredCompetitor.updateMany({
+        where: { id: { in: discoveredRows.map((row) => row.id) } },
+        data: {
+          selectionState: nextState,
+          selectionReason: reason,
+          manuallyModified: true,
+          lastModifiedBy: 'user',
+          lastModifiedAt: new Date(),
+        },
+      });
+    }
+
+    emitResearchJobEvent({
+      researchJobId,
+      source: 'competitor-orchestrator-v2',
+      code: 'competitor.candidate.state.manual_update',
+      level: 'info',
+      message: `Candidate state updated for ${candidate.platform} @${candidate.handle}`,
+      platform: candidate.platform,
+      handle: candidate.handle,
+      entityType: 'competitor_candidate_profile',
+      entityId: candidateProfileId,
+      metadata: {
+        oldState: candidate.state,
+        newState: nextState,
+        reason,
+        discoveredUpdatedCount: discoveredRows.length,
+      },
+    });
+
+    return res.json({
+      success: true,
+      candidateProfile: updatedCandidate,
+      discoveredUpdatedCount: discoveredRows.length,
+    });
+  } catch (error: any) {
+    console.error('[API] Failed to update candidate state:', error);
+    if (error?.message?.includes('state must be one of')) {
+      return res.status(400).json({ success: false, error: error.message });
+    }
+    return res.status(500).json({
+      success: false,
+      error: error?.message || 'Failed to update candidate state',
+    });
+  }
+});
+
+/**
+ * POST /api/research-jobs/:id/competitors/recheck-availability
+ * Re-validate a candidate profile availability (manual operator action).
+ */
+router.post('/:id/competitors/recheck-availability', async (req: Request, res: Response) => {
+  try {
+    const { id: researchJobId } = req.params;
+    const candidateProfileId = String(req.body?.candidateProfileId || '').trim();
+    if (!candidateProfileId) {
+      return res.status(400).json({ success: false, error: 'candidateProfileId is required' });
+    }
+
+    const result = await recheckCompetitorAvailability(researchJobId, candidateProfileId);
+    res.json({ success: true, ...result });
+  } catch (error: any) {
+    console.error('[API] Recheck availability failed:', error);
+    const status = Number(error?.statusCode || 500);
+    res.status(status).json({
+      success: false,
+      error: error?.message || 'Failed to recheck competitor availability',
+      code: error?.code,
+    });
   }
 });
 
@@ -1604,85 +2343,122 @@ router.post('/:id/scrape-client-profile', async (req: Request, res: Response) =>
   }
 });
 
+/** Build client-only scrape targets from job (inputData + clientAccounts). Never use DDG or other discovered handles for client scrapes. */
+function getRerunClientTargets(job: any): Array<{ platform: string; handle: string }> {
+  const normalize = (h: string) => normalizeHandleFromUrl(h) || String(h ?? '').replace(/^@+/, '').trim().toLowerCase();
+  const targets: Array<{ platform: string; handle: string }> = [];
+  const inputData = (job.inputData || {}) as any;
+  const accounts = job.client?.clientAccounts || [];
+
+  if (inputData.handles && typeof inputData.handles === 'object') {
+    for (const [platform, raw] of Object.entries(inputData.handles)) {
+      const p = String(platform).toLowerCase();
+      if ((p !== 'instagram' && p !== 'tiktok') || !raw || typeof raw !== 'string') continue;
+      const h = normalize(raw);
+      if (h) targets.push({ platform: p, handle: h });
+    }
+  }
+  for (const acc of accounts) {
+    const p = String(acc.platform || '').toLowerCase();
+    if ((p !== 'instagram' && p !== 'tiktok') || !acc.handle) continue;
+    const h = normalize(acc.handle);
+    if (h) targets.push({ platform: p, handle: h });
+  }
+  if (targets.length === 0 && inputData.handle && typeof inputData.handle === 'string') {
+    const p = String((inputData.platform as string) || 'instagram').toLowerCase();
+    if (p === 'instagram' || p === 'tiktok') {
+      const h = normalize(inputData.handle);
+      if (h) targets.push({ platform: p, handle: h });
+    }
+  }
+  const seen = new Set<string>();
+  return targets.filter((t) => {
+    const k = `${t.platform}:${t.handle}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
 /**
  * POST /api/research-jobs/:id/rerun/:scraper
- * Re-run a specific scraper for a research job
+ * Re-run a specific scraper for a research job.
+ * Client scrapes (instagram, tiktok, social_images) use ONLY job/client-defined handles—never DDG-discovered or other sources.
  */
 router.post('/:id/rerun/:scraper', async (req: Request, res: Response) => {
   try {
     const { id, scraper } = req.params;
     
-    // Get job to find input data
     const job = await prisma.researchJob.findUnique({
       where: { id },
-      include: { client: true }
+      include: { client: { include: { clientAccounts: true } } },
     });
 
     if (!job) {
       return res.status(404).json({ error: 'Research job not found' });
     }
 
-    const { handle, brandName, niche } = job.inputData as any;
+    const { brandName, niche } = (job.inputData as any) || {};
+    const clientTargets = getRerunClientTargets(job);
+    const handle = clientTargets[0]?.handle;
     
-    console.log(`[API] Re-running ${scraper} for job ${id} (@${handle})`);
+    console.log(`[API] Re-running ${scraper} for job ${id} (${clientTargets.length} client targets)`);
 
-    // Run scraper asynchronously (fire and forget from API perspective, but could block if needed)
-    // For now we'll await it to simpler feedback, or we could run in background
-    
-    let result;
+    let result: any;
 
     switch (scraper) {
-      case 'instagram':
-        // Run in background (Fire & Forget)
-        scrapeProfileSafe(id, 'instagram', handle).then(res => {
-            console.log(`[Background] Instagram scrape finished:`, res);
-        });
-        result = { status: 'started_background', message: 'Instagram scrape started in background' };
+      case 'instagram': {
+        const instagramTargets = clientTargets.filter((t) => t.platform === 'instagram');
+        if (instagramTargets.length === 0) {
+          return res.status(400).json({ error: 'No client Instagram handle defined for this job. Add one in inputData or client accounts.' });
+        }
+        for (const t of instagramTargets) {
+          scrapeProfileSafe(id, 'instagram', t.handle).then((res) => {
+            console.log(`[Background] Instagram @${t.handle} scrape finished:`, res);
+          });
+        }
+        result = { status: 'started_background', message: `Instagram scrape started for ${instagramTargets.map((t) => `@${t.handle}`).join(', ')}` };
         break;
+      }
 
-      case 'tiktok':
-         // Run in background (Fire & Forget)
-        scrapeProfileSafe(id, 'tiktok', handle).then(res => {
-            console.log(`[Background] TikTok scrape finished:`, res);
-        });
-        result = { status: 'started_background', message: 'TikTok scrape started in background' };
+      case 'tiktok': {
+        const tiktokTargets = clientTargets.filter((t) => t.platform === 'tiktok');
+        if (tiktokTargets.length === 0) {
+          return res.status(400).json({ error: 'No client TikTok handle defined for this job. Add one in inputData or client accounts.' });
+        }
+        for (const t of tiktokTargets) {
+          scrapeProfileSafe(id, 'tiktok', t.handle).then((res) => {
+            console.log(`[Background] TikTok @${t.handle} scrape finished:`, res);
+          });
+        }
+        result = { status: 'started_background', message: `TikTok scrape started for ${tiktokTargets.map((t) => `@${t.handle}`).join(', ')}` };
         break;
+      }
         
       case 'scrape_social_images':
-      case 'social_images':
-        // Scrape images from Instagram/TikTok using site-limited search
-        // This populates ddgImageResult collection
+      case 'social_images': {
+        if (clientTargets.length === 0) {
+          return res.status(400).json({ error: 'No client Instagram/TikTok handles defined for this job. Add handles in inputData or client accounts.' });
+        }
+        const handles: Record<string, string> = {};
+        for (const t of clientTargets) {
+          if (t.platform === 'instagram' || t.platform === 'tiktok') handles[t.platform] = t.handle;
+        }
         try {
           const { scrapeSocialContent } = await import('../services/discovery/duckduckgo-search');
-          const clientAccounts = await prisma.clientAccount.findMany({
-            where: { clientId: job.clientId },
-          });
-          
-          const handles: Record<string, string> = {};
-          clientAccounts.forEach(acc => {
-            if (acc.handle) {
-              handles[acc.platform] = acc.handle;
-            }
-          });
-          
-          if (Object.keys(handles).length === 0) {
-            // Fallback to input handle
-            handles.instagram = handle;
-          }
-          
-          console.log(`[API] Scraping social images for: ${Object.entries(handles).map(([p, h]) => `${p}:@${h}`).join(', ')}`);
+          console.log(`[API] Scraping social images for client handles only: ${Object.entries(handles).map(([p, h]) => `${p}:@${h}`).join(', ')}`);
           result = await scrapeSocialContent(handles, 30, id);
         } catch (error: any) {
           result = { error: error.message };
         }
         break;
+      }
         
       case 'ddg_search':
       case 'ddg_images': 
       case 'ddg_videos':
       case 'ddg_news':
-        // All DDG types run together in gatherAllDDG for efficiency
-        result = await gatherAllDDG(brandName || handle, niche || 'General', id);
+        result = await gatherAllDDG(brandName || (clientTargets[0]?.handle ?? ''), niche || 'General', id);
         break;
         
 
@@ -2192,4 +2968,3 @@ router.post('/:id/scrape-client', async (req: Request, res: Response) => {
 });
 
 export default router;
-

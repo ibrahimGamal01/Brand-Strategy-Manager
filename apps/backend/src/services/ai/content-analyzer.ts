@@ -1,8 +1,10 @@
-import { OpenAI } from 'openai';
+// import { OpenAI } from 'openai';
 import fs from 'fs';
 import { prisma } from '../../lib/prisma';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+import { openai } from './openai-client';
+
+// const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 /**
  * Deep content analysis - NOT just validation
@@ -118,7 +120,7 @@ Be specific and grounded in the actual caption text. Return ONLY valid JSON.`;
     temperature: 0.3,
   });
 
-  return JSON.parse(response.choices[0].message.content || '{}');
+  return JSON.parse((response.choices[0] as any).message?.content || '{}');
 }
 
 /**
@@ -131,19 +133,24 @@ async function analyzeVisual(mediaPath: string) {
   const extension = mediaPath.split('.').pop()?.toLowerCase() || 'jpg';
   const mimeType = extension === 'png' ? 'image/png' : 'image/jpeg';
 
-  const prompt = `Analyze this social media post visual in detail:
+  const prompt = `You are a social media marketing strategist for an agency. Evaluate this asset as you would for a client or competitor audit.
 
-1. **Visual Style**: Describe colors, composition, layout, typography (if visible text)
-2. **Branding Elements**: What branding is visible? (logos, colors, fonts)
-3. **Text Overlays**: What text is shown on the image? (transcribe exactly)
-4. **Mood & Aesthetic**: What feeling does this visual create?
-5. **Production Quality**:  low/medium/high and why
-6. **Visual Hooks**: What grabs attention immediately?
-7. **Design Principles**: What design techniques are used? (rule of thirds, contrast, etc.)
-8. **Recommended Improvements**: What could make this visually stronger?
-9. **Confidence Score**: How clear/analyzable is this image? (0-1)
-
-Return comprehensive JSON with all fields.`;
+Analyze this social media post visual. Return JSON with:
+- platform_format: string (e.g. "Reels", "Feed", "Story", "TikTok").
+- hook_strength: number 1-10 (how strong is the visual hook).
+- scroll_stopping: object with "yes" or "no" and "why" (short reason).
+- on_brand_estimate: string (does this feel on-brand for a typical client; or "unknown" if no brand context).
+- actionable_visual_fixes: array of 2-4 concrete, specific steps to improve the visual.
+- visual_style: object (colors, composition, layout, typography if visible).
+- brand_elements_present: what branding is visible (logos, colors, fonts).
+- text_overlay: transcribe any text on the image.
+- mood_aesthetic: feeling the visual creates.
+- production_quality: low/medium/high with brief why.
+- visual_hooks: what grabs attention immediately.
+- composition: balance, rule of thirds, layout; color_use: palette, contrast; typography: readability, hierarchy.
+- cta_clarity: how clear is the call-to-action if any.
+- psychological_triggers: any used.
+- confidence_score: number 0-1.`;
 
   const response = await openai.chat.completions.create({
     model: 'gpt-4o',
@@ -163,7 +170,7 @@ Return comprehensive JSON with all fields.`;
     temperature: 0.3,
   });
 
-  return JSON.parse(response.choices[0].message.content || '{}');
+  return JSON.parse((response.choices[0] as any).message?.content || '{}');
 }
 
 /**
@@ -182,20 +189,21 @@ async function analyzeOverall(caption: string | null, mediaPath?: string) {
 
     visualContext = 'Visual context available';
 
-    const prompt = `Analyze this post holistically (caption + visual together):
+    const prompt = `You are a social media marketing strategist for an agency. Analyze this post holistically (caption + visual together).
 
 Caption: "${captionText}"
 
-Overall Strategy Analysis:
-1. **Main Topic**: Central message combining text and visual
-2. **Content Pillar**: Primary category for this content
-3. **Target Audience**: Who is this specifically for?
-4. **Content Strategy**: What strategy is at play here? (storytelling, education, entertainment, etc.)
-5. **Effectiveness Rating**: How well does caption + visual work together? (1-10)
-6. **Strategic Recommendations**: How could this be improved strategically?
-7. **Confidence Score**: 0-1
-
-Return detailed JSON.`;
+Return JSON with:
+- performance_estimate: object with "score" (1-10, engagement potential) and "reason" (short explanation).
+- one_line_recommendation: string (next post idea or A/B test suggestion—one concrete, actionable line).
+- strategic_recommendations: array of 2-4 specific, actionable bullets (no filler; things to do or test).
+- main_topic: central message combining text and visual.
+- content_pillar: primary category (education/entertainment/inspiration/promotion/authority).
+- target_audience: who this is specifically for.
+- content_strategy: what strategy is at play (storytelling, education, etc.).
+- effectiveness_rating: 1-10 (how well caption + visual work together).
+- creative_and_design_summary: composition, color, hierarchy, cta_clarity, brand_consistency.
+- confidence_score: number 0-1.`;
 
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',
@@ -215,23 +223,24 @@ Return detailed JSON.`;
       temperature: 0.3,
     });
 
-    return JSON.parse(response.choices[0].message.content || '{}');
+    return JSON.parse((response.choices[0] as any).message?.content || '{}');
   } else {
     // Caption only
-    const prompt = `Analyze this post strategically:
+    const prompt = `You are a social media marketing strategist for an agency. Analyze this post strategically.
 
 Caption: "${captionText}"
 
-Overall Strategy:
-1. **Main Topic**: Central message
-2. **Content Pillar**: Primary category
-3. **Target Audience**: Who is this for?
-4. **Content Strategy**: What strategy is used?
-5. **Effectiveness Rating**: How effective is this? (1-10)
-6. **Strategic Recommendations**: Improvements?
-7. **Confidence Score**: 0-1
-
-Return detailed JSON.`;
+Return JSON with:
+- performance_estimate: object with "score" (1-10, engagement potential) and "reason" (short explanation).
+- one_line_recommendation: string (next post idea or A/B test suggestion—one concrete, actionable line).
+- strategic_recommendations: array of 2-4 specific, actionable bullets (no filler).
+- main_topic: central message.
+- content_pillar: primary category.
+- target_audience: who this is for.
+- content_strategy: what strategy is used.
+- effectiveness_rating: 1-10.
+- creative_and_design_summary: brief summary if caption-only.
+- confidence_score: number 0-1.`;
 
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',
@@ -240,7 +249,7 @@ Return detailed JSON.`;
       temperature: 0.3,
     });
 
-    return JSON.parse(response.choices[0].message.content || '{}');
+    return JSON.parse((response.choices[0] as any).message?.content || '{}');
   }
 }
 

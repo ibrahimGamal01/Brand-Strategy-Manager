@@ -1,50 +1,56 @@
-import { exec } from 'child_process';
-import { existsSync } from 'fs';
+import crypto from 'crypto';
 import path from 'path';
-import { promisify } from 'util';
 import { fileManager, STORAGE_PATHS } from '../storage/file-manager';
 import { prisma } from '../../lib/prisma';
 import { tiktokService } from '../scraper/tiktok-service';
 import { resolveInstagramMediaViaApify } from '../scraper/apify-instagram-media-downloader';
-
-const execAsync = promisify(exec);
+import { createScraperProxyPool, runScriptJsonWithRetries } from '../scraper/script-runner';
+import { extractMediaUrls, extractImageMetadata, generateVideoThumbnail } from './download-helpers';
+import { downloadGenericMedia } from './download-generic';
+import { emitResearchJobEvent } from '../social/research-job-events';
 
 async function resolveInstagramMediaViaCamoufox(sourceUrl: string): Promise<{
   success: boolean;
   mediaUrls: string[];
   thumbnailUrl?: string;
   error?: string;
+  scraperUsed?: string;
 }> {
-  const cwd = process.cwd();
-  const candidates = [
-    path.join(cwd, 'scripts/camoufox_insta_downloader.py'),
-    path.join(cwd, 'apps/backend/scripts/camoufox_insta_downloader.py'),
-  ];
-  const scriptPath = candidates.find((p) => existsSync(p));
-  if (!scriptPath) {
-    return { success: false, mediaUrls: [], error: 'camoufox_insta_downloader.py not found' };
-  }
   try {
-    const { stdout } = await execAsync(
-      `python3 "${scriptPath}" "${sourceUrl}"`,
-      { cwd, timeout: 90000 }
-    );
-    const result = JSON.parse(stdout.trim());
-    if (result.success && Array.isArray(result.mediaUrls) && result.mediaUrls.length > 0) {
+    const result = await runScriptJsonWithRetries<{
+      success?: boolean;
+      mediaUrls?: string[];
+      thumbnailUrl?: string;
+      error?: string;
+    }>({
+      label: 'instagram-media-resolver',
+      executable: 'python3',
+      scriptFileName: 'camoufox_insta_downloader.py',
+      args: [sourceUrl],
+      timeoutMs: 90_000,
+      maxBufferBytes: 6 * 1024 * 1024,
+      maxAttempts: Number(process.env.INSTAGRAM_MEDIA_RESOLVE_ATTEMPTS || 2),
+      proxyPool: instagramMediaResolverProxyPool,
+    });
+    const parsed = result.parsed || {};
+    if (parsed.success && Array.isArray(parsed.mediaUrls) && parsed.mediaUrls.length > 0) {
       return {
         success: true,
-        mediaUrls: result.mediaUrls,
-        thumbnailUrl: result.thumbnailUrl,
+        mediaUrls: parsed.mediaUrls,
+        thumbnailUrl: parsed.thumbnailUrl,
+        scraperUsed: 'camoufox_local',
       };
     }
-    return { success: false, mediaUrls: [], error: result.error || 'No media URLs' };
+    return {
+      success: false,
+      mediaUrls: [],
+      error: parsed.error || 'No media URLs',
+      scraperUsed: 'camoufox_local',
+    };
   } catch (e: any) {
-    return { success: false, mediaUrls: [], error: e.message || 'Camoufox resolve failed' };
+    return { success: false, mediaUrls: [], error: e.message || 'Camoufox resolve failed', scraperUsed: 'camoufox_local' };
   }
 }
-import { extractMediaUrls, extractImageMetadata, generateVideoThumbnail } from './download-helpers';
-import { downloadGenericMedia } from './download-generic';
-import { emitResearchJobEvent } from '../social/research-job-events';
 
 type EntityType = 'CLIENT' | 'COMPETITOR' | 'SOCIAL';
 
@@ -79,6 +85,18 @@ const DEFAULT_SOCIAL_MEDIA_FAILURE_COOLDOWN_MS = Number.parseInt(
   10
 );
 const ENABLE_TIKTOK_PAGE_DOWNLOAD = String(process.env.ENABLE_TIKTOK_PAGE_DOWNLOAD || '').toLowerCase() === 'true';
+const instagramMediaResolverProxyPool = createScraperProxyPool('instagram-media-resolver', [
+  'INSTAGRAM_MEDIA_RESOLVER_PROXY_URLS',
+  'INSTAGRAM_SCRAPER_PROXY_URLS',
+  'SCRAPER_PROXY_URLS',
+  'PROXY_URLS',
+  'PROXY_URL',
+]);
+
+function generateMediaFilename(extension: string): string {
+  const cleanExt = extension.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'bin';
+  return `${Date.now()}_${crypto.randomBytes(6).toString('hex')}.${cleanExt}`;
+}
 
 function normalizePositiveInt(value: number, fallback: number): number {
   if (!Number.isFinite(value)) return fallback;
@@ -161,7 +179,13 @@ export async function downloadPostMedia(
       continue;
     }
 
-    let resolved = await resolveInstagramMediaViaApify(sourceUrl, {
+    let resolved: {
+      success: boolean;
+      mediaUrls: string[];
+      thumbnailUrl?: string;
+      error?: string;
+      scraperUsed?: string;
+    } = await resolveInstagramMediaViaApify(sourceUrl, {
       researchJobId: eventContext?.researchJobId,
       runId: eventContext?.runId,
       source: eventContext?.source,
@@ -206,11 +230,12 @@ export async function downloadPostMedia(
       if (isTikTokPhoto) extension = 'jpg';
       else if (isVideo) extension = 'mp4';
 
-      const filename = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${extension}`;
+      const filename = generateMediaFilename(extension);
       let storagePath =
         entityType === 'CLIENT'
           ? path.join(STORAGE_PATHS.clientMedia(entityId, postId), filename)
           : path.join(STORAGE_PATHS.competitorMedia(entityId, postId), filename);
+      storagePath = fileManager.resolveStoragePath(storagePath);
 
       if (isTikTokPageUrl(url)) {
         if (!ENABLE_TIKTOK_PAGE_DOWNLOAD) {
@@ -222,7 +247,9 @@ export async function downloadPostMedia(
 
         const result = await tiktokService.downloadVideo(url, storagePath);
         if (!result.success) throw new Error(`TikTok download failed: ${result.error}`);
-        if (result.path) storagePath = result.path;
+        if (result.path) {
+          storagePath = fileManager.resolveStoragePath(result.path);
+        }
       } else {
         const headers: Record<string, string> = {
           Referer: 'https://www.instagram.com/',
@@ -234,7 +261,9 @@ export async function downloadPostMedia(
           headers['User-Agent'] =
             'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
         }
-        await fileManager.downloadAndSave(url, storagePath, headers);
+        await fileManager.downloadAndSave(url, storagePath, headers, {
+          contextLabel: `post-${postId}`,
+        });
       }
 
       const stats = fileManager.getStats(storagePath);

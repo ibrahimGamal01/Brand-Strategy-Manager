@@ -416,14 +416,20 @@ if __name__ == '__main__':
             break
 
     if len(sys.argv) < 2:
-        print(json.dumps({'error': 'Usage: python3 instagram_scraper.py <handle> [posts_limit]'}))
+        print(json.dumps({'error': 'Usage: python3 instagram_scraper.py <handle> [posts_limit] [proxy_url]'}))
         sys.exit(1)
     
     handle = sys.argv[1].replace('@', '')
     posts_limit = int(sys.argv[2]) if len(sys.argv) > 2 else 30
+    proxy_url = (
+        (sys.argv[3] if len(sys.argv) > 3 else None)
+        or os.environ.get('SCRAPER_PROXY_URL')
+        or os.environ.get('HTTPS_PROXY')
+        or os.environ.get('HTTP_PROXY')
+    )
     
     try:
-        scrape_profile(handle, posts_limit)
+        scrape_profile(handle, posts_limit, use_proxy=bool(proxy_url), proxy_url=proxy_url)
     except Exception as e:
         print(json.dumps({'error': str(e)}), file=sys.stdout)
         sys.exit(1)

@@ -415,7 +415,7 @@ router.patch('/discovered/:id/state', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Discovered competitor not found' });
     }
 
-    // Update state
+    // Update DiscoveredCompetitor
     const updated = await prisma.discoveredCompetitor.update({
       where: { id },
       data: {
@@ -426,6 +426,23 @@ router.patch('/discovered/:id/state', async (req: Request, res: Response) => {
         lastModifiedBy: 'user', // TODO: Add actual user ID when auth is implemented
       },
     });
+
+    // Sync to linked CompetitorCandidateProfile so shortlist UI reflects the change
+    if (updated.candidateProfileId) {
+      const candidateState = ['TOP_PICK', 'SHORTLISTED', 'APPROVED', 'FILTERED_OUT', 'REJECTED'].includes(selectionState)
+        ? (selectionState as 'TOP_PICK' | 'SHORTLISTED' | 'APPROVED' | 'FILTERED_OUT' | 'REJECTED')
+        : null;
+      if (candidateState) {
+        await prisma.competitorCandidateProfile.updateMany({
+          where: { id: updated.candidateProfileId },
+          data: {
+            state: candidateState,
+            stateReason: reason || `Manually set to ${selectionState}`,
+            updatedAt: new Date(),
+          },
+        });
+      }
+    }
 
     // Emit research job event
     const { emitResearchJobEvent } = await import('../services/social/research-job-events');
@@ -539,7 +556,7 @@ router.patch('/discovered/batch/state', async (req: Request, res: Response) => {
         return { id: update.id, success: false, error: 'Not found' };
       }
 
-      await prisma.discoveredCompetitor.update({
+      const updated = await prisma.discoveredCompetitor.update({
         where: { id: update.id },
         data: {
           selectionState: update.selectionState as any,
@@ -549,6 +566,17 @@ router.patch('/discovered/batch/state', async (req: Request, res: Response) => {
           lastModifiedBy: 'user',
         },
       });
+
+      if (updated.candidateProfileId && ['TOP_PICK', 'SHORTLISTED', 'APPROVED', 'FILTERED_OUT', 'REJECTED'].includes(update.selectionState)) {
+        await prisma.competitorCandidateProfile.updateMany({
+          where: { id: updated.candidateProfileId },
+          data: {
+            state: update.selectionState as any,
+            stateReason: update.reason || `Manually set to ${update.selectionState}`,
+            updatedAt: new Date(),
+          },
+        });
+      }
 
       // Emit event
       const { emitResearchJobEvent } = await import('../services/social/research-job-events');

@@ -5,13 +5,18 @@
  * Handles video info extraction and download.
  */
 
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import crypto from 'crypto';
 import path from 'path';
 import { PrismaClient } from '@prisma/client';
+import { createScraperProxyPool, runScriptJsonWithRetries } from './script-runner';
 
-const execAsync = promisify(exec);
 const prisma = new PrismaClient();
+const youtubeProxyPool = createScraperProxyPool('youtube-scraper', [
+  'YOUTUBE_SCRAPER_PROXY_URLS',
+  'SCRAPER_PROXY_URLS',
+  'PROXY_URLS',
+  'PROXY_URL',
+]);
 
 export interface YouTubeVideoInfo {
   video_id: string;
@@ -37,28 +42,23 @@ export async function getYouTubeVideoInfo(url: string): Promise<YouTubeVideoInfo
   console.log(`[YouTube] Getting info for: ${url}`);
   
   try {
-    const scriptPath = path.join(process.cwd(), 'scripts/youtube_downloader.py');
-    
-    const { stdout, stderr } = await execAsync(
-      `python3 ${scriptPath} info "${url}"`,
-      {
-        cwd: process.cwd(),
-        timeout: 60000,
-      }
-    );
-    
-    if (stderr) {
-      console.log(`[YouTube] ${stderr}`);
-    }
-    
-    const result = JSON.parse(stdout);
-    
-    if (result.error) {
-      console.error(`[YouTube] Error: ${result.error}`);
+    const result = await runScriptJsonWithRetries<YouTubeVideoInfo & { success?: boolean; error?: string }>({
+      label: 'youtube-info',
+      executable: 'python3',
+      scriptFileName: 'youtube_downloader.py',
+      args: ['info', url],
+      timeoutMs: 60_000,
+      maxAttempts: Number(process.env.YOUTUBE_INFO_ATTEMPTS || 2),
+      proxyPool: youtubeProxyPool,
+    });
+
+    const parsed = result.parsed;
+    if ((parsed as any).error) {
+      console.error(`[YouTube] Error: ${(parsed as any).error}`);
       return null;
     }
     
-    return result;
+    return parsed;
     
   } catch (error: any) {
     console.error(`[YouTube] Info extraction failed:`, error.message);
@@ -77,23 +77,23 @@ export async function downloadYouTubeVideo(
   console.log(`[YouTube] Downloading ${audioOnly ? 'audio' : 'video'}: ${url}`);
   
   try {
-    const scriptPath = path.join(process.cwd(), 'scripts/youtube_downloader.py');
     const action = audioOnly ? 'audio' : 'download';
-    
-    const { stdout, stderr } = await execAsync(
-      `python3 ${scriptPath} ${action} "${url}" "${outputPath}"`,
-      {
-        cwd: process.cwd(),
-        timeout: 300000, // 5 min
-      }
-    );
-    
-    if (stderr) {
-      console.log(`[YouTube] ${stderr}`);
-    }
-    
-    const result = JSON.parse(stdout);
-    return result;
+    const result = await runScriptJsonWithRetries<{
+      success: boolean;
+      path?: string;
+      size_bytes?: number;
+      error?: string;
+    }>({
+      label: 'youtube-download',
+      executable: 'python3',
+      scriptFileName: 'youtube_downloader.py',
+      args: [action, url, outputPath],
+      timeoutMs: 300_000,
+      maxAttempts: Number(process.env.YOUTUBE_DOWNLOAD_ATTEMPTS || 3),
+      proxyPool: youtubeProxyPool,
+    });
+
+    return result.parsed;
     
   } catch (error: any) {
     console.error(`[YouTube] Download failed:`, error.message);
@@ -124,7 +124,7 @@ export async function downloadDdgYouTubeVideo(
   }
   
   // Generate output path
-  const filename = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.mp4`;
+  const filename = `${Date.now()}_${crypto.randomBytes(6).toString('hex')}.mp4`;
   const outputPath = path.join(process.cwd(), 'storage', 'youtube', researchJobId, filename);
   
   const result = await downloadYouTubeVideo(ddgResult.url, outputPath);

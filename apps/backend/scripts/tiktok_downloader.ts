@@ -7,25 +7,68 @@ import path from 'path';
 // Use stealth plugin to avoid detection
 puppeteer.use(StealthPlugin());
 
+function resolveProxyConfig() {
+    const raw = (process.env.SCRAPER_PROXY_URL || process.env.HTTPS_PROXY || process.env.HTTP_PROXY || '').trim();
+    if (!raw) return null;
+    try {
+        const parsed = new URL(raw);
+        const port = parsed.port ? Number(parsed.port) : parsed.protocol === 'https:' ? 443 : 80;
+        if (!Number.isFinite(port)) return null;
+        return {
+            browserServer: `${parsed.protocol}//${parsed.hostname}:${port}`,
+            auth: parsed.username || parsed.password
+                ? {
+                    username: decodeURIComponent(parsed.username || ''),
+                    password: decodeURIComponent(parsed.password || ''),
+                }
+                : null,
+            axiosProxy: {
+                protocol: parsed.protocol.replace(':', ''),
+                host: parsed.hostname,
+                port,
+                auth: parsed.username || parsed.password
+                    ? {
+                        username: decodeURIComponent(parsed.username || ''),
+                        password: decodeURIComponent(parsed.password || ''),
+                    }
+                    : undefined,
+            },
+        };
+    } catch {
+        return null;
+    }
+}
+
 async function downloadTikTokVideo(videoUrl: string, outputPath: string) {
     let browser;
     try {
+        const proxyConfig = resolveProxyConfig();
+
         // Launch browser
+        const launchArgs = [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process', 
+            '--disable-gpu'
+        ];
+        if (proxyConfig?.browserServer) {
+            launchArgs.push(`--proxy-server=${proxyConfig.browserServer}`);
+        }
+
         browser = await puppeteer.launch({
             headless: 'new',
-            args: [
-                '--no-sandbox', 
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--no-zygote',
-                '--single-process', 
-                '--disable-gpu'
-            ]
+            args: launchArgs
         });
 
         const page = await browser.newPage();
+
+        if (proxyConfig?.auth) {
+            await page.authenticate(proxyConfig.auth);
+        }
         
         // Set a realistic User Agent
         await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
@@ -100,7 +143,8 @@ async function downloadTikTokVideo(videoUrl: string, outputPath: string) {
                     'Cookie': cookieString,
                     'Referer': 'https://www.tiktok.com/',
                     'Origin': 'https://www.tiktok.com'
-                }
+                },
+                proxy: proxyConfig?.axiosProxy || false
             });
 
             fs.writeFileSync(outputPath, response.data);

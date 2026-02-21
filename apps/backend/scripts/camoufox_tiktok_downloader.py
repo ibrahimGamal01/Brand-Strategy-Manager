@@ -22,6 +22,27 @@ try:
 except ImportError:
     _SSL_CTX = ssl.create_default_context()
 
+PROXY_URL = (
+    os.environ.get("SCRAPER_PROXY_URL")
+    or os.environ.get("HTTPS_PROXY")
+    or os.environ.get("HTTP_PROXY")
+    or ""
+).strip()
+
+def with_proxy(cmd):
+    if PROXY_URL and "--proxy" not in cmd:
+        return [*cmd, "--proxy", PROXY_URL]
+    return cmd
+
+def open_url(req, timeout):
+    if PROXY_URL:
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({"http": PROXY_URL, "https": PROXY_URL}),
+            urllib.request.HTTPSHandler(context=_SSL_CTX),
+        )
+        return opener.open(req, timeout=timeout)
+    return urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX)
+
 try:
     from camoufox.sync_api import Camoufox
 except ImportError:
@@ -114,7 +135,7 @@ def download_photo(photo_url: str, output_path: str) -> dict:
                     "Referer": "https://www.tiktok.com/",
                 },
             )
-            with urllib.request.urlopen(req, timeout=60, context=_SSL_CTX) as resp:
+            with open_url(req, timeout=60) as resp:
                 data = resp.read()
             ext = ".jpg" if ".jpg" in img_url or "jpeg" in img_url else ".png"
             if not output_path.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
@@ -170,7 +191,7 @@ def download_video(video_url: str, output_path: str) -> dict:
             if not url:
                 try:
                     result = subprocess.run(
-                        ["yt-dlp", "-f", "b", "-g", video_url],
+                        with_proxy(["yt-dlp", "-f", "b", "-g", video_url]),
                         capture_output=True, text=True, timeout=30,
                     )
                     if result.returncode == 0 and result.stdout.strip():
@@ -194,7 +215,7 @@ def download_video(video_url: str, output_path: str) -> dict:
                     "Origin": "https://www.tiktok.com",
                 },
             )
-            with urllib.request.urlopen(req, timeout=120, context=_SSL_CTX) as resp:
+            with open_url(req, timeout=120) as resp:
                 data = resp.read()
             with open(output_path, "wb") as f:
                 f.write(data)
@@ -202,7 +223,7 @@ def download_video(video_url: str, output_path: str) -> dict:
     except Exception as e:
         try:
             result = subprocess.run(
-                ["yt-dlp", "-f", "b", "-o", output_path, video_url],
+                with_proxy(["yt-dlp", "-f", "b", "-o", output_path, video_url]),
                 capture_output=True, text=True, timeout=120,
             )
             if result.returncode == 0 and os.path.exists(output_path):

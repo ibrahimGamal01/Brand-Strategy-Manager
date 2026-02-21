@@ -3,7 +3,9 @@ import { emitResearchJobEvent } from '../social/research-job-events';
 import type { DataGaps } from './client-completeness';
 
 /**
- * Check for unscraped competitor profiles
+ * Check for unscraped competitor profiles.
+ * Only returns client-entered inspiration links (source = client_inspiration).
+ * Discovered competitors from orchestration stay for client review; scraping only when they request it (approve-and-scrape).
  */
 async function checkUnscrapedProfiles(researchJobId: string): Promise<string[]> {
   const unscraped = await prisma.discoveredCompetitor.findMany({
@@ -13,6 +15,9 @@ async function checkUnscrapedProfiles(researchJobId: string): Promise<string[]> 
       selectionState: {
         in: ['TOP_PICK', 'SHORTLISTED', 'APPROVED'],
       },
+      candidateProfile: {
+        source: 'client_inspiration',
+      },
     },
     select: { id: true },
   });
@@ -21,7 +26,8 @@ async function checkUnscrapedProfiles(researchJobId: string): Promise<string[]> 
 }
 
 /**
- * Check for stale competitor profiles (scraped >7 days ago)
+ * Check for stale competitor profiles (scraped >7 days ago).
+ * Only client-inspiration profiles are auto-requeued; discovered ones stay manual.
  */
 async function checkStaleProfiles(researchJobId: string): Promise<string[]> {
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -34,6 +40,9 @@ async function checkStaleProfiles(researchJobId: string): Promise<string[]> {
       selectionState: {
         in: ['TOP_PICK', 'SHORTLISTED'],
       },
+      candidateProfile: {
+        source: 'client_inspiration',
+      },
     },
     select: { id: true },
   });
@@ -42,7 +51,8 @@ async function checkStaleProfiles(researchJobId: string): Promise<string[]> {
 }
 
 /**
- * Check for competitors with missing posts
+ * Check for competitors with missing posts.
+ * Only client-inspiration profiles are auto-requeued.
  */
 async function checkMissingPosts(researchJobId: string): Promise<string[]> {
   const missing = await prisma.discoveredCompetitor.findMany({
@@ -52,6 +62,9 @@ async function checkMissingPosts(researchJobId: string): Promise<string[]> {
       postsScraped: { lte: 0 },
       selectionState: {
         in: ['TOP_PICK', 'SHORTLISTED'],
+      },
+      candidateProfile: {
+        source: 'client_inspiration',
       },
     },
     select: { id: true },

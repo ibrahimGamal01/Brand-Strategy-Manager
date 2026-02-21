@@ -64,53 +64,64 @@ export async function generateStrategyDocument(
   const shouldGenerate = (section: string) =>
     sections.includes('all') || sections.includes(section);
 
+  const INTER_SECTION_DELAY_MS = 3000; // Spread TPM usage and reduce 429s
+  const delay = () => new Promise((r) => setTimeout(r, INTER_SECTION_DELAY_MS));
+
   try {
     // Generate Business Understanding
     if (shouldGenerate('businessUnderstanding')) {
       console.log('[Orchestrator] Generating Business Understanding...\n');
       result.sections.businessUnderstanding = await generateBusinessUnderstanding(researchJobId);
+      await delay();
     }
 
     // Generate Target Audience
     if (shouldGenerate('targetAudience')) {
       console.log('[Orchestrator] Generating Target Audience...\n');
       result.sections.targetAudience = await generateTargetAudience(researchJobId);
+      await delay();
     }
 
     // Generate Industry Overview
     if (shouldGenerate('industryOverview')) {
       console.log('[Orchestrator] Generating Industry Overview...\n');
       result.sections.industryOverview = await generateIndustryOverview(researchJobId);
+      await delay();
     }
 
     // Generate Priority Competitor
     if (shouldGenerate('priorityCompetitor')) {
       console.log('[Orchestrator] Generating Priority Competitor Analysis...\n');
       result.sections.priorityCompetitor = await generatePriorityCompetitor(researchJobId);
+      await delay();
     }
 
     // Generate Content Analysis
     if (shouldGenerate('contentAnalysis')) {
       console.log('[Orchestrator] Generating Content Analysis...\n');
       result.sections.contentAnalysis = await generateContentAnalysis(researchJobId);
+      await delay();
     }
 
     // Generate Content Pillars
     if (shouldGenerate('contentPillars')) {
       console.log('[Orchestrator] Generating Content Pillars...\n');
       result.sections.contentPillars = await generateContentPillars(researchJobId);
+      await delay();
     }
 
     // Generate Format Recommendations
     if (shouldGenerate('formatRecommendations')) {
       console.log('[Orchestrator] Generating Format Recommendations...\n');
       result.sections.formatRecommendations = await generateFormatRecommendations(researchJobId);
+      await delay();
     }
 
     // Generate Buyer Journey
     if (shouldGenerate('buyerJourney')) {
       console.log('[Orchestrator] Generating Buyer Journey...\n');
       result.sections.buyerJourney = await generateBuyerJourney(researchJobId);
+      await delay();
     }
 
     // Generate Platform Strategy
@@ -118,6 +129,8 @@ export async function generateStrategyDocument(
       console.log('[Orchestrator] Generating Platform Strategy...\n');
       result.sections.platformStrategy = await generatePlatformStrategy(researchJobId);
     }
+
+    // No delay after last section
 
     // Extract markdown from each section for transition processing
     const sectionMarkdown: Record<string, string> = {};

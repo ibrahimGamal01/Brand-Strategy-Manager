@@ -7,12 +7,20 @@ import {
   buildCompetitorDiscoveryPolicy,
   CompetitorDiscoveryMethodAnswerJson,
 } from './competitor-policy-engine';
-import { buildIdentityGroupedShortlist, approveAndQueueCandidates, continueQueueFromCandidates, persistOrchestrationCandidates } from './competitor-materializer';
+import {
+  buildIdentityGroupedShortlist,
+  buildStageGroupedCompetitors,
+  approveAndQueueCandidates,
+  continueQueueFromCandidates,
+  persistOrchestrationCandidates,
+  repairCandidateEligibilityForJob,
+} from './competitor-materializer';
 import { buildPointyCompetitorQueryPlan, DiscoveryPrecision } from './competitor-query-composer';
 import { sanitizeDiscoveryContext } from './discovery-context-sanitizer';
 import { detectPlatformMatrix, CompetitorSurface } from './competitor-platform-detector';
 import { resolveCandidateAvailability } from './competitor-resolver';
 import { scoreCompetitorCandidates } from './competitor-scorer';
+import { validateHandleDDG } from './duckduckgo-search';
 
 export type OrchestrationMode = 'append' | 'replace';
 export type ConnectorPolicy = 'ddg_first_pluggable';
@@ -52,6 +60,7 @@ export interface CompetitorShortlistV2Response {
   topPicks: ReturnType<typeof buildIdentityGroupedShortlist>['topPicks'];
   shortlist: ReturnType<typeof buildIdentityGroupedShortlist>['shortlist'];
   filteredOut: ReturnType<typeof buildIdentityGroupedShortlist>['filteredOut'];
+  stageBuckets: ReturnType<typeof buildStageGroupedCompetitors>;
 }
 
 type OrchestrationErrorCode =
@@ -478,7 +487,12 @@ function extractJobContext(job: {
       ''
   ).trim();
   const rawAudienceSummary = String(
-    inputData.targetAudience || brainProfile?.targetMarket || inputData.persona || inputData.audience || ''
+    inputData.idealAudience ||
+      inputData.targetAudience ||
+      brainProfile?.targetMarket ||
+      inputData.persona ||
+      inputData.audience ||
+      ''
   ).trim();
   const sanitized = sanitizeDiscoveryContext({
     niche: rawNiche,
@@ -572,6 +586,12 @@ function extractJobContext(job: {
     nichePositionAnswer,
     q13AnswerJson ? JSON.stringify(q13AnswerJson) : '',
     String(inputData.website || brainProfile?.websiteDomain || inputData.websiteUrl || inputData.domain || ''),
+    String(inputData.mainOffer || ''),
+    Array.isArray(inputData.topProblems) ? (inputData.topProblems as string[]).join(' ') : String(inputData.topProblems || ''),
+    Array.isArray(inputData.resultsIn90Days) ? (inputData.resultsIn90Days as string[]).join(' ') : String(inputData.resultsIn90Days || ''),
+    Array.isArray(inputData.competitorInspirationLinks)
+      ? (inputData.competitorInspirationLinks as string[]).join(' ')
+      : String(inputData.competitorInspirationLinks || ''),
   ].filter(Boolean);
 
   for (const account of job.client?.clientAccounts || []) {
@@ -1114,7 +1134,35 @@ export async function getCompetitorShortlist(
       topPicks: [],
       shortlist: [],
       filteredOut: [],
+      stageBuckets: {
+        clientInputs: [],
+        discoveredCandidates: [],
+        scrapeQueue: [],
+        scrapedReady: [],
+        blocked: [],
+      },
     };
+  }
+
+  const eligibilityRepair = await repairCandidateEligibilityForJob({
+    researchJobId,
+    limit: 1200,
+  });
+  if (eligibilityRepair.updated > 0) {
+    emitResearchJobEvent({
+      researchJobId,
+      runId: run.id,
+      source: 'competitor-orchestrator-v2',
+      code: 'competitor.eligibility.repaired',
+      level: 'info',
+      message: `Repaired eligibility flags for ${eligibilityRepair.updated} candidate profile(s) during shortlist load`,
+      metrics: {
+        checked: eligibilityRepair.checked,
+        updated: eligibilityRepair.updated,
+        becameEligible: eligibilityRepair.becameEligible,
+        lostEligibility: eligibilityRepair.lostEligibility,
+      },
+    });
   }
 
   const profiles = await prisma.competitorCandidateProfile.findMany({
@@ -1143,7 +1191,43 @@ export async function getCompetitorShortlist(
     orderBy: [{ relevanceScore: 'desc' }],
   });
 
-  const grouped = buildIdentityGroupedShortlist(profiles as never);
+  const snapshotReadinessRows = await prisma.competitorProfileSnapshot.findMany({
+    where: { researchJobId },
+    select: {
+      readinessStatus: true,
+      scrapedAt: true,
+      competitorProfile: {
+        select: {
+          platform: true,
+          handle: true,
+        },
+      },
+    },
+    orderBy: { scrapedAt: 'desc' },
+    take: 500,
+  });
+
+  const readinessByProfileKey: Record<string, 'READY' | 'DEGRADED' | 'BLOCKED' | null> = {};
+  for (const row of snapshotReadinessRows) {
+    const platform = String(row.competitorProfile?.platform || '').toLowerCase();
+    const handle = String(row.competitorProfile?.handle || '').toLowerCase().replace(/^@/, '');
+    if (!platform || !handle) continue;
+    const key = `${platform}:${handle}`;
+    if (readinessByProfileKey[key] !== undefined) continue;
+    const status = row.readinessStatus;
+    if (status === 'READY' || status === 'DEGRADED' || status === 'BLOCKED') {
+      readinessByProfileKey[key] = status;
+    } else {
+      readinessByProfileKey[key] = null;
+    }
+  }
+
+  const grouped = buildIdentityGroupedShortlist(profiles as never, {
+    readinessByProfileKey,
+  });
+  const stageBuckets = buildStageGroupedCompetitors(profiles as never, {
+    readinessByProfileKey,
+  });
   const rawSummary = (run.summary || {}) as Record<string, unknown>;
   const summary: CompetitorOrchestrationV2Summary = {
     candidatesDiscovered: Number(rawSummary.candidatesDiscovered || profiles.length || 0),
@@ -1158,10 +1242,14 @@ export async function getCompetitorShortlist(
     controlMode,
     summary,
     platformMatrix: parseRunPlatformMatrix(run.platforms || null),
-    diagnostics: (run.diagnostics || null) as Record<string, unknown> | null,
+    diagnostics: {
+      ...(((run.diagnostics || {}) as Record<string, unknown>) || {}),
+      eligibilityRepair,
+    },
     topPicks: grouped.topPicks,
     shortlist: grouped.shortlist,
     filteredOut: grouped.filteredOut,
+    stageBuckets,
   };
 }
 
@@ -1229,4 +1317,92 @@ export async function continueCompetitorScrape(
     forceUnavailable: Boolean(input.forceUnavailable),
     forceMaterialize: Boolean(input.forceMaterialize),
   });
+}
+
+export async function recheckCompetitorAvailability(
+  researchJobId: string,
+  candidateProfileId: string
+): Promise<{
+  candidateProfileId: string;
+  handle: string;
+  platform: string;
+  availabilityStatus: string;
+  availabilityReason: string | null;
+  resolverConfidence: number | null;
+}> {
+  const profile = await prisma.competitorCandidateProfile.findFirst({
+    where: {
+      id: candidateProfileId,
+      researchJobId,
+    },
+    select: {
+      id: true,
+      handle: true,
+      platform: true,
+      availabilityStatus: true,
+      resolverConfidence: true,
+      verificationAttempts: true,
+    },
+  });
+
+  if (!profile) {
+    throw createServiceError('ORCHESTRATION_RUN_NOT_FOUND', 'Candidate profile not found', 404);
+  }
+
+  let availabilityStatus = profile.availabilityStatus;
+  let availabilityReason: string | null = 'Recheck skipped for unsupported platform';
+  let resolverConfidence = profile.resolverConfidence ?? null;
+
+  if (profile.platform === 'instagram' || profile.platform === 'tiktok') {
+    const validation = await validateHandleDDG(profile.handle, profile.platform);
+    if (validation.is_valid) {
+      availabilityStatus = 'VERIFIED';
+      availabilityReason = validation.reason || 'Verified via manual recheck';
+      resolverConfidence = Number(validation.confidence || resolverConfidence || 0.7);
+    } else if (validation.error) {
+      availabilityStatus = 'CONNECTOR_ERROR';
+      availabilityReason = validation.reason || validation.error || 'Validation connector error';
+      resolverConfidence = Number(validation.confidence || 0.2);
+    } else {
+      availabilityStatus = 'PROFILE_UNAVAILABLE';
+      availabilityReason = validation.reason || 'Profile unavailable via manual recheck';
+      resolverConfidence = Number(validation.confidence || 0.8);
+    }
+  }
+
+  await prisma.competitorCandidateProfile.update({
+    where: { id: profile.id },
+    data: {
+      availabilityStatus,
+      availabilityReason,
+      resolverConfidence,
+      verificationAttempts: Number(profile.verificationAttempts || 0) + 1,
+      lastVerifiedAt: new Date(),
+      verificationSource: 'manual_recheck',
+    },
+  });
+
+  emitResearchJobEvent({
+    researchJobId,
+    source: 'competitor-orchestrator-v2',
+    code: 'competitor.availability.rechecked',
+    level: 'info',
+    message: `Rechecked @${profile.handle} (${profile.platform}) -> ${availabilityStatus}`,
+    platform: profile.platform,
+    handle: profile.handle,
+    metadata: {
+      candidateProfileId: profile.id,
+      availabilityReason,
+      resolverConfidence,
+    },
+  });
+
+  return {
+    candidateProfileId: profile.id,
+    handle: profile.handle,
+    platform: profile.platform,
+    availabilityStatus,
+    availabilityReason,
+    resolverConfidence,
+  };
 }

@@ -17,6 +17,10 @@ const REQUIRED_TABLES = [
   // Brand intelligence v2 columns live on these core tables
   'brand_mentions',
   'community_insights',
+  // BAT Brain collaboration surfaces
+  'brain_profile_suggestions',
+  'strategy_doc_chat_sessions',
+  'strategy_doc_chat_messages',
 ];
 
 const REQUIRED_COLUMNS: Record<string, string[]> = {
@@ -46,6 +50,9 @@ const REQUIRED_COLUMNS: Record<string, string[]> = {
     'evidence',
   ],
   community_insights: ['brand_intelligence_run_id', 'source_query', 'evidence'],
+  brain_profile_suggestions: ['client_id', 'field', 'proposed_value', 'status'],
+  strategy_doc_chat_sessions: ['research_job_id', 'scope', 'status', 'last_message_at'],
+  strategy_doc_chat_messages: ['session_id', 'role', 'content', 'created_at'],
 };
 
 export async function checkSchemaReadiness(): Promise<SchemaReadinessReport> {

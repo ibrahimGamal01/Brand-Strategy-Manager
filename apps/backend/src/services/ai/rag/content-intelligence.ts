@@ -9,12 +9,11 @@
  * - Content gaps and opportunities
  */
 
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../../../lib/prisma';
 import { DataQualityScore, calculateQualityScore } from './data-quality';
 import { analyzePlatformContent, analyzePost, extractContentPillars, calculateFormatStats } from './post-analysis';
 import { analyzeCompetitorContent, analyzeCompetitorPosition } from './competitor-analysis';
-
-const prisma = new PrismaClient();
+import { buildProfileKey, buildRagReadinessScope, RagReadinessScope } from './readiness-context';
 
 export interface ContentIntelligence {
   client: ClientContentAnalysis;
@@ -145,8 +144,12 @@ export interface RecommendedPillar {
 /**
  * Get comprehensive content intelligence for a research job
  */
-export async function getContentIntelligence(researchJobId: string): Promise<ContentIntelligence> {
+export async function getContentIntelligence(
+  researchJobId: string,
+  readinessScope?: RagReadinessScope
+): Promise<ContentIntelligence> {
   console.log(`[Content Intelligence] Analyzing content for research job ${researchJobId.substring(0, 8)}...`);
+  const scope = readinessScope || (await buildRagReadinessScope(researchJobId));
 
   // 0. Get research job details to find target handles
   const job = await prisma.researchJob.findUnique({
@@ -173,9 +176,15 @@ export async function getContentIntelligence(researchJobId: string): Promise<Con
   });
 
   // 2. Get competitor profiles with their social profiles
-  const competitorRecords = await prisma.discoveredCompetitor.findMany({
+  const discoveredCompetitorRecords = await prisma.discoveredCompetitor.findMany({
     where: { researchJobId }
   });
+
+  const competitorRecords = scope.hasCompetitorReady
+    ? discoveredCompetitorRecords.filter((row) =>
+        scope.competitorProfileKeys.has(buildProfileKey(row.platform, row.handle))
+      )
+    : [];
 
   // Get social profiles for competitors
   const competitorProfiles = await Promise.all(
@@ -206,23 +215,33 @@ export async function getContentIntelligence(researchJobId: string): Promise<Con
   
   // Potential client profiles (not known competitors)
   const potentialClientProfiles = allJobProfiles.filter(p => !competitorHandleSet.has(p.handle.toLowerCase()));
+  const readinessClientProfiles = scope.hasClientReady
+    ? potentialClientProfiles.filter((profile) =>
+        scope.clientProfileKeys.has(buildProfileKey(profile.platform, profile.handle))
+      )
+    : [];
+  const clientSelectionPool = readinessClientProfiles.length > 0 ? readinessClientProfiles : potentialClientProfiles;
 
   // Refine client profile selection:
   // 1. Prioritize handles matching inputData
   // 2. If numeric TikTok ID, take the one with most posts
   
-  let instagramProfile = potentialClientProfiles.find(p => p.platform === 'instagram' && p.handle.toLowerCase() === clientInstagramHandle);
+  let instagramProfile = clientSelectionPool.find(
+    (p) => p.platform === 'instagram' && p.handle.toLowerCase() === clientInstagramHandle
+  );
   if (!instagramProfile) {
      // Fallback: take the instagram profile with most posts that isn't a competitor
-     instagramProfile = potentialClientProfiles
+     instagramProfile = clientSelectionPool
        .filter(p => p.platform === 'instagram')
        .sort((a, b) => b.posts.length - a.posts.length)[0];
   }
 
-  let tiktokProfile = potentialClientProfiles.find(p => p.platform === 'tiktok' && p.handle.toLowerCase() === clientTiktokHandle);
+  let tiktokProfile = clientSelectionPool.find(
+    (p) => p.platform === 'tiktok' && p.handle.toLowerCase() === clientTiktokHandle
+  );
   if (!tiktokProfile) {
      // Fallback: take the tiktok profile with most posts (likely numeric ID)
-     tiktokProfile = potentialClientProfiles
+     tiktokProfile = clientSelectionPool
        .filter(p => p.platform === 'tiktok')
        .sort((a, b) => b.posts.length - a.posts.length)[0];
   }
@@ -245,6 +264,18 @@ export async function getContentIntelligence(researchJobId: string): Promise<Con
   const allPosts = [...refinedClientProfiles.flatMap(p => p.posts), ...competitorProfiles.flatMap(c => c.socialProfile?.posts || [])];
   const issues: string[] = [];
   const warnings: string[] = [];
+
+  if (!scope.hasClientReady) {
+    warnings.push('No readiness-qualified client snapshots are available');
+  }
+  if (!scope.hasCompetitorReady) {
+    issues.push('No readiness-qualified competitor snapshots are available');
+  }
+  if (scope.hasCompetitorReady && discoveredCompetitorRecords.length > competitorRecords.length) {
+    warnings.push(
+      `Filtered ${discoveredCompetitorRecords.length - competitorRecords.length} competitors due to readiness gate`
+    );
+  }
 
   if (allPosts.length === 0) {
     issues.push('No posts found for content analysis');
@@ -391,4 +422,3 @@ function generateContentInsights(
     recommendedPillars
   };
 }
-

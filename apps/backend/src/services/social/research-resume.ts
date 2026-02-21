@@ -143,6 +143,57 @@ function getJobCoreContext(job: JobContext) {
   };
 }
 
+/** Build rich context for deep AI questions: search snippets, website, and data scope so answers are grounded in available research. */
+async function buildRichQuestionContext(
+  jobId: string,
+  coreContext: ReturnType<typeof getJobCoreContext>
+): Promise<{
+  brandName: string;
+  handle?: string;
+  bio?: string;
+  niche?: string;
+  websiteUrl?: string;
+  rawSearchContext?: string;
+}> {
+  const [searchResults, competitorCount, postCount] = await Promise.all([
+    prisma.rawSearchResult.findMany({
+      where: { researchJobId: jobId },
+      orderBy: { createdAt: 'desc' },
+      take: 30,
+      select: { title: true, body: true },
+    }),
+    prisma.discoveredCompetitor.count({ where: { researchJobId: jobId } }),
+    prisma.socialPost.count({
+      where: { socialProfile: { researchJobId: jobId } },
+    }),
+  ]);
+
+  const job = await prisma.researchJob.findUnique({
+    where: { id: jobId },
+    select: { inputData: true },
+  });
+  const inputData = (job?.inputData || {}) as Record<string, unknown>;
+  const websiteUrl =
+    (inputData.website as string) || (inputData.websiteUrl as string) || '';
+
+  const snippets = searchResults.map((r) => `${r.title || ''}\n${(r.body || '').slice(0, 300)}`).filter(Boolean);
+  const rawSearchContext =
+    snippets.length > 0
+      ? `Web research (${snippets.length} snippets):\n${snippets.join('\n---\n')}\n\nResearch scope: ${competitorCount} competitors discovered, ${postCount} posts in database for this job.`
+      : postCount > 0 || competitorCount > 0
+        ? `Research scope: ${competitorCount} competitors discovered, ${postCount} posts in database for this job. (No DDG search snippets yet.)`
+        : undefined;
+
+  return {
+    brandName: coreContext.brandName || coreContext.handle || 'Brand',
+    handle: coreContext.handle || undefined,
+    bio: coreContext.bio,
+    niche: coreContext.niche || undefined,
+    websiteUrl: websiteUrl || undefined,
+    rawSearchContext: rawSearchContext || undefined,
+  };
+}
+
 function collectClientTargets(job: JobContext): Array<{ platform: string; handle: string }> {
   const inputHandles = (job.inputData?.handles || {}) as Record<string, string>;
   const targets: Array<{ platform: string; handle: string }> = [];
@@ -850,12 +901,8 @@ async function continueModuleData(job: JobContext, module: ModuleKey): Promise<C
       startedTasks.push('ask_deep_questions');
 
       try {
-        await askAllDeepQuestions(job.id, {
-          brandName: coreContext.brandName || coreContext.handle,
-          handle: coreContext.handle,
-          bio: coreContext.bio,
-          niche: coreContext.niche,
-        });
+        const questionContext = await buildRichQuestionContext(job.id, coreContext);
+        await askAllDeepQuestions(job.id, questionContext);
       } catch (error) {
         errors.push(`AI questions failed: ${(error as Error).message}`);
       }

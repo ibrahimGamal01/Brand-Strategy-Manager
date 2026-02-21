@@ -24,6 +24,7 @@ model Client {
   createdAt              DateTime            @default(now()) @map("created_at")
   updatedAt              DateTime            @updatedAt @map("updated_at")
   brainProfile           BrainProfile?
+  brainProfileSuggestions BrainProfileSuggestion[]
   brandMentions          BrandMention[]
   buyerJourneyStages     BuyerJourneyStage[]
   clientAccounts         ClientAccount[]
@@ -75,6 +76,7 @@ model ResearchJob {
   continuityNextRunAt         DateTime?                    @map("continuity_next_run_at")
   continuityRunning           Boolean                      @default(false) @map("continuity_running")
   aiAnalyses                  AiAnalysis[]
+  mediaAnalysisRuns           MediaAnalysisRun[]
   aiBusinessAnalyses          AiBusinessAnalysis[]
   aiQuestions                 AiQuestion[]
   brainCommands               BrainCommand[]
@@ -96,6 +98,9 @@ model ResearchJob {
   searchTrends                SearchTrend[]
   socialProfiles              SocialProfile[]
   socialTrends                SocialTrend[]
+  contentCalendarRuns         ContentCalendarRun[]
+  calendarChatSessions        CalendarChatSession[]
+  strategyDocChatSessions     StrategyDocChatSession[]
 
   @@map("research_jobs")
 }
@@ -394,6 +399,7 @@ model BrainProfile {
   websiteDomain  String?     @map("website_domain")
   channels       Json?
   constraints    Json?
+  meta           Json?
   createdAt      DateTime    @default(now()) @map("created_at")
   updatedAt      DateTime    @updatedAt @map("updated_at")
   goals          BrainGoal[]
@@ -419,6 +425,25 @@ model BrainGoal {
   @@map("brain_goals")
 }
 
+model BrainProfileSuggestion {
+  id            String                       @id @default(uuid())
+  clientId      String                       @map("client_id")
+  field         String
+  proposedValue Json                         @map("proposed_value")
+  approvedValue Json?                        @map("approved_value")
+  reason        String?
+  source        String?
+  status        BrainProfileSuggestionStatus @default(PENDING)
+  createdAt     DateTime                     @default(now()) @map("created_at")
+  resolvedAt    DateTime?                    @map("resolved_at")
+  resolvedBy    String?                      @map("resolved_by")
+  client        Client                       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, status, createdAt(sort: Desc)])
+  @@index([clientId, field, status])
+  @@map("brain_profile_suggestions")
+}
+
 model BrainCommand {
   id            String             @id @default(uuid())
   researchJobId String             @map("research_job_id")
@@ -428,6 +453,7 @@ model BrainCommand {
   proposedPatch Json?              @map("proposed_patch")
   appliedPatch  Json?              @map("applied_patch")
   status        BrainCommandStatus @default(PENDING)
+  replyText     String?            @map("reply_text")
   error         String?
   createdBy     String?            @map("created_by")
   createdAt     DateTime           @default(now()) @map("created_at")
@@ -567,6 +593,9 @@ model CompetitorCandidateProfile {
   normalizedHandle      String                        @map("normalized_handle")
   profileUrl            String?                       @map("profile_url")
   source                String
+  inputType             String?                       @map("input_type")
+  scrapeEligible        Boolean                       @default(false) @map("scrape_eligible")
+  blockerReasonCode     String?                       @map("blocker_reason_code")
   availabilityStatus    CompetitorAvailabilityStatus  @default(UNVERIFIED) @map("availability_status")
   availabilityReason    String?                       @map("availability_reason")
   resolverConfidence    Float?                        @map("resolver_confidence")
@@ -590,6 +619,7 @@ model CompetitorCandidateProfile {
   @@unique([researchJobId, platform, normalizedHandle])
   @@index([researchJobId, state, relevanceScore(sort: Desc)])
   @@index([researchJobId, availabilityStatus])
+  @@index([researchJobId, scrapeEligible, state, availabilityStatus])
   @@index([orchestrationRunId, platform])
   @@index([identityId])
   @@map("competitor_candidate_profiles")
@@ -783,6 +813,10 @@ model ClientProfileSnapshot {
   postsCount         Int?                 @map("posts_count")
   isVerified         Boolean              @default(false) @map("is_verified")
   isPrivate          Boolean              @default(false) @map("is_private")
+  readinessScore     Float?               @map("readiness_score")
+  readinessStatus    String?              @map("readiness_status")
+  readinessReasons   Json?                @map("readiness_reasons")
+  lastReadinessAt    DateTime?            @map("last_readiness_at")
   runId              String?              @map("run_id")
   orchestrationState Json?                @map("orchestration_state")
   scrapedAt          DateTime             @default(now()) @map("scraped_at")
@@ -793,6 +827,7 @@ model ClientProfileSnapshot {
   researchJob        ResearchJob?         @relation(fields: [researchJobId], references: [id])
 
   @@index([researchJobId])
+  @@index([researchJobId, readinessStatus, scrapedAt(sort: Desc)])
   @@map("client_profile_snapshots")
 }
 
@@ -852,6 +887,10 @@ model CompetitorProfileSnapshot {
   postsCount          Int?                     @map("posts_count")
   isVerified          Boolean                  @default(false) @map("is_verified")
   isPrivate           Boolean                  @default(false) @map("is_private")
+  readinessScore      Float?                   @map("readiness_score")
+  readinessStatus     String?                  @map("readiness_status")
+  readinessReasons    Json?                    @map("readiness_reasons")
+  lastReadinessAt     DateTime?                @map("last_readiness_at")
   runId               String?                  @map("run_id")
   orchestrationState  Json?                    @map("orchestration_state")
   scrapedAt           DateTime                 @default(now()) @map("scraped_at")
@@ -862,6 +901,7 @@ model CompetitorProfileSnapshot {
   researchJob         ResearchJob?             @relation(fields: [researchJobId], references: [id])
 
   @@index([researchJobId])
+  @@index([researchJobId, readinessStatus, scrapedAt(sort: Desc)])
   @@map("competitor_profile_snapshots")
 }
 
@@ -928,6 +968,8 @@ model AiAnalysis {
   visualStyleNotes      String?         @map("visual_style_notes")
   hookAnalysis          String?         @map("hook_analysis")
   fullResponse          Json?           @map("full_response")
+  documentStatus        String?         @map("document_status")
+  groundingReport       Json?           @map("grounding_report")
   confidenceScore       Float?          @map("confidence_score")
   tokensUsed            Int?            @map("tokens_used")
   analyzedAt            DateTime        @default(now()) @map("analyzed_at")
@@ -1099,6 +1141,13 @@ enum BrainCommandStatus {
   FAILED
 }
 
+enum BrainProfileSuggestionStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  APPROVED
+}
+
 enum BrainCommandType {
   ADD_COMPETITOR
   REMOVE_COMPETITOR
@@ -1142,4 +1191,298 @@ enum AnalysisType {
   CAPTION
   OVERALL
   DOCUMENT
+}
+
+enum MediaAnalysisRunStatus {
+  RUNNING
+  COMPLETE
+  SKIPPED
+  FAILED
+}
+
+model MediaAnalysisRun {
+  id                String                 @id @default(uuid())
+  researchJobId     String                 @map("research_job_id")
+  status            MediaAnalysisRunStatus @default(RUNNING)
+  allowDegraded     Boolean                @default(false) @map("allow_degraded")
+  skipAlreadyAnalyzed Boolean              @default(true) @map("skip_already_analyzed")
+  requestedLimit    Int                    @map("requested_limit")
+  maxEligibleAssets Int                    @map("max_eligible_assets")
+  maxEligiblePosts  Int                    @map("max_eligible_posts")
+  downloadedTotal   Int                    @default(0) @map("downloaded_total")
+  qualifiedForAi    Int                    @default(0) @map("qualified_for_ai")
+  analysisWindow    Int                    @default(0) @map("analysis_window")
+  analyzedInWindow  Int                    @default(0) @map("analyzed_in_window")
+  attemptedAssets   Int                    @default(0) @map("attempted_assets")
+  succeededCount    Int                    @default(0) @map("succeeded_count")
+  failedCount       Int                    @default(0) @map("failed_count")
+  skippedReason     String?                @map("skipped_reason")
+  diagnostics       Json?
+  startedAt         DateTime               @default(now()) @map("started_at")
+  completedAt       DateTime?              @map("completed_at")
+
+  researchJob ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+
+  @@index([researchJobId, startedAt(sort: Desc)])
+  @@index([researchJobId, status, startedAt(sort: Desc)])
+  @@map("media_analysis_runs")
+}
+
+// ============================================
+// CONTENT CALENDAR SYSTEM
+// ============================================
+
+model ContentCalendarRun {
+  id                  String                @id @default(uuid())
+  researchJobId       String                @map("research_job_id")
+  weekStart           DateTime              @map("week_start")
+  timezone            String                @default("Africa/Cairo")
+  calendarBriefJson   Json                  @map("calendar_brief_json")
+  contentCalendarJson Json                  @map("content_calendar_json")
+  status              ContentCalendarStatus @default(RUNNING)
+  errorMessage        String?               @map("error_message")
+  diagnostics         Json?
+  createdAt           DateTime              @default(now()) @map("created_at")
+  completedAt         DateTime?             @map("completed_at")
+
+  researchJob  ResearchJob           @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  slots        CalendarSlot[]
+  chatSessions CalendarChatSession[]
+
+  @@index([researchJobId, weekStart])
+  @@map("content_calendar_runs")
+}
+
+enum ContentCalendarStatus {
+  RUNNING
+  COMPLETE
+  FAILED
+}
+
+model CalendarSlot {
+  id                  String             @id @default(uuid())
+  calendarRunId       String             @map("calendar_run_id")
+  slotIndex           Int                @map("slot_index")
+  platform            String
+  contentType         String             @map("content_type")
+  scheduledAt         DateTime           @map("scheduled_at")
+  theme               String?
+  pillarId            String?            @map("pillar_id")
+  objective           String?
+  productionBriefJson Json               @map("production_brief_json")
+  generationPlanJson  Json               @map("generation_plan_json")
+  inspirationPostIds  String[]           @map("inspiration_post_ids")
+  status              CalendarSlotStatus @default(PLANNED)
+  blockReason         String?            @map("block_reason")
+  createdAt           DateTime           @default(now()) @map("created_at")
+
+  calendarRun ContentCalendarRun @relation(fields: [calendarRunId], references: [id], onDelete: Cascade)
+  drafts      ContentDraft[]
+
+  @@unique([calendarRunId, slotIndex])
+  @@index([calendarRunId, status])
+  @@map("calendar_slots")
+}
+
+enum CalendarSlotStatus {
+  PLANNED
+  BLOCKED
+  READY_TO_GENERATE
+  GENERATING
+  DRAFT_CREATED
+  APPROVED
+}
+
+model ContentDraft {
+  id                     String             @id @default(uuid())
+  slotId                 String             @map("slot_id")
+  version                Int
+  status                 ContentDraftStatus @default(DRAFT)
+  caption                String?
+  scriptJson             Json?              @map("script_json")
+  assetsJson             Json?              @map("assets_json")
+  usedInspirationPostIds String[]           @map("used_inspiration_post_ids")
+  generationParams       Json?              @map("generation_params")
+  errorMessage           String?            @map("error_message")
+  createdAt              DateTime           @default(now()) @map("created_at")
+  approvedAt             DateTime?          @map("approved_at")
+
+  slot     CalendarSlot    @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  feedback DraftFeedback[]
+
+  @@unique([slotId, version])
+  @@index([slotId, status])
+  @@map("content_drafts")
+}
+
+enum ContentDraftStatus {
+  DRAFT
+  AWAITING_FEEDBACK
+  APPROVED
+  FAILED
+}
+
+model DraftFeedback {
+  id         String             @id @default(uuid())
+  draftId    String             @map("draft_id")
+  authorType FeedbackAuthorType @map("author_type")
+  text       String
+  createdAt  DateTime           @default(now()) @map("created_at")
+
+  draft ContentDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
+
+  @@index([draftId, createdAt])
+  @@map("draft_feedback")
+}
+
+enum FeedbackAuthorType {
+  CLIENT
+  INTERNAL
+}
+
+// ============================================
+// CHAT INTERFACE FOR CALENDAR
+// ============================================
+
+model CalendarChatSession {
+  id            String                 @id @default(uuid())
+  researchJobId String                 @map("research_job_id")
+  entityType    CalendarChatEntityType @map("entity_type")
+  entityId      String                 @map("entity_id")
+  title         String?
+  status        CalendarChatStatus     @default(ACTIVE)
+  createdAt     DateTime               @default(now()) @map("created_at")
+  lastMessageAt DateTime               @default(now()) @map("last_message_at")
+  closedAt      DateTime?              @map("closed_at")
+
+  researchJob          ResearchJob           @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  messages             CalendarChatMessage[]
+  commands             CalendarChatCommand[]
+  contentCalendarRun   ContentCalendarRun?   @relation(fields: [contentCalendarRunId], references: [id])
+  contentCalendarRunId String?
+
+  @@index([researchJobId, entityType, entityId])
+  @@index([researchJobId, status, lastMessageAt(sort: Desc)])
+  @@map("calendar_chat_sessions")
+}
+
+enum CalendarChatEntityType {
+  CALENDAR_RUN
+  CALENDAR_SLOT
+  CONTENT_DRAFT
+}
+
+enum CalendarChatStatus {
+  ACTIVE
+  RESOLVED
+  ARCHIVED
+}
+
+model CalendarChatMessage {
+  id        String           @id @default(uuid())
+  sessionId String           @map("session_id")
+  role      CalendarChatRole
+  content   String
+  metadata  Json?
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  session CalendarChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+  @@map("calendar_chat_messages")
+}
+
+enum CalendarChatRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+model CalendarChatCommand {
+  id            String                 @id @default(uuid())
+  sessionId     String                 @map("session_id")
+  entityType    CalendarChatEntityType @map("entity_type")
+  entityId      String                 @map("entity_id")
+  commandType   CalendarCommandType    @map("command_type")
+  instruction   String
+  proposedPatch Json                   @map("proposed_patch")
+  appliedPatch  Json?                  @map("applied_patch")
+  status        CalendarCommandStatus  @default(PENDING)
+  replyText     String?                @map("reply_text")
+  error         String?
+  createdAt     DateTime               @default(now()) @map("created_at")
+  appliedAt     DateTime?              @map("applied_at")
+
+  session CalendarChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, status, createdAt(sort: Desc)])
+  @@index([entityType, entityId])
+  @@map("calendar_chat_commands")
+}
+
+enum CalendarCommandType {
+  UPDATE_SLOT_BRIEF
+  UPDATE_DRAFT_CAPTION
+  UPDATE_DRAFT_SCRIPT
+  REGENERATE_DRAFT
+  RESCHEDULE_SLOT
+  CHANGE_INSPIRATION
+  UPDATE_PRODUCTION_PARAMS
+}
+
+enum CalendarCommandStatus {
+  PENDING
+  APPROVED
+  APPLIED
+  REJECTED
+  FAILED
+}
+
+model StrategyDocChatSession {
+  id            String                @id @default(uuid())
+  researchJobId String                @map("research_job_id")
+  scope         StrategyDocChatScope  @default(ALL)
+  sectionKey    String?               @map("section_key")
+  title         String?
+  status        StrategyDocChatStatus @default(ACTIVE)
+  createdAt     DateTime              @default(now()) @map("created_at")
+  updatedAt     DateTime              @updatedAt @map("updated_at")
+  lastMessageAt DateTime              @default(now()) @map("last_message_at")
+
+  researchJob ResearchJob              @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  messages    StrategyDocChatMessage[]
+
+  @@index([researchJobId, status, lastMessageAt(sort: Desc)])
+  @@index([researchJobId, scope, sectionKey])
+  @@map("strategy_doc_chat_sessions")
+}
+
+enum StrategyDocChatScope {
+  ALL
+  SECTION
+}
+
+enum StrategyDocChatStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+model StrategyDocChatMessage {
+  id            String             @id @default(uuid())
+  sessionId     String             @map("session_id")
+  role          StrategyDocChatRole
+  content       String
+  contextSnippet Json?             @map("context_snippet")
+  createdAt     DateTime           @default(now()) @map("created_at")
+
+  session StrategyDocChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+  @@map("strategy_doc_chat_messages")
+}
+
+enum StrategyDocChatRole {
+  USER
+  ASSISTANT
+  SYSTEM
 }

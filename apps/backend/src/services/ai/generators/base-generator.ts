@@ -4,7 +4,7 @@
  * Common functionality for all template generators
  */
 
-import OpenAI from 'openai';
+import { openai, OpenAI } from '../openai-client';
 import { getFullResearchContext, ResearchContext, formatContextForLLM } from '../rag';
 import { validateContent } from '../validation';
 import { ValidationResult } from '../types/templates';
@@ -12,7 +12,7 @@ import { COST_PROTECTION, costTracker, checkCostLimit } from '../validation/cost
 import { detectIndustry, applyIndustryModifier, IndustryContext } from '../prompts/industry-modifiers';
 import { postProcessContent } from './post-processor';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 export interface GeneratorConfig {
   sectionType: string;
@@ -206,6 +206,16 @@ export class BaseGenerator {
       this.config.sectionType
     );
 
+    const globalPrefix =
+      'Never write "Not available in data", "not found in research", or similar disclaimers. ' +
+      'If a metric is unknown, omit it or use "—". ' +
+      'Never output placeholders (e.g., [Competitor], [Handle], @competitor1) or invented handles. ' +
+      'Use only real handles present in VERIFIED COMPETITOR DATA.\n\n';
+    const sectionFocusPrefix =
+      this.config.sectionType === 'content_analysis' || this.config.sectionType === 'format_recommendations'
+        ? 'Prioritize the "Content Intelligence" and "Media Creative Analysis" sections below when making recommendations. Cite specific opportunities, gaps, and creative insights. Verify engagement percentages are plausible (0.1%–15% typical); never use values > 100%.\n\n'
+        : '';
+
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
       { role: 'system', content: industryAwarePrompt }
     ];
@@ -214,14 +224,14 @@ export class BaseGenerator {
     if (!previousAttempt) {
       messages.push({
         role: 'user',
-        content: `Generate the ${this.config.sectionType} section using this research:\n\n${contextString}`
+        content: `${globalPrefix}${sectionFocusPrefix}Generate the ${this.config.sectionType} section using this research:\n\n${contextString}`
       });
     }
     // Retry with feedback
     else {
       messages.push({
         role: 'user',
-        content: `Generate the ${this.config.sectionType} section:\n\n${contextString}`
+        content: `${globalPrefix}${sectionFocusPrefix}Generate the ${this.config.sectionType} section:\n\n${contextString}`
       });
       messages.push({
         role: 'assistant',
@@ -257,7 +267,7 @@ export class BaseGenerator {
       );
     }
 
-    return response.choices[0].message.content || '';
+    return (response.choices[0] as any).message?.content || '';
   }
 
   /**

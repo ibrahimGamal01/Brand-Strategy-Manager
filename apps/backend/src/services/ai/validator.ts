@@ -1,8 +1,8 @@
-import { OpenAI } from 'openai';
+import { openai } from './openai-client';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// const openai = new OpenAI({
+//   apiKey: process.env.OPENAI_API_KEY,
+// });
 
 export interface ValidationResult {
   isValid: boolean;
@@ -50,7 +50,7 @@ Return JSON:
       temperature: 0.1, // Low temp for consistent validation
     });
 
-    const result = JSON.parse(response.choices[0].message.content || '{}');
+    const result = JSON.parse((response.choices[0] as any).message?.content || '{}');
     
     console.log(`[AI Validation] Profile validation: ${result.isValid ? 'PASS' : 'FAIL'}`);
     if (result.issues?.length > 0) {
@@ -99,7 +99,7 @@ Return JSON with cleaned posts array and issues list.`;
       temperature: 0,
     });
 
-    const result = JSON.parse(response.choices[0].message.content || '{}');
+    const result = JSON.parse((response.choices[0] as any).message?.content || '{}');
     
     console.log(`[AI Validation] Post validation: ${result.isValid ? 'PASS' : 'FAIL'} (${posts.length} posts)`);
     
@@ -146,7 +146,7 @@ Return JSON with cleaned suggestions array, marking invalid ones.`;
       temperature: 0.2,
     });
 
-    const result = JSON.parse(response.choices[0].message.content || '{}');
+    const result = JSON.parse((response.choices[0] as any).message?.content || '{}');
     
     console.log(`[AI Validation] Competitor validation: ${result.isValid ? 'PASS' : 'FAIL'}`);
     
@@ -196,7 +196,7 @@ Return JSON validating each field.`;
       temperature: 0,
     });
 
-    const result = JSON.parse(response.choices[0].message.content || '{}');
+    const result = JSON.parse((response.choices[0] as any).message?.content || '{}');
     
     return result;
   } catch (error: any) {

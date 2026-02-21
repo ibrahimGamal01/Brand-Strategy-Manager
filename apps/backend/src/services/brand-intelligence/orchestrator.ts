@@ -327,7 +327,7 @@ export async function getBrandIntelligenceSummary(
     modules: (run.modules as BrandIntelligenceModuleKey[]) || [],
     moduleOrder: (run.moduleOrder as BrandIntelligenceModuleKey[]) || [],
     runReason: run.runReason,
-    summary: (run.summary as BrandIntelligenceSummary) || null,
+    summary: (run.summary as unknown as BrandIntelligenceSummary) || null,
     diagnostics: run.diagnostics,
   };
 }

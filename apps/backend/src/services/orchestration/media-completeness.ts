@@ -9,8 +9,11 @@ export interface MediaGaps {
   competitorSnapshotIds: string[];
 }
 
+/** Don't re-queue the same snapshot for media download within this window (avoids hammering cooldown/failing posts every cycle). */
+const MEDIA_DOWNLOAD_QUEUE_THROTTLE_MS = 60 * 60 * 1000; // 1 hour
+
 /**
- * Find snapshots with posts that have no MediaAssets
+ * Find snapshots with posts that have no MediaAssets and that are not recently queued (throttle re-queue).
  */
 export async function checkMediaGaps(researchJobId: string): Promise<MediaGaps> {
   const [clientSnapshotsWithGaps, competitorSnapshotsWithGaps] = await Promise.all([
@@ -33,6 +36,7 @@ export async function checkMediaGaps(researchJobId: string): Promise<MediaGaps> 
 async function findClientSnapshotsWithMissingMedia(
   researchJobId: string
 ): Promise<{ id: string }[]> {
+  // const throttleBefore = new Date(Date.now() - MEDIA_DOWNLOAD_QUEUE_THROTTLE_MS);
   const snapshots = await prisma.clientProfileSnapshot.findMany({
     where: {
       researchJobId,
@@ -41,6 +45,11 @@ async function findClientSnapshotsWithMissingMedia(
           mediaAssets: { none: {} },
         },
       },
+      // TODO: Re-enable throttling after adding lastMediaDownloadQueuedAt to schema
+      // OR: [
+      //   { lastMediaDownloadQueuedAt: null },
+      //   { lastMediaDownloadQueuedAt: { lt: throttleBefore } },
+      // ],
     },
     select: { id: true },
     orderBy: { scrapedAt: 'desc' },
@@ -53,6 +62,7 @@ async function findClientSnapshotsWithMissingMedia(
 async function findCompetitorSnapshotsWithMissingMedia(
   researchJobId: string
 ): Promise<{ id: string }[]> {
+  // const throttleBefore = new Date(Date.now() - MEDIA_DOWNLOAD_QUEUE_THROTTLE_MS);
   const snapshots = await prisma.competitorProfileSnapshot.findMany({
     where: {
       researchJobId,
@@ -61,6 +71,11 @@ async function findCompetitorSnapshotsWithMissingMedia(
           mediaAssets: { none: {} },
         },
       },
+      // TODO: Re-enable throttling after adding lastMediaDownloadQueuedAt to schema
+      // OR: [
+      //   { lastMediaDownloadQueuedAt: null },
+      //   { lastMediaDownloadQueuedAt: { lt: throttleBefore } },
+      // ],
     },
     select: { id: true },
     orderBy: { scrapedAt: 'desc' },
@@ -71,15 +86,22 @@ async function findCompetitorSnapshotsWithMissingMedia(
 }
 
 /**
- * Queue media download tasks for snapshots with missing media
+ * Queue media download tasks for snapshots with missing media.
+ * Sets lastMediaDownloadQueuedAt so we don't re-queue the same snapshot every cycle (throttle).
  */
 export async function queueMediaDownloadTasks(
   researchJobId: string,
   gaps: MediaGaps
 ): Promise<number> {
   let queuedCount = 0;
+  const now = new Date();
 
   for (const snapshotId of gaps.clientSnapshotIds) {
+    // TODO: Re-enable after adding lastMediaDownloadQueuedAt to schema
+    // await prisma.clientProfileSnapshot.updateMany({
+    //   where: { id: snapshotId },
+    //   data: { lastMediaDownloadQueuedAt: now },
+    // });
     downloadSnapshotMedia('client', snapshotId)
       .then((downloaded) => {
         if (downloaded > 0) {
@@ -108,6 +130,11 @@ export async function queueMediaDownloadTasks(
   }
 
   for (const snapshotId of gaps.competitorSnapshotIds) {
+    // TODO: Re-enable after adding lastMediaDownloadQueuedAt to schema
+    // await prisma.competitorProfileSnapshot.updateMany({
+    //   where: { id: snapshotId },
+    //   data: { lastMediaDownloadQueuedAt: now },
+    // });
     downloadSnapshotMedia('competitor', snapshotId)
       .then((downloaded) => {
         if (downloaded > 0) {

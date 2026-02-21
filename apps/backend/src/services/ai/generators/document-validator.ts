@@ -128,6 +128,36 @@ function validatePass1(documentSections: Record<string, string>): { passed: bool
         suggestion: 'Use specific numbers from research data'
       });
     }
+
+    // Check for impossible engagement rates (e.g. 283% - likely typo for 2.83%)
+    const impossibleEngagement = content.match(/\d{3,}%?\s*engagement|engagement\s*(?:rate)?\s*(?:of\s+)?\d{3,}%/gi);
+    if (impossibleEngagement && impossibleEngagement.length > 0) {
+      issues.push({
+        severity: 'HIGH',
+        section: sectionName,
+        issue: 'Impossible engagement rate detected (values > 99% are invalid)',
+        evidence: `Found: ${impossibleEngagement.slice(0, 3).join(', ')}`,
+        suggestion: 'Engagement rates are typically 0.1%-15%. Fix likely typos (e.g. 283% -> 2.83%)'
+      });
+    }
+
+    // Content Analysis / Format Recommendations: recommendations should cite evidence (content intelligence, media analysis, or verified data)
+    const evidenceSections = ['contentAnalysis', 'formatRecommendations'];
+    if (evidenceSections.includes(sectionName) && content.length > 200) {
+      const evidenceSignals = [
+        /content gap|content gaps|blue ocean|opportunit(y|ies)|recommended pillar|content intelligence|media creative|hook strength|scroll-stopping|actionable (fix|recommendation|step)|@\w+|top-performing|verified (competitor|data)|competitor (angle|analysis)|format breakdown/i,
+      ];
+      const hasEvidence = evidenceSignals.some((re) => re.test(content));
+      if (!hasEvidence) {
+        issues.push({
+          severity: 'MEDIUM',
+          section: sectionName,
+          issue: 'Recommendations may not cite content intelligence, media analysis, or verified competitor data',
+          evidence: 'No evidence signals (e.g. content gap, opportunity, hook, actionable fix, @handle) detected',
+          suggestion: 'Regenerate or edit to cite specific opportunities, gaps, or creative insights from the research context'
+        });
+      }
+    }
   });
 
   const criticalIssues = issues.filter(i => i.severity === 'CRITICAL');
@@ -243,7 +273,7 @@ export async function validateDocument(
   Object.entries(documentSections).forEach(([key, section]) => {
     if (section && typeof section === 'object') {
       markdownSections[key] = section.markdown || '';
-      scores[key] = section.score || 0;
+      scores[key] = section.validationScore ?? section.score ?? 0;
     }
   });
 

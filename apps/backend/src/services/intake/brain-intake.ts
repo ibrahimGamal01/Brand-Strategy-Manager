@@ -27,6 +27,21 @@ function toJson<T>(value: T): Prisma.InputJsonValue {
 }
 
 function buildMergedConstraints(payload: any, excludedCategories: string[]): Record<string, unknown> {
+  const topicsToAvoidRaw =
+    payload.topicsToAvoid ??
+    (payload.constraints && typeof payload.constraints === 'object'
+      ? (payload.constraints as Record<string, unknown>).topicsToAvoid
+      : undefined);
+  const topicsToAvoid =
+    typeof topicsToAvoidRaw === 'string'
+      ? topicsToAvoidRaw.split(/[\n,]+/).map((p) => p.trim()).filter(Boolean)
+      : Array.isArray(topicsToAvoidRaw)
+        ? topicsToAvoidRaw.map((x: unknown) => String(x || '').trim()).filter(Boolean)
+        : parseStringList(topicsToAvoidRaw);
+  const brandVoiceWords = String(payload.brandVoiceWords || '').trim() ||
+    (payload.constraints && typeof payload.constraints === 'object'
+      ? String((payload.constraints as Record<string, unknown>).brandVoiceWords || '').trim()
+      : '');
   return {
     ...(payload.constraints && typeof payload.constraints === 'object' ? payload.constraints : {}),
     operatorGoal: String(payload.engineGoal || payload.operatorGoal || '').trim() || undefined,
@@ -35,6 +50,8 @@ function buildMergedConstraints(payload: any, excludedCategories: string[]): Rec
     autonomyLevel: String(payload.autonomyLevel || '').trim() || undefined,
     budgetSensitivity: String(payload.budgetSensitivity || '').trim() || undefined,
     brandTone: String(payload.brandTone || '').trim() || undefined,
+    brandVoiceWords: brandVoiceWords || undefined,
+    topicsToAvoid: topicsToAvoid.length > 0 ? topicsToAvoid : undefined,
     language: String(payload.language || '').trim() || undefined,
     planningHorizon: String(payload.planningHorizon || '').trim() || undefined,
   };
@@ -64,14 +81,17 @@ async function findOrCreateClient(
     client = await prisma.client.create({
       data: {
         name,
-        businessOverview: payload.businessOverview || payload.futureGoal || null,
+        businessOverview:
+          String(payload.oneSentenceDescription || payload.description || payload.businessOverview || payload.futureGoal || '').trim() || null,
         goalsKpis: payload.primaryGoal || null,
       },
     });
     return { client, isExistingClient };
   }
 
-  const incomingOverview = String(payload.businessOverview || payload.futureGoal || '').trim();
+  const incomingOverview = String(
+    payload.oneSentenceDescription || payload.description || payload.businessOverview || payload.futureGoal || ''
+  ).trim();
   const existingOverview = String(client.businessOverview || '').trim();
   const shouldReplacePlaceholderOverview =
     Boolean(incomingOverview) && isLikelyPlaceholderDiscoveryContext(existingOverview);
@@ -171,6 +191,28 @@ export async function processBrainIntake(payload: any): Promise<BrainIntakeResul
     )
   );
 
+  function parseList(value: unknown, maxItems = 10): string[] {
+    if (Array.isArray(value)) {
+      return value.map((x: unknown) => String(x || '').trim()).filter(Boolean).slice(0, maxItems);
+    }
+    const s = String(value || '').trim();
+    if (!s) return [];
+    const parts = s.split(/[\n,]+/).map((p) => p.trim()).filter(Boolean);
+    return parts.slice(0, maxItems);
+  }
+
+  const servicesList = parseList(payload.servicesList, 20);
+  const topProblems = parseList(payload.topProblems, 3);
+  const resultsIn90Days = parseList(payload.resultsIn90Days, 2);
+  const questionsBeforeBuying = parseList(payload.questionsBeforeBuying, 3);
+  const competitorInspirationLinks = parseList(payload.competitorInspirationLinks, 3);
+  const topicsToAvoidList =
+    (mergedConstraints.topicsToAvoid as string[] | undefined)?.length
+      ? (mergedConstraints.topicsToAvoid as string[])
+      : parseList(payload.topicsToAvoid, 15);
+
+  const competitorInspirationLinksEarly = competitorInspirationLinks;
+
   const recentJob = !forceNew
     ? await prisma.researchJob.findFirst({
         where: {
@@ -191,7 +233,70 @@ export async function processBrainIntake(payload: any): Promise<BrainIntakeResul
       })
     : null;
 
+  function buildInputData() {
+    return toJson({
+      handle: primaryHandle,
+      platform: primaryPlatform,
+      handles: platformHandles,
+      channels: payload.channels || [],
+      brandName: name,
+      niche: String(payload.niche || payload.businessType || '').trim(),
+      businessType: String(payload.businessType || '').trim(),
+      website: String(payload.website || payload.websiteDomain || '').trim(),
+      primaryGoal: String(payload.primaryGoal || '').trim(),
+      secondaryGoals,
+      futureGoal: String(payload.futureGoal || '').trim(),
+      targetAudience: String(payload.targetAudience || '').trim(),
+      geoScope: String(payload.geoScope || '').trim(),
+      language: String(payload.language || '').trim(),
+      planningHorizon: String(payload.planningHorizon || '').trim(),
+      autonomyLevel: String(payload.autonomyLevel || '').trim() || 'assist',
+      budgetSensitivity: String(payload.budgetSensitivity || '').trim(),
+      brandTone: String(payload.brandTone || '').trim(),
+      constraints: mergedConstraints,
+      intakeVersion: 'v2',
+      description: String(payload.oneSentenceDescription || payload.description || '').trim() || undefined,
+      businessOverview: String(
+        payload.oneSentenceDescription || payload.businessOverview || payload.futureGoal || ''
+      ).trim() || undefined,
+      operateWhere: String(payload.operateWhere || '').trim() || undefined,
+      wantClientsWhere: String(payload.wantClientsWhere || '').trim() || undefined,
+      idealAudience: String(payload.idealAudience || '').trim() || undefined,
+      servicesList: servicesList.length > 0 ? servicesList : undefined,
+      mainOffer: String(payload.mainOffer || '').trim() || undefined,
+      topProblems: topProblems.length > 0 ? topProblems : undefined,
+      resultsIn90Days: resultsIn90Days.length > 0 ? resultsIn90Days : undefined,
+      questionsBeforeBuying: questionsBeforeBuying.length > 0 ? questionsBeforeBuying : undefined,
+      competitorInspirationLinks:
+        competitorInspirationLinks.length > 0 ? competitorInspirationLinks : undefined,
+      brandVoiceWords: String(payload.brandVoiceWords || '').trim() || undefined,
+      topicsToAvoid: topicsToAvoidList.length > 0 ? topicsToAvoidList : undefined,
+    });
+  }
+
   if (recentJob) {
+    await prisma.researchJob.update({
+      where: { id: recentJob.id },
+      data: { inputData: buildInputData() },
+    });
+    if (competitorInspirationLinksEarly.length > 0) {
+      const existingClientInspirationCount = await prisma.competitorCandidateProfile.count({
+        where: {
+          researchJobId: recentJob.id,
+          source: 'client_inspiration',
+        },
+      });
+      if (existingClientInspirationCount === 0) {
+        const { seedTopPicksFromInspirationLinks } = await import(
+          '../discovery/seed-intake-competitors'
+        );
+        await seedTopPicksFromInspirationLinks(recentJob.id, competitorInspirationLinksEarly).catch(
+          (err) => {
+            console.error(`[API] Seed intake competitors (reused job) failed for ${recentJob.id}:`, err);
+          }
+        );
+      }
+    }
     return {
       success: true,
       isExisting: true,
@@ -207,30 +312,20 @@ export async function processBrainIntake(payload: any): Promise<BrainIntakeResul
       clientId: client.id,
       status: 'PENDING',
       startedAt: new Date(),
-      inputData: toJson({
-        handle: primaryHandle,
-        platform: primaryPlatform,
-        handles: platformHandles,
-        channels: payload.channels || [],
-        brandName: name,
-        niche: String(payload.niche || payload.businessType || '').trim(),
-        businessType: String(payload.businessType || '').trim(),
-        website: String(payload.website || payload.websiteDomain || '').trim(),
-        primaryGoal: String(payload.primaryGoal || '').trim(),
-        secondaryGoals,
-        futureGoal: String(payload.futureGoal || '').trim(),
-        targetAudience: String(payload.targetAudience || '').trim(),
-        geoScope: String(payload.geoScope || '').trim(),
-        language: String(payload.language || '').trim(),
-        planningHorizon: String(payload.planningHorizon || '').trim(),
-        autonomyLevel: String(payload.autonomyLevel || '').trim() || 'assist',
-        budgetSensitivity: String(payload.budgetSensitivity || '').trim(),
-        brandTone: String(payload.brandTone || '').trim(),
-        constraints: mergedConstraints,
-        intakeVersion: 'v2',
-      }),
+      inputData: buildInputData(),
     },
   });
+
+  if (competitorInspirationLinks.length > 0) {
+    const { seedTopPicksFromInspirationLinks } = await import(
+      '../discovery/seed-intake-competitors'
+    );
+    await seedTopPicksFromInspirationLinks(researchJob.id, competitorInspirationLinks).catch(
+      (err) => {
+        console.error(`[API] Seed intake competitors failed for job ${researchJob.id}:`, err);
+      }
+    );
+  }
 
   void resumeResearchJob(researchJob.id).catch((error) => {
     console.error(`[API] Intake orchestration failed for job ${researchJob.id}:`, error);

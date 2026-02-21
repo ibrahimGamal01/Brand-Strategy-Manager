@@ -20,6 +20,18 @@ import json
 import os
 import subprocess
 
+PROXY_URL = (
+    os.environ.get('SCRAPER_PROXY_URL')
+    or os.environ.get('HTTPS_PROXY')
+    or os.environ.get('HTTP_PROXY')
+    or ''
+).strip()
+
+def with_proxy(cmd):
+    if PROXY_URL and '--proxy' not in cmd:
+        return [*cmd, '--proxy', PROXY_URL]
+    return cmd
+
 def get_video_info(url: str) -> dict:
     """
     Get video metadata without downloading.
@@ -35,7 +47,7 @@ def get_video_info(url: str) -> dict:
             url
         ]
         
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        result = subprocess.run(with_proxy(cmd), capture_output=True, text=True, timeout=60)
         
         if result.returncode != 0:
             return {"error": result.stderr or "Failed to get video info"}
@@ -96,7 +108,7 @@ def download_video(url: str, output_path: str, audio_only: bool = False) -> dict
                 url
             ]
         
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)  # 5 min timeout
+        result = subprocess.run(with_proxy(cmd), capture_output=True, text=True, timeout=300)  # 5 min timeout
         
         if result.returncode == 0:
             # Find the actual file (yt-dlp adds extension)

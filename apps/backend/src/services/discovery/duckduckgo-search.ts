@@ -299,6 +299,44 @@ function extractHandlesFromRawResults(
 }
 
 /**
+ * Domain-first search to discover a website's Instagram/TikTok handles.
+ * Used by intake suggestion layer so we suggest the real handle (e.g. eluumis_official) not a guess from brand name.
+ */
+export async function searchSocialHandlesForWebsite(
+  domain: string,
+  options?: { timeoutMs?: number }
+): Promise<{ instagram?: string; tiktok?: string }> {
+  const out: { instagram?: string; tiktok?: string } = {};
+  const cleanDomain = String(domain || '').trim().replace(/^https?:\/\//, '').split('/')[0];
+  if (!cleanDomain) return out;
+
+  try {
+    const queries = [`${cleanDomain} instagram`, `${cleanDomain} tiktok`];
+    const { stdout, stderr } = await runDdgCommand(
+      ['raw', ...queries],
+      options?.timeoutMs ?? 30_000
+    );
+    if (stderr) console.log(`[DDGSearch] ${stderr}`);
+
+    const parsed = JSON.parse(stdout) as { results?: RawSearchResult[]; total?: number };
+    const rawResults = parsed.results || [];
+
+    const instagramHandles = extractHandlesFromRawResults(rawResults, 'instagram');
+    const tiktokHandles = extractHandlesFromRawResults(rawResults, 'tiktok');
+    if (instagramHandles.length > 0) out.instagram = instagramHandles[0];
+    if (tiktokHandles.length > 0) out.tiktok = tiktokHandles[0];
+
+    if (out.instagram || out.tiktok) {
+      console.log(`[DDGSearch] Website ${cleanDomain} social: instagram=@${out.instagram ?? 'none'}, tiktok=@${out.tiktok ?? 'none'}`);
+    }
+    return out;
+  } catch (error: any) {
+    console.error(`[DDGSearch] searchSocialHandlesForWebsite failed for ${cleanDomain}:`, error.message);
+    return out;
+  }
+}
+
+/**
  * Save raw search results to database for later processing
  */
 export async function saveRawResultsToDB(
@@ -680,8 +718,48 @@ export interface GatherAllResult {
 }
 
 /**
+ * Build handles for social scrape from job's explicit client data (form / inputData / clientAccounts).
+ * Only use DDG-discovered handles when the user has not provided any.
+ */
+async function getClientHandlesForJob(researchJobId: string): Promise<Record<string, string>> {
+  const { normalizeHandle } = await import('../intake/brain-intake-utils.js');
+  const job = await prisma.researchJob.findUnique({
+    where: { id: researchJobId },
+    include: { client: { include: { clientAccounts: true } } },
+  });
+  if (!job) return {};
+
+  const inputData = (job.inputData || {}) as Record<string, unknown>;
+  const handles: Record<string, string> = {};
+
+  if (inputData.handles && typeof inputData.handles === 'object') {
+    for (const [platform, raw] of Object.entries(inputData.handles)) {
+      if ((platform === 'instagram' || platform === 'tiktok') && typeof raw === 'string' && raw) {
+        const h = normalizeHandle(raw);
+        if (h) handles[platform] = h;
+      }
+    }
+  }
+  if (Object.keys(handles).length === 0 && inputData.handle && typeof inputData.handle === 'string') {
+    const platform = String((inputData.platform as string) || 'instagram').toLowerCase();
+    if (platform === 'instagram' || platform === 'tiktok') {
+      const h = normalizeHandle(inputData.handle);
+      if (h) handles[platform] = h;
+    }
+  }
+  for (const acc of job.client?.clientAccounts || []) {
+    if ((acc.platform === 'instagram' || acc.platform === 'tiktok') && acc.handle) {
+      const h = normalizeHandle(acc.handle);
+      if (h && !handles[acc.platform]) handles[acc.platform] = h;
+    }
+  }
+  return handles;
+}
+
+/**
  * COMPREHENSIVE: Gather ALL DDG data and save to DB
- * This is the main entry point for maximizing data collection
+ * This is the main entry point for maximizing data collection.
+ * Social content scrape uses the job's client handles first; DDG-discovered handles only as fallback when none provided.
  */
 export async function gatherAllDDG(
   brandName: string,
@@ -704,24 +782,25 @@ export async function gatherAllDDG(
     // Save all results to DB
     await saveAllResultsToDB(researchJobId, result);
     
-    // NEW: Also scrape social content for images/videos using site-limited search
-    // This ensures we get media from the actual social profiles, not generic search
+    // Scrape social content from CLIENT handles (form / inputData / clientAccounts) first; only fall back to DDG-discovered handles when none exist
     console.log(`[DDGSearch] Scraping social content for images/videos...`);
-    
-    // First, try to find social handles from the brand context search
-    const brandContext = await searchBrandContextDDG(brandName, researchJobId);
-    
-    // Build handles object from discovered socials
-    const handles: Record<string, string> = {};
-    if (brandContext.instagram_handle) handles.instagram = brandContext.instagram_handle;
-    if (brandContext.tiktok_handle) handles.tiktok = brandContext.tiktok_handle;
-    
-    // Scrape social content if we found any handles
+    let handles: Record<string, string> = await getClientHandlesForJob(researchJobId);
+    if (Object.keys(handles).length === 0) {
+      const brandContext = await searchBrandContextDDG(brandName, researchJobId);
+      if (brandContext.instagram_handle) handles.instagram = brandContext.instagram_handle;
+      if (brandContext.tiktok_handle) handles.tiktok = brandContext.tiktok_handle;
+      if (Object.keys(handles).length > 0) {
+        console.log(`[DDGSearch] No client handles on job; using DDG-discovered handles as fallback`);
+      }
+    } else {
+      console.log(`[DDGSearch] Using job client handles: ${Object.entries(handles).map(([p, h]) => `${p}:@${h}`).join(', ')}`);
+    }
+
     if (Object.keys(handles).length > 0) {
       const socialContent = await scrapeSocialContent(handles, 30, researchJobId);
       console.log(`[DDGSearch] Scraped ${socialContent.totals.images} images, ${socialContent.totals.videos} videos from social profiles`);
     } else {
-      console.log(`[DDGSearch] No social handles found, skipping social content scrape`);
+      console.log(`[DDGSearch] No social handles available, skipping social content scrape`);
     }
     
     return result;

@@ -1,4 +1,5 @@
 import path from 'path';
+import crypto from 'crypto';
 import { prisma } from '../../lib/prisma';
 import { fileManager } from '../storage/file-manager';
 import { extractImageMetadata, generateVideoThumbnail } from './download-helpers';
@@ -15,7 +16,8 @@ export async function downloadGenericMedia(
     const isVideo = type === 'DDG_VIDEO';
     const mediaType = isVideo ? 'VIDEO' : 'IMAGE';
     const extension = fileManager.getExtension(url) || (isVideo ? 'mp4' : 'jpg');
-    const filename = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${extension}`;
+    const safeExt = extension.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || (isVideo ? 'mp4' : 'jpg');
+    const filename = `${Date.now()}_${crypto.randomBytes(6).toString('hex')}.${safeExt}`;
 
     const isYoutube = url.includes('youtube.com') || url.includes('youtu.be');
     let storagePath = '';
@@ -25,7 +27,8 @@ export async function downloadGenericMedia(
       console.log(`[Downloader] YouTube link detected, skipping file download: ${url}`);
     } else {
       storagePath = path.join(process.cwd(), 'storage', 'research', researchJobId, filename);
-      await fileManager.downloadAndSave(url, storagePath);
+      storagePath = fileManager.resolveStoragePath(storagePath);
+      await fileManager.downloadAndSave(url, storagePath, {}, { contextLabel: `ddg-${type.toLowerCase()}` });
     }
 
     const stats = fileManager.getStats(storagePath);

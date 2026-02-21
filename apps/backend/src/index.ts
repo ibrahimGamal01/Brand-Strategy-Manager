@@ -18,6 +18,7 @@ import tiktokDataRouter from './routes/tiktok-data';
 import brandIntelligenceRouter from './routes/research-jobs-brand-intelligence';
 import recoveryRouter from './routes/recovery';
 import orchestrationRouter from './routes/orchestration';
+import contentCalendarRouter from './routes/content-calendar';
 
 const envLoad = loadBackendEnv();
 console.log('[DEBUG] DATABASE_URL loaded:', process.env.DATABASE_URL?.replace(/:[^:@]*@/, ':***@'));
@@ -31,7 +32,7 @@ for (const warning of preflight.warnings) {
 }
 
 const app = express();
-const PORT = process.env.BACKEND_PORT || 3001;
+const PORT = process.env.PORT || process.env.BACKEND_PORT || 3001;
 let schemaReport: SchemaReadinessReport | null = null;
 
 app.use(cors());
@@ -76,6 +77,7 @@ app.use((req, res, next) => {
 app.use('/api/clients', clientsRouter);
 app.use('/api/research-jobs', dataManagementRouter);
 app.use('/api/research-jobs', brandIntelligenceRouter);
+app.use('/api/research-jobs', contentCalendarRouter);
 app.use('/api/research-jobs', researchJobsRouter);
 app.use('/api/media', mediaRouter);
 app.use('/api/competitors', competitorsRouter);

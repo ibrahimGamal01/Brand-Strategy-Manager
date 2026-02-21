@@ -1,12 +1,14 @@
-import { exec } from 'child_process';
-import { existsSync } from 'fs';
-import { promisify } from 'util';
-import path from 'path';
 import { createGraphQLScraper } from './instagram-graphql';
 import axios from 'axios';
 import { extractCsrf } from './instagram-cookie';
+import { createScraperProxyPool, runScriptJsonWithRetries } from './script-runner';
 
-const execAsync = promisify(exec);
+const instagramScraperProxyPool = createScraperProxyPool('instagram-scraper', [
+  'INSTAGRAM_SCRAPER_PROXY_URLS',
+  'SCRAPER_PROXY_URLS',
+  'PROXY_URLS',
+  'PROXY_URL',
+]);
 
 
 export interface InstagramComment {
@@ -196,21 +198,18 @@ export async function scrapeInstagramProfile(
   // Layer 1: Try Camoufox (anti-detect browser fallback)
   try {
     console.log(`[Instagram] Attempting Camoufox scraper for @${cleanHandle}...`);
-    const cwd = process.cwd();
-    const candidates = [
-      path.join(cwd, 'scripts/camoufox_instagram_scraper.py'),
-      path.join(cwd, 'apps/backend/scripts/camoufox_instagram_scraper.py'),
-    ];
-    const resolvedPath = candidates.find((p) => existsSync(p));
-    if (!resolvedPath) throw new Error('camoufox_instagram_scraper.py not found');
+    const camoufoxRun = await runScriptJsonWithRetries<InstagramProfileData | { error: string }>({
+      label: 'instagram-camoufox-scrape',
+      executable: 'python3',
+      scriptFileName: 'camoufox_instagram_scraper.py',
+      args: [cleanHandle, String(postsLimit)],
+      timeoutMs: 300_000,
+      maxBufferBytes: 10 * 1024 * 1024,
+      maxAttempts: Number(process.env.INSTAGRAM_CAMOUFOX_SCRAPE_ATTEMPTS || 2),
+      proxyPool: instagramScraperProxyPool,
+    });
 
-    const { stdout, stderr } = await execAsync(
-      `python3 "${resolvedPath}" "${cleanHandle}" "${postsLimit}"`,
-      { cwd: process.cwd(), maxBuffer: 10 * 1024 * 1024, timeout: 300000 }
-    );
-    if (stderr) console.log(`[Instagram/Camoufox] ${stderr}`);
-
-    const camResult: InstagramProfileData | { error: string } = JSON.parse(stdout);
+    const camResult = camoufoxRun.parsed;
     if ('error' in camResult) throw new Error(camResult.error);
 
     const data = camResult as InstagramProfileData;
@@ -244,25 +243,34 @@ export async function scrapeInstagramProfile(
   // Layer 1: Try Python Instaloader
   try {
     console.log(`[Instagram] Attempting Python scraper for @${cleanHandle} (Deep OASP Mode)...`);
-    
-    const scriptPath = path.join(process.cwd(), 'scripts/instagram_scraper.py');
-    const args = [scriptPath, cleanHandle, postsLimit.toString()];
+    const args = [cleanHandle, postsLimit.toString()];
     if (proxyUrl) {
       args.push(proxyUrl);
     }
+    const forcedProxyEnv = proxyUrl
+      ? {
+          SCRAPER_PROXY_URL: proxyUrl,
+          PROXY_URL: proxyUrl,
+          HTTP_PROXY: proxyUrl,
+          HTTPS_PROXY: proxyUrl,
+          http_proxy: proxyUrl,
+          https_proxy: proxyUrl,
+        }
+      : undefined;
 
-    const { stdout, stderr } = await execAsync(`python3 ${args.join(' ')}`, {
-      cwd: process.cwd(),
-      maxBuffer: 10 * 1024 * 1024, // 10MB buffer
-      timeout: 300000, // 5 min timeout
+    const pythonRun = await runScriptJsonWithRetries<InstagramProfileData | { error: string; message?: string }>({
+      label: 'instagram-python-scrape',
+      executable: 'python3',
+      scriptFileName: 'instagram_scraper.py',
+      args,
+      timeoutMs: 300_000,
+      maxBufferBytes: 10 * 1024 * 1024,
+      maxAttempts: Number(process.env.INSTAGRAM_PYTHON_SCRAPE_ATTEMPTS || 2),
+      proxyPool: instagramScraperProxyPool,
+      extraEnv: forcedProxyEnv,
     });
 
-    // Log Python stderr (info messages)
-    if (stderr) {
-      console.log(`[Instagram/Python] ${stderr}`);
-    }
-
-    const result: InstagramProfileData | { error: string, message?: string } = JSON.parse(stdout);
+    const result = pythonRun.parsed;
 
     // CRITICAL: Check for Rate Limits
     if ('error' in result && result.error === 'RATE_LIMIT_EXCEEDED') {

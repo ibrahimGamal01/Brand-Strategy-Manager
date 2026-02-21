@@ -21,6 +21,18 @@ import subprocess
 import re
 from datetime import datetime
 
+PROXY_URL = (
+    os.environ.get('SCRAPER_PROXY_URL')
+    or os.environ.get('HTTPS_PROXY')
+    or os.environ.get('HTTP_PROXY')
+    or ''
+).strip()
+
+def with_proxy(cmd):
+    if PROXY_URL and '--proxy' not in cmd:
+        return [*cmd, '--proxy', PROXY_URL]
+    return cmd
+
 def check_ytdlp_installed() -> bool:
     """Check if yt-dlp is installed and accessible."""
     try:
@@ -137,7 +149,7 @@ def get_profile_and_videos(handle: str, max_videos: int = 30) -> dict:
             profile_url
         ]
         
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        result = subprocess.run(with_proxy(cmd), capture_output=True, text=True, timeout=120)
         
         if result.returncode != 0 and not result.stdout:
             # yt-dlp failed, try DDG fallback
@@ -228,7 +240,7 @@ def download_video(video_url: str, output_path: str) -> dict:
             video_url
         ]
         
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        result = subprocess.run(with_proxy(cmd), capture_output=True, text=True, timeout=120)
         
         if result.returncode == 0:
             # Get the actual file path (yt-dlp might add extension)

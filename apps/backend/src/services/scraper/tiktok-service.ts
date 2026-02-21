@@ -5,14 +5,25 @@
  * Handles profile scraping, video metadata, and content download.
  */
 
-import { exec } from 'child_process';
-import { existsSync } from 'fs';
-import { promisify } from 'util';
-import path from 'path';
 import { PrismaClient } from '@prisma/client';
+import { createScraperProxyPool, runScriptJsonWithRetries } from './script-runner';
 
-const execAsync = promisify(exec);
 const prisma = new PrismaClient();
+
+const tiktokScraperProxyPool = createScraperProxyPool('tiktok-scraper', [
+  'TIKTOK_SCRAPER_PROXY_URLS',
+  'SCRAPER_PROXY_URLS',
+  'PROXY_URLS',
+  'PROXY_URL',
+]);
+
+const tiktokDownloaderProxyPool = createScraperProxyPool('tiktok-downloader', [
+  'TIKTOK_DOWNLOADER_PROXY_URLS',
+  'TIKTOK_SCRAPER_PROXY_URLS',
+  'SCRAPER_PROXY_URLS',
+  'PROXY_URLS',
+  'PROXY_URL',
+]);
 
 export interface TikTokVideo {
   video_id: string;
@@ -46,10 +57,6 @@ export interface TikTokScrapeResult {
   error?: string;
 }
 
-function resolveScriptPath(name: string, candidates: string[]): string | null {
-  return candidates.find((p) => existsSync(p)) ?? null;
-}
-
 /**
  * Scrape TikTok profile and recent videos
  * Primary: Camoufox | Fallback: tiktok_scraper.py (yt-dlp)
@@ -61,64 +68,46 @@ export async function scrapeTikTokProfile(
   const cleanHandle = handle.replace('@', '');
   console.log(`[TikTok] Scraping @${cleanHandle}...`);
 
-  const cwd = process.cwd();
-  const camoufoxCandidates = [
-    path.join(cwd, 'scripts/camoufox_tiktok_scraper.py'),
-    path.join(cwd, 'apps/backend/scripts/camoufox_tiktok_scraper.py'),
-  ];
-  const camoufoxPath = resolveScriptPath('camoufox_tiktok_scraper', camoufoxCandidates);
-
-  if (camoufoxPath) {
-    try {
-      console.log(`[TikTok] Trying Camoufox scraper...`);
-      const { stdout, stderr } = await execAsync(
-        `python3 "${camoufoxPath}" profile "${cleanHandle}" ${maxVideos}`,
-        { cwd, timeout: 180000, maxBuffer: 50 * 1024 * 1024 }
-      );
-      if (stderr) console.log(`[TikTok] ${stderr}`);
-      const result = JSON.parse(stdout);
-      if (result.success && (result.videos?.length > 0 || result.profile)) {
-        console.log(`[TikTok] Camoufox found ${result.total_videos || 0} videos`);
-        return {
-          success: true,
-          profile: result.profile,
-          videos: result.videos,
-          total_videos: result.total_videos,
-        };
-      }
-    } catch (e: any) {
-      console.log(`[TikTok] Camoufox failed: ${e.message}, falling back to yt-dlp...`);
+  try {
+    console.log('[TikTok] Trying Camoufox scraper...');
+    const camoufox = await runScriptJsonWithRetries<TikTokScrapeResult>({
+      label: 'tiktok-camoufox-scrape',
+      executable: 'python3',
+      scriptFileName: 'camoufox_tiktok_scraper.py',
+      args: ['profile', cleanHandle, String(maxVideos)],
+      timeoutMs: 180_000,
+      maxBufferBytes: 50 * 1024 * 1024,
+      maxAttempts: Number(process.env.TIKTOK_CAMOUFOX_SCRAPE_ATTEMPTS || 2),
+      proxyPool: tiktokScraperProxyPool,
+    });
+    const result = camoufox.parsed;
+    if (result.success && (result.videos?.length || result.profile)) {
+      console.log(`[TikTok] Camoufox found ${result.total_videos || 0} videos`);
+      return result;
     }
-  }
-
-  const ytdlpCandidates = [
-    path.join(cwd, 'scripts/tiktok_scraper.py'),
-    path.join(cwd, 'apps/backend/scripts/tiktok_scraper.py'),
-  ];
-  const scriptPath = resolveScriptPath('tiktok_scraper', ytdlpCandidates);
-  if (!scriptPath) {
-    return { success: false, error: 'tiktok_scraper.py not found' };
+  } catch (e: any) {
+    console.log(`[TikTok] Camoufox failed: ${e.message}, falling back to yt-dlp...`);
   }
 
   try {
-    const { stdout, stderr } = await execAsync(
-      `python3 "${scriptPath}" profile "${cleanHandle}" ${maxVideos}`,
-      { cwd, timeout: 180000, maxBuffer: 50 * 1024 * 1024 }
-    );
-    if (stderr) console.log(`[TikTok] ${stderr}`);
-    const result = JSON.parse(stdout);
-    if (result.error) {
-      return { success: false, error: result.error };
+    const fallback = await runScriptJsonWithRetries<TikTokScrapeResult>({
+      label: 'tiktok-ytdlp-scrape',
+      executable: 'python3',
+      scriptFileName: 'tiktok_scraper.py',
+      args: ['profile', cleanHandle, String(maxVideos)],
+      timeoutMs: 180_000,
+      maxBufferBytes: 50 * 1024 * 1024,
+      maxAttempts: Number(process.env.TIKTOK_YTDLP_SCRAPE_ATTEMPTS || 3),
+      proxyPool: tiktokScraperProxyPool,
+    });
+    const result = fallback.parsed;
+    if ((result as any).error) {
+      return { success: false, error: (result as any).error };
     }
     console.log(`[TikTok] Found ${result.total_videos || 0} videos for @${cleanHandle}`);
-    return {
-      success: true,
-      profile: result.profile,
-      videos: result.videos,
-      total_videos: result.total_videos,
-    };
+    return result;
   } catch (error: any) {
-    console.error(`[TikTok] Scrape failed:`, error.message);
+    console.error('[TikTok] Scrape failed:', error.message);
     return { success: false, error: error.message };
   }
 }
@@ -133,48 +122,33 @@ export async function downloadTikTokVideo(
 ): Promise<{ success: boolean; path?: string; error?: string }> {
   console.log(`[TikTok] Downloading: ${videoUrl}`);
 
-  const cwd = process.cwd();
-  const camoufoxCandidates = [
-    path.join(cwd, 'scripts/camoufox_tiktok_downloader.py'),
-    path.join(cwd, 'apps/backend/scripts/camoufox_tiktok_downloader.py'),
-  ];
-  const camoufoxPath = resolveScriptPath('camoufox_tiktok_downloader', camoufoxCandidates);
-
-  if (camoufoxPath) {
-    try {
-      const { stdout } = await execAsync(
-        `python3 "${camoufoxPath}" "${videoUrl}" "${outputPath}"`,
-        { cwd, timeout: 300000 }
-      );
-      const result = JSON.parse(stdout.trim());
-      if (result.success) return result;
-    } catch (e: any) {
-      console.log(`[TikTok] Camoufox download failed: ${e.message}, falling back to Puppeteer...`);
-    }
-  }
-
-  const puppeteerCandidates = [
-    path.join(cwd, 'scripts/tiktok_downloader.ts'),
-    path.join(cwd, 'apps/backend/scripts/tiktok_downloader.ts'),
-  ];
-  const scriptPath = resolveScriptPath('tiktok_downloader', puppeteerCandidates);
-  if (!scriptPath) {
-    return { success: false, error: 'tiktok_downloader.ts not found' };
+  try {
+    const camoufox = await runScriptJsonWithRetries<{ success: boolean; path?: string; error?: string }>({
+      label: 'tiktok-camoufox-download',
+      executable: 'python3',
+      scriptFileName: 'camoufox_tiktok_downloader.py',
+      args: [videoUrl, outputPath],
+      timeoutMs: 300_000,
+      maxAttempts: Number(process.env.TIKTOK_CAMOUFOX_DOWNLOAD_ATTEMPTS || 2),
+      proxyPool: tiktokDownloaderProxyPool,
+    });
+    if (camoufox.parsed.success) return camoufox.parsed;
+  } catch (e: any) {
+    console.log(`[TikTok] Camoufox download failed: ${e.message}, falling back to Puppeteer...`);
   }
 
   try {
-    const { stdout, stderr } = await execAsync(
-      `npx tsx "${scriptPath}" "${videoUrl}" "${outputPath}"`,
-      { cwd, timeout: 300000 }
-    );
-    const lines = stdout.trim().split('\n');
-    const lastLine = lines[lines.length - 1];
-    try {
-      return JSON.parse(lastLine);
-    } catch (e) {
-      if (stderr) console.error(`[TikTok] Stderr: ${stderr}`);
-      return { success: false, error: 'Failed to parse downloader output' };
-    }
+    const puppeteer = await runScriptJsonWithRetries<{ success: boolean; path?: string; error?: string }>({
+      label: 'tiktok-puppeteer-download',
+      executable: 'npx',
+      scriptArgsPrefix: ['tsx'],
+      scriptFileName: 'tiktok_downloader.ts',
+      args: [videoUrl, outputPath],
+      timeoutMs: 300_000,
+      maxAttempts: Number(process.env.TIKTOK_PUPPETEER_DOWNLOAD_ATTEMPTS || 2),
+      proxyPool: tiktokDownloaderProxyPool,
+    });
+    return puppeteer.parsed;
   } catch (error: any) {
     return { success: false, error: error.message };
   }

@@ -199,10 +199,10 @@ export async function scrapeProfileIncrementally(
     let scrapedData: ScrapedProfile | null = null;
     
     if (platform === 'instagram') {
-      // Instagram: use higher limit so one Apify call returns many posts (cost is per call)
-      const instagramPostsLimit = parseInt(
-        process.env.INSTAGRAM_POST_LIMIT || process.env.SOCIAL_SCRAPE_POST_LIMIT || '50',
-        10
+      // Instagram: default 50 (Apify cost is per run, not per post). Override with INSTAGRAM_POST_LIMIT.
+      const instagramPostsLimit = Math.max(
+        1,
+        parseInt(String(process.env.INSTAGRAM_POST_LIMIT || 50), 10) || 50
       );
       const { scrapeInstagramProfile } = await import('../scraper/instagram-service');
       const result = await scrapeInstagramProfile(handle, instagramPostsLimit);
@@ -605,35 +605,53 @@ async function saveScrapedData(researchJobId: string, data: ScrapedProfile) {
           },
         });
 
-        // Sync ClientAccount so orchestration (client-completeness) sees lastScrapedAt and followerCount
-        await tx.clientAccount.upsert({
-          where: {
-            clientId_platform_handle: {
+        // Sync ALL ClientAccount rows for this client+platform so orchestration (client-completeness) gap checks clear.
+        // Duplicate rows (e.g. URL vs handle) all get the same lastScrapedAt/followerCount/bio.
+        const accounts = await tx.clientAccount.findMany({
+          where: { clientId: context.clientId, platform: data.platform },
+          select: { id: true, handle: true },
+        });
+        const updatePayload = {
+          followerCount: safeFollowerCount ?? undefined,
+          followingCount: safeFollowingCount ?? undefined,
+          bio: safeBio ?? undefined,
+          profileUrl: data.url ?? undefined,
+          profileImageUrl: data.posts[0]?.thumbnailUrl ?? undefined,
+          lastScrapedAt: new Date(),
+        };
+        if (accounts.length > 0) {
+          for (const acc of accounts) {
+            await tx.clientAccount.update({
+              where: { id: acc.id },
+              data: updatePayload,
+            });
+          }
+          console.log(
+            `[SocialScraper] Updated ${accounts.length} ClientAccount(s) for client+platform (orchestration gap checks).`
+          );
+        } else {
+          await tx.clientAccount.upsert({
+            where: {
+              clientId_platform_handle: {
+                clientId: context.clientId,
+                platform: data.platform,
+                handle: data.handle,
+              },
+            },
+            update: updatePayload,
+            create: {
               clientId: context.clientId,
               platform: data.platform,
               handle: data.handle,
+              profileUrl: data.url ?? undefined,
+              followerCount: data.followers ?? undefined,
+              followingCount: data.following ?? undefined,
+              bio: data.bio ?? undefined,
+              profileImageUrl: data.posts[0]?.thumbnailUrl ?? undefined,
+              lastScrapedAt: new Date(),
             },
-          },
-          update: {
-            followerCount: safeFollowerCount ?? undefined,
-            followingCount: safeFollowingCount ?? undefined,
-            bio: safeBio ?? undefined,
-            profileUrl: data.url ?? undefined,
-            profileImageUrl: data.posts[0]?.thumbnailUrl ?? undefined,
-            lastScrapedAt: new Date(),
-          },
-          create: {
-            clientId: context.clientId,
-            platform: data.platform,
-            handle: data.handle,
-            profileUrl: data.url ?? undefined,
-            followerCount: data.followers ?? undefined,
-            followingCount: data.following ?? undefined,
-            bio: data.bio ?? undefined,
-            profileImageUrl: data.posts[0]?.thumbnailUrl ?? undefined,
-            lastScrapedAt: new Date(),
-          },
-        });
+          });
+        }
 
         const snapshot = await tx.clientProfileSnapshot.create({
           data: {
@@ -807,9 +825,11 @@ async function resolveProfileContext(researchJobId: string, platform: string, ha
 
   if (!job || !job.client) return null;
 
-  const normalizedHandle = handle.toLowerCase();
+  const { normalizeHandle } = await import('../intake/brain-intake-utils');
+  const normalizedScraped = normalizeHandle(handle);
+  if (!normalizedScraped) return null;
   const isClient = job.client.clientAccounts.some(
-    (acc) => acc.platform === platform && acc.handle.toLowerCase() === normalizedHandle
+    (acc) => acc.platform === platform && normalizeHandle(acc.handle) === normalizedScraped
   );
 
   if (isClient) {
@@ -817,7 +837,7 @@ async function resolveProfileContext(researchJobId: string, platform: string, ha
   }
 
   const discovered = job.discoveredCompetitors.find(
-    (dc) => dc.platform === platform && dc.handle.toLowerCase() === normalizedHandle
+    (dc) => dc.platform === platform && normalizeHandle(dc.handle) === normalizedScraped
   );
 
   if (discovered?.competitorId) {

@@ -1,11 +1,21 @@
 /**
  * Competitor Context Retrieval
+ *
+ * Filters out obvious non-competitors (certification bodies, placeholders, unrelated verticals)
+ * to improve strategy document quality.
  */
 
-import { PrismaClient } from '@prisma/client';
-import { DataQualityScore, calculateQualityScore, detectSuspiciousData } from './data-quality';
+import { prisma } from '../../../lib/prisma';
+import { buildProfileKey, buildRagReadinessScope, RagReadinessScope } from './readiness-context';
+import { DataQualityScore, calculateQualityScore } from './data-quality';
 
-const prisma = new PrismaClient();
+/** Handles known to be non-direct-competitors: certification bodies, placeholders, unrelated verticals */
+const KNOWN_NON_COMPETITOR_HANDLES = new Set([
+  'bcorpuk',        // B Corp UK - certification body, not a brand
+  'wellnesscompetitors', // Placeholder/generic name
+  'ifbbwellness',   // IFBB - fitness/bodybuilding org
+  'elemis',         // Skincare brand - different vertical than biophoton/wellness tech
+].map((h) => h.toLowerCase()));
 
 export interface CompetitorData {
   handle: string;
@@ -30,7 +40,12 @@ export interface CompetitorContext {
  * Get competitor context with quality validation
  * CRITICAL: Filters out client's own social handles to prevent self-comparison
  */
-export async function getCompetitorContext(researchJobId: string): Promise<CompetitorContext> {
+export async function getCompetitorContext(
+  researchJobId: string,
+  readinessScope?: RagReadinessScope
+): Promise<CompetitorContext> {
+  const scope = readinessScope || (await buildRagReadinessScope(researchJobId));
+
   // Get client name to filter out client-related handles
   const researchJob = await prisma.researchJob.findUnique({
     where: { id: researchJobId },
@@ -59,9 +74,31 @@ export async function getCompetitorContext(researchJobId: string): Promise<Compe
   });
 
   // CRITICAL: Filter out client handles
-  const externalCompetitors = discoveredCompetitors.filter(dc => !isClientHandle(dc.handle));
+  let filtered = discoveredCompetitors.filter((dc) => !isClientHandle(dc.handle));
 
-  console.log(`[Competitor Context] Found ${discoveredCompetitors.length} discovered competitors, ${externalCompetitors.length} after filtering client handles`);
+  // Filter out known non-competitors (certification bodies, placeholders, unrelated verticals)
+  const beforeNonCompetitorFilter = filtered.length;
+  filtered = filtered.filter((dc) => {
+    const handleLower = dc.handle?.toLowerCase().replace(/^@+/, '') ?? '';
+    return !KNOWN_NON_COMPETITOR_HANDLES.has(handleLower);
+  });
+  if (beforeNonCompetitorFilter > filtered.length) {
+    console.log(
+      `[Competitor Context] Filtered ${beforeNonCompetitorFilter - filtered.length} known non-competitors`
+    );
+  }
+
+  const beforeReadinessFilter = filtered.length;
+  let externalCompetitors = filtered;
+  if (scope.competitorProfileKeys.size > 0) {
+    externalCompetitors = filtered.filter((row) =>
+      scope.competitorProfileKeys.has(buildProfileKey(row.platform, row.handle))
+    );
+  } else {
+    externalCompetitors = [];
+  }
+
+  console.log(`[Competitor Context] Found ${discoveredCompetitors.length} discovered competitors, ${externalCompetitors.length} after filtering client handles and non-competitors`);
 
   // Get social profile data for these competitors
   const competitorHandles = externalCompetitors.map(c => c.handle);
@@ -90,6 +127,15 @@ export async function getCompetitorContext(researchJobId: string): Promise<Compe
   const issues: string[] = [];
   const warnings: string[] = [];
 
+  if (!scope.hasCompetitorReady) {
+    issues.push('No readiness-qualified competitor snapshots are available');
+  }
+  if (scope.hasCompetitorReady && beforeReadinessFilter > externalCompetitors.length) {
+    warnings.push(
+      `Filtered ${beforeReadinessFilter - externalCompetitors.length} competitors due to readiness gate`
+    );
+  }
+
   if (externalCompetitors.length < 10) {
     warnings.push(`Only ${externalCompetitors.length}/10 external competitors found`);
   }
@@ -103,9 +149,7 @@ export async function getCompetitorContext(researchJobId: string): Promise<Compe
     const profile = socialProfiles.find(p => p.handle === dc.handle && p.platform === dc.platform);
     
     const postIssues: string[] = [];
-    const postWarnings: string[] = []
-
-;
+    const postWarnings: string[] = [];
 
     const posts = profile?.posts || [];
     

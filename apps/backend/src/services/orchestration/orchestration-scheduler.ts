@@ -7,6 +7,23 @@ let isRunning = false;
 const DEFAULT_INTERVAL_MINUTES = 15;
 const MAX_CONCURRENT_JOBS = 3;
 
+/** Statuses for which the continuous orchestrator runs (gap-fill: media downloads, AI analysis, competitor tasks). */
+const DEFAULT_ORCHESTRATION_STATUSES = [
+  'COMPLETE',
+  'ANALYZING',
+  'SCRAPING_CLIENT',
+  'SCRAPING_COMPETITORS',
+  'DISCOVERING_COMPETITORS',
+] as const;
+
+function getOrchestrationStatuses(): string[] {
+  const env = process.env.ORCHESTRATION_STATUSES;
+  if (env && env.trim()) {
+    return env.split(',').map((s) => s.trim()).filter(Boolean);
+  }
+  return [...DEFAULT_ORCHESTRATION_STATUSES];
+}
+
 /**
  * Get orchestration interval from environment or config
  */
@@ -28,10 +45,11 @@ async function processOrchestrationCycle(): Promise<void> {
   console.log('[OrchestrationScheduler] Starting orchestration cycle...');
 
   try {
-    // Get all research jobs that are active (COMPLETE = data gathering done, per ResearchJobStatus enum)
+    const statuses = getOrchestrationStatuses();
+    // Run for jobs in any "active" status so media download and AI analysis can progress before job reaches COMPLETE
     const activeJobs = await prisma.researchJob.findMany({
       where: {
-        status: 'COMPLETE',
+        status: { in: statuses as any },
       },
       select: {
         id: true,

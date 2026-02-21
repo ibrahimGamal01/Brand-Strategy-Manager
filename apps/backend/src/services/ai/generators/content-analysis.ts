@@ -71,58 +71,82 @@ class ContentAnalysisGenerator extends BaseGenerator {
    * Check what data is actually available
    */
   private async checkDataQuality(researchJobId: string) {
-    // Get client ID from research job
-    const job = await prisma.researchJob.findUnique({
-      where: { id: researchJobId },
-      select: { clientId: true }
-    });
+    const [
+      readyClientSnapshots,
+      readyCompetitorSnapshots,
+      totalPosts,
+      postsWithMetrics,
+      postsWithCaptions,
+      aiAnalysisCount,
+      communityInsights,
+    ] = await Promise.all([
+      prisma.clientProfileSnapshot.count({
+        where: { researchJobId, readinessStatus: 'READY' },
+      }),
+      prisma.competitorProfileSnapshot.count({
+        where: { researchJobId, readinessStatus: 'READY' },
+      }),
+      prisma.competitorPostSnapshot.count({
+        where: {
+          competitorProfileSnapshot: {
+            researchJobId,
+            readinessStatus: { in: ['READY', 'DEGRADED'] },
+          },
+        },
+      }),
+      prisma.competitorPostSnapshot.count({
+        where: {
+          competitorProfileSnapshot: {
+            researchJobId,
+            readinessStatus: { in: ['READY', 'DEGRADED'] },
+          },
+          OR: [
+            { likesCount: { gt: 0 } },
+            { viewsCount: { gt: 0 } },
+            { playsCount: { gt: 0 } },
+          ],
+        },
+      }),
+      prisma.competitorPostSnapshot.count({
+        where: {
+          competitorProfileSnapshot: {
+            researchJobId,
+            readinessStatus: { in: ['READY', 'DEGRADED'] },
+          },
+          caption: { not: null },
+        },
+      }),
+      prisma.aiAnalysis.count({
+        where: {
+          researchJobId,
+          analysisType: 'DOCUMENT',
+          topic: 'content_analysis',
+        },
+      }),
+      prisma.communityInsight.count({
+        where: { researchJobId },
+      }),
+    ]);
 
-    if (!job) {
-      console.warn('[Content Analysis] Research job not found');
-      return { score: 0, totalPosts: 0, postsWithMetrics: 0, postsWithCaptions: 0, hasAIAnalysis: false, hasCommunityData: false, warnings: ['Job not found'] };
+    if (readyClientSnapshots === 0 && readyCompetitorSnapshots === 0 && totalPosts === 0) {
+      console.warn('[Content Analysis] No readiness-qualified snapshot evidence found');
+      return {
+        score: 0,
+        totalPosts: 0,
+        postsWithMetrics: 0,
+        postsWithCaptions: 0,
+        hasAIAnalysis: false,
+        hasCommunityData: false,
+        warnings: ['No readiness-qualified snapshot evidence found'],
+      };
     }
 
-    // Get priority competitors
-    const competitors = await prisma.competitor.findMany({
-      where: { 
-        clientId: job.clientId,
-        isPriority: true 
-      }
-    });
-
-    // Get social posts for these competitors
-    const posts = await prisma.cleanedPost.findMany({
-      where: {
-        competitorId: { in: competitors.map(c => c.id) }
-      }
-    });
-
-    // Get AI content analysis
-    const aiAnalysis = await prisma.aiQuestion.findFirst({
-      where: {
-        researchJobId,
-        questionType: 'CONTENT_OPPORTUNITIES'
-      }
-    });
-
     // Get community insights for topic analysis
-    const communityInsights = await prisma.communityInsight.findMany({
-      where: { researchJobId }
-    });
-
     // Calculate quality score
-    const postsWithMetrics = posts.filter(p => 
-      p.likes !== null || p.comments !== null
-    ).length;
-
-    const postsWithCaptions = posts.filter(p => 
-      p.caption && p.caption.length > 10
-    ).length;
-
     let score = 0;
-    if (posts.length >= 20) score += 30;
-    else if (posts.length >= 10) score += 20;
-    else if (posts.length >= 5) score += 10;
+    if (totalPosts >= 20) score += 30;
+    else if (totalPosts >= 10) score += 20;
+    else if (totalPosts >= 5) score += 10;
 
     if (postsWithMetrics >= 10) score += 25;
     else if (postsWithMetrics >= 5) score += 15;
@@ -131,17 +155,18 @@ class ContentAnalysisGenerator extends BaseGenerator {
     if (postsWithCaptions >= 15) score += 20;
     else if (postsWithCaptions >= 8) score += 10;
 
-    if (aiAnalysis) score += 15;
-    if (communityInsights.length > 5) score += 10;
+    if (readyClientSnapshots > 0 && readyCompetitorSnapshots > 0) score += 10;
+    if (aiAnalysisCount > 0) score += 15;
+    if (communityInsights > 5) score += 10;
 
     return {
       score,
-      totalPosts: posts.length,
+      totalPosts,
       postsWithMetrics,
       postsWithCaptions,
-      hasAIAnalysis: !!aiAnalysis,
-      hasCommunityData: communityInsights.length > 0,
-      warnings: this.generateDataWarnings(score, posts.length, postsWithMetrics)
+      hasAIAnalysis: aiAnalysisCount > 0,
+      hasCommunityData: communityInsights > 0,
+      warnings: this.generateDataWarnings(score, totalPosts, postsWithMetrics)
     };
   }
 

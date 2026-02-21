@@ -10,6 +10,7 @@ import { prisma } from '../../lib/prisma';
 import { emitResearchJobEvent } from '../social/research-job-events';
 import { scrapeCompetitorsIncremental } from './competitor-scraper';
 import { ScoredCandidate } from './competitor-scorer';
+import { deriveCandidateEligibility } from './competitor-pipeline-rules';
 
 type ScrapePlatform = 'instagram' | 'tiktok';
 
@@ -22,6 +23,15 @@ export interface IdentityGroupView {
   profiles: CandidateProfileView[];
   bestScore: number;
 }
+
+export type CandidateProfileSourceType = 'client_inspiration' | 'orchestrated' | 'manual';
+export type CandidateReadinessStatus = 'READY' | 'DEGRADED' | 'BLOCKED' | null;
+export type CompetitorPipelineStage =
+  | 'CLIENT_INPUTS'
+  | 'DISCOVERED_CANDIDATES'
+  | 'SCRAPE_QUEUE'
+  | 'SCRAPED_READY'
+  | 'BLOCKED';
 
 export interface CandidateProfileView {
   id: string;
@@ -40,6 +50,20 @@ export interface CandidateProfileView {
   sources: string[];
   discoveredCompetitorId: string | null;
   discoveredStatus: DiscoveredCompetitorStatus | null;
+  sourceType: CandidateProfileSourceType;
+  scrapeEligible: boolean;
+  blockerReasonCode: string | null;
+  readinessStatus: CandidateReadinessStatus;
+  lastStateTransitionAt: string;
+  pipelineStage: CompetitorPipelineStage;
+}
+
+export interface CompetitorStageBucketsView {
+  clientInputs: IdentityGroupView[];
+  discoveredCandidates: IdentityGroupView[];
+  scrapeQueue: IdentityGroupView[];
+  scrapedReady: IdentityGroupView[];
+  blocked: IdentityGroupView[];
 }
 
 function toSelectionState(state: CompetitorCandidateState): CompetitorSelectionState {
@@ -293,6 +317,10 @@ export async function persistOrchestrationCandidates(input: {
       nextState = 'APPROVED';
       nextReason = 'Preserved previously approved candidate';
     }
+    const eligibility = deriveCandidateEligibility({
+      platformOrInputType: row.platform,
+      availabilityStatus: row.availabilityStatus,
+    });
 
     const profile = await prisma.competitorCandidateProfile.upsert({
       where: {
@@ -311,6 +339,9 @@ export async function persistOrchestrationCandidates(input: {
         normalizedHandle: row.normalizedHandle,
         profileUrl: row.profileUrl,
         source: row.sources[0] || 'orchestrator',
+        inputType: eligibility.inputType,
+        scrapeEligible: eligibility.scrapeEligible,
+        blockerReasonCode: eligibility.blockerReasonCode,
         availabilityStatus: row.availabilityStatus,
         availabilityReason: row.availabilityReason,
         resolverConfidence: row.resolverConfidence,
@@ -330,6 +361,9 @@ export async function persistOrchestrationCandidates(input: {
         handle: row.handle,
         profileUrl: row.profileUrl,
         source: row.sources[0] || 'orchestrator',
+        inputType: eligibility.inputType,
+        scrapeEligible: eligibility.scrapeEligible,
+        blockerReasonCode: eligibility.blockerReasonCode,
         availabilityStatus: row.availabilityStatus,
         availabilityReason: row.availabilityReason,
         resolverConfidence: row.resolverConfidence,
@@ -430,8 +464,164 @@ type CandidateProfileWithRelations = CompetitorCandidateProfile & {
   }>;
 };
 
-function profileToView(profile: CandidateProfileWithRelations): CandidateProfileView {
+type ProfileViewBuildOptions = {
+  readinessByProfileKey?: Record<string, CandidateReadinessStatus>;
+};
+
+function normalizeSourceType(source: string): CandidateProfileSourceType {
+  const value = String(source || '').toLowerCase();
+  if (value === 'client_inspiration') return 'client_inspiration';
+  if (value.includes('manual')) return 'manual';
+  return 'orchestrated';
+}
+
+function isScrapeEligiblePlatform(platform: string): boolean {
+  return platform === 'instagram' || platform === 'tiktok';
+}
+
+type EligibilityShape = {
+  inputType: string | null;
+  scrapeEligible: boolean;
+  blockerReasonCode: string | null;
+};
+
+type EligibilityComparableProfile = Pick<
+  CompetitorCandidateProfile,
+  'platform' | 'inputType' | 'availabilityStatus' | 'scrapeEligible' | 'blockerReasonCode'
+>;
+
+function deriveEligibilityForProfile(profile: EligibilityComparableProfile): EligibilityShape {
+  const derived = deriveCandidateEligibility({
+    platformOrInputType: profile.inputType || profile.platform,
+    availabilityStatus: profile.availabilityStatus,
+  });
   return {
+    inputType: derived.inputType,
+    scrapeEligible: derived.scrapeEligible,
+    blockerReasonCode: derived.blockerReasonCode,
+  };
+}
+
+function hasEligibilityDrift(
+  profile: EligibilityComparableProfile,
+  expected: EligibilityShape
+): boolean {
+  return (
+    String(profile.inputType || '') !== String(expected.inputType || '') ||
+    Boolean(profile.scrapeEligible) !== Boolean(expected.scrapeEligible) ||
+    String(profile.blockerReasonCode || '') !== String(expected.blockerReasonCode || '')
+  );
+}
+
+export async function repairCandidateEligibilityForJob(input: {
+  researchJobId: string;
+  runId?: string;
+  limit?: number;
+}): Promise<{
+  checked: number;
+  updated: number;
+  becameEligible: number;
+  lostEligibility: number;
+}> {
+  const where: Prisma.CompetitorCandidateProfileWhereInput = {
+    researchJobId: input.researchJobId,
+  };
+  if (input.runId) where.orchestrationRunId = input.runId;
+  const limit = Math.max(25, Math.min(2000, Number(input.limit || 600)));
+
+  const rows = await prisma.competitorCandidateProfile.findMany({
+    where,
+    select: {
+      id: true,
+      platform: true,
+      inputType: true,
+      scrapeEligible: true,
+      blockerReasonCode: true,
+      availabilityStatus: true,
+    },
+    orderBy: [{ updatedAt: 'desc' }],
+    take: limit,
+  });
+
+  let updated = 0;
+  let becameEligible = 0;
+  let lostEligibility = 0;
+
+  for (const row of rows) {
+    const expected = deriveEligibilityForProfile(row);
+    if (!hasEligibilityDrift(row, expected)) continue;
+    if (!row.scrapeEligible && expected.scrapeEligible) becameEligible += 1;
+    if (row.scrapeEligible && !expected.scrapeEligible) lostEligibility += 1;
+
+    await prisma.competitorCandidateProfile.update({
+      where: { id: row.id },
+      data: {
+        inputType: expected.inputType,
+        scrapeEligible: expected.scrapeEligible,
+        blockerReasonCode: expected.blockerReasonCode,
+      },
+    });
+    updated += 1;
+  }
+
+  return {
+    checked: rows.length,
+    updated,
+    becameEligible,
+    lostEligibility,
+  };
+}
+
+function deriveBlockerReasonCode(profile: CompetitorCandidateProfile): string | null {
+  if (profile.blockerReasonCode) return profile.blockerReasonCode;
+  if (!profile.scrapeEligible) {
+    return isScrapeEligiblePlatform(profile.platform)
+      ? 'SCRAPE_NOT_ELIGIBLE'
+      : 'UNSUPPORTED_SCRAPE_PLATFORM';
+  }
+  if (profile.availabilityStatus === 'PROFILE_UNAVAILABLE') return 'PROFILE_UNAVAILABLE';
+  if (profile.availabilityStatus === 'INVALID_HANDLE') return 'INVALID_HANDLE';
+  return null;
+}
+
+function profileLookupKey(platform: string, normalizedHandle: string): string {
+  return `${String(platform || '').toLowerCase()}:${String(normalizedHandle || '').toLowerCase()}`;
+}
+
+function classifyPipelineStage(profile: CandidateProfileView): CompetitorPipelineStage {
+  if (profile.blockerReasonCode || profile.readinessStatus === 'BLOCKED') {
+    return 'BLOCKED';
+  }
+
+  if (profile.sourceType === 'client_inspiration') {
+    return 'CLIENT_INPUTS';
+  }
+
+  if (profile.discoveredStatus === 'SCRAPED' || profile.discoveredStatus === 'CONFIRMED') {
+    return 'SCRAPED_READY';
+  }
+
+  if (
+    profile.discoveredCompetitorId ||
+    profile.state === 'TOP_PICK' ||
+    profile.state === 'SHORTLISTED' ||
+    profile.state === 'APPROVED'
+  ) {
+    return 'SCRAPE_QUEUE';
+  }
+
+  return 'DISCOVERED_CANDIDATES';
+}
+
+function profileToView(
+  profile: CandidateProfileWithRelations,
+  options: ProfileViewBuildOptions = {}
+): CandidateProfileView {
+  const readinessStatus =
+    options.readinessByProfileKey?.[profileLookupKey(profile.platform, profile.normalizedHandle)] || null;
+  const sourceType = normalizeSourceType(profile.source);
+  const blockerReasonCode = deriveBlockerReasonCode(profile);
+  const view: CandidateProfileView = {
     id: profile.id,
     platform: profile.platform,
     handle: profile.handle,
@@ -453,7 +643,15 @@ function profileToView(profile: CandidateProfileWithRelations): CandidateProfile
       : [],
     discoveredCompetitorId: profile.discoveredCompetitors[0]?.id || null,
     discoveredStatus: profile.discoveredCompetitors[0]?.status || null,
+    sourceType,
+    scrapeEligible: Boolean(profile.scrapeEligible),
+    blockerReasonCode,
+    readinessStatus,
+    lastStateTransitionAt: profile.updatedAt.toISOString(),
+    pipelineStage: 'DISCOVERED_CANDIDATES',
   };
+  view.pipelineStage = classifyPipelineStage(view);
+  return view;
 }
 
 function fallbackCanonicalName(handle: string): string {
@@ -466,13 +664,10 @@ function fallbackCanonicalName(handle: string): string {
     .join(' ');
 }
 
-export function buildIdentityGroupedShortlist(
-  profiles: CandidateProfileWithRelations[]
-): {
-  topPicks: IdentityGroupView[];
-  shortlist: IdentityGroupView[];
-  filteredOut: IdentityGroupView[];
-} {
+function buildIdentityGroups(
+  profiles: CandidateProfileWithRelations[],
+  options: ProfileViewBuildOptions = {}
+): IdentityGroupView[] {
   const statePriority: Record<CompetitorCandidateState, number> = {
     TOP_PICK: 5,
     APPROVED: 4,
@@ -486,7 +681,7 @@ export function buildIdentityGroupedShortlist(
   for (const profile of profiles) {
     const identityKey = profile.identity?.id || `unlinked:${profile.platform}:${profile.normalizedHandle}`;
     const existing = grouped.get(identityKey);
-    const profileView = profileToView(profile);
+    const profileView = profileToView(profile, options);
     const score = Number(profile.relevanceScore || 0);
     if (existing) {
       existing.profiles.push(profileView);
@@ -512,6 +707,18 @@ export function buildIdentityGroupedShortlist(
       return Number(b.relevanceScore || 0) - Number(a.relevanceScore || 0);
     });
   }
+  return groups;
+}
+
+export function buildIdentityGroupedShortlist(
+  profiles: CandidateProfileWithRelations[],
+  options: ProfileViewBuildOptions = {}
+): {
+  topPicks: IdentityGroupView[];
+  shortlist: IdentityGroupView[];
+  filteredOut: IdentityGroupView[];
+} {
+  const groups = buildIdentityGroups(profiles, options);
   const topPicks: IdentityGroupView[] = [];
   const shortlist: IdentityGroupView[] = [];
   const filteredOut: IdentityGroupView[] = [];
@@ -530,7 +737,7 @@ export function buildIdentityGroupedShortlist(
     }
   }
 
-  const FILTERED_DISPLAY_LIMIT = 10;
+  const FILTERED_DISPLAY_LIMIT = 200;
   const filteredOutLimited = filteredOut
     .filter((group) => {
       const hasVerifiedHighSignal = group.profiles.some(
@@ -549,6 +756,75 @@ export function buildIdentityGroupedShortlist(
     .slice(0, FILTERED_DISPLAY_LIMIT);
 
   return { topPicks, shortlist, filteredOut: filteredOutLimited };
+}
+
+export function buildStageGroupedCompetitors(
+  profiles: CandidateProfileWithRelations[],
+  options: ProfileViewBuildOptions = {}
+): CompetitorStageBucketsView {
+  const groups = buildIdentityGroups(profiles, options);
+  const buckets: CompetitorStageBucketsView = {
+    clientInputs: [],
+    discoveredCandidates: [],
+    scrapeQueue: [],
+    scrapedReady: [],
+    blocked: [],
+  };
+
+  for (const group of groups) {
+    const byStage: Record<CompetitorPipelineStage, CandidateProfileView[]> = {
+      CLIENT_INPUTS: [],
+      DISCOVERED_CANDIDATES: [],
+      SCRAPE_QUEUE: [],
+      SCRAPED_READY: [],
+      BLOCKED: [],
+    };
+
+    for (const profile of group.profiles) {
+      byStage[profile.pipelineStage].push(profile);
+    }
+
+    const pushStage = (
+      stage: CompetitorPipelineStage,
+      target:
+        | CompetitorStageBucketsView['clientInputs']
+        | CompetitorStageBucketsView['discoveredCandidates']
+        | CompetitorStageBucketsView['scrapeQueue']
+        | CompetitorStageBucketsView['scrapedReady']
+        | CompetitorStageBucketsView['blocked']
+    ) => {
+      if (byStage[stage].length === 0) return;
+      target.push({
+        identityId: group.identityId,
+        canonicalName: group.canonicalName,
+        websiteDomain: group.websiteDomain,
+        businessType: group.businessType,
+        audienceSummary: group.audienceSummary,
+        profiles: byStage[stage],
+        bestScore: Math.max(
+          ...byStage[stage].map((profile) => Number(profile.relevanceScore || 0)),
+          0
+        ),
+      });
+    };
+
+    pushStage('CLIENT_INPUTS', buckets.clientInputs);
+    pushStage('DISCOVERED_CANDIDATES', buckets.discoveredCandidates);
+    pushStage('SCRAPE_QUEUE', buckets.scrapeQueue);
+    pushStage('SCRAPED_READY', buckets.scrapedReady);
+    pushStage('BLOCKED', buckets.blocked);
+  }
+
+  const sortByScore = (rows: IdentityGroupView[]) =>
+    rows.sort((a, b) => Number(b.bestScore || 0) - Number(a.bestScore || 0));
+
+  sortByScore(buckets.clientInputs);
+  sortByScore(buckets.discoveredCandidates);
+  sortByScore(buckets.scrapeQueue);
+  sortByScore(buckets.scrapedReady);
+  sortByScore(buckets.blocked);
+
+  return buckets;
 }
 
 export async function approveAndQueueCandidates(input: {
@@ -690,9 +966,20 @@ export async function continueQueueFromCandidates(input: {
   onlyPending?: boolean;
   forceUnavailable?: boolean;
   forceMaterialize?: boolean;
+  maxQueueTargets?: number;
 }): Promise<{ queuedCount: number; skippedCount: number }> {
   const selectedIds = Array.from(new Set((input.candidateProfileIds || []).filter(Boolean)));
   const forceMaterialize = Boolean(input.forceMaterialize);
+  const defaultMaxQueueTargets = Math.max(
+    5,
+    Number(process.env.COMPETITOR_CONTINUE_QUEUE_MAX || 25)
+  );
+  const maxQueueTargets =
+    Number(input.maxQueueTargets || 0) > 0
+      ? Number(input.maxQueueTargets)
+      : selectedIds.length > 0
+        ? selectedIds.length
+        : defaultMaxQueueTargets;
 
   const where: Prisma.CompetitorCandidateProfileWhereInput = {
     researchJobId: input.researchJobId,
@@ -703,6 +990,28 @@ export async function continueQueueFromCandidates(input: {
   if (input.runId) where.orchestrationRunId = input.runId;
   if (selectedIds.length > 0) where.id = { in: selectedIds };
 
+  const eligibilityRepair = await repairCandidateEligibilityForJob({
+    researchJobId: input.researchJobId,
+    runId: input.runId,
+    limit: 800,
+  });
+  if (eligibilityRepair.updated > 0) {
+    emitResearchJobEvent({
+      researchJobId: input.researchJobId,
+      runId: input.runId,
+      source: 'competitor-orchestrator-v2',
+      code: 'competitor.eligibility.repaired',
+      level: 'info',
+      message: `Repaired eligibility flags for ${eligibilityRepair.updated} competitor candidate(s)`,
+      metrics: {
+        checked: eligibilityRepair.checked,
+        updated: eligibilityRepair.updated,
+        becameEligible: eligibilityRepair.becameEligible,
+        lostEligibility: eligibilityRepair.lostEligibility,
+      },
+    });
+  }
+
   const profiles = await prisma.competitorCandidateProfile.findMany({
     where,
     include: {
@@ -710,15 +1019,70 @@ export async function continueQueueFromCandidates(input: {
         select: { id: true, status: true },
       },
     },
-    orderBy: [{ relevanceScore: 'desc' }],
-    take: 80,
+    orderBy: [{ relevanceScore: 'desc' }, { updatedAt: 'desc' }],
+    take: Math.max(80, Math.min(500, maxQueueTargets * 8)),
   });
+
+  const queuePriority = (
+    profile: (typeof profiles)[number],
+    eligibility: EligibilityShape
+  ): number => {
+    const source = String(profile.source || '').toLowerCase();
+    const state = String(profile.state || '').toUpperCase();
+    let priority = 0;
+    if (source === 'client_inspiration') priority += 10000;
+    if (state === 'TOP_PICK') priority += 2500;
+    else if (state === 'APPROVED') priority += 1800;
+    else if (state === 'SHORTLISTED') priority += 1200;
+    if (eligibility.scrapeEligible) priority += 500;
+    if (profile.availabilityStatus === 'VERIFIED') priority += 300;
+    priority += Number(profile.relevanceScore || 0) * 100;
+    return priority;
+  };
+
+  const withEligibility = profiles.map((profile) => ({
+    profile,
+    eligibility: deriveEligibilityForProfile(profile),
+  }));
+  const sortedByPriority = [...withEligibility].sort(
+    (a, b) => queuePriority(b.profile, b.eligibility) - queuePriority(a.profile, a.eligibility)
+  );
+  const sortedClientInputs = sortedByPriority.filter(
+    (row) => String(row.profile.source || '').toLowerCase() === 'client_inspiration'
+  );
+  const clientReserve =
+    selectedIds.length > 0
+      ? 0
+      : Math.max(0, Number(process.env.COMPETITOR_QUEUE_CLIENT_RESERVE || 3));
+  const orderedProfiles: typeof withEligibility = [];
+  const seenProfileIds = new Set<string>();
+  for (const row of sortedClientInputs.slice(0, clientReserve)) {
+    if (seenProfileIds.has(row.profile.id)) continue;
+    seenProfileIds.add(row.profile.id);
+    orderedProfiles.push(row);
+  }
+  for (const row of sortedByPriority) {
+    if (seenProfileIds.has(row.profile.id)) continue;
+    seenProfileIds.add(row.profile.id);
+    orderedProfiles.push(row);
+  }
 
   const queueTargets: Array<{ id: string; handle: string; platform: string }> = [];
   let skippedCount = 0;
 
-  for (const profile of profiles) {
+  for (const row of orderedProfiles) {
+    const profile = row.profile;
+    const eligibility = row.eligibility;
+    if (queueTargets.length >= maxQueueTargets) {
+      skippedCount += 1;
+      continue;
+    }
+
     if (!isScrapePlatform(profile.platform)) {
+      skippedCount += 1;
+      continue;
+    }
+    if (!forceMaterialize && !eligibility.scrapeEligible) {
       skippedCount += 1;
       continue;
     }

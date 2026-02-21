@@ -7,6 +7,7 @@ Run: python3 camoufox_insta_downloader.py <post_url>
 """
 
 import json
+import os
 import re
 import ssl
 import subprocess
@@ -19,6 +20,27 @@ try:
     _SSL_CTX = ssl.create_default_context(cafile=certifi.where())
 except ImportError:
     _SSL_CTX = ssl.create_default_context()
+
+PROXY_URL = (
+    os.environ.get("SCRAPER_PROXY_URL")
+    or os.environ.get("HTTPS_PROXY")
+    or os.environ.get("HTTP_PROXY")
+    or ""
+).strip()
+
+def with_proxy(cmd):
+    if PROXY_URL and "--proxy" not in cmd:
+        return [*cmd, "--proxy", PROXY_URL]
+    return cmd
+
+def open_url(req, timeout):
+    if PROXY_URL:
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({"http": PROXY_URL, "https": PROXY_URL}),
+            urllib.request.HTTPSHandler(context=_SSL_CTX),
+        )
+        return opener.open(req, timeout=timeout)
+    return urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX)
 
 def _get_camoufox():
     try:
@@ -126,7 +148,7 @@ def resolve_post(post_url: str, debug: bool = False) -> dict:
             post_url,
             headers={"User-Agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"},
         )
-        with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
+        with open_url(req, timeout=15) as resp:
             html = resp.read().decode("utf-8", errors="ignore")
         m = re.search(r'<meta[^>]+property="og:image"[^>]+content="([^"]+)"', html)
         if not m:
@@ -190,7 +212,7 @@ def resolve_post(post_url: str, debug: bool = False) -> dict:
 
     try:
         result = subprocess.run(
-            ["yt-dlp", "-g", "--no-playlist", post_url],
+            with_proxy(["yt-dlp", "-g", "--no-playlist", post_url]),
             capture_output=True, text=True, timeout=30,
         )
         if result.returncode == 0 and result.stdout.strip():

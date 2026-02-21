@@ -149,10 +149,17 @@ export async function loadBrandIntelligenceContext(
 
   const sanitizeResult = sanitizeDiscoveryContext({
     businessOverview: String(
-      inputData.businessOverview || inputData.description || job.client.businessOverview || ''
+      inputData.businessOverview ||
+        inputData.description ||
+        job.client.businessOverview ||
+        ''
     ),
     audienceSummary: String(
-      inputData.targetAudience || brainProfile?.targetMarket || inputData.audience || ''
+      inputData.idealAudience ||
+        inputData.targetAudience ||
+        brainProfile?.targetMarket ||
+        inputData.audience ||
+        ''
     ),
     niche: String(inputData.niche || brainProfile?.businessType || 'business'),
   });
@@ -174,6 +181,10 @@ export async function loadBrandIntelligenceContext(
           ? (brainProfile.constraints as Record<string, unknown>).excludedCategories
           : []
       ),
+      ...normalizeList(inputData.topicsToAvoid),
+      ...(inputData.constraints && typeof inputData.constraints === 'object'
+        ? normalizeList((inputData.constraints as Record<string, unknown>).topicsToAvoid)
+        : []),
     ])
   );
 

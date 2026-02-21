@@ -244,15 +244,16 @@ DO NOT use vague sources like "Reddit Insight" or "Platform feedback".
 CRITICAL RULES:
 1. Base personas on research data (TARGET_AUDIENCE AI insight, community insights)
 2. Be specific - avoid generic personas
-3. Use actual quotes from research when available
-4. Each persona should be 400-600 words
-5. Total: 2-4 personas = 1500-2500 words
-6. Use data from social audience analysis when available
-7. If demographic data is unclear, infer from context clues in research
-8. If data is missing for a subsection (like Quote), SKIP that subsection - do NOT include "Data unavailable" placeholder text
-9. DO NOT use em-dashes (—) use standard hyphens (-)
-10. COMPLETE ALL PERSONAS FULLY - if approaching token limit, reduce detail per persona rather than leaving incomplete
-11. WORD VARIETY: Vary vocabulary throughout - avoid repeating the same phrases more than 3 times
+3. Use consistent labels: "Persona 1: [Descriptive Title]", "Persona 2: [Descriptive Title]", etc. Do not introduce random first names (e.g. Lisa, Ahmed) unless they are the persona title. Other sections will reference personas by these exact labels.
+4. Use actual quotes from research when available
+5. Each persona should be 400-600 words
+6. Total: 2-4 personas = 1500-2500 words
+7. Use data from social audience analysis when available
+8. If demographic data is unclear, infer from context clues in research
+9. If data is missing for a subsection (like Quote), SKIP that subsection - do NOT include "Data unavailable" placeholder text
+10. DO NOT use em-dashes (—) use standard hyphens (-)
+11. COMPLETE ALL PERSONAS FULLY - if approaching token limit, reduce detail per persona rather than leaving incomplete
+12. WORD VARIETY: Vary vocabulary throughout - avoid repeating the same phrases more than 3 times
 
 OUTPUT FORMAT: Pure markdown with clear section breaks`,
 
@@ -678,7 +679,7 @@ TASK: Define 3-5 core content pillars in MARKDOWN based on the research.
 ### Strategic Foundation
 - **Purpose**: [What this pillar communicates]
 - **Why It Matters**: [Connects to specific pain point/goal from research]
-- **Target Persona**: [Primary persona addressed]
+- **Target Persona**: [Reference EXACT label from Part 2, e.g. "Persona 1 (Tech-Savvy Wellness Seeker)" - do NOT introduce new names like Lisa that are not defined in Part 2]
 
 ### Execution Examples
 - **Example Hooks**:
@@ -718,7 +719,7 @@ Based on competitor benchmarks (if available):
 ## Pillar 3: [Pillar Name]
 
 ### Persona Connection
-Which persona does this serve? [Reference specific persona from Part 2]
+Which persona does this serve? [Reference EXACT persona label from Part 2 - e.g. "Persona 1 (Tech-Savvy Wellness Seeker)" - do NOT introduce new names like Lisa that are not defined in Part 2]
 
 ### Format Recommendations
 - **Primary**: [Format] - [why it works for this pillar based on data]

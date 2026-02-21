@@ -22,6 +22,8 @@ type ContinueJobResult = {
   runId: string;
   clientProfilesAttempted: number;
   competitorProfilesAttempted: number;
+  clientProfilesSkipped?: number;
+  competitorProfilesSkipped?: number;
   errors: string[];
 };
 
@@ -259,7 +261,12 @@ export async function continueResearchJob(
       take: Math.max((job as any).competitorsToFind || 10, 10),
     });
 
-    for (const competitor of competitors) {
+    const clientHandleSet = new Set(clientTargets.map((t) => t.handle.toLowerCase()));
+    const competitorsToScrape = competitors.filter(
+      (c) => !clientHandleSet.has(String(c.handle || '').toLowerCase())
+    );
+
+    for (const competitor of competitorsToScrape) {
       competitorProfilesAttempted++;
       emitResearchJobEvent({
         researchJobId: jobId,
