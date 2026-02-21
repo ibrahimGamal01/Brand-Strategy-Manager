@@ -389,3 +389,10 @@ See: `part2_frontend_plan.md` for frontend development plan.
 ---
 
 **Backend Complete! 🎉**
+
+---
+
+## Deployment
+
+For Railway deployment steps (backend + frontend services), see:
+- `docs/deployment/railway.md`
