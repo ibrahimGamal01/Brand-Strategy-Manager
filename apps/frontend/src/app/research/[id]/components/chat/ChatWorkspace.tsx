@@ -255,6 +255,24 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
     }
   }
 
+  async function handleAttachmentView(message: ChatMessage, attachmentId: string, meta?: Record<string, unknown>) {
+    if (!activeSessionId) return;
+    const payload = meta || {};
+    if (socket.status === 'open') {
+      socket.sendBlockEvent({ messageId: message.id, blockId: attachmentId, eventType: 'ATTACH_VIEW', payload });
+    } else {
+      await apiFetch(`/research-jobs/${jobId}/chat/sessions/${activeSessionId}/events`, {
+        method: 'POST',
+        body: JSON.stringify({
+          messageId: message.id,
+          blockId: attachmentId,
+          eventType: 'ATTACH_VIEW',
+          payload,
+        }),
+      });
+    }
+  }
+
   async function handleUnpinSavedBlock(block: ChatSavedBlock) {
     if (!activeSessionId) return;
     await recordEvent(
@@ -333,6 +351,7 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
           onBlockPin={(message, block) => recordEvent(message, block, 'PIN')}
           onBlockUnpin={(message, block) => recordEvent(message, block, 'UNPIN')}
           onSelectDesign={handleSelectDesign}
+          onAttachmentView={handleAttachmentView}
           isStreaming={socket.status === 'open' && Boolean(streamingMessage)}
           connectionStatus={socket.status}
           researchJobId={jobId}
