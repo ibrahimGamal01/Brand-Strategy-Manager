@@ -1,22 +1,16 @@
 'use client';
 
-import { motion } from 'framer-motion';
+import { useState } from 'react';
 
-interface PromptChip {
-    label: string;
-    prompt: string;
-    icon?: string;
-}
-
-const DEFAULT_CHIPS: PromptChip[] = [
-    { label: 'Compare competitors', prompt: 'Compare my top 3 competitors side by side', icon: '⚔️' },
-    { label: 'Instagram hook', prompt: 'Suggest 3 strong hooks for Instagram', icon: '✨' },
-    { label: 'Content calendar', prompt: 'Build me a 1-week content calendar based on the strategy', icon: '📅' },
-    { label: 'Brand gap', prompt: "What's my brand's biggest gap right now?", icon: '🔍' },
-    { label: 'SWOT analysis', prompt: 'Give me a full SWOT analysis for my brand', icon: '📊' },
-    { label: 'Brand voice', prompt: 'Analyze and describe my brand voice profile', icon: '🎙️' },
-    { label: 'Top post format', prompt: 'What content format performs best for my niche?', icon: '🏆' },
-    { label: 'Competitor weakness', prompt: 'What are the biggest weaknesses of my top competitors?', icon: '💡' },
+const DEFAULT_CHIPS = [
+    { label: '⚔️ Compare competitors', prompt: 'Compare my top competitors and show me where I stand.' },
+    { label: '📊 SWOT analysis', prompt: '/swot Run a full SWOT analysis for my brand.' },
+    { label: '🎙️ Brand voice', prompt: '/voice Visualize my brand voice positioning.' },
+    { label: '✨ Instagram hook', prompt: 'Write me 3 high-converting Instagram hook formulas for my niche.' },
+    { label: '📅 Content calendar', prompt: '/calendar Show me content calendar actions I can take now.' },
+    { label: '🔭 Brand gap', prompt: 'What is my biggest brand gap compared to competitors?' },
+    { label: '🏆 Scoreboard', prompt: '/scoreboard Rank my top competitors by engagement score.' },
+    { label: '🎨 Moodboard', prompt: '/moodboard Create a visual direction moodboard for my brand.' },
 ];
 
 interface PromptChipsProps {
@@ -25,24 +19,30 @@ interface PromptChipsProps {
 }
 
 export function PromptChips({ onSelect, disabled }: PromptChipsProps) {
+    const [expanded, setExpanded] = useState(false);
+
+    const visible = expanded ? DEFAULT_CHIPS : DEFAULT_CHIPS.slice(0, 3);
+
+    if (disabled) return null;
+
     return (
-        <div className="overflow-x-auto pb-1 no-scrollbar">
-            <div className="flex gap-2 w-max">
-                {DEFAULT_CHIPS.map((chip, index) => (
-                    <motion.button
-                        key={chip.label}
-                        initial={{ opacity: 0, y: 6 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.2, delay: index * 0.03 }}
-                        onClick={() => onSelect(chip.prompt)}
-                        disabled={disabled}
-                        className="flex items-center gap-1.5 rounded-full border border-border/60 bg-background/60 px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition-all hover:border-primary/40 hover:bg-primary/5 hover:text-foreground disabled:pointer-events-none disabled:opacity-40 whitespace-nowrap cursor-pointer"
-                    >
-                        {chip.icon && <span className="text-[12px]">{chip.icon}</span>}
-                        {chip.label}
-                    </motion.button>
-                ))}
-            </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+            {visible.map((chip) => (
+                <button
+                    key={chip.label}
+                    onClick={() => onSelect(chip.prompt)}
+                    disabled={disabled}
+                    className="rounded-full border border-dashed border-border/60 bg-background/60 px-3 py-1 text-[11px] text-muted-foreground transition-all hover:border-primary/40 hover:bg-primary/5 hover:text-foreground disabled:opacity-40"
+                >
+                    {chip.label}
+                </button>
+            ))}
+            <button
+                onClick={() => setExpanded((p) => !p)}
+                className="rounded-full border border-border/40 bg-background/40 px-2.5 py-1 text-[10px] text-muted-foreground transition-all hover:bg-accent"
+            >
+                {expanded ? '↑ Less' : `+${DEFAULT_CHIPS.length - 3} more`}
+            </button>
         </div>
     );
 }

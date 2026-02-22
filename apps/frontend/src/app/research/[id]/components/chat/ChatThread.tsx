@@ -95,17 +95,35 @@ export function ChatThread({
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              className="flex flex-col items-center justify-center py-12 text-center"
+              className="flex flex-col items-center justify-center py-8 text-center"
             >
-              <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 text-2xl text-white shadow-lg">
+              <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 text-[18px] font-bold text-white shadow-lg">
                 BAT
               </div>
               <h4 className="text-sm font-semibold text-foreground">BAT Intelligence</h4>
-              <p className="mt-1 max-w-[260px] text-xs text-muted-foreground">
-                Your brand strategy co-pilot. Ask anything about your brand, competitors, or content direction.
+              <p className="mt-1 max-w-[240px] text-xs text-muted-foreground">
+                Your brand strategy co-pilot. Start with one of these or type anything below.
               </p>
-              <p className="mt-3 text-[11px] text-muted-foreground/60">
-                Type / to see available commands
+
+              <div className="mt-5 w-full max-w-sm space-y-2">
+                {[
+                  { q: "What is my brand's biggest competitive gap?", icon: '🔭' },
+                  { q: 'Show me my top 3 competitor insights', icon: '⚔️' },
+                  { q: 'What content should I create this week?', icon: '✨' },
+                ].map((card) => (
+                  <button
+                    key={card.q}
+                    onClick={() => onDraftChange(card.q)}
+                    className="flex w-full items-center gap-3 rounded-xl border border-dashed border-border/60 bg-background/60 px-4 py-3 text-left text-xs text-foreground transition-all hover:border-primary/40 hover:bg-primary/5"
+                  >
+                    <span className="text-base">{card.icon}</span>
+                    <span>{card.q}</span>
+                  </button>
+                ))}
+              </div>
+
+              <p className="mt-5 text-[10px] text-muted-foreground/60">
+                Type / for commands · Ctrl+Enter to send
               </p>
             </motion.div>
           ) : (

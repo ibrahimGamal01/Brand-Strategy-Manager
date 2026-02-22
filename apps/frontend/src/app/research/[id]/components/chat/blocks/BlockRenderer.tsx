@@ -53,6 +53,39 @@ const BLOCK_LABELS: Record<string, string> = {
   brand_voice_meter: 'Voice Meter',
 };
 
+const BLOCK_ACCENT: Record<string, string> = {
+  insight: 'border-l-amber-400',
+  swot: 'border-l-violet-400',
+  comparison: 'border-l-sky-400',
+  scoreboard: 'border-l-emerald-400',
+  poll: 'border-l-primary',
+  metric_cards: 'border-l-rose-400',
+  moodboard: 'border-l-pink-400',
+  brand_voice_meter: 'border-l-indigo-400',
+  chart: 'border-l-cyan-400',
+  timeline: 'border-l-orange-400',
+  table: 'border-l-slate-400',
+  source_list: 'border-l-zinc-400',
+};
+
+const BLOCK_ICON: Record<string, string> = {
+  insight: '💡',
+  swot: '📊',
+  comparison: '⚔️',
+  scoreboard: '🏆',
+  poll: '🗳️',
+  metric_cards: '📈',
+  moodboard: '🎨',
+  brand_voice_meter: '🎙️',
+  chart: '📉',
+  timeline: '📅',
+  table: '📋',
+  source_list: '📎',
+  action_buttons: '⚡',
+  post_grid: '🖼️',
+  funnel: '⬇️',
+};
+
 interface BlockRendererProps {
   block: ChatBlock;
   isPinned?: boolean;
@@ -103,11 +136,14 @@ export function BlockRenderer({ block, isPinned, onView, onPin, onUnpin, onActio
   }, [block, onView]);
 
   const label = BLOCK_LABELS[block.type] || 'Block';
+  const accentClass = BLOCK_ACCENT[block.type] || 'border-l-border';
+  const icon = BLOCK_ICON[block.type] || '📎';
 
   return (
-    <div ref={ref} className="rounded-lg border border-border/60 bg-background/60 p-3">
+    <div ref={ref} className={`rounded-lg border border-l-4 bg-card/70 p-3 ${accentClass} border-border/50`}>
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
+          <span className="text-sm">{icon}</span>
           <Badge variant="outline" className="text-[10px] uppercase">
             {label}
           </Badge>
@@ -116,20 +152,22 @@ export function BlockRenderer({ block, isPinned, onView, onPin, onUnpin, onActio
               viewed
             </Badge>
           ) : null}
-          {block.title ? <span className="text-xs font-medium">{block.title}</span> : null}
         </div>
         <div className="flex items-center gap-2">
           {isPinned ? (
-            <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => onUnpin?.(block)}>
+            <Button size="sm" variant="outline" className="h-6 px-2 text-[10px]" onClick={() => onUnpin?.(block)}>
               Unpin
             </Button>
           ) : (
-            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => onPin?.(block)}>
+            <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px]" onClick={() => onPin?.(block)}>
               Pin
             </Button>
           )}
         </div>
       </div>
+      {block.title ? (
+        <p className="mb-2 text-xs font-semibold text-muted-foreground">{block.title}</p>
+      ) : null}
 
       {isTableBlock(block) ? <TableBlockView block={block} /> : null}
       {isMetricCardsBlock(block) ? <MetricCardsBlockView block={block} /> : null}

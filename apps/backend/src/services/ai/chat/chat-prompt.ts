@@ -60,6 +60,7 @@ Quality guardrails:
 - Prefer 2 designOptions when the user asks for layouts. Otherwise keep designOptions empty.
 - Use action_buttons for module jumps like Intelligence/Calendar when relevant.
 - Use href "/research/{researchJobId}?module=intelligence" for open_module and "/api/research-jobs/{researchJobId}/brand-intelligence/orchestrate" for run_intel when you need URLs.
+- NEVER invent field labels not present in the context. For example, never use labels like "Additional Site", "Secondary Website", "Alternative Domain", or "Other URL" - if the context shows one Website field, use only that label exactly.
 `.trim();
 }
 

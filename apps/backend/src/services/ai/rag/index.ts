@@ -194,10 +194,16 @@ export function formatContextForLLM(context: ResearchContext): string {
 `;
 
   // Section 2: Business Context
+  const primaryWebsite = context.business.website || (context.brainProfile.hasData ? context.brainProfile.websiteDomain : null) || 'Not available';
+  const secondaryWebsite = context.business.website && context.brainProfile.hasData && context.brainProfile.websiteDomain && context.brainProfile.websiteDomain !== context.business.website
+    ? context.brainProfile.websiteDomain
+    : null;
+  const websiteDisplay = secondaryWebsite ? `${primaryWebsite} (also: ${secondaryWebsite})` : primaryWebsite;
+
   output += `## Business Profile
 - **Name**: ${context.business.name}
 - **Handle**: ${context.business.handle || 'Not available'}
-- **Website**: ${context.business.website || 'Not available'}
+- **Website**: ${websiteDisplay}
 - **Bio**: ${context.business.bio || 'Not available'}
 - **Search Results**: ${context.business.searchResults.length} sources
 

@@ -68,8 +68,6 @@ export function ChatMessageItem({
   const blockCount = activeBlocks.length;
   const hasAttachments = (message.attachments?.length || 0) > 0;
 
-  const avatarLabel = isUser ? 'You' : 'BAT';
-
   const cleanedContent = useMemo(() => {
     let content = message.content || '';
     content = content.replace(/```(?:json)?\s*\{[^`]*"blocks"[^`]*"designOptions"[^`]*\}\s*```/gi, '');
@@ -95,32 +93,39 @@ export function ChatMessageItem({
     onComposerFill?.(`Rewrite this in a ${toneLabel} tone: "${preview}"`);
   }
 
+  if (isUser) {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[75%] rounded-2xl rounded-tr-sm bg-primary/15 px-4 py-2.5 text-sm text-foreground shadow-sm">
+          <p className="whitespace-pre-wrap leading-relaxed">{cleanedContent || message.content}</p>
+          <p className="mt-1 text-right text-[10px] text-muted-foreground">{formatTimestamp(message.createdAt)}</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <article
-      className={`group relative rounded-xl border px-4 py-3 text-sm shadow-sm transition-colors ${isUser
-          ? 'ml-auto max-w-[85%] border-primary/30 bg-gradient-to-br from-primary/10 to-background text-foreground'
-          : 'mr-auto border-border/70 bg-card/80 text-foreground'
-        }`}
+      className="group relative"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
       <div className="flex items-start gap-3">
-        {/* Avatar */}
-        <div
-          className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-bold tracking-wide ${isUser
-              ? 'bg-primary/20 text-primary'
-              : 'bg-gradient-to-br from-emerald-400 to-teal-600 text-white shadow-sm'
-            }`}
-        >
-          {avatarLabel}
+        {/* BAT Avatar with Intel label */}
+        <div className="flex flex-col items-center gap-0.5 flex-shrink-0">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 text-[11px] font-bold tracking-wide text-white shadow-md">
+            BAT
+          </div>
+          <span className="text-[9px] font-mono uppercase tracking-wider text-muted-foreground">Intel</span>
         </div>
 
-        <div className="flex-1 min-w-0">
+        {/* BAT message card with teal left accent */}
+        <div className="flex-1 min-w-0 rounded-xl border border-l-4 border-border/50 border-l-teal-400 bg-card/80 px-4 py-3 shadow-sm">
           <div className="mb-2 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-[10px] uppercase tracking-wide text-muted-foreground">
-              <span className="font-semibold">{isUser ? 'You' : 'BAT Intelligence'}</span>
+              <span className="font-semibold text-teal-600 dark:text-teal-400">BAT Intelligence</span>
               {message.pending ? <Badge variant="outline">sending</Badge> : null}
-              {!isUser && (blockCount > 0 || hasAttachments) ? (
+              {(blockCount > 0 || hasAttachments) ? (
                 <Badge variant="secondary" className="text-[10px] uppercase">
                   {blockCount + (message.attachments?.length || 0)} items
                 </Badge>
@@ -129,9 +134,7 @@ export function ChatMessageItem({
             <span className="text-[10px] text-muted-foreground">{formatTimestamp(message.createdAt)}</span>
           </div>
 
-          {isUser ? (
-            <p className="whitespace-pre-wrap leading-relaxed">{cleanedContent || message.content}</p>
-          ) : cleanedContent ? (
+          {cleanedContent ? (
             <div className="prose prose-sm max-w-none text-foreground">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{cleanedContent}</ReactMarkdown>
             </div>
@@ -199,8 +202,7 @@ export function ChatMessageItem({
                       return;
                     }
                     if (action === 'run_intel' || action === 'run_orchestrator' || action === 'run_intelligence') {
-                      const targetHref =
-                        href || `/api/research-jobs/${researchJobId}/brand-intelligence/orchestrate`;
+                      const targetHref = href || `/api/research-jobs/${researchJobId}/brand-intelligence/orchestrate`;
                       fetch(targetHref, { method: 'POST' }).catch(() => { });
                       return;
                     }
@@ -216,8 +218,8 @@ export function ChatMessageItem({
         </div>
       </div>
 
-      {/* Hover toolbar - only for assistant messages */}
-      {!isUser && hovered && !message.pending && (
+      {/* Hover toolbar */}
+      {hovered && !message.pending && (
         <div className="absolute -top-5 right-3 z-20">
           <MessageToolbar
             message={message}
