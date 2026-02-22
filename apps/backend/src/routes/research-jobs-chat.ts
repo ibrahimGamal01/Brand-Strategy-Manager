@@ -14,6 +14,8 @@ import {
 import { attachScreenshotsToMessage } from '../services/chat/chat-attachments';
 import { handleChatBlockEvent } from '../services/chat/chat-events';
 import { streamChatCompletion } from '../services/ai/chat/chat-generator';
+import { listUserContexts, deactivateUserContext } from '../services/chat/user-context-repository';
+
 
 const router = Router();
 
@@ -170,6 +172,28 @@ router.get('/:id/chat/sessions/:sessionId/saved-blocks', async (req, res) => {
   } catch (error: any) {
     console.error('[Chat] Failed to list saved blocks:', error);
     return res.status(500).json({ error: 'Failed to list saved blocks', details: error.message });
+  }
+});
+
+// ---- User-Supplied Context endpoints ----
+
+router.get('/:id/chat/user-context', async (req, res) => {
+  try {
+    const { id: researchJobId } = req.params;
+    const items = await listUserContexts(researchJobId);
+    return res.json({ items });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Failed to list user contexts', details: error.message });
+  }
+});
+
+router.delete('/:id/chat/user-context/:contextId', async (req, res) => {
+  try {
+    const { contextId } = req.params;
+    await deactivateUserContext(contextId);
+    return res.json({ ok: true });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Failed to remove user context', details: error.message });
   }
 });
 

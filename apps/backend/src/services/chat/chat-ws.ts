@@ -15,6 +15,8 @@ import { attachScreenshotsToMessage } from './chat-attachments';
 import { handleChatBlockEvent } from './chat-events';
 import { streamChatCompletion } from '../ai/chat/chat-generator';
 import type { ChatBlock, ChatDesignOption } from './chat-types';
+import { extractUserContext } from './user-context-extractor';
+import { upsertUserContext } from './user-context-repository';
 
 type ChatSocketState = {
   researchJobId: string;
@@ -137,6 +139,21 @@ export function attachChatWebSocketServer(server: http.Server, isSchemaReady: Sc
           if (attachments.length) {
             await attachScreenshotsToMessage(userMessage.id, attachments);
           }
+
+          // Auto-extract and persist any user-supplied context (websites, handles, notes)
+          const uscItems = extractUserContext(content);
+          if (uscItems.length > 0) {
+            await Promise.all(
+              uscItems.map((item) =>
+                upsertUserContext(researchJobId, item.category, item.key, item.value, item.label, content).catch(() => {}),
+              ),
+            );
+            safeSend(socket, {
+              type: 'CONTEXT_SAVED',
+              items: uscItems.map((i) => ({ category: i.category, label: i.label, value: i.value })),
+            });
+          }
+
           const assistantMessage = await createChatMessage(state.sessionId, 'ASSISTANT', '');
 
           safeSend(socket, {

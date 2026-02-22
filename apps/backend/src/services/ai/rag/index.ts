@@ -20,6 +20,7 @@ import {
   getBrainProfileContext,
 } from './brain-profile-context';
 import { buildRagReadinessScope } from './readiness-context';
+import { getUserSuppliedContexts, formatUserContextForLLM, type UserSuppliedContextEntry } from './user-context';
 
 export interface ResearchContext {
   business: BusinessContext;
@@ -30,6 +31,7 @@ export interface ResearchContext {
   community: CommunityContext;
   contentIntelligence: ContentIntelligence;
   mediaAnalysis: MediaAnalysisSummary;
+  userSupplied: UserSuppliedContextEntry[];
   readiness: {
     allowedStatuses: Array<'READY' | 'DEGRADED'>;
     clientCounts: Record<'READY' | 'DEGRADED' | 'BLOCKED' | 'UNKNOWN', number>;
@@ -52,7 +54,7 @@ export async function getFullResearchContext(researchJobId: string): Promise<Res
     allowDegraded: process.env.RAG_ALLOW_DEGRADED_CONTEXT === 'true',
   });
 
-  const [business, brainProfile, aiInsights, competitors, socialData, community, contentIntelligence, mediaAnalysis] = await Promise.all([
+  const [business, brainProfile, aiInsights, competitors, socialData, community, contentIntelligence, mediaAnalysis, userSupplied] = await Promise.all([
     getBusinessContext(researchJobId),
     getBrainProfileContext(researchJobId).catch((err) => {
       console.warn('[RAG] Failed to load brain profile context:', err?.message || err);
@@ -93,6 +95,7 @@ export async function getFullResearchContext(researchJobId: string): Promise<Res
       recurringRecommendations: [],
       hasData: false,
     })),
+    getUserSuppliedContexts(researchJobId).catch(() => [] as UserSuppliedContextEntry[]),
   ]);
 
   const crossRefIssues = crossReferenceData(aiInsights, competitors.all10);
@@ -162,6 +165,7 @@ export async function getFullResearchContext(researchJobId: string): Promise<Res
     community,
     contentIntelligence,
     mediaAnalysis,
+    userSupplied,
     readiness: {
       allowedStatuses: readinessScope.allowedStatuses,
       clientCounts: readinessScope.clientCounts,
@@ -180,8 +184,14 @@ export async function getFullResearchContext(researchJobId: string): Promise<Res
  * Comprehensive formatting including ALL data sources
  */
 export function formatContextForLLM(context: ResearchContext): string {
+  // Section 0: User-Supplied Context (HIGHEST PRIORITY - inserted first)
+  let output = '';
+  if (context.userSupplied.length > 0) {
+    output += formatUserContextForLLM(context.userSupplied);
+  }
+
   // Section 1: Quality Overview
-  let output = `# Research Data Quality: ${context.overallQuality.score.toFixed(1)}/100 ${context.overallQuality.isReliable ? '✓ RELIABLE' : '⚠️ NEEDS VALIDATION'}
+  output += `# Research Data Quality: ${context.overallQuality.score.toFixed(1)}/100 ${context.overallQuality.isReliable ? '✓ RELIABLE' : '⚠️ NEEDS VALIDATION'}
 
 `;
 

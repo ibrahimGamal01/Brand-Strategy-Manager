@@ -104,6 +104,7 @@ model ResearchJob {
   strategyDocChatSessions     StrategyDocChatSession[]
   clientIntakeAnswers         ClientIntakeAnswer[]
   screenshotAttachments       ScreenshotAttachment[]
+  userSuppliedContexts        UserSuppliedContext[]
 
   @@map("research_jobs")
 }
@@ -1612,3 +1613,24 @@ enum StrategyDocChatRole {
   ASSISTANT
   SYSTEM
 }
+
+/// Persistent facts the user provides during chat sessions.
+/// Injected into every RAG call as the highest-priority context block.
+model UserSuppliedContext {
+  id            String      @id @default(uuid())
+  researchJobId String      @map("research_job_id")
+  category      String      // "website" | "social_profile" | "fact" | "correction" | "document_url" | "free_text"
+  key           String      // natural dedup key within category (e.g. domain name, platform_handle)
+  value         String      // the actual data value
+  label         String?     // human-readable display label
+  sourceMessage String?     @map("source_message") // original user message that triggered saving
+  isActive      Boolean     @default(true) @map("is_active")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+  researchJob   ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+
+  @@unique([researchJobId, category, key])
+  @@index([researchJobId, isActive])
+  @@map("user_supplied_contexts")
+}
+
