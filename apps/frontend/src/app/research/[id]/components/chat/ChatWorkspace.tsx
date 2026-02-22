@@ -123,19 +123,37 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
         case 'ASSISTANT_BLOCKS': {
           const msgId = typeof event.messageId === 'string' ? event.messageId : null;
           if (!msgId) break;
+          const blocksFollowUp = Array.isArray(event.followUp) ? (event.followUp as string[]) : null;
           setStreamingMessage((prev) =>
             prev && prev.id === msgId
               ? {
                 ...prev,
                 blocks: Array.isArray(event.blocks) ? event.blocks : [],
                 designOptions: Array.isArray(event.designOptions) ? event.designOptions : [],
+                ...(blocksFollowUp ? { followUp: blocksFollowUp } : {}),
               }
               : prev
           );
           break;
         }
+
         case 'ASSISTANT_DONE': {
-          setStreamingMessage(null);
+          const doneId = typeof event.messageId === 'string' ? event.messageId : null;
+          const doneFollowUp = Array.isArray(event.followUp) ? (event.followUp as string[]) : [];
+          // Immediately promote the streaming message into the messages array with followUp
+          setStreamingMessage((prev) => {
+            if (prev && doneId && prev.id === doneId) {
+              const finalMsg = { ...prev, pending: false, followUp: doneFollowUp };
+              setMessages((msgs) => {
+                const exists = msgs.find((m) => m.id === doneId);
+                if (exists) {
+                  return msgs.map((m) => m.id === doneId ? { ...m, followUp: doneFollowUp } : m);
+                }
+                return [...msgs.filter((m) => !m.pending || m.id !== doneId), finalMsg];
+              });
+            }
+            return null;
+          });
           void sessionDetailQuery.refetch();
           void savedBlocksQuery.refetch();
           break;

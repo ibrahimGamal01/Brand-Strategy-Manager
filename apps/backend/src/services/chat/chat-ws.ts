@@ -207,6 +207,15 @@ export function attachChatWebSocketServer(server: http.Server, isSchemaReady: Sc
             cachedBlocks = result.blocks;
             cachedDesigns = result.designOptions;
 
+            // Broadcast final blocks + follow_up together so the frontend can show chips immediately
+            safeSend(socket, {
+              type: 'ASSISTANT_BLOCKS',
+              messageId: assistantMessage.id,
+              blocks: cachedBlocks,
+              designOptions: cachedDesigns,
+              followUp: result.followUp,
+            });
+
             await updateChatMessage(assistantMessage.id, {
               content: fullContent,
               blocks: cachedBlocks,
