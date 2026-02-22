@@ -5,6 +5,7 @@ import {
   AlertCircle,
   CheckCircle2,
   Circle,
+  Download,
   Loader2,
   Radio,
   RefreshCw,
@@ -23,6 +24,7 @@ interface LiveActivityFeedProps {
   connectionState: ConnectionState;
   mode?: 'panel' | 'rail';
   onSelectEvent?: (event: ResearchJobEvent) => void;
+  jobId?: string;
 }
 
 const FILTER_OPTIONS: Array<{ key: FeedFilter; label: string }> = [
@@ -86,12 +88,33 @@ function getConnectionBadge(connectionState: ConnectionState) {
   );
 }
 
-export function LiveActivityFeed({ events, connectionState, mode = 'panel', onSelectEvent }: LiveActivityFeedProps) {
+export function LiveActivityFeed({ events, connectionState, mode = 'panel', onSelectEvent, jobId }: LiveActivityFeedProps) {
   const [filter, setFilter] = useState<FeedFilter>('all');
   const [query, setQuery] = useState('');
   const [autoScroll, setAutoScroll] = useState(true);
   const [readIds, setReadIds] = useState<Set<number>>(() => new Set());
+  const [downloadState, setDownloadState] = useState<'idle' | 'running' | 'done'>('idle');
+  const [downloadResult, setDownloadResult] = useState<string | null>(null);
   const feedRef = useRef<HTMLDivElement | null>(null);
+
+  async function runDownloaders() {
+    if (!jobId || downloadState === 'running') return;
+    setDownloadState('running');
+    setDownloadResult(null);
+    try {
+      const repairRes = await fetch(`/api/research-jobs/${jobId}/repair-media`, { method: 'POST' });
+      const repairData = await repairRes.json().catch(() => ({}));
+      const dlRes = await fetch(`/api/research-jobs/${jobId}/download-media`, { method: 'POST' });
+      const dlData = await dlRes.json().catch(() => ({}));
+      const ghosts = repairData.ghostsRepaired ?? 0;
+      const queued = dlData.queued ?? 0;
+      setDownloadResult(`Repaired ${ghosts} ghost${ghosts !== 1 ? 's' : ''}, queued ${queued} download${queued !== 1 ? 's' : ''}`);
+    } catch {
+      setDownloadResult('Failed to trigger downloads - check backend connection');
+    } finally {
+      setDownloadState('done');
+    }
+  }
 
   const filteredEvents = useMemo(() => {
     const loweredQuery = query.trim().toLowerCase();
@@ -231,20 +254,19 @@ export function LiveActivityFeed({ events, connectionState, mode = 'panel', onSe
                   onKeyDown={
                     onSelectEvent
                       ? (keyboardEvent) => {
-                          if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') {
-                            keyboardEvent.preventDefault();
-                            onSelectEvent(event);
-                          }
+                        if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') {
+                          keyboardEvent.preventDefault();
+                          onSelectEvent(event);
                         }
+                      }
                       : undefined
                   }
-                  className={`rounded-lg border p-3 text-xs transition-colors ${
-                    isError
-                      ? 'border-destructive/35 bg-destructive/10'
-                      : read
-                        ? 'border-border/50 bg-background/50'
-                        : 'border-primary/25 bg-primary/5'
-                  } ${onSelectEvent ? 'cursor-pointer hover:border-primary/40' : ''}`}
+                  className={`rounded-lg border p-3 text-xs transition-colors ${isError
+                    ? 'border-destructive/35 bg-destructive/10'
+                    : read
+                      ? 'border-border/50 bg-background/50'
+                      : 'border-primary/25 bg-primary/5'
+                    } ${onSelectEvent ? 'cursor-pointer hover:border-primary/40' : ''}`}
                 >
                   <div className="mb-1 flex items-center justify-between gap-2">
                     <p className="line-clamp-1 font-medium">{event.message}</p>
@@ -343,6 +365,41 @@ export function LiveActivityFeed({ events, connectionState, mode = 'panel', onSe
         </div>
       </header>
 
+      {jobId && (
+        <div className="flex items-center justify-between border-b px-4 py-2 bg-muted/30">
+          <div className="flex items-center gap-3">
+            <Button
+              id="run-downloaders-btn"
+              size="sm"
+              variant="outline"
+              disabled={downloadState === 'running'}
+              onClick={runDownloaders}
+              className="h-7 gap-1.5 text-xs border-primary/40 text-primary hover:bg-primary/10"
+            >
+              {downloadState === 'running' ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Download className="h-3 w-3" />
+              )}
+              {downloadState === 'running' ? 'Running...' : 'Run Downloaders'}
+            </Button>
+            {downloadResult && (
+              <span className="text-xs text-muted-foreground">{downloadResult}</span>
+            )}
+          </div>
+          {downloadState === 'done' && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => { setDownloadState('idle'); setDownloadResult(null); }}
+              className="h-7 px-2 text-xs text-muted-foreground"
+            >
+              <X className="h-3 w-3" />
+            </Button>
+          )}
+        </div>
+      )}
+
       <div ref={feedRef} onScroll={onScrollFeed} className="max-h-[420px] overflow-y-auto px-4 py-3 custom-scrollbar">
         {groupedEvents.length === 0 ? (
           <p className="text-sm text-muted-foreground">No events yet.</p>
@@ -363,13 +420,12 @@ export function LiveActivityFeed({ events, connectionState, mode = 'panel', onSe
                     return (
                       <div
                         key={event.id}
-                        className={`rounded-md border px-3 py-2 text-sm ${
-                          isError
-                            ? 'border-destructive/40 bg-destructive/5'
-                            : isWarn
-                              ? 'border-amber-500/40 bg-amber-500/5'
-                              : 'border-border bg-background/60'
-                        }`}
+                        className={`rounded-md border px-3 py-2 text-sm ${isError
+                          ? 'border-destructive/40 bg-destructive/5'
+                          : isWarn
+                            ? 'border-amber-500/40 bg-amber-500/5'
+                            : 'border-border bg-background/60'
+                          }`}
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="flex items-center gap-2">

@@ -29,6 +29,7 @@ import {
   researchContinuity,
 } from '../services/social/research-continuity';
 import { normalizeHandle as normalizeHandleFromUrl } from '../services/intake/brain-intake-utils';
+import { forceQueueAllMediaDownloads } from '../services/orchestration/media-completeness';
 import {
   emitResearchJobEvent,
   listResearchJobEvents,
@@ -813,6 +814,119 @@ router.post('/:id/analyze-media', async (req: Request, res: Response) => {
     });
   }
 });
+
+/**
+ * POST /api/research-jobs/:id/download-media
+ * Force-queue all missing media downloads for this job, bypassing the 1-hour throttle.
+ * Useful to manually re-trigger downloads after Railway restarts wipe the local storage.
+ */
+router.post('/:id/download-media', async (req: Request, res: Response) => {
+  try {
+    const { id: jobId } = req.params;
+    if (!isUuid(jobId)) {
+      return res.status(400).json({ error: 'Invalid job ID' });
+    }
+    const job = await prisma.researchJob.findUnique({ where: { id: jobId }, select: { id: true } });
+    if (!job) {
+      return res.status(404).json({ error: 'Research job not found' });
+    }
+    const result = await forceQueueAllMediaDownloads(jobId);
+    return res.json({
+      success: true,
+      queued: result.queued,
+      snapshotsClient: result.snapshotsClient,
+      snapshotsCompetitor: result.snapshotsCompetitor,
+      socialProfiles: result.socialProfiles,
+      message: result.queued > 0
+        ? `Queued ${result.queued} download tasks (${result.snapshotsClient} client, ${result.snapshotsCompetitor} competitor, ${result.socialProfiles} social profiles)`
+        : 'No missing media found - all assets appear to be downloaded',
+    });
+  } catch (error: any) {
+    console.error('[API] download-media error:', error);
+    return res.status(500).json({ error: 'Download trigger failed', message: error.message || 'Unknown error' });
+  }
+});
+
+/**
+ * POST /api/research-jobs/:id/repair-media
+ * Find ghost assets (isDownloaded=true but file missing from local disk / R2 not configured)
+ * and reset them so they can be re-downloaded on the next queue cycle.
+ */
+router.post('/:id/repair-media', async (req: Request, res: Response) => {
+  try {
+    const { id: jobId } = req.params;
+    if (!isUuid(jobId)) {
+      return res.status(400).json({ error: 'Invalid job ID' });
+    }
+    const job = await prisma.researchJob.findUnique({ where: { id: jobId }, select: { id: true } });
+    if (!job) {
+      return res.status(404).json({ error: 'Research job not found' });
+    }
+
+    // Collect all MediaAssets for this job's social profiles and snapshots.
+    // We look for assets where: isDownloaded=true BUT blobStoragePath is a local absolute path
+    // and the file no longer exists on disk (ephemeral Railway filesystem wiped it).
+    const r2Active = process.env.USE_R2_STORAGE === 'true';
+    let ghostsRepaired = 0;
+
+    if (!r2Active) {
+      // Find all media assets linked to this job, where blobStoragePath is an absolute path
+      const allAssets = await prisma.mediaAsset.findMany({
+        where: {
+          isDownloaded: true,
+          blobStoragePath: { not: null },
+          OR: [
+            { socialPost: { socialProfile: { researchJobId: jobId } } },
+            { clientPostSnapshot: { clientProfileSnapshot: { researchJobId: jobId } } },
+            { competitorPostSnapshot: { competitorProfileSnapshot: { researchJobId: jobId } } },
+            { clientPost: { clientAccount: { client: { researchJobs: { some: { id: jobId } } } } } },
+          ],
+        },
+        select: { id: true, blobStoragePath: true },
+      });
+
+      const ghostIds: string[] = [];
+      for (const asset of allAssets) {
+        const p = asset.blobStoragePath || '';
+        // A ghost is: absolute path that no longer exists on disk
+        const isLocalAbsolute = p.startsWith('/');
+        if (isLocalAbsolute) {
+          const exists = require('fs').existsSync(p);
+          if (!exists) ghostIds.push(asset.id);
+        }
+        // R2 keys (no leading slash, no http) stored when R2 was active but is now disabled
+        const isOrphanedR2Key = !p.startsWith('/') && !p.startsWith('http') && p.length > 0;
+        if (isOrphanedR2Key) ghostIds.push(asset.id);
+      }
+
+      if (ghostIds.length > 0) {
+        await prisma.mediaAsset.updateMany({
+          where: { id: { in: ghostIds } },
+          data: {
+            isDownloaded: false,
+            downloadError: 'repaired_ghost_asset',
+          },
+        });
+        ghostsRepaired = ghostIds.length;
+        console.log(`[RepairMedia] Marked ${ghostsRepaired} ghost assets for re-download (job: ${jobId})`);
+      }
+    }
+
+    // Now force-queue downloads for everything missing
+    const downloadResult = await forceQueueAllMediaDownloads(jobId);
+
+    return res.json({
+      success: true,
+      ghostsRepaired,
+      queued: downloadResult.queued,
+      message: `Repaired ${ghostsRepaired} ghost assets, queued ${downloadResult.queued} downloads`,
+    });
+  } catch (error: any) {
+    console.error('[API] repair-media error:', error);
+    return res.status(500).json({ error: 'Media repair failed', message: error.message || 'Unknown error' });
+  }
+});
+
 
 type ResearchModuleName =
   | 'competitors'

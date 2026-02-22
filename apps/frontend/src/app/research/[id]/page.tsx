@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useResearchJob } from '@/hooks/useResearchJob';
 import { useResearchJobEvents } from '@/hooks/useResearchJobEvents';
-import { useParams } from 'next/navigation';
+import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
 import { ResearchFooter } from './components';
 import { ResearchTreeView } from './components/ResearchTreeView';
@@ -95,12 +95,24 @@ function ModulePlaceholder({
   );
 }
 
+function isWorkspaceModule(value: string | null | undefined): value is BatWorkspaceModuleKey {
+  if (!value) return false;
+  return BAT_WORKSPACE_MODULES.some((module) => module.key === value);
+}
+
 export default function ResearchPage() {
   const params = useParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const searchParamsString = searchParams.toString();
   const { toast } = useToast();
   const jobId = params.id as string;
+  const moduleParam = searchParams.get('module');
 
-  const [activeModule, setActiveModule] = useState<BatWorkspaceModuleKey>('brain');
+  const [activeModule, setActiveModule] = useState<BatWorkspaceModuleKey>(
+    isWorkspaceModule(moduleParam) ? moduleParam : 'brain'
+  );
   const [isContinuing, setIsContinuing] = useState(false);
   const [brainPayload, setBrainPayload] = useState<Record<string, unknown> | null>(null);
 
@@ -120,6 +132,24 @@ export default function ResearchPage() {
     void loadBrainPayload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId]);
+
+  useEffect(() => {
+    if (isWorkspaceModule(moduleParam)) {
+      setActiveModule(moduleParam);
+    }
+  }, [moduleParam]);
+
+  const setModule = useCallback(
+    (nextModule: BatWorkspaceModuleKey) => {
+      if (nextModule === activeModule) return;
+      setActiveModule(nextModule);
+      const nextParams = new URLSearchParams(searchParamsString);
+      if (nextParams.get('module') === nextModule) return;
+      nextParams.set('module', nextModule);
+      router.replace(`${pathname}?${nextParams.toString()}`, { scroll: false });
+    },
+    [activeModule, pathname, router, searchParamsString]
+  );
 
   // Refetch brain when job data changes (e.g. after orchestration) and brainPayload is still missing
   useEffect(() => {
@@ -447,7 +477,7 @@ export default function ResearchPage() {
         <BatModuleNav
           modules={BAT_WORKSPACE_MODULES}
           activeModule={activeModule}
-          onChange={setActiveModule}
+          onChange={setModule}
         />
       }
       notificationRail={
@@ -455,7 +485,7 @@ export default function ResearchPage() {
           events={events as ResearchJobEvent[]}
           connectionState={connectionState}
           onSelectEvent={(event) => {
-            setActiveModule('intelligence');
+            setModule('intelligence');
             toast({
               title: 'Opened Intelligence',
               description: event.message,
@@ -464,7 +494,10 @@ export default function ResearchPage() {
         />
       }
     >
-      <WorkspaceErrorBoundary title="BAT workspace module failed to render">
+      <WorkspaceErrorBoundary
+        title="BAT workspace module failed to render"
+        resetKey={`${activeModule}:${String(data?.updatedAt || '')}`}
+      >
         {activeModule === 'brain' ? (
           <div className="space-y-4">
             <BrainWorkspacePanel
@@ -599,7 +632,7 @@ export default function ResearchPage() {
               </div>
             </section>
 
-            <LiveActivityFeed events={events as ResearchJobEvent[]} connectionState={connectionState} mode="panel" />
+            <LiveActivityFeed events={events as ResearchJobEvent[]} connectionState={connectionState} mode="panel" jobId={jobId} />
           </div>
         ) : null}
       </WorkspaceErrorBoundary>

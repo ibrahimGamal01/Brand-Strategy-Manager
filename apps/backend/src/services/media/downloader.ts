@@ -5,7 +5,7 @@ import { prisma } from '../../lib/prisma';
 import { tiktokService } from '../scraper/tiktok-service';
 import { resolveInstagramMediaViaApify } from '../scraper/apify-instagram-media-downloader';
 import { createScraperProxyPool, runScriptJsonWithRetries } from '../scraper/script-runner';
-import { extractMediaUrls, extractImageMetadata, generateVideoThumbnail } from './download-helpers';
+import { extractMediaUrls, extractImageMetadata, generateVideoThumbnail, extractVideoDuration } from './download-helpers';
 import { downloadGenericMedia } from './download-generic';
 import { emitResearchJobEvent } from '../social/research-job-events';
 
@@ -297,6 +297,7 @@ export async function downloadPostMedia(
         thumbnailPath = fileManager.toUrl(storagePath);
       } else {
         thumbnailPath = await generateVideoThumbnail(storagePath);
+        durationSeconds = await extractVideoDuration(storagePath);
       }
 
       const mediaAssetData: any = {

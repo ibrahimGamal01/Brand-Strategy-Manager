@@ -1,6 +1,9 @@
 import sharp from 'sharp';
 import path from 'path';
 import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 export async function extractImageMetadata(imagePath: string) {
   try {
@@ -37,6 +40,30 @@ export async function generateVideoThumbnail(videoPath: string): Promise<string>
   } catch (error: any) {
     console.error('[Downloader] Failed to generate video thumbnail:', error.message);
     return '';
+  }
+}
+
+/**
+ * Extract video duration in seconds using ffprobe.
+ * Returns undefined if ffprobe is not available or the call fails.
+ */
+export async function extractVideoDuration(videoPath: string): Promise<number | undefined> {
+  if (!videoPath || videoPath.startsWith('media/') || videoPath.startsWith('http')) {
+    // R2 keys and remote URLs are not local paths - skip
+    return undefined;
+  }
+  try {
+    const { stdout } = await execAsync(
+      `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${videoPath}"`,
+      { timeout: 15_000 }
+    );
+    const seconds = parseFloat(stdout.trim());
+    if (Number.isFinite(seconds) && seconds > 0) {
+      return Math.round(seconds * 100) / 100;
+    }
+    return undefined;
+  } catch {
+    return undefined;
   }
 }
 
