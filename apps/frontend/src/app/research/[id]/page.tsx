@@ -46,7 +46,9 @@ function fmtDate(value?: string | null) {
   if (!value) return '—';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleString();
+  // Use fixed ISO-style format to avoid server/client locale mismatch hydration errors
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 function ModulePlaceholder({
@@ -335,36 +337,36 @@ export default function ResearchPage() {
     apiSocialProfiles.length > 0
       ? apiSocialProfiles
       : (() => {
-          const fromAccounts = (client.clientAccounts || []).map((acc: any) => ({
-            platform: acc.platform,
-            handle: acc.handle,
-            followers: acc.followerCount || 0,
-            following: acc.followingCount || 0,
-            bio: acc.bio || '',
-            profileImageUrl: acc.profileImageUrl,
-          }));
-          if (fromAccounts.length > 0) return fromAccounts;
-          const fromInput: Array<{ platform: string; handle: string; followers: number; following: number; bio: string; profileImageUrl?: string }> = [];
-          if (inputData.handle && (inputData.platform === 'instagram' || inputData.platform === 'tiktok')) {
-            fromInput.push({
-              platform: String(inputData.platform || 'instagram').toLowerCase(),
-              handle: String(inputData.handle).replace(/^@+/, '').trim(),
-              followers: 0,
-              following: 0,
-              bio: '',
-            });
-          }
-          if (inputData.handles && typeof inputData.handles === 'object') {
-            for (const [platform, handle] of Object.entries(inputData.handles)) {
-              if ((platform === 'instagram' || platform === 'tiktok') && typeof handle === 'string' && handle) {
-                const h = String(handle).replace(/^@+/, '').trim();
-                if (h && !fromInput.some((p) => p.platform === platform && p.handle.toLowerCase() === h.toLowerCase()))
-                  fromInput.push({ platform, handle: h, followers: 0, following: 0, bio: '' });
-              }
+        const fromAccounts = (client.clientAccounts || []).map((acc: any) => ({
+          platform: acc.platform,
+          handle: acc.handle,
+          followers: acc.followerCount || 0,
+          following: acc.followingCount || 0,
+          bio: acc.bio || '',
+          profileImageUrl: acc.profileImageUrl,
+        }));
+        if (fromAccounts.length > 0) return fromAccounts;
+        const fromInput: Array<{ platform: string; handle: string; followers: number; following: number; bio: string; profileImageUrl?: string }> = [];
+        if (inputData.handle && (inputData.platform === 'instagram' || inputData.platform === 'tiktok')) {
+          fromInput.push({
+            platform: String(inputData.platform || 'instagram').toLowerCase(),
+            handle: String(inputData.handle).replace(/^@+/, '').trim(),
+            followers: 0,
+            following: 0,
+            bio: '',
+          });
+        }
+        if (inputData.handles && typeof inputData.handles === 'object') {
+          for (const [platform, handle] of Object.entries(inputData.handles)) {
+            if ((platform === 'instagram' || platform === 'tiktok') && typeof handle === 'string' && handle) {
+              const h = String(handle).replace(/^@+/, '').trim();
+              if (h && !fromInput.some((p) => p.platform === platform && p.handle.toLowerCase() === h.toLowerCase()))
+                fromInput.push({ platform, handle: h, followers: 0, following: 0, bio: '' });
             }
           }
-          return fromInput;
-        })();
+        }
+        return fromInput;
+      })();
 
   socialProfiles = socialProfiles.sort((a: any, b: any) => {
     const priority = { instagram: 1, tiktok: 2 };
@@ -403,17 +405,17 @@ export default function ResearchPage() {
     brainPayload ??
     (data
       ? {
-          success: true,
-          brainProfile: data.brainProfile ?? data.client?.brainProfile ?? null,
-          commandHistory: data.brainCommands ?? [],
-          competitorSummary: data.competitorSummary ?? {
-            runId: null,
-            topPicks: 0,
-            shortlisted: 0,
-            approved: 0,
-            filtered: 0,
-          },
-        }
+        success: true,
+        brainProfile: data.brainProfile ?? data.client?.brainProfile ?? null,
+        commandHistory: data.brainCommands ?? [],
+        competitorSummary: data.competitorSummary ?? {
+          runId: null,
+          topPicks: 0,
+          shortlisted: 0,
+          approved: 0,
+          filtered: 0,
+        },
+      }
       : undefined);
 
   const coverageReport = buildBrainCoverageReport({
