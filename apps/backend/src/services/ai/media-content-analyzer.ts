@@ -1,10 +1,13 @@
 import { OpenAI } from 'openai';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { prisma } from '../../lib/prisma';
 import { generateVideoThumbnail } from '../media/download-helpers';
 import { transcribeVideoOrAudio } from '../media/audio-transcription';
 import { extractOnScreenTextFromVideo, type OnScreenTextEntry } from '../media/video-text-extraction';
+import { isR2Configured } from '../storage/r2-client';
+import { downloadFromR2 } from '../storage/r2-storage';
 
 let openaiClient: OpenAI | null = null;
 
@@ -18,14 +21,37 @@ function getOpenAiClient(): OpenAI | null {
 
 const STORAGE_BASE = path.join(process.cwd(), 'storage');
 
+function isR2Key(blobStoragePath: string): boolean {
+  // R2 keys are relative paths like media/competitor/... with no leading slash
+  return !path.isAbsolute(blobStoragePath) && !blobStoragePath.startsWith('/storage/');
+}
+
 function resolveMediaPath(blobStoragePath: string | null): string | null {
   if (!blobStoragePath) return null;
+  if (isR2Configured() && isR2Key(blobStoragePath)) return null; // handled separately via R2 download
   if (path.isAbsolute(blobStoragePath) && fs.existsSync(blobStoragePath)) return blobStoragePath;
   const fromCwd = path.join(process.cwd(), blobStoragePath);
   if (fs.existsSync(fromCwd)) return fromCwd;
   const fromStorage = path.join(STORAGE_BASE, blobStoragePath.replace(/^\/*storage\/?/, ''));
   if (fs.existsSync(fromStorage)) return fromStorage;
   return null;
+}
+
+/**
+ * Download R2 object to a temp file and return its path.
+ * Caller must delete the temp file when done.
+ */
+async function downloadR2ToTempFile(r2Key: string): Promise<string | null> {
+  try {
+    const buffer = await downloadFromR2(r2Key);
+    const ext = path.extname(r2Key) || '.bin';
+    const tmpPath = path.join(os.tmpdir(), `r2_media_${Date.now()}_${Math.random().toString(36).slice(2)}${ext}`);
+    fs.writeFileSync(tmpPath, buffer);
+    return tmpPath;
+  } catch (e) {
+    console.error(`[MediaContentAnalyzer] Failed to download R2 key ${r2Key}:`, e);
+    return null;
+  }
 }
 
 export interface AnalyzeMediaResult {
@@ -63,12 +89,21 @@ export async function analyzeMediaAsset(
   },
   context?: AnalyzeMediaContext
 ): Promise<AnalyzeMediaResult> {
-  const mediaPath = resolveMediaPath(asset.blobStoragePath);
+  const isR2Asset = asset.blobStoragePath ? (isR2Configured() && isR2Key(asset.blobStoragePath)) : false;
+  let tempFilePath: string | null = null;
+  let mediaPath: string | null = resolveMediaPath(asset.blobStoragePath);
+
+  // In R2 mode: download to a temp file for local processing (transcript, thumbnail, on-screen text)
+  if (!mediaPath && isR2Asset && asset.blobStoragePath) {
+    tempFilePath = await downloadR2ToTempFile(asset.blobStoragePath);
+    mediaPath = tempFilePath;
+  }
+
   if (!mediaPath || !fs.existsSync(mediaPath)) {
     return {
       mediaAssetId: asset.id,
       success: false,
-      error: 'Media file not found',
+      error: 'Media file not found on disk or in R2',
     };
   }
 
@@ -213,6 +248,11 @@ export async function analyzeMediaAsset(
   } catch (e: any) {
     result.error = e.message || 'Analysis failed';
     console.error(`[MediaContentAnalyzer] Error for asset ${asset.id}:`, e);
+  } finally {
+    // Clean up temp file downloaded from R2 so we don't fill /tmp
+    if (tempFilePath) {
+      try { fs.unlinkSync(tempFilePath); } catch { /* ignore */ }
+    }
   }
 
   return result;

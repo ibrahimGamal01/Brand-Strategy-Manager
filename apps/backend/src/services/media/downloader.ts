@@ -261,16 +261,24 @@ export async function downloadPostMedia(
           headers['User-Agent'] =
             'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
         }
-        await fileManager.downloadAndSave(url, storagePath, headers, {
+
+        // R2 key mirrors the local path structure so migrations are easy
+        const r2Prefix =
+          entityType === 'CLIENT' ? `media/client/${entityId}/${postId}` : `media/competitor/${entityId}/${postId}`;
+        const r2Key = `${r2Prefix}/${filename}`;
+
+        const saved = await fileManager.downloadAndSaveOrUpload(url, storagePath, r2Key, headers, {
           contextLabel: `post-${postId}`,
         });
+        // Use the returned storagePath (R2 key in R2 mode, local path in local mode)
+        storagePath = saved.storagePath;
       }
 
-      const stats = fileManager.getStats(storagePath);
+      const stats = storagePath.startsWith('media/') ? null : fileManager.getStats(storagePath);
       const fileSizeBytes = stats?.size || 0;
 
       // Hard reject: file was written but is 0 bytes (empty CDN response or write error)
-      if (fileSizeBytes === 0) {
+      if (stats !== null && fileSizeBytes === 0) {
         fileManager.delete(storagePath);
         throw new Error(
           `Downloaded file is 0 bytes, rejecting ghost asset (url: ${url}, path: ${storagePath})`
