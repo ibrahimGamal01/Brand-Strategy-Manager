@@ -15,9 +15,11 @@ export type ChatMessage = {
   designOptions?: ChatDesignOption[] | null;
   selectedDesignId?: string | null;
   attachments?: ChatAttachment[] | null;
+  followUp?: string[] | null;
   createdAt: string;
   pending?: boolean;
 };
+
 
 export type ChatSavedBlock = {
   id: string;

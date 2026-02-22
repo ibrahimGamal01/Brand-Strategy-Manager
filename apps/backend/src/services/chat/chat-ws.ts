@@ -211,9 +211,14 @@ export function attachChatWebSocketServer(server: http.Server, isSchemaReady: Sc
               content: fullContent,
               blocks: cachedBlocks,
               designOptions: cachedDesigns,
+              followUp: result.followUp,
             });
             await touchChatSession(state.sessionId);
-            safeSend(socket, { type: 'ASSISTANT_DONE', messageId: assistantMessage.id });
+            safeSend(socket, {
+              type: 'ASSISTANT_DONE',
+              messageId: assistantMessage.id,
+              followUp: result.followUp,
+            });
           } catch (error: any) {
             console.error('[Chat WS] Failed to generate response:', error);
             safeSend(socket, { type: 'ERROR', error: 'GENERATION_FAILED', details: error.message });

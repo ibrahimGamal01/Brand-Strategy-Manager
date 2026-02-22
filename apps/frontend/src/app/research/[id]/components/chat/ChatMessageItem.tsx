@@ -8,6 +8,7 @@ import type { ChatBlock, ChatDesignOption } from './blocks/types';
 import { BlockRenderer } from './blocks/BlockRenderer';
 import { AttachmentGallery } from './AttachmentGallery';
 import { MessageToolbar } from './MessageToolbar';
+import { FollowUpChips } from './FollowUpChips';
 import { useRouter } from 'next/navigation';
 
 interface ChatMessageItemProps {
@@ -42,6 +43,31 @@ function resolveBlocks(message: ChatMessage, selectedDesignId: string | null): C
   return (message.blocks || []) as ChatBlock[];
 }
 
+/**
+ * Aggressive JSON cleaner.
+ * Strips:
+ *  1. <chat_blocks>...</chat_blocks> blobs
+ *  2. ```json {...} ``` fences
+ *  3. Trailing partial { "blocks"... JSON
+ *  4. Any trailing standalone { that starts a JSON object
+ */
+function cleanContent(raw: string): string {
+  let text = raw;
+  // Remove XML-wrapped blocks payload
+  text = text.replace(/<chat_blocks>[\s\S]*?<\/chat_blocks>/gi, '');
+  // Remove fenced JSON blocks
+  text = text.replace(/```json[\s\S]*?```/gi, '');
+  text = text.replace(/```[\s\S]*?```/g, (m) => (m.includes('"blocks"') ? '' : m));
+  // Remove trailing standalone JSON object that starts with {
+  text = text.replace(/\s*\{[\s\S]*$/m, (match) => {
+    if (/"blocks"\s*:/.test(match) || /"designOptions"\s*:/.test(match) || /"follow_up"\s*:/.test(match)) {
+      return '';
+    }
+    return match;
+  });
+  return text.trim();
+}
+
 export function ChatMessageItem({
   message,
   pinnedBlockIds,
@@ -65,45 +91,40 @@ export function ChatMessageItem({
 
   const activeBlocks = resolveBlocks(message, selectedDesign);
   const designOptions = (message.designOptions || []) as ChatDesignOption[];
-  const blockCount = activeBlocks.length;
-  const hasAttachments = (message.attachments?.length || 0) > 0;
+  const cleanedContent = useMemo(() => cleanContent(message.content || ''), [message.content]);
 
-  const cleanedContent = useMemo(() => {
-    let content = message.content || '';
-    content = content.replace(/```(?:json)?\s*\{[^`]*"blocks"[^`]*"designOptions"[^`]*\}\s*```/gi, '');
-    if (/^\s*\{\s*"blocks"\s*:\s*\[[\s\S]*?\]\s*,\s*"designOptions"\s*:\s*\[[\s\S]*?\]\s*\}\s*$/i.test(content)) {
-      content = '';
-    }
-    return content.trim();
-  }, [message.content]);
+  const followUp: string[] = useMemo(() => {
+    if (Array.isArray(message.followUp) && message.followUp.length > 0) return message.followUp;
+    return [];
+  }, [message.followUp]);
 
   function handleRemix(content: string) {
-    const preview = content.slice(0, 120).replace(/\n/g, ' ');
-    onComposerFill?.(`Remix this: "${preview}"`);
+    onComposerFill?.(`Remix this: "${content.slice(0, 120).replace(/\n/g, ' ')}"`);
   }
-
   function handleExpand(content: string) {
-    const preview = content.slice(0, 120).replace(/\n/g, ' ');
-    onComposerFill?.(`Go deeper on this: "${preview}"`);
+    onComposerFill?.(`Go deeper on this: "${content.slice(0, 120).replace(/\n/g, ' ')}"`);
   }
-
   function handleTranslate(content: string, tone: 'professional' | 'casual' | 'punchy') {
-    const preview = content.slice(0, 120).replace(/\n/g, ' ');
-    const toneLabel = { professional: 'professional and formal', casual: 'casual and friendly', punchy: 'punchy and bold' }[tone];
-    onComposerFill?.(`Rewrite this in a ${toneLabel} tone: "${preview}"`);
+    const labels = { professional: 'professional and formal', casual: 'casual and friendly', punchy: 'punchy and bold' };
+    onComposerFill?.(`Rewrite this in a ${labels[tone]} tone: "${content.slice(0, 120).replace(/\n/g, ' ')}"`);
+  }
+  function handleClarify(answer: string) {
+    onComposerFill?.(answer);
   }
 
+  // ── USER BUBBLE ────────────────────────────────────────────────────────────
   if (isUser) {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[75%] rounded-2xl rounded-tr-sm bg-primary/15 px-4 py-2.5 text-sm text-foreground shadow-sm">
-          <p className="whitespace-pre-wrap leading-relaxed">{cleanedContent || message.content}</p>
-          <p className="mt-1 text-right text-[10px] text-muted-foreground">{formatTimestamp(message.createdAt)}</p>
+        <div className="max-w-[75%] rounded-2xl rounded-tr-sm bg-primary/12 px-4 py-2.5 text-sm text-foreground shadow-sm">
+          <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
+          <p className="mt-1 text-right text-[10px] text-muted-foreground/60">{formatTimestamp(message.createdAt)}</p>
         </div>
       </div>
     );
   }
 
+  // ── BAT RESPONSE ──────────────────────────────────────────────────────────
   return (
     <article
       className="group relative"
@@ -111,45 +132,42 @@ export function ChatMessageItem({
       onMouseLeave={() => setHovered(false)}
     >
       <div className="flex items-start gap-3">
-        {/* BAT Avatar with Intel label */}
-        <div className="flex flex-col items-center gap-0.5 flex-shrink-0">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 text-[11px] font-bold tracking-wide text-white shadow-md">
+
+        {/* BAT avatar column */}
+        <div className="flex flex-shrink-0 flex-col items-center gap-0.5 pt-1">
+          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 text-[10px] font-bold tracking-wide text-white shadow-md">
             BAT
           </div>
-          <span className="text-[9px] font-mono uppercase tracking-wider text-muted-foreground">Intel</span>
+          <span className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground/50">Intel</span>
         </div>
 
-        {/* BAT message card with teal left accent */}
-        <div className="flex-1 min-w-0 rounded-xl border border-l-4 border-border/50 border-l-teal-400 bg-card/80 px-4 py-3 shadow-sm">
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-[10px] uppercase tracking-wide text-muted-foreground">
-              <span className="font-semibold text-teal-600 dark:text-teal-400">BAT Intelligence</span>
-              {message.pending ? <Badge variant="outline">sending</Badge> : null}
-              {(blockCount > 0 || hasAttachments) ? (
-                <Badge variant="secondary" className="text-[10px] uppercase">
-                  {blockCount + (message.attachments?.length || 0)} items
-                </Badge>
-              ) : null}
-            </div>
-            <span className="text-[10px] text-muted-foreground">{formatTimestamp(message.createdAt)}</span>
+        {/* Message body */}
+        <div className="min-w-0 flex-1">
+
+          {/* Header row: label + timestamp */}
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-[10px] font-semibold uppercase tracking-widest text-teal-600 dark:text-teal-400">
+              BAT Intelligence
+            </span>
+            <span className="text-[10px] text-muted-foreground/50">{formatTimestamp(message.createdAt)}</span>
           </div>
 
+          {/* ZONE A: Narrative response */}
           {cleanedContent ? (
-            <div className="prose prose-sm max-w-none text-foreground">
+            <div className="prose prose-sm max-w-none text-foreground [&_li]:my-0.5 [&_p]:my-1 [&_strong]:font-semibold">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{cleanedContent}</ReactMarkdown>
             </div>
           ) : null}
 
+          {/* Design options selector */}
           {designOptions.length > 0 ? (
-            <div className="mt-3 rounded-md border border-border/50 bg-background/70 p-2">
-              <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="mt-3 rounded-lg border border-border/40 bg-muted/30 p-2.5">
+              <div className="mb-2 flex items-center justify-between">
                 <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                   Design Options
                 </span>
                 {selectedDesign ? (
-                  <Badge variant="outline" className="text-[10px] uppercase">
-                    {selectedDesign}
-                  </Badge>
+                  <Badge variant="outline" className="text-[10px] uppercase">{selectedDesign}</Badge>
                 ) : null}
               </div>
               <ToggleGroup
@@ -173,19 +191,19 @@ export function ChatMessageItem({
             </div>
           ) : null}
 
+          {/* Attachments */}
           <AttachmentGallery
             attachments={message.attachments}
-            onView={(att) => {
-              onAttachmentView?.(message, att.id, {
-                recordType: att.recordType,
-                recordId: att.recordId,
-                isAppScreenshot: att.isAppScreenshot,
-              });
-            }}
+            onView={(att) => onAttachmentView?.(message, att.id, {
+              recordType: att.recordType,
+              recordId: att.recordId,
+              isAppScreenshot: att.isAppScreenshot,
+            })}
           />
 
+          {/* ZONE B: Structured blocks */}
           {activeBlocks.length > 0 ? (
-            <div className="mt-3 space-y-2">
+            <div className="mt-3 space-y-3">
               {activeBlocks.map((block) => (
                 <BlockRenderer
                   key={block.blockId}
@@ -194,27 +212,32 @@ export function ChatMessageItem({
                   onView={(b) => onBlockView(message, b)}
                   onPin={(b) => onBlockPin(message, b)}
                   onUnpin={(b) => onBlockUnpin(message, b)}
+                  onClarify={handleClarify}
                   onAction={(action, href) => {
                     if (action === 'open_module') {
-                      const targetHref = href || `/research/${researchJobId}?module=intelligence`;
-                      if (targetHref.startsWith('http')) window.open(targetHref, '_blank');
-                      else router.push(targetHref);
+                      const target = href || `/research/${researchJobId}?module=intelligence`;
+                      if (target.startsWith('http')) window.open(target, '_blank');
+                      else router.push(target);
                       return;
                     }
                     if (action === 'run_intel' || action === 'run_orchestrator' || action === 'run_intelligence') {
-                      const targetHref = href || `/api/research-jobs/${researchJobId}/brand-intelligence/orchestrate`;
-                      fetch(targetHref, { method: 'POST' }).catch(() => { });
+                      const target = href || `/api/research-jobs/${researchJobId}/brand-intelligence/orchestrate`;
+                      fetch(target, { method: 'POST' }).catch(() => { });
                       return;
                     }
-                    if (href) {
-                      const target = href.startsWith('http') ? '_blank' : '_self';
-                      window.open(href, target);
-                    }
+                    if (href) window.open(href, href.startsWith('http') ? '_blank' : '_self');
                   }}
                 />
               ))}
             </div>
           ) : null}
+
+          {/* ZONE C: Follow-up suggestions */}
+          <FollowUpChips
+            suggestions={followUp}
+            onSelect={(s) => onComposerFill?.(s)}
+            isHidden={message.pending}
+          />
         </div>
       </div>
 

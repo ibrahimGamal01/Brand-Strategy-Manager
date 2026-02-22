@@ -86,7 +86,7 @@ export async function createChatMessage(
 
 export async function updateChatMessage(
   messageId: string,
-  data: Partial<Pick<ChatMessageRecord, 'content' | 'blocks' | 'designOptions'>>
+  data: Partial<Pick<ChatMessageRecord, 'content' | 'blocks' | 'designOptions'>> & { followUp?: string[] | null }
 ) {
   return prisma.chatMessage.update({
     where: { id: messageId },
@@ -98,9 +98,13 @@ export async function updateChatMessage(
       ...(data.designOptions !== undefined
         ? { designOptions: data.designOptions ?? Prisma.JsonNull }
         : {}),
+      ...(data.followUp !== undefined
+        ? { followUp: data.followUp ?? Prisma.JsonNull }
+        : {}),
     },
   });
 }
+
 
 export async function listSavedBlocks(sessionId: string) {
   return prisma.chatSavedBlock.findMany({

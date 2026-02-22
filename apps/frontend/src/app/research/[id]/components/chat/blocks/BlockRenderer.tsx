@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import type {
   ChatBlock,
@@ -34,68 +33,9 @@ import { ScoreboardBlockView } from './renderers/ScoreboardBlockView';
 import { MoodboardBlockView } from './renderers/MoodboardBlockView';
 import { SwotBlockView } from './renderers/SwotBlockView';
 import { BrandVoiceMeterBlockView } from './renderers/BrandVoiceMeterBlockView';
+import { ClarificationBlockView } from './renderers/ClarificationBlockView';
 
-const BLOCK_LABELS: Record<string, string> = {
-  table: 'Table',
-  metric_cards: 'Metrics',
-  insight: 'Insight',
-  post_grid: 'Post Grid',
-  comparison: 'Comparison',
-  source_list: 'Sources',
-  action_buttons: 'Actions',
-  timeline: 'Timeline',
-  funnel: 'Funnel',
-  chart: 'Chart',
-  poll: 'Poll',
-  scoreboard: 'Scoreboard',
-  moodboard: 'Moodboard',
-  swot: 'SWOT',
-  brand_voice_meter: 'Voice Meter',
-};
-
-const BLOCK_ACCENT: Record<string, string> = {
-  insight: 'border-l-amber-400',
-  swot: 'border-l-violet-400',
-  comparison: 'border-l-sky-400',
-  scoreboard: 'border-l-emerald-400',
-  poll: 'border-l-primary',
-  metric_cards: 'border-l-rose-400',
-  moodboard: 'border-l-pink-400',
-  brand_voice_meter: 'border-l-indigo-400',
-  chart: 'border-l-cyan-400',
-  timeline: 'border-l-orange-400',
-  table: 'border-l-slate-400',
-  source_list: 'border-l-zinc-400',
-};
-
-const BLOCK_ICON: Record<string, string> = {
-  insight: '💡',
-  swot: '📊',
-  comparison: '⚔️',
-  scoreboard: '🏆',
-  poll: '🗳️',
-  metric_cards: '📈',
-  moodboard: '🎨',
-  brand_voice_meter: '🎙️',
-  chart: '📉',
-  timeline: '📅',
-  table: '📋',
-  source_list: '📎',
-  action_buttons: '⚡',
-  post_grid: '🖼️',
-  funnel: '⬇️',
-};
-
-interface BlockRendererProps {
-  block: ChatBlock;
-  isPinned?: boolean;
-  onView?: (block: ChatBlock) => void;
-  onPin?: (block: ChatBlock) => void;
-  onUnpin?: (block: ChatBlock) => void;
-  onAction?: (action?: string, href?: string) => void;
-}
-
-// Type guards to keep TS happy even with the catch-all BaseBlock in the union
+// Type guards
 const isTableBlock = (b: ChatBlock): b is TableBlock => b.type === 'table';
 const isMetricCardsBlock = (b: ChatBlock): b is MetricCardsBlock => b.type === 'metric_cards';
 const isInsightBlock = (b: ChatBlock): b is InsightBlock => b.type === 'insight';
@@ -111,11 +51,32 @@ const isScoreboardBlock = (b: ChatBlock): b is ScoreboardBlock => b.type === 'sc
 const isMoodboardBlock = (b: ChatBlock): b is MoodboardBlock => b.type === 'moodboard';
 const isSwotBlock = (b: ChatBlock): b is SwotBlock => b.type === 'swot';
 const isBrandVoiceMeterBlock = (b: ChatBlock): b is BrandVoiceMeterBlock => b.type === 'brand_voice_meter';
+// Inline type for ClarificationBlock
+interface ClarificationBlock {
+  type: 'clarification';
+  blockId: string;
+  question: string;
+  options: string[];
+  allowFreeText?: boolean;
+}
 
-export function BlockRenderer({ block, isPinned, onView, onPin, onUnpin, onAction }: BlockRendererProps) {
+const isClarificationBlock = (b: ChatBlock): b is ClarificationBlock & ChatBlock =>
+  b.type === 'clarification';
+
+interface BlockRendererProps {
+  block: ChatBlock;
+  isPinned?: boolean;
+  onView?: (block: ChatBlock) => void;
+  onPin?: (block: ChatBlock) => void;
+  onUnpin?: (block: ChatBlock) => void;
+  onAction?: (action?: string, href?: string) => void;
+  onClarify?: (answer: string) => void;
+}
+
+export function BlockRenderer({ block, isPinned, onView, onPin, onUnpin, onAction, onClarify }: BlockRendererProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   const viewedRef = useRef(false);
-  const [hasViewed, setHasViewed] = useState(false);
+  const [, setHasViewed] = useState(false);
 
   useEffect(() => {
     if (!ref.current || viewedRef.current || !onView) return;
@@ -135,57 +96,88 @@ export function BlockRenderer({ block, isPinned, onView, onPin, onUnpin, onActio
     return () => observer.disconnect();
   }, [block, onView]);
 
-  const label = BLOCK_LABELS[block.type] || 'Block';
-  const accentClass = BLOCK_ACCENT[block.type] || 'border-l-border';
-  const icon = BLOCK_ICON[block.type] || '📎';
-
-  return (
-    <div ref={ref} className={`rounded-lg border border-l-4 bg-card/70 p-3 ${accentClass} border-border/50`}>
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className="text-sm">{icon}</span>
-          <Badge variant="outline" className="text-[10px] uppercase">
-            {label}
-          </Badge>
-          {hasViewed ? (
-            <Badge variant="secondary" className="text-[10px] uppercase">
-              viewed
-            </Badge>
-          ) : null}
-        </div>
-        <div className="flex items-center gap-2">
-          {isPinned ? (
-            <Button size="sm" variant="outline" className="h-6 px-2 text-[10px]" onClick={() => onUnpin?.(block)}>
-              Unpin
-            </Button>
-          ) : (
-            <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px]" onClick={() => onPin?.(block)}>
-              Pin
-            </Button>
-          )}
-        </div>
+  // Source list: render inline, no card wrapping
+  if (isSourceListBlock(block)) {
+    return (
+      <div ref={ref}>
+        <SourceListBlockView block={block} />
       </div>
-      {block.title ? (
-        <p className="mb-2 text-xs font-semibold text-muted-foreground">{block.title}</p>
-      ) : null}
+    );
+  }
 
-      {isTableBlock(block) ? <TableBlockView block={block} /> : null}
-      {isMetricCardsBlock(block) ? <MetricCardsBlockView block={block} /> : null}
-      {isInsightBlock(block) ? <InsightBlockView block={block} /> : null}
-      {isPostGridBlock(block) ? <PostGridBlockView block={block} /> : null}
-      {isComparisonBlock(block) ? <ComparisonBlockView block={block} /> : null}
-      {isSourceListBlock(block) ? <SourceListBlockView block={block} /> : null}
-      {isActionButtonsBlock(block) ? <ActionButtonsBlockView block={block} onAction={onAction} /> : null}
-      {isTimelineBlock(block) ? <TimelineBlockView block={block} /> : null}
-      {isFunnelBlock(block) ? <FunnelBlockView block={block} /> : null}
-      {isChartBlock(block) ? <ChartBlockView block={block} /> : null}
-      {isPollBlock(block) ? <PollBlockView block={block} /> : null}
-      {isScoreboardBlock(block) ? <ScoreboardBlockView block={block} /> : null}
-      {isMoodboardBlock(block) ? <MoodboardBlockView block={block} /> : null}
-      {isSwotBlock(block) ? <SwotBlockView block={block} /> : null}
-      {isBrandVoiceMeterBlock(block) ? <BrandVoiceMeterBlockView block={block} /> : null}
-      {!BLOCK_LABELS[block.type] ? (
-        <pre className="text-xs text-muted-foreground whitespace-pre-wrap">{JSON.stringify(block, null, 2)}</pre>
+  // Clarification: render inline, no pin
+  if (isClarificationBlock(block)) {
+    return (
+      <div ref={ref}>
+        <ClarificationBlockView
+          block={block as ClarificationBlock}
+          onAnswer={(answer: string) => onClarify?.(answer)}
+        />
+      </div>
+    );
+  }
+
+  // All other blocks: render with pin button overlay (no outer wrapper card)
+  return (
+    <div ref={ref} className="group relative">
+      {/* Pin button - hover only */}
+      <div className="absolute right-2 top-2 z-10 opacity-0 transition-opacity group-hover:opacity-100">
+        {isPinned ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 w-6 p-0 text-amber-500 hover:text-amber-600"
+            title="Unpin"
+            onClick={() => onUnpin?.(block)}
+          >
+            📌
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 w-6 p-0 text-muted-foreground/40 hover:text-muted-foreground"
+            title="Pin to saved"
+            onClick={() => onPin?.(block)}
+          >
+            📌
+          </Button>
+        )}
+      </div>
+
+      {isTableBlock(block) && <TableBlockView block={block} />}
+      {isMetricCardsBlock(block) && <MetricCardsBlockView block={block} />}
+      {isInsightBlock(block) && <InsightBlockView block={block} />}
+      {isPostGridBlock(block) && <PostGridBlockView block={block} />}
+      {isComparisonBlock(block) && <ComparisonBlockView block={block} />}
+      {isActionButtonsBlock(block) && <ActionButtonsBlockView block={block} onAction={onAction} />}
+      {isTimelineBlock(block) && <TimelineBlockView block={block} />}
+      {isFunnelBlock(block) && <FunnelBlockView block={block} />}
+      {isChartBlock(block) && <ChartBlockView block={block} />}
+      {isPollBlock(block) && <PollBlockView block={block} />}
+      {isScoreboardBlock(block) && <ScoreboardBlockView block={block} />}
+      {isMoodboardBlock(block) && <MoodboardBlockView block={block} />}
+      {isSwotBlock(block) && <SwotBlockView block={block} />}
+      {isBrandVoiceMeterBlock(block) && <BrandVoiceMeterBlockView block={block} />}
+
+      {/* Unknown block type fallback */}
+      {!isTableBlock(block) &&
+        !isMetricCardsBlock(block) &&
+        !isInsightBlock(block) &&
+        !isPostGridBlock(block) &&
+        !isComparisonBlock(block) &&
+        !isActionButtonsBlock(block) &&
+        !isTimelineBlock(block) &&
+        !isFunnelBlock(block) &&
+        !isChartBlock(block) &&
+        !isPollBlock(block) &&
+        !isScoreboardBlock(block) &&
+        !isMoodboardBlock(block) &&
+        !isSwotBlock(block) &&
+        !isBrandVoiceMeterBlock(block) ? (
+        <pre className="rounded border border-border/40 bg-muted/40 p-3 text-xs text-muted-foreground">
+          {JSON.stringify(block, null, 2)}
+        </pre>
       ) : null}
     </div>
   );

@@ -25,6 +25,7 @@ export type ChatGenerationResult = {
   content: string;
   blocks: ChatBlock[];
   designOptions: ChatDesignOption[];
+  followUp: string[];
 };
 
 export type ChatStreamCallbacks = {
@@ -34,20 +35,24 @@ export type ChatStreamCallbacks = {
   onDone?: () => void;
 };
 
-function parseBlocksPayload(raw: string): { blocks: ChatBlock[]; designOptions: ChatDesignOption[] } {
-  if (!raw) return { blocks: [], designOptions: [] };
+function parseBlocksPayload(raw: string): { blocks: ChatBlock[]; designOptions: ChatDesignOption[]; followUp: string[] } {
+  if (!raw) return { blocks: [], designOptions: [], followUp: [] };
   const trimmed = raw.trim();
-  if (!trimmed) return { blocks: [], designOptions: [] };
+  if (!trimmed) return { blocks: [], designOptions: [], followUp: [] };
   try {
     const parsed = JSON.parse(trimmed);
     const blocks = Array.isArray(parsed?.blocks) ? parsed.blocks : [];
     const designOptions = Array.isArray(parsed?.designOptions) ? parsed.designOptions : [];
-    return { blocks, designOptions };
+    const followUp = Array.isArray(parsed?.follow_up)
+      ? (parsed.follow_up as unknown[]).filter((s): s is string => typeof s === 'string')
+      : [];
+    return { blocks, designOptions, followUp };
   } catch (error) {
     console.warn('[Chat Generator] Failed to parse blocks payload:', (error as Error).message);
-    return { blocks: [], designOptions: [] };
+    return { blocks: [], designOptions: [], followUp: [] };
   }
 }
+
 
 export async function streamChatCompletion(params: {
   researchJobId: string;
@@ -75,7 +80,7 @@ export async function streamChatCompletion(params: {
     params.callbacks?.onDelta?.(content);
     params.callbacks?.onBlocks?.(mockBlocks, []);
     params.callbacks?.onDone?.();
-    return { content, blocks: mockBlocks, designOptions: [] };
+    return { content, blocks: mockBlocks, designOptions: [], followUp: [] };
   }
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
@@ -145,12 +150,11 @@ export async function streamChatCompletion(params: {
     payload = payload.slice(0, endIndex);
   }
 
-  const { blocks, designOptions } = parseBlocksPayload(payload);
-  // Fallback: if no blocks parsed but JSON code fence exists in content, try to parse it.
+  const { blocks, designOptions, followUp } = parseBlocksPayload(payload);
   let finalBlocks = blocks;
   let finalDesigns = designOptions;
   if (finalBlocks.length === 0) {
-    const fenceMatch = content.match(/```json\\s*({[\\s\\S]*?})\\s*```/);
+    const fenceMatch = content.match(/```json\s*({[\s\S]*?})\s*```/);
     if (fenceMatch) {
       try {
         const parsed = JSON.parse(fenceMatch[1]);
@@ -161,23 +165,13 @@ export async function streamChatCompletion(params: {
       }
     }
   }
-  // If still empty, provide a minimal insight block as a safety net.
-  if (finalBlocks.length === 0 && content.trim()) {
-    finalBlocks = [
-      {
-        type: 'insight',
-        blockId: 'auto-insight',
-        title: 'Key points',
-        body: content.slice(0, 280),
-      },
-    ];
-  }
-  params.callbacks?.onBlocks?.(blocks, designOptions);
+  params.callbacks?.onBlocks?.(finalBlocks, finalDesigns);
   params.callbacks?.onDone?.();
 
   if (usage?.prompt_tokens && usage?.completion_tokens) {
     costTracker.addUsage(CHAT_MODEL, usage.prompt_tokens, usage.completion_tokens);
   }
 
-  return { content: cleanedContent.trim(), blocks: finalBlocks, designOptions: finalDesigns };
+  return { content: cleanedContent.trim(), blocks: finalBlocks, designOptions: finalDesigns, followUp };
 }
+
