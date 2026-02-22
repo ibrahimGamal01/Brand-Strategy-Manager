@@ -69,7 +69,7 @@ export function RawSearchResults({ results }: RawSearchResultsProps) {
                         {result.source}
                       </Badge>
                       <span className="text-[10px] text-muted-foreground font-mono">
-                        query: "{result.query}"
+                        query: &quot;{result.query}&quot;
                       </span>
                     </div>
                     <a

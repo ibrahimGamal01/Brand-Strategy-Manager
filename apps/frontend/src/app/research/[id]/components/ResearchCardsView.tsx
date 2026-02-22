@@ -35,7 +35,6 @@ interface ResearchCardsViewProps {
  * 2-column grid with expandable cards showing hierarchical data
  */
 export function ResearchCardsView({
-    jobId,
     client,
     data,
     onScrapeCompetitor

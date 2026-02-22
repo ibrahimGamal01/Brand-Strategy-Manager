@@ -150,7 +150,7 @@ export function VisualComparisonSection({ jobId }: VisualComparisonSectionProps)
             <div className="mt-4 p-3 bg-muted/30 rounded-lg text-xs text-muted-foreground">
                 <p className="font-medium mb-1">Why these posts?</p>
                 The selected visuals represent the highest engagement (likes, shares, comments) from the scraped profiles.
-                Focusing on these "outliers" reveals the visual patterns that currently resonate with the audience.
+                Focusing on these &quot;outliers&quot; reveals the visual patterns that currently resonate with the audience.
             </div>
         </DataSourceSection>
     );

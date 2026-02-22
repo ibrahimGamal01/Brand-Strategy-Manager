@@ -197,7 +197,8 @@ export async function apiFetchLong<T>(
   init?: ApiFetchLongOptions
 ): Promise<T> {
   const timeoutMs = init?.timeoutMs ?? LONG_REQUEST_TIMEOUT_MS;
-  const { timeoutMs: _drop, ...fetchInit } = init ?? {};
+  const { timeoutMs: _unusedTimeoutMs, ...fetchInit } = init ?? {};
+  void _unusedTimeoutMs;
 
   const directBase = getLongRequestBase();
   const url =

@@ -2,10 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 type ChatSocketStatus = 'idle' | 'connecting' | 'open' | 'closed' | 'error';
 
-export type ChatSocketEvent = {
-  type: string;
-  [key: string]: any;
-};
+export type ChatSocketEvent = Record<string, unknown> & { type: string };
 
 interface UseChatSocketOptions {
   researchJobId: string;
@@ -40,7 +37,7 @@ export function useChatSocket({ researchJobId, sessionId, onEvent }: UseChatSock
     socket.send(JSON.stringify(payload));
   }, []);
 
-  const connect = useCallback(() => {
+  const connect = useCallback(function connectSocket() {
     if (!researchJobId) return;
     if (socketRef.current) {
       socketRef.current.close();
@@ -78,7 +75,7 @@ export function useChatSocket({ researchJobId, sessionId, onEvent }: UseChatSock
       const delay = Math.min(5000, 500 + retryCount * 500);
       if (reconnectRef.current) window.clearTimeout(reconnectRef.current);
       reconnectRef.current = window.setTimeout(() => {
-        connect();
+        connectSocket();
       }, delay);
     };
   }, [researchJobId, sessionId, sendRaw]);

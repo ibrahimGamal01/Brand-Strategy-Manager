@@ -11,11 +11,8 @@ import { useToast } from '@/hooks/use-toast';
 
 interface CompetitorPostsSectionProps {
     competitorId: string;
-    handle: string;
     platform: 'instagram' | 'tiktok';
     postsCount: number;
-    defaultExpanded?: boolean;
-    profileId?: string; // Social profile ID for API operations
     onRefresh?: () => void; // Callback to refresh parent data
 }
 
@@ -24,11 +21,8 @@ type FilterOption = 'all' | 'videos' | 'images';
 
 export function CompetitorPostsSection({
     competitorId,
-    handle,
     platform,
     postsCount,
-    defaultExpanded = false,
-    profileId,
     onRefresh
 }: CompetitorPostsSectionProps) {
     const [posts, setPosts] = useState<any[]>([]);

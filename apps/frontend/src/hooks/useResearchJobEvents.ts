@@ -100,7 +100,7 @@ export function useResearchJobEvents(jobId?: string) {
     }
   }, [appendEvents, jobId]);
 
-  const connectStream = useCallback(() => {
+  const connectStream = useCallback(function connectStreamFn() {
     if (!jobId) return;
 
     closeStream();
@@ -139,7 +139,7 @@ export function useResearchJobEvents(jobId?: string) {
       if (!reconnectTimerRef.current) {
         reconnectTimerRef.current = window.setTimeout(() => {
           reconnectTimerRef.current = null;
-          connectStream();
+          connectStreamFn();
         }, RECONNECT_DELAY_MS);
       }
     };

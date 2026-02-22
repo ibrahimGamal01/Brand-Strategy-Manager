@@ -8,11 +8,9 @@ import { socialProfileSchema } from './data/schemas/social-profiles.schema';
 import { useDataCrud } from '../hooks/useDataCrud';
 import { PostsGridWithRanking } from './PostsGridWithRanking';
 import { useState } from 'react';
-import { cn } from '@/lib/utils';
 import { useParams } from 'next/navigation'; // To get jobId if not in props
 
 interface SocialProfilesSectionProps {
-    client: any;
     data: {
         clientPosts: any[];
         socialProfiles: any[];
@@ -20,7 +18,7 @@ interface SocialProfilesSectionProps {
     onRerun: (scraper: string) => Promise<void>;
 }
 
-export function SocialProfilesSection({ client, data, onRerun }: SocialProfilesSectionProps) {
+export function SocialProfilesSection({ data, onRerun }: SocialProfilesSectionProps) {
     const params = useParams();
     const jobId = params.id as string;
     const [running, setRunning] = useState<Record<string, boolean>>({});

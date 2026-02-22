@@ -21,7 +21,7 @@ export function CopyForBatButton({ recordType, recordId, getNode, size = 'sm' }:
     });
 
     const node = getNode();
-    let items: Record<string, Blob> = { 'application/x-bat-record': metaBlob };
+    const items: Record<string, Blob> = { 'application/x-bat-record': metaBlob };
 
     try {
       if (node) {

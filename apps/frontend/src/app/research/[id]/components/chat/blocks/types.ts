@@ -88,6 +88,39 @@ export type ChartBlock = BaseBlock & {
   caption?: string;
 };
 
+export type PollBlock = BaseBlock & {
+  type: 'poll';
+  question: string;
+  options: Array<{ id: string; label: string; description?: string }>;
+};
+
+export type ScoreboardBlock = BaseBlock & {
+  type: 'scoreboard';
+  rows: Array<{ label: string; score: number; maxScore?: number; note?: string; rank?: number }>;
+};
+
+export type MoodboardBlock = BaseBlock & {
+  type: 'moodboard';
+  palette: Array<{ hex: string; name?: string }>;
+  fonts?: Array<{ name: string; style?: string }>;
+  keywords?: string[];
+  aesthetic?: string;
+};
+
+export type SwotBlock = BaseBlock & {
+  type: 'swot';
+  strengths: string[];
+  weaknesses: string[];
+  opportunities: string[];
+  threats: string[];
+};
+
+export type BrandVoiceMeterBlock = BaseBlock & {
+  type: 'brand_voice_meter';
+  dimensions: Array<{ leftLabel: string; rightLabel: string; value: number; note?: string }>;
+  summary?: string;
+};
+
 export type ChatBlock =
   | TableBlock
   | MetricCardsBlock
@@ -99,6 +132,11 @@ export type ChatBlock =
   | TimelineBlock
   | FunnelBlock
   | ChartBlock
+  | PollBlock
+  | ScoreboardBlock
+  | MoodboardBlock
+  | SwotBlock
+  | BrandVoiceMeterBlock
   | BaseBlock;
 
 export type ChatDesignOption = {

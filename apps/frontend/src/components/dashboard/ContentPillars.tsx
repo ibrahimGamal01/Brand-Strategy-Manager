@@ -83,7 +83,7 @@ export function ContentPillars({ pillars }: ContentPillarsProps) {
                           Emotional Connection
                         </div>
                         <p className="text-sm text-foreground/80 italic">
-                          "{pillar.emotionalConnection}"
+                          &quot;{pillar.emotionalConnection}&quot;
                         </p>
                       </div>
                       

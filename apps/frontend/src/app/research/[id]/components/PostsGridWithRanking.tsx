@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import {
     Heart, MessageCircle, Eye, Share2, ExternalLink,
-    TrendingUp, Users, Clock, Trophy, BarChart3, Brain, ChevronDown, ChevronUp
+    TrendingUp, Clock, Trophy, Brain, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toMediaUrl } from '@/lib/media-url';
@@ -75,7 +75,7 @@ export function PostsGridWithRanking({ posts, followerCount, platform }: PostsGr
     // Calculate aggregate stats
     const stats = calculateAggregateStats(rankedPosts);
 
-    const tabs: Array<{ id: RankingCriteria; label: string; icon: any; desc: string }> = [
+    const tabs: Array<{ id: RankingCriteria; label: string; icon: React.ComponentType<{ className?: string }>; desc: string }> = [
         { id: 'balanced', label: 'Balanced', icon: Trophy, desc: 'Multi-metric winners' },
         { id: 'engagement', label: 'Engagement', icon: Heart, desc: 'Most engaging' },
         { id: 'reach', label: 'Reach', icon: Eye, desc: 'Most viewed' },
@@ -86,6 +86,11 @@ export function PostsGridWithRanking({ posts, followerCount, platform }: PostsGr
 
     return (
         <div className="space-y-6">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="px-2 py-1 rounded-full border border-border/70 bg-card/60">
+                    Platform: {platform === 'instagram' ? 'Instagram' : 'TikTok'}
+                </span>
+            </div>
             {/* Performance Overview Cards */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <StatsCard
@@ -176,7 +181,6 @@ export function PostsGridWithRanking({ posts, followerCount, platform }: PostsGr
                         <PostCard
                             key={rankedPost.post.id}
                             rankedPost={rankedPost}
-                            platform={platform}
                             criteria={selectedCriteria}
                         />
                     ))}
@@ -187,8 +191,6 @@ export function PostsGridWithRanking({ posts, followerCount, platform }: PostsGr
                         <PostRow
                             key={rankedPost.post.id}
                             rankedPost={rankedPost}
-                            platform={platform}
-                            criteria={selectedCriteria}
                         />
                     ))}
                 </div>
@@ -316,7 +318,7 @@ function PostAnalysisBlock({ mediaAssets }: { mediaAssets?: Post['mediaAssets'] 
 }
 
 // Post Card (Grid View)
-function PostCard({ rankedPost, platform, criteria }: { rankedPost: RankedPost; platform: string; criteria: RankingCriteria }) {
+function PostCard({ rankedPost, criteria }: { rankedPost: RankedPost; criteria: RankingCriteria }) {
     const { post, rank, score, breakdown } = rankedPost;
 
     const [mediaIndex, setMediaIndex] = useState(0);
@@ -328,7 +330,7 @@ function PostCard({ rankedPost, platform, criteria }: { rankedPost: RankedPost; 
     });
     const current = mediaItems[mediaIndex] || null;
 
-    let mediaSrc = current?.url ||
+            const mediaSrc = current?.url ||
         toMediaUrl(post.thumbnailUrl) ||
         toMediaUrl(post.url) ||
         post.thumbnailUrl ||
@@ -470,7 +472,7 @@ function PostCard({ rankedPost, platform, criteria }: { rankedPost: RankedPost; 
 }
 
 // Post Row (List View)
-function PostRow({ rankedPost, platform, criteria }: { rankedPost: RankedPost; platform: string; criteria: RankingCriteria }) {
+function PostRow({ rankedPost }: { rankedPost: RankedPost }) {
     const { post, rank, score, breakdown } = rankedPost;
 
     const localImage = post.mediaAssets?.find(m => !m.blobStoragePath?.endsWith('.mp4'));
@@ -606,7 +608,7 @@ function calculateScore(breakdown: ReturnType<typeof calculateBreakdown>, criter
         case 'conversation': return breakdown.conversation;
         case 'virality': return breakdown.virality;
         case 'recency': return breakdown.recency;
-        case 'balanced':
+        case 'balanced': {
             const normalized = {
                 engagement: Math.min(100, breakdown.engagementRate * 10),
                 reach: Math.min(100, breakdown.reach / 1000),
@@ -621,6 +623,7 @@ function calculateScore(breakdown: ReturnType<typeof calculateBreakdown>, criter
                 normalized.conversation * 0.15 +
                 normalized.recency * 0.10
             );
+        }
         default: return 0;
     }
 }

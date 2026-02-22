@@ -59,10 +59,11 @@ export function ChatThread({
 
   return (
     <section className="flex h-full flex-col gap-3">
-      <div className="rounded-xl border border-border/70 bg-card/60 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
+      <div className="rounded-xl border border-border/70 bg-card/60 shadow-sm flex flex-col overflow-hidden" style={{ minHeight: 0, flex: '1 1 auto' }}>
+        {/* Session header */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3 flex-shrink-0">
           <div>
-            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Conversation</p>
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Active Thread</p>
             <h3 className="text-sm font-semibold">{sessionTitle || 'Untitled session'}</h3>
             {headerTime ? (
               <p className="text-[11px] text-muted-foreground">Last active: {headerTime}</p>
@@ -72,8 +73,11 @@ export function ChatThread({
             <Badge variant="outline" className="text-[10px] uppercase">
               {displayMessages.length} messages
             </Badge>
-            <Badge variant={isStreaming ? 'warning' : 'secondary'} className="text-[10px] uppercase">
-              {isStreaming ? 'streaming' : 'idle'}
+            <Badge
+              variant={isStreaming ? 'warning' : 'secondary'}
+              className={`text-[10px] uppercase transition-all ${isStreaming ? 'animate-pulse' : ''}`}
+            >
+              {isStreaming ? 'thinking' : 'idle'}
             </Badge>
             <Badge variant="outline" className="text-[10px] uppercase">
               {connectionLabel}
@@ -81,37 +85,76 @@ export function ChatThread({
           </div>
         </div>
 
+        {/* Messages */}
         <div
           ref={containerRef}
           className="flex-1 space-y-3 overflow-y-auto px-4 py-3 custom-scrollbar"
+          style={{ minHeight: 0 }}
         >
           {displayMessages.length === 0 ? (
-            <div className="rounded-md border border-dashed border-border/60 bg-background/40 p-4 text-sm text-muted-foreground">
-              Start a chat to explore research insights, draft options, or compare directions.
-            </div>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="flex flex-col items-center justify-center py-12 text-center"
+            >
+              <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 text-2xl text-white shadow-lg">
+                BAT
+              </div>
+              <h4 className="text-sm font-semibold text-foreground">BAT Intelligence</h4>
+              <p className="mt-1 max-w-[260px] text-xs text-muted-foreground">
+                Your brand strategy co-pilot. Ask anything about your brand, competitors, or content direction.
+              </p>
+              <p className="mt-3 text-[11px] text-muted-foreground/60">
+                Type / to see available commands
+              </p>
+            </motion.div>
           ) : (
             <AnimatePresence initial={false}>
-              {displayMessages.map((message) => (
+              {displayMessages.map((message, index) => (
                 <motion.div
                   key={message.id}
                   layout
                   initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 12 }}
-                  transition={{ duration: 0.2 }}
+                  transition={{ duration: 0.2, delay: index === displayMessages.length - 1 ? 0 : 0 }}
                 >
-          <ChatMessageItem
-            message={message}
-            pinnedBlockIds={pinnedBlockIds}
-            onBlockView={onBlockView}
-            onBlockPin={onBlockPin}
-            onBlockUnpin={onBlockUnpin}
-            onSelectDesign={onSelectDesign}
-            onAttachmentView={onAttachmentView}
-            researchJobId={researchJobId}
-          />
-        </motion.div>
-      ))}
+                  <ChatMessageItem
+                    message={message}
+                    pinnedBlockIds={pinnedBlockIds}
+                    onBlockView={onBlockView}
+                    onBlockPin={onBlockPin}
+                    onBlockUnpin={onBlockUnpin}
+                    onSelectDesign={onSelectDesign}
+                    onAttachmentView={onAttachmentView}
+                    onComposerFill={onDraftChange}
+                    researchJobId={researchJobId}
+                  />
+                </motion.div>
+              ))}
+              {/* Streaming cursor indicator */}
+              {isStreaming && (
+                <motion.div
+                  key="streaming-cursor"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="flex items-center gap-2 px-4 py-2"
+                >
+                  <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 text-[10px] font-bold text-white">
+                    BAT
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {[0, 0.15, 0.3].map((delay, i) => (
+                      <motion.div
+                        key={i}
+                        className="h-2 w-2 rounded-full bg-emerald-500"
+                        animate={{ y: [0, -4, 0] }}
+                        transition={{ repeat: Infinity, duration: 0.6, delay }}
+                      />
+                    ))}
+                  </div>
+                </motion.div>
+              )}
             </AnimatePresence>
           )}
         </div>

@@ -153,7 +153,7 @@ export function CommunityInsights({ insights }: CommunityInsightsProps) {
                   </div>
                   
                   <blockquote className="text-sm italic text-foreground/90 border-l-2 border-primary/30 pl-3 mb-3">
-                    "{insight.content}"
+                    &quot;{insight.content}&quot;
                   </blockquote>
                   
                   <div className="space-y-2">

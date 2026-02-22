@@ -31,7 +31,7 @@ export function useClientQuestions(researchJobId: string) {
       const data = await apiFetch<{ pending: QuestionSet[] }>(`/research-jobs/${researchJobId}/questions/pending`);
       setPending(data.pending || []);
       if (data.pending?.length) setActiveId(data.pending[0].id);
-    } catch (err) {
+    } catch {
       // ignore
     }
   }, [researchJobId]);

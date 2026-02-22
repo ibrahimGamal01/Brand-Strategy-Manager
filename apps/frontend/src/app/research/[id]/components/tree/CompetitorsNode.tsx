@@ -226,10 +226,8 @@ function CompetitorNodeItem({ comp, scrapingIds, handleScrape, getSocialProfileI
                 {comp.postsScraped > 0 && (
                     <CompetitorPostsSection
                         competitorId={comp.id}
-                        handle={comp.handle}
                         platform={platform}
                         postsCount={comp.postsScraped}
-                        profileId={getSocialProfileId(comp.handle, platform)}
                         onRefresh={() => onRefreshSection?.('competitors')}
                     />
                 )}

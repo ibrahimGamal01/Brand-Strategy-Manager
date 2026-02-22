@@ -12,7 +12,6 @@ interface DataCardProps {
     status?: 'idle' | 'loading' | 'success' | 'error';
     defaultExpanded?: boolean;
     children?: ReactNode;
-    onRefresh?: () => void;
     className?: string;
 }
 
@@ -31,7 +30,6 @@ export function DataCard({
     status = 'idle',
     defaultExpanded = false,
     children,
-    onRefresh,
     className = ''
 }: DataCardProps) {
     const [isExpanded, setIsExpanded] = useState(defaultExpanded);

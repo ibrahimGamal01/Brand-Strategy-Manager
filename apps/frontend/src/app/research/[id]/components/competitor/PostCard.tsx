@@ -33,8 +33,6 @@ export function PostCard({ post, platform }: PostCardProps) {
     };
 
     const isPink = platform === 'instagram';
-    const isBlue = platform === 'tiktok';
-    const accentColor = isPink ? 'bg-pink-500' : 'bg-blue-500';
     const accentText = isPink ? 'text-pink-500' : 'text-blue-500';
 
     return (

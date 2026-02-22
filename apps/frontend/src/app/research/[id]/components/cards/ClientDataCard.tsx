@@ -2,7 +2,6 @@
 
 import { User, Instagram, Video } from 'lucide-react';
 import { DataCard } from './DataCard';
-import { Badge } from '@/components/ui/badge';
 import { PostsGridWithRanking } from '../PostsGridWithRanking';
 
 interface SocialProfile {

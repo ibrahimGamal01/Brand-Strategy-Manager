@@ -63,12 +63,6 @@ export function DiscoveryCard({
     const icon = type === 'ai' ? <Bot className="h-4 w-4" /> :
         type === 'tiktok' ? <Video className="h-4 w-4" /> :
             <Code className="h-4 w-4" />;
-    const title = type === 'ai' ? 'AI Discovery' :
-        type === 'tiktok' ? 'TikTok Discovery' :
-            'Algorithmic Search';
-    const colorClass = type === 'ai' ? 'text-purple-400' :
-        type === 'tiktok' ? 'text-pink-400' :
-            'text-orange-400';
 
     // Build settings config based on type
     const settingsConfig = type === 'ai'
@@ -171,7 +165,7 @@ export function DiscoveryCard({
                             ))
                         ) : (
                             <div className="p-4 border border-dashed border-border rounded-lg text-center text-xs text-muted-foreground bg-muted/10">
-                                No competitors found yet. Click "Re-run Discovery" to fetch.
+                                No competitors found yet. Click &quot;Re-run Discovery&quot; to fetch.
                             </div>
                         )}
                     </div>

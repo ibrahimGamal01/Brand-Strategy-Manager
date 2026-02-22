@@ -87,7 +87,7 @@ function parseChannelToken(token: string): ChannelDraftItem | null {
   if (!raw) return null;
 
   const pair = raw.match(
-    /^(instagram|tiktok|youtube|linkedin|facebook|x|twitter)\s*[:=\-]?\s*@?([a-z0-9._-]{1,80})$/i
+    /^(instagram|tiktok|youtube|linkedin|facebook|x|twitter)\s*[:=-]?\s*@?([a-z0-9._-]{1,80})$/i
   );
   if (pair) {
     const platform = pair[1].toLowerCase() === 'twitter' ? 'x' : pair[1].toLowerCase();

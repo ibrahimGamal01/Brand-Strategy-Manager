@@ -113,7 +113,7 @@ export async function recordChatBlockEvent(params: {
   sessionId: string;
   messageId: string;
   blockId: string;
-  eventType: 'VIEW' | 'PIN' | 'UNPIN' | 'SELECT_DESIGN';
+  eventType: 'VIEW' | 'PIN' | 'UNPIN' | 'SELECT_DESIGN' | 'FORM_SUBMIT' | 'ATTACH_VIEW';
   payload?: Record<string, unknown> | null;
 }) {
   return prisma.chatBlockEvent.create({

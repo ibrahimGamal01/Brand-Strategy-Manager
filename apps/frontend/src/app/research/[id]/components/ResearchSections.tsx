@@ -1,7 +1,6 @@
 'use client';
 
 import {
-    Instagram,
     Search,
     Image as ImageIcon,
     Video,
@@ -11,11 +10,8 @@ import {
     MessageSquare,
     Brain,
     Database,
-    XCircle,
-    Share2,
     Loader2
 } from 'lucide-react';
-import { PipelineProgress } from './PipelineProgress';
 // New Generic Data Components
 import { DataSection } from './data/DataSection';
 import { DataGrid } from './data/DataGrid';
@@ -31,8 +27,6 @@ import { useDataCrud } from '../hooks/useDataCrud';
 
 // Legacy components (kept for reference or specific use cases)
 import { DataSourceSection } from './DataSourceSection';
-import { SocialProfilesSection } from './SocialProfilesSection';
-import { CompetitorOrchestrationPanel } from './competitor/CompetitorOrchestrationPanel';
 import { VisualComparisonSection } from './VisualComparisonSection';
 import { ClientDataCard } from './cards/ClientDataCard';
 import { Badge } from '@/components/ui/badge';
@@ -46,7 +40,6 @@ import { ModuleActionButtons } from './ModuleActionButtons';
 
 interface AllResearchSectionsProps {
     jobId: string;
-    status: string;
     client: any;
     data: {
         clientPosts: any[];
@@ -69,17 +62,15 @@ interface AllResearchSectionsProps {
     }
 }
 
-export function AllResearchSections({ jobId, status, client, data }: AllResearchSectionsProps) {
+export function AllResearchSections({ jobId, client, data }: AllResearchSectionsProps) {
     const router = useRouter();
     const { toast } = useToast();
-    const [runningScrapers, setRunningScrapers] = useState<Record<string, boolean>>({});
     const [brandIntelRunning, setBrandIntelRunning] = useState(false);
     const { runModuleAction, isRunning, getLastResult } = useModuleActions(jobId);
 
     // Wrapper for rerun actions
     async function rerunScraper(jobId: string, scraperType: string) {
         try {
-            setRunningScrapers(prev => ({ ...prev, [scraperType]: true }));
             const response = await apiClient.rerunScraper(jobId, scraperType);
             if (response?.error) {
                 throw new Error(response.error);
@@ -96,7 +87,7 @@ export function AllResearchSections({ jobId, status, client, data }: AllResearch
                 variant: 'destructive',
             });
         } finally {
-            setRunningScrapers(prev => ({ ...prev, [scraperType]: false }));
+            // no-op
         }
     }
 
@@ -384,11 +375,9 @@ export function AllResearchSections({ jobId, status, client, data }: AllResearch
                     </div>
                 }
             >
-                <CompetitorOrchestrationPanel
-                    jobId={jobId}
-                    className="mb-4"
-                    onRefresh={() => router.refresh()}
-                />
+                <div className="text-sm text-muted-foreground">
+                    Competitor orchestration panel temporarily disabled.
+                </div>
             </DataSourceSection>
 
             {/* 8. Brand Mentions */}

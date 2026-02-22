@@ -7,7 +7,8 @@ import type { ChatMessage } from './types';
 import type { ChatBlock, ChatDesignOption } from './blocks/types';
 import { BlockRenderer } from './blocks/BlockRenderer';
 import { AttachmentGallery } from './AttachmentGallery';
-import { useRouter, usePathname } from 'next/navigation';
+import { MessageToolbar } from './MessageToolbar';
+import { useRouter } from 'next/navigation';
 
 interface ChatMessageItemProps {
   message: ChatMessage;
@@ -17,6 +18,7 @@ interface ChatMessageItemProps {
   onBlockUnpin: (message: ChatMessage, block: ChatBlock) => void;
   onSelectDesign: (message: ChatMessage, designId: string) => void;
   onAttachmentView?: (message: ChatMessage, attachmentId: string, meta?: Record<string, unknown>) => void;
+  onComposerFill?: (text: string) => void;
   researchJobId: string;
 }
 
@@ -48,11 +50,12 @@ export function ChatMessageItem({
   onBlockUnpin,
   onSelectDesign,
   onAttachmentView,
+  onComposerFill,
   researchJobId,
 }: ChatMessageItemProps) {
   const router = useRouter();
-  const pathname = usePathname();
   const isUser = message.role === 'USER';
+  const [hovered, setHovered] = useState(false);
   const initialDesign = useMemo(() => resolveDesignSelection(message), [message]);
   const [selectedDesign, setSelectedDesign] = useState<string | null>(initialDesign);
 
@@ -61,43 +64,61 @@ export function ChatMessageItem({
   }, [message.id, message.selectedDesignId, message.designOptions]);
 
   const activeBlocks = resolveBlocks(message, selectedDesign);
-
   const designOptions = (message.designOptions || []) as ChatDesignOption[];
   const blockCount = activeBlocks.length;
-  const avatarLabel = isUser ? 'You' : message.role === 'ASSISTANT' ? 'BAT' : 'SYS';
   const hasAttachments = (message.attachments?.length || 0) > 0;
+
+  const avatarLabel = isUser ? 'You' : 'BAT';
 
   const cleanedContent = useMemo(() => {
     let content = message.content || '';
-    // Remove fenced JSON with blocks/designOptions the model might have echoed.
     content = content.replace(/```(?:json)?\s*\{[^`]*"blocks"[^`]*"designOptions"[^`]*\}\s*```/gi, '');
-    // Remove inline minimal JSON if it's the only thing left.
     if (/^\s*\{\s*"blocks"\s*:\s*\[[\s\S]*?\]\s*,\s*"designOptions"\s*:\s*\[[\s\S]*?\]\s*\}\s*$/i.test(content)) {
       content = '';
     }
     return content.trim();
   }, [message.content]);
 
+  function handleRemix(content: string) {
+    const preview = content.slice(0, 120).replace(/\n/g, ' ');
+    onComposerFill?.(`Remix this: "${preview}"`);
+  }
+
+  function handleExpand(content: string) {
+    const preview = content.slice(0, 120).replace(/\n/g, ' ');
+    onComposerFill?.(`Go deeper on this: "${preview}"`);
+  }
+
+  function handleTranslate(content: string, tone: 'professional' | 'casual' | 'punchy') {
+    const preview = content.slice(0, 120).replace(/\n/g, ' ');
+    const toneLabel = { professional: 'professional and formal', casual: 'casual and friendly', punchy: 'punchy and bold' }[tone];
+    onComposerFill?.(`Rewrite this in a ${toneLabel} tone: "${preview}"`);
+  }
+
   return (
     <article
-      className={`rounded-xl border px-4 py-3 text-sm shadow-sm ${
-        isUser
-          ? 'ml-auto border-primary/30 bg-gradient-to-br from-primary/10 to-background text-foreground'
+      className={`group relative rounded-xl border px-4 py-3 text-sm shadow-sm transition-colors ${isUser
+          ? 'ml-auto max-w-[85%] border-primary/30 bg-gradient-to-br from-primary/10 to-background text-foreground'
           : 'mr-auto border-border/70 bg-card/80 text-foreground'
-      }`}
+        }`}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
     >
       <div className="flex items-start gap-3">
+        {/* Avatar */}
         <div
-          className={`flex h-9 w-9 items-center justify-center rounded-full text-[11px] font-semibold ${
-            isUser ? 'bg-primary/20 text-primary' : 'bg-emerald-100 text-emerald-700'
-          }`}
+          className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-bold tracking-wide ${isUser
+              ? 'bg-primary/20 text-primary'
+              : 'bg-gradient-to-br from-emerald-400 to-teal-600 text-white shadow-sm'
+            }`}
         >
           {avatarLabel}
         </div>
-        <div className="flex-1">
+
+        <div className="flex-1 min-w-0">
           <div className="mb-2 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-[10px] uppercase tracking-wide text-muted-foreground">
-              <span className="font-semibold">{avatarLabel}</span>
+              <span className="font-semibold">{isUser ? 'You' : 'BAT Intelligence'}</span>
               {message.pending ? <Badge variant="outline">sending</Badge> : null}
               {!isUser && (blockCount > 0 || hasAttachments) ? (
                 <Badge variant="secondary" className="text-[10px] uppercase">
@@ -172,17 +193,15 @@ export function ChatMessageItem({
                   onUnpin={(b) => onBlockUnpin(message, b)}
                   onAction={(action, href) => {
                     if (action === 'open_module') {
-                      const targetHref =
-                        href || `/research/${researchJobId}?module=intelligence`;
+                      const targetHref = href || `/research/${researchJobId}?module=intelligence`;
                       if (targetHref.startsWith('http')) window.open(targetHref, '_blank');
                       else router.push(targetHref);
                       return;
                     }
                     if (action === 'run_intel' || action === 'run_orchestrator' || action === 'run_intelligence') {
                       const targetHref =
-                        href ||
-                        `/api/research-jobs/${researchJobId}/brand-intelligence/orchestrate`;
-                      fetch(targetHref, { method: 'POST' }).catch(() => {});
+                        href || `/api/research-jobs/${researchJobId}/brand-intelligence/orchestrate`;
+                      fetch(targetHref, { method: 'POST' }).catch(() => { });
                       return;
                     }
                     if (href) {
@@ -196,6 +215,18 @@ export function ChatMessageItem({
           ) : null}
         </div>
       </div>
+
+      {/* Hover toolbar - only for assistant messages */}
+      {!isUser && hovered && !message.pending && (
+        <div className="absolute -top-5 right-3 z-20">
+          <MessageToolbar
+            message={message}
+            onRemix={handleRemix}
+            onExpand={handleExpand}
+            onTranslate={handleTranslate}
+          />
+        </div>
+      )}
     </article>
   );
 }

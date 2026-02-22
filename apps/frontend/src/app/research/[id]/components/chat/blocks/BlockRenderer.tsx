@@ -13,6 +13,11 @@ import type {
   TimelineBlock,
   FunnelBlock,
   ChartBlock,
+  PollBlock,
+  ScoreboardBlock,
+  MoodboardBlock,
+  SwotBlock,
+  BrandVoiceMeterBlock,
 } from './types';
 import { TableBlockView } from './renderers/TableBlockView';
 import { MetricCardsBlockView } from './renderers/MetricCardsBlockView';
@@ -24,6 +29,11 @@ import { ActionButtonsBlockView } from './renderers/ActionButtonsBlockView';
 import { TimelineBlockView } from './renderers/TimelineBlockView';
 import { FunnelBlockView } from './renderers/FunnelBlockView';
 import { ChartBlockView } from './renderers/ChartBlockView';
+import { PollBlockView } from './renderers/PollBlockView';
+import { ScoreboardBlockView } from './renderers/ScoreboardBlockView';
+import { MoodboardBlockView } from './renderers/MoodboardBlockView';
+import { SwotBlockView } from './renderers/SwotBlockView';
+import { BrandVoiceMeterBlockView } from './renderers/BrandVoiceMeterBlockView';
 
 const BLOCK_LABELS: Record<string, string> = {
   table: 'Table',
@@ -36,6 +46,11 @@ const BLOCK_LABELS: Record<string, string> = {
   timeline: 'Timeline',
   funnel: 'Funnel',
   chart: 'Chart',
+  poll: 'Poll',
+  scoreboard: 'Scoreboard',
+  moodboard: 'Moodboard',
+  swot: 'SWOT',
+  brand_voice_meter: 'Voice Meter',
 };
 
 interface BlockRendererProps {
@@ -58,6 +73,11 @@ const isActionButtonsBlock = (b: ChatBlock): b is ActionButtonsBlock => b.type =
 const isTimelineBlock = (b: ChatBlock): b is TimelineBlock => b.type === 'timeline';
 const isFunnelBlock = (b: ChatBlock): b is FunnelBlock => b.type === 'funnel';
 const isChartBlock = (b: ChatBlock): b is ChartBlock => b.type === 'chart';
+const isPollBlock = (b: ChatBlock): b is PollBlock => b.type === 'poll';
+const isScoreboardBlock = (b: ChatBlock): b is ScoreboardBlock => b.type === 'scoreboard';
+const isMoodboardBlock = (b: ChatBlock): b is MoodboardBlock => b.type === 'moodboard';
+const isSwotBlock = (b: ChatBlock): b is SwotBlock => b.type === 'swot';
+const isBrandVoiceMeterBlock = (b: ChatBlock): b is BrandVoiceMeterBlock => b.type === 'brand_voice_meter';
 
 export function BlockRenderer({ block, isPinned, onView, onPin, onUnpin, onAction }: BlockRendererProps) {
   const ref = useRef<HTMLDivElement | null>(null);
@@ -121,6 +141,11 @@ export function BlockRenderer({ block, isPinned, onView, onPin, onUnpin, onActio
       {isTimelineBlock(block) ? <TimelineBlockView block={block} /> : null}
       {isFunnelBlock(block) ? <FunnelBlockView block={block} /> : null}
       {isChartBlock(block) ? <ChartBlockView block={block} /> : null}
+      {isPollBlock(block) ? <PollBlockView block={block} /> : null}
+      {isScoreboardBlock(block) ? <ScoreboardBlockView block={block} /> : null}
+      {isMoodboardBlock(block) ? <MoodboardBlockView block={block} /> : null}
+      {isSwotBlock(block) ? <SwotBlockView block={block} /> : null}
+      {isBrandVoiceMeterBlock(block) ? <BrandVoiceMeterBlockView block={block} /> : null}
       {!BLOCK_LABELS[block.type] ? (
         <pre className="text-xs text-muted-foreground whitespace-pre-wrap">{JSON.stringify(block, null, 2)}</pre>
       ) : null}

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Play, ChevronLeft, ChevronRight, ExternalLink, Clock } from 'lucide-react';
+import { Play, ChevronLeft, ChevronRight, Clock } from 'lucide-react';
 
 interface VideoItem {
     id: string;

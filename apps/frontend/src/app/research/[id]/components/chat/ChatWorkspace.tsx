@@ -87,7 +87,7 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
       switch (event.type) {
         case 'AUTH_OK': {
           if (event.sessionId && event.sessionId !== activeSessionId) {
-            setActiveSessionId(event.sessionId);
+            setActiveSessionId(event.sessionId as string);
             void sessionsQuery.refetch();
           }
           break;
@@ -100,8 +100,10 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
           break;
         }
         case 'ASSISTANT_START': {
+          const msgId = typeof event.messageId === 'string' ? event.messageId : null;
+          if (!msgId) break;
           setStreamingMessage({
-            id: event.messageId,
+            id: msgId,
             role: 'ASSISTANT',
             content: '',
             createdAt: new Date().toISOString(),
@@ -109,21 +111,25 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
           break;
         }
         case 'ASSISTANT_DELTA': {
+          const msgId = typeof event.messageId === 'string' ? event.messageId : null;
+          if (!msgId) break;
           setStreamingMessage((prev) =>
-            prev && prev.id === event.messageId
+            prev && prev.id === msgId
               ? { ...prev, content: `${prev.content}${event.delta || ''}` }
               : prev
           );
           break;
         }
         case 'ASSISTANT_BLOCKS': {
+          const msgId = typeof event.messageId === 'string' ? event.messageId : null;
+          if (!msgId) break;
           setStreamingMessage((prev) =>
-            prev && prev.id === event.messageId
+            prev && prev.id === msgId
               ? {
-                  ...prev,
-                  blocks: event.blocks || [],
-                  designOptions: event.designOptions || [],
-                }
+                ...prev,
+                blocks: Array.isArray(event.blocks) ? event.blocks : [],
+                designOptions: Array.isArray(event.designOptions) ? event.designOptions : [],
+              }
               : prev
           );
           break;
@@ -137,7 +143,7 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
         case 'ERROR': {
           toast({
             title: 'Chat error',
-            description: event.details || event.error || 'Chat connection failed',
+            description: String(event.details || event.error || 'Chat connection failed'),
             variant: 'destructive',
           });
           break;
@@ -361,6 +367,7 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
           blocks={savedBlocksQuery.data?.blocks || []}
           onUnpin={handleUnpinSavedBlock}
           isLoading={savedBlocksQuery.isLoading}
+          messageCount={messages.length + (streamingMessage ? 1 : 0)}
         />
       </div>
     </div>
