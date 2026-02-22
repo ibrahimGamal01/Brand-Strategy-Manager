@@ -9,6 +9,8 @@ import {
   sleep,
 } from '../network/proxy-rotation';
 import { STORAGE_ROOT } from './storage-root';
+import { isR2Configured } from './r2-client';
+import { uploadUrlToR2, r2KeyToUrl } from './r2-storage';
 
 const STORAGE_BASE = STORAGE_ROOT;
 
@@ -58,6 +60,19 @@ function isWithinStorageRoot(targetPath: string): boolean {
 }
 
 function validateDownloadBuffer(url: string, contentTypeRaw: string, buffer: Buffer): void {
+  // Hard reject: empty buffer means rate-limit, auth wall, or CDN error response
+  if (buffer.length === 0) {
+    throw new Error(`Empty download buffer for ${url} - likely rate-limited, blocked, or CDN error`);
+  }
+
+  // Hard reject: anything under 512 bytes is not a valid media file
+  const MIN_VALID_BYTES = 512;
+  if (buffer.length < MIN_VALID_BYTES) {
+    throw new Error(
+      `Suspiciously small download (${buffer.length} bytes) for ${url} - not a valid media file`
+    );
+  }
+
   const contentType = (contentTypeRaw || '').toLowerCase();
   if (contentType.includes('text/html')) {
     throw new Error(`Invalid content type: ${contentType}. Likely a login page or error page.`);
@@ -205,11 +220,18 @@ export const fileManager = {
   },
 
   /**
-   * Convert storage path to URL for frontend
+   * Convert storage path or R2 key to URL for frontend.
+   * When R2 is configured, keys are returned as R2 CDN URLs.
+   * When using local storage, keys are served as /storage/... routes.
    */
   toUrl(storagePath: string): string {
     if (!storagePath) return '';
     if (/^https?:\/\//i.test(storagePath)) return storagePath;
+
+    // In R2 mode the "path" stored in DB is actually an R2 key (relative, no leading slash)
+    if (isR2Configured() && !path.isAbsolute(storagePath) && !storagePath.startsWith('/storage/')) {
+      return r2KeyToUrl(storagePath);
+    }
 
     const absolute = path.isAbsolute(storagePath) ? storagePath : path.resolve(storagePath);
     if (!isWithinStorageRoot(absolute)) {
@@ -218,6 +240,31 @@ export const fileManager = {
 
     const relativePath = path.relative(STORAGE_BASE, absolute).split(path.sep).join('/');
     return `/storage/${relativePath}`;
+  },
+
+  /**
+   * Download from URL and either upload to R2 or save to local disk,
+   * depending on USE_R2_STORAGE env var.
+   *
+   * Returns the storage reference (R2 key or local absolute path).
+   */
+  async downloadAndSaveOrUpload(
+    url: string,
+    localSavePath: string,
+    r2Key: string,
+    headers: Record<string, string> = {},
+    options: DownloadAndSaveOptions = {}
+  ): Promise<{ storagePath: string; sizeBytes: number }> {
+    if (isR2Configured()) {
+      const result = await uploadUrlToR2(url, r2Key, headers, {
+        contextLabel: options.contextLabel || r2Key,
+      });
+      return { storagePath: r2Key, sizeBytes: result.sizeBytes };
+    }
+    // Fall back to local disk
+    await this.downloadAndSave(url, localSavePath, headers, options);
+    const stats = fs.statSync(path.resolve(localSavePath));
+    return { storagePath: localSavePath, sizeBytes: stats.size };
   },
 
   /**

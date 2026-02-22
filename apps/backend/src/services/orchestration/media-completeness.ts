@@ -36,7 +36,7 @@ export async function checkMediaGaps(researchJobId: string): Promise<MediaGaps> 
 async function findClientSnapshotsWithMissingMedia(
   researchJobId: string
 ): Promise<{ id: string }[]> {
-  // const throttleBefore = new Date(Date.now() - MEDIA_DOWNLOAD_QUEUE_THROTTLE_MS);
+  const throttleBefore = new Date(Date.now() - MEDIA_DOWNLOAD_QUEUE_THROTTLE_MS);
   const snapshots = await prisma.clientProfileSnapshot.findMany({
     where: {
       researchJobId,
@@ -45,11 +45,10 @@ async function findClientSnapshotsWithMissingMedia(
           mediaAssets: { none: {} },
         },
       },
-      // TODO: Re-enable throttling after adding lastMediaDownloadQueuedAt to schema
-      // OR: [
-      //   { lastMediaDownloadQueuedAt: null },
-      //   { lastMediaDownloadQueuedAt: { lt: throttleBefore } },
-      // ],
+      OR: [
+        { lastMediaDownloadQueuedAt: null },
+        { lastMediaDownloadQueuedAt: { lt: throttleBefore } },
+      ],
     },
     select: { id: true },
     orderBy: { scrapedAt: 'desc' },
@@ -62,7 +61,7 @@ async function findClientSnapshotsWithMissingMedia(
 async function findCompetitorSnapshotsWithMissingMedia(
   researchJobId: string
 ): Promise<{ id: string }[]> {
-  // const throttleBefore = new Date(Date.now() - MEDIA_DOWNLOAD_QUEUE_THROTTLE_MS);
+  const throttleBefore = new Date(Date.now() - MEDIA_DOWNLOAD_QUEUE_THROTTLE_MS);
   const snapshots = await prisma.competitorProfileSnapshot.findMany({
     where: {
       researchJobId,
@@ -71,11 +70,10 @@ async function findCompetitorSnapshotsWithMissingMedia(
           mediaAssets: { none: {} },
         },
       },
-      // TODO: Re-enable throttling after adding lastMediaDownloadQueuedAt to schema
-      // OR: [
-      //   { lastMediaDownloadQueuedAt: null },
-      //   { lastMediaDownloadQueuedAt: { lt: throttleBefore } },
-      // ],
+      OR: [
+        { lastMediaDownloadQueuedAt: null },
+        { lastMediaDownloadQueuedAt: { lt: throttleBefore } },
+      ],
     },
     select: { id: true },
     orderBy: { scrapedAt: 'desc' },
@@ -97,11 +95,10 @@ export async function queueMediaDownloadTasks(
   const now = new Date();
 
   for (const snapshotId of gaps.clientSnapshotIds) {
-    // TODO: Re-enable after adding lastMediaDownloadQueuedAt to schema
-    // await prisma.clientProfileSnapshot.updateMany({
-    //   where: { id: snapshotId },
-    //   data: { lastMediaDownloadQueuedAt: now },
-    // });
+    await prisma.clientProfileSnapshot.updateMany({
+      where: { id: snapshotId },
+      data: { lastMediaDownloadQueuedAt: now },
+    });
     downloadSnapshotMedia('client', snapshotId)
       .then((downloaded) => {
         if (downloaded > 0) {
@@ -130,11 +127,10 @@ export async function queueMediaDownloadTasks(
   }
 
   for (const snapshotId of gaps.competitorSnapshotIds) {
-    // TODO: Re-enable after adding lastMediaDownloadQueuedAt to schema
-    // await prisma.competitorProfileSnapshot.updateMany({
-    //   where: { id: snapshotId },
-    //   data: { lastMediaDownloadQueuedAt: now },
-    // });
+    await prisma.competitorProfileSnapshot.updateMany({
+      where: { id: snapshotId },
+      data: { lastMediaDownloadQueuedAt: now },
+    });
     downloadSnapshotMedia('competitor', snapshotId)
       .then((downloaded) => {
         if (downloaded > 0) {

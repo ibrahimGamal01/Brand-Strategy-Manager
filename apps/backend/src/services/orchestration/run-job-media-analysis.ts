@@ -326,12 +326,37 @@ export async function runAiAnalysisForJob(
       },
     });
 
-    analysisScope.analysisWindow = allAssets.length;
-    analysisScope.analyzedInWindow = allAssets.filter(hasAiAnalysis).length;
+    // Physical existence check: Railway ephemeral filesystem wipes files on restart.
+    // Any asset where the file no longer exists on disk gets marked as not-downloaded
+    // so the completeness orchestrator will re-queue it cleanly.
+    const verifiedAssets: typeof allAssets = [];
+    for (const asset of allAssets) {
+      if (!asset.blobStoragePath) continue;
+      const exists = require('fs').existsSync(require('path').resolve(asset.blobStoragePath));
+      if (!exists) {
+        console.warn(
+          `[Orchestrator] Ghost asset detected (file missing): ${asset.id} → ${asset.blobStoragePath}`
+        );
+        void prisma.mediaAsset
+          .update({
+            where: { id: asset.id },
+            data: {
+              isDownloaded: false,
+              downloadError: 'file_missing_after_restart',
+            },
+          })
+          .catch(() => {});
+        continue;
+      }
+      verifiedAssets.push(asset);
+    }
+
+    analysisScope.analysisWindow = verifiedAssets.length;
+    analysisScope.analyzedInWindow = verifiedAssets.filter(hasAiAnalysis).length;
 
     const candidates = skipAlreadyAnalyzed
-      ? allAssets.filter((a) => !hasAiAnalysis(a))
-      : allAssets;
+      ? verifiedAssets.filter((a) => !hasAiAnalysis(a))
+      : verifiedAssets;
     const toProcess = candidates.slice(0, limit);
 
     if (toProcess.length === 0) {

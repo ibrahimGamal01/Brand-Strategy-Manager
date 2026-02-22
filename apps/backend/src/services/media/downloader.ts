@@ -269,6 +269,14 @@ export async function downloadPostMedia(
       const stats = fileManager.getStats(storagePath);
       const fileSizeBytes = stats?.size || 0;
 
+      // Hard reject: file was written but is 0 bytes (empty CDN response or write error)
+      if (fileSizeBytes === 0) {
+        fileManager.delete(storagePath);
+        throw new Error(
+          `Downloaded file is 0 bytes, rejecting ghost asset (url: ${url}, path: ${storagePath})`
+        );
+      }
+
       let width: number | undefined;
       let height: number | undefined;
       let durationSeconds: number | undefined;
