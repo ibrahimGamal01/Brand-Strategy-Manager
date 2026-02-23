@@ -28,10 +28,19 @@ CREATE INDEX IF NOT EXISTS "user_supplied_contexts_research_job_id_is_active_idx
 CREATE UNIQUE INDEX IF NOT EXISTS "user_supplied_contexts_research_job_id_category_key_key"
   ON "user_supplied_contexts"("research_job_id", "category", "key");
 
-ALTER TABLE "user_supplied_contexts"
-  ADD CONSTRAINT "user_supplied_contexts_research_job_id_fkey"
-  FOREIGN KEY ("research_job_id") REFERENCES "research_jobs"("id")
-  ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'user_supplied_contexts_research_job_id_fkey'
+      AND conrelid = 'user_supplied_contexts'::regclass
+  ) THEN
+    ALTER TABLE "user_supplied_contexts"
+      ADD CONSTRAINT "user_supplied_contexts_research_job_id_fkey"
+      FOREIGN KEY ("research_job_id") REFERENCES "research_jobs"("id")
+      ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- Rename index to match Prisma naming (idempotent)
 DO $$
