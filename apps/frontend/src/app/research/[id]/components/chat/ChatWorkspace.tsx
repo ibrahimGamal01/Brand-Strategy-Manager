@@ -851,6 +851,120 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
       return;
     }
 
+    if (normalizedAction === 'mutation_stage') {
+      const sessionId = activeSessionId;
+      const hrefParams = parseHrefParams(href);
+      const section = resolveIntelligenceSection(
+        payload?.section || payload?.sectionKey || hrefParams.section || hrefParams.sectionKey
+      );
+      const kindRaw = String(payload?.kind || payload?.action || payload?.operation || hrefParams.kind || '').toLowerCase();
+      const kind = (['create', 'update', 'delete', 'clear'] as const).includes(kindRaw as any)
+        ? (kindRaw as 'create' | 'update' | 'delete' | 'clear')
+        : null;
+      const whereCandidate =
+        asRecord(payload?.where) ||
+        asRecord(payload?.target) ||
+        asRecord(payload?.match) ||
+        asRecord(payload?.record) ||
+        undefined;
+      const dataCandidate = asRecord(payload?.data) || undefined;
+
+      if (!sessionId || !section || !kind) {
+        toast({
+          title: 'Missing mutation payload',
+          description: 'mutation_stage requires section + kind.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const response = await apiFetch<{
+        ok: boolean;
+        result?: {
+          mutationId: string;
+          confirmToken: string;
+          kind: 'create' | 'update' | 'delete' | 'clear';
+          section: string;
+          matchedCount: number;
+          warnings?: string[];
+          beforeSample?: Array<Record<string, unknown>>;
+          afterSample?: Array<Record<string, unknown>>;
+          requiresConfirmation?: boolean;
+        };
+      }>(
+        `/research-jobs/${jobId}/chat/sessions/${sessionId}/mutations/stage`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            section,
+            kind,
+            where: whereCandidate,
+            data: dataCandidate,
+          }),
+        },
+      );
+
+      const result = response?.result;
+      if (!result?.mutationId || !result.confirmToken) {
+        throw new Error('Stage mutation response is missing mutationId or confirmToken.');
+      }
+
+      await appendToolResultMessage(
+        `Mutation preview ready for ${result.kind.toUpperCase()} in ${result.section}. Review before applying.`,
+        {
+          role: 'SYSTEM',
+          blocks: [
+            {
+              type: 'mutation_preview',
+              blockId: `mutation-preview-${result.mutationId}`,
+              title: 'Mutation preview',
+              section: result.section,
+              kind: result.kind,
+              mutationId: result.mutationId,
+              confirmToken: result.confirmToken,
+              matchedCount: Number(result.matchedCount || 0),
+              warnings: Array.isArray(result.warnings) ? result.warnings : [],
+              beforeSample: Array.isArray(result.beforeSample) ? result.beforeSample : [],
+              afterSample: Array.isArray(result.afterSample) ? result.afterSample : [],
+              requiresConfirmation: result.requiresConfirmation !== false,
+            } as ChatBlock,
+            {
+              type: 'action_buttons',
+              blockId: `mutation-actions-${result.mutationId}`,
+              title: 'Apply this change?',
+              buttons: [
+                {
+                  label: 'Confirm apply',
+                  action: 'mutation_apply',
+                  intent: 'primary',
+                  payload: {
+                    mutationId: result.mutationId,
+                    confirmToken: result.confirmToken,
+                    section: result.section,
+                  },
+                },
+                {
+                  label: 'Open section',
+                  action: 'open_module',
+                  intent: 'secondary',
+                  payload: {
+                    module: 'intelligence',
+                    section: result.section,
+                  },
+                },
+              ],
+            } as ChatBlock,
+          ],
+        },
+      );
+
+      toast({
+        title: 'Mutation staged',
+        description: 'Preview is ready. Confirm apply when you are satisfied.',
+      });
+      return;
+    }
+
     if (normalizedAction === 'mutation_apply') {
       const sessionId = activeSessionId;
       const hrefParams = parseHrefParams(href);

@@ -23,6 +23,10 @@ import type {
   OptionCardsBlock,
   RecapEditorBlock,
   QuickReplyBarBlock,
+  EvidenceListBlock,
+  MutationPreviewBlock,
+  DocumentRequestBlock,
+  DocumentReadyBlock,
   CompareModesBlock,
   ScenarioSimulatorBlock,
   ConstraintBuilderBlock,
@@ -53,6 +57,10 @@ import { ChoiceChipsBlockView } from './renderers/ChoiceChipsBlockView';
 import { OptionCardsBlockView } from './renderers/OptionCardsBlockView';
 import { RecapEditorBlockView } from './renderers/RecapEditorBlockView';
 import { QuickReplyBarBlockView } from './renderers/QuickReplyBarBlockView';
+import { EvidenceListBlockView } from './renderers/EvidenceListBlockView';
+import { MutationPreviewBlockView } from './renderers/MutationPreviewBlockView';
+import { DocumentRequestBlockView } from './renderers/DocumentRequestBlockView';
+import { DocumentReadyBlockView } from './renderers/DocumentReadyBlockView';
 import { CompareModesBlockView } from './renderers/CompareModesBlockView';
 import { ScenarioSimulatorBlockView } from './renderers/ScenarioSimulatorBlockView';
 import { ConstraintBuilderBlockView } from './renderers/ConstraintBuilderBlockView';
@@ -83,6 +91,10 @@ const isChoiceChipsBlock = (b: ChatBlock): b is ChoiceChipsBlock => b.type === '
 const isOptionCardsBlock = (b: ChatBlock): b is OptionCardsBlock => b.type === 'option_cards';
 const isRecapEditorBlock = (b: ChatBlock): b is RecapEditorBlock => b.type === 'recap_editor';
 const isQuickReplyBarBlock = (b: ChatBlock): b is QuickReplyBarBlock => b.type === 'quick_reply_bar';
+const isEvidenceListBlock = (b: ChatBlock): b is EvidenceListBlock => b.type === 'evidence_list';
+const isMutationPreviewBlock = (b: ChatBlock): b is MutationPreviewBlock => b.type === 'mutation_preview';
+const isDocumentRequestBlock = (b: ChatBlock): b is DocumentRequestBlock => b.type === 'document_request';
+const isDocumentReadyBlock = (b: ChatBlock): b is DocumentReadyBlock => b.type === 'document_ready';
 const isCompareModesBlock = (b: ChatBlock): b is CompareModesBlock => b.type === 'compare_modes';
 const isScenarioSimulatorBlock = (b: ChatBlock): b is ScenarioSimulatorBlock => b.type === 'scenario_simulator';
 const isConstraintBuilderBlock = (b: ChatBlock): b is ConstraintBuilderBlock => b.type === 'constraint_builder';
@@ -193,6 +205,17 @@ function normalizeBlock(block: ChatBlock): ChatBlock {
     case 'quick_reply_bar':
       out.suggestions = asArray<string>(out.suggestions);
       break;
+    case 'evidence_list':
+      out.items = asArray<Record<string, unknown>>(out.items);
+      break;
+    case 'mutation_preview':
+      out.warnings = asArray<string>(out.warnings);
+      out.beforeSample = asArray<Record<string, unknown>>(out.beforeSample);
+      out.afterSample = asArray<Record<string, unknown>>(out.afterSample);
+      break;
+    case 'document_request':
+      out.options = asArray<Record<string, unknown>>(out.options);
+      break;
     case 'compare_modes':
       out.modes = asArray<Record<string, unknown>>(out.modes).map((mode) => ({
         ...mode,
@@ -281,6 +304,14 @@ function hasRenderableContent(block: ChatBlock): boolean {
       return asArray((block as RecapEditorBlock).items).length > 0 || hasText((block as RecapEditorBlock).summary);
     case 'quick_reply_bar':
       return asArray((block as QuickReplyBarBlock).suggestions).length > 0;
+    case 'evidence_list':
+      return asArray((block as EvidenceListBlock).items).length > 0;
+    case 'mutation_preview':
+      return typeof (block as MutationPreviewBlock).matchedCount === 'number';
+    case 'document_request':
+      return asArray((block as DocumentRequestBlock).options).length > 0 || hasText((block as DocumentRequestBlock).question);
+    case 'document_ready':
+      return hasText((block as DocumentReadyBlock).storagePath) || hasText((block as DocumentReadyBlock).title);
     case 'compare_modes':
       return asArray((block as CompareModesBlock).modes).length > 0;
     case 'scenario_simulator':
@@ -425,6 +456,10 @@ export function BlockRenderer({
       {isOptionCardsBlock(safeBlock) && <OptionCardsBlockView block={safeBlock} onSelect={handleStructuredAnswer} />}
       {isRecapEditorBlock(safeBlock) && <RecapEditorBlockView block={safeBlock} onSelect={handleStructuredAnswer} />}
       {isQuickReplyBarBlock(safeBlock) && <QuickReplyBarBlockView block={safeBlock} onSelect={handleStructuredAnswer} />}
+      {isEvidenceListBlock(safeBlock) && <EvidenceListBlockView block={safeBlock} />}
+      {isMutationPreviewBlock(safeBlock) && <MutationPreviewBlockView block={safeBlock} />}
+      {isDocumentRequestBlock(safeBlock) && <DocumentRequestBlockView block={safeBlock} onSelect={handleStructuredAnswer} />}
+      {isDocumentReadyBlock(safeBlock) && <DocumentReadyBlockView block={safeBlock} />}
       {isCompareModesBlock(safeBlock) && <CompareModesBlockView block={safeBlock} onSelect={handleStructuredAnswer} />}
       {isScenarioSimulatorBlock(safeBlock) && <ScenarioSimulatorBlockView block={safeBlock} onSelect={handleStructuredAnswer} />}
       {isConstraintBuilderBlock(safeBlock) && <ConstraintBuilderBlockView block={safeBlock} onSelect={handleStructuredAnswer} />}
@@ -454,6 +489,10 @@ export function BlockRenderer({
         !isOptionCardsBlock(safeBlock) &&
         !isRecapEditorBlock(safeBlock) &&
         !isQuickReplyBarBlock(safeBlock) &&
+        !isEvidenceListBlock(safeBlock) &&
+        !isMutationPreviewBlock(safeBlock) &&
+        !isDocumentRequestBlock(safeBlock) &&
+        !isDocumentReadyBlock(safeBlock) &&
         !isCompareModesBlock(safeBlock) &&
         !isScenarioSimulatorBlock(safeBlock) &&
         !isConstraintBuilderBlock(safeBlock) &&

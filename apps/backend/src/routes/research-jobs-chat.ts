@@ -21,7 +21,7 @@ import {
   upsertUserContext,
   UscCategory,
 } from '../services/chat/user-context-repository';
-import { applyMutation, undoMutation } from '../services/ai/chat/mutations/mutation-service';
+import { applyMutation, stageMutation, undoMutation } from '../services/ai/chat/mutations/mutation-service';
 
 
 const router = Router();
@@ -194,6 +194,43 @@ router.post('/:id/chat/sessions/:sessionId/mutations/:mutationId/apply', async (
   } catch (error: any) {
     console.error('[Chat] Failed to apply mutation:', error);
     return res.status(500).json({ error: 'Failed to apply mutation', details: error.message });
+  }
+});
+
+router.post('/:id/chat/sessions/:sessionId/mutations/stage', async (req, res) => {
+  try {
+    const { id: researchJobId, sessionId } = req.params;
+    const session = await getChatSession(researchJobId, sessionId);
+    if (!session) return res.status(404).json({ error: 'Chat session not found' });
+
+    const section = String(req.body?.section || '').trim().toLowerCase();
+    const kind = String(req.body?.kind || '').trim().toLowerCase();
+    const where =
+      req.body?.where && typeof req.body.where === 'object' && !Array.isArray(req.body.where)
+        ? (req.body.where as Record<string, unknown>)
+        : undefined;
+    const data =
+      req.body?.data && typeof req.body.data === 'object' && !Array.isArray(req.body.data)
+        ? (req.body.data as Record<string, unknown>)
+        : undefined;
+
+    if (!section || !kind) {
+      return res.status(400).json({ error: 'section and kind are required' });
+    }
+    if (!['create', 'update', 'delete', 'clear'].includes(kind)) {
+      return res.status(400).json({ error: 'kind must be one of create/update/delete/clear' });
+    }
+
+    const result = await stageMutation(
+      { researchJobId, sessionId },
+      { section, kind: kind as 'create' | 'update' | 'delete' | 'clear', where, data },
+    );
+
+    await touchChatSession(sessionId);
+    return res.json({ ok: true, result });
+  } catch (error: any) {
+    console.error('[Chat] Failed to stage mutation:', error);
+    return res.status(500).json({ error: 'Failed to stage mutation', details: error.message });
   }
 });
 

@@ -64,6 +64,7 @@ export type ActionButtonsBlock = BaseBlock & {
       | 'document_generate'
       | 'user_context_upsert'
       | 'user_context_delete'
+      | 'mutation_stage'
       | 'mutation_apply'
       | 'mutation_undo'
       | 'intel_crud'
@@ -185,6 +186,47 @@ export type QuickReplyBarBlock = BaseBlock & {
   suggestions: string[];
 };
 
+export type EvidenceListBlock = BaseBlock & {
+  type: 'evidence_list';
+  caption?: string;
+  items: Array<{
+    id?: string;
+    title: string;
+    url?: string;
+    internalLink?: string;
+    source?: string;
+    note?: string;
+  }>;
+};
+
+export type MutationPreviewBlock = BaseBlock & {
+  type: 'mutation_preview';
+  section: string;
+  kind: 'create' | 'update' | 'delete' | 'clear';
+  mutationId: string;
+  confirmToken?: string;
+  matchedCount: number;
+  warnings?: string[];
+  beforeSample?: Array<Record<string, unknown>>;
+  afterSample?: Array<Record<string, unknown>>;
+  requiresConfirmation?: boolean;
+};
+
+export type DocumentRequestBlock = BaseBlock & {
+  type: 'document_request';
+  question?: string;
+  options: Array<{ id: string; label: string; description?: string }>;
+};
+
+export type DocumentReadyBlock = BaseBlock & {
+  type: 'document_ready';
+  title?: string;
+  mimeType?: string;
+  storagePath?: string;
+  attachmentId?: string;
+  sizeBytes?: number;
+};
+
 export type CompareModesBlock = BaseBlock & {
   type: 'compare_modes';
   modes: Array<{ id: string; title: string; summary: string; pros?: string[]; cons?: string[] }>;
@@ -251,6 +293,10 @@ export type ChatBlock =
   | OptionCardsBlock
   | RecapEditorBlock
   | QuickReplyBarBlock
+  | EvidenceListBlock
+  | MutationPreviewBlock
+  | DocumentRequestBlock
+  | DocumentReadyBlock
   | CompareModesBlock
   | ScenarioSimulatorBlock
   | ConstraintBuilderBlock

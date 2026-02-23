@@ -158,7 +158,10 @@ function hasCrudActionButtons(blocks: ChatBlock[]): boolean {
   return blocks.some((block) => {
     if (String(block.type || '').toLowerCase() !== 'action_buttons') return false;
     const buttons = Array.isArray((block as any).buttons) ? ((block as any).buttons as Array<Record<string, unknown>>) : [];
-    return buttons.some((button) => String(button.action || '').toLowerCase().startsWith('intel_'));
+    return buttons.some((button) => {
+      const action = String(button.action || '').toLowerCase();
+      return action.startsWith('intel_') || action === 'mutation_stage';
+    });
   });
 }
 
@@ -179,34 +182,45 @@ export function ensureCrudActionBlock(blocks: ChatBlock[], rawMessage: string): 
   const intent = detectCrudIntent(rawMessage);
   if (!intent) return blocks;
 
-  const payload: Record<string, unknown> = {
+  const readPayload: Record<string, unknown> = {
     section: intent.section,
-    action: intent.action,
+    action: 'read',
   };
-  if (intent.target) payload.target = intent.target;
-  if (intent.data) payload.data = intent.data;
+  const isMutation = intent.action !== 'read';
+  const mutationPayload: Record<string, unknown> = {
+    section: intent.section,
+    kind: intent.action,
+  };
+  if (intent.target) {
+    mutationPayload.where = intent.target;
+    readPayload.target = intent.target;
+  }
+  if (intent.data) mutationPayload.data = intent.data;
 
   const block: ChatBlock = {
     type: 'action_buttons',
     blockId: `crud-action-${intent.section}-${intent.action}`,
-    title: 'Apply to Intelligence data',
+    title: isMutation ? 'Preview Intelligence mutation' : 'Inspect Intelligence data',
     buttons: [
       {
-        label: `Run ${intent.action.toUpperCase()}`,
+        label: isMutation ? `Preview ${intent.action.toUpperCase()}` : 'Run READ',
         sublabel: `Section: ${intent.section.replace(/_/g, ' ')}`,
-        action: `intel_${intent.action}`,
+        action: isMutation ? 'mutation_stage' : 'intel_read',
         intent: 'primary',
-        payload,
+        payload: isMutation
+          ? mutationPayload
+          : {
+              section: intent.section,
+              action: 'read',
+              target: intent.target,
+            },
       },
       {
         label: 'Preview section',
         sublabel: 'Open section for review',
         action: 'intel_read',
         intent: 'secondary',
-        payload: {
-          section: intent.section,
-          action: 'read',
-        },
+        payload: readPayload,
       },
     ],
   };
