@@ -12,11 +12,18 @@ const router = Router();
 router.get('/client/:clientId', async (req: Request, res: Response) => {
   try {
     const { clientId } = req.params;
+    const includeFiltered = String(req.query.includeFiltered || '').trim().toLowerCase() === 'true';
+
+    const discoveredWhere: any = { researchJob: { clientId } };
+    if (!includeFiltered) {
+      discoveredWhere.selectionState = { notIn: ['FILTERED_OUT', 'REJECTED'] };
+      discoveredWhere.status = { not: 'REJECTED' };
+    }
 
     const discovered = await prisma.discoveredCompetitor.findMany({
-      where: { researchJob: { clientId } },
+      where: discoveredWhere,
       include: { competitor: true },
-      orderBy: { relevanceScore: 'desc' },
+      orderBy: [{ relevanceScore: 'desc' }, { discoveredAt: 'desc' }],
     });
 
     const confirmed = await prisma.competitor.findMany({
@@ -24,6 +31,7 @@ router.get('/client/:clientId', async (req: Request, res: Response) => {
     });
 
     res.json({
+      includeFiltered,
       discovered,
       confirmed,
     });

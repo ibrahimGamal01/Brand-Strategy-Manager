@@ -176,6 +176,14 @@ function parseCandidateState(value: unknown): CandidateStateValue {
   return normalized as CandidateStateValue;
 }
 
+function parseBooleanQuery(value: unknown, fallback: boolean = false): boolean {
+  if (value === undefined || value === null || value === '') return fallback;
+  const normalized = String(value).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return fallback;
+}
+
 // Helper function
 async function saveCompetitors(
     clientId: string, 
@@ -238,6 +246,10 @@ async function saveCompetitors(
 router.get('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const includeFiltered = parseBooleanQuery(
+      Array.isArray(req.query.includeFiltered) ? req.query.includeFiltered[0] : req.query.includeFiltered,
+      false
+    );
 
     const job = await prisma.researchJob.findUnique({
       where: { id },
@@ -418,7 +430,9 @@ router.get('/:id', async (req: Request, res: Response) => {
         })
         .slice(0, filteredCap);
 
-    const aggregatedCompetitors = [...activeCompetitors, ...filteredCompetitors];
+    const aggregatedCompetitors = includeFiltered
+      ? [...activeCompetitors, ...filteredCompetitors]
+      : activeCompetitors;
 
     const aggregatedTrends = await prisma.searchTrend.findMany({
         where: { researchJobId: { in: clientJobIds } },
@@ -717,6 +731,12 @@ router.get('/:id', async (req: Request, res: Response) => {
     const responseJob = {
         ...job,
         discoveredCompetitors: aggregatedCompetitors,
+        discoveredCompetitorBuckets: {
+          active: activeCompetitors,
+          filtered: filteredCompetitors,
+          includeFiltered,
+          filteredCap,
+        },
         searchTrends: aggregatedTrends,
         socialTrends: aggregatedSocialTrends,
         communityInsights: aggregatedInsights,
@@ -2362,6 +2382,258 @@ router.get('/:id/competitors/runs/:runId/diagnostics', async (req: Request, res:
   } catch (error: any) {
     const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
     res.status(status).json({ success: false, error: error?.message || 'Failed to fetch diagnostics' });
+  }
+});
+
+/**
+ * GET /api/research-jobs/:id/competitors/debug-export
+ * Export a full competitor audit payload for QA and agency review.
+ */
+router.get('/:id/competitors/debug-export', async (req: Request, res: Response) => {
+  try {
+    const { id: researchJobId } = req.params;
+    const runIdRaw = Array.isArray(req.query.runId) ? req.query.runId[0] : req.query.runId;
+    const runId = parseRunId(runIdRaw);
+
+    const run = runId
+      ? await prisma.competitorOrchestrationRun.findFirst({
+          where: { id: runId, researchJobId },
+        })
+      : await prisma.competitorOrchestrationRun.findFirst({
+          where: { researchJobId },
+          orderBy: { createdAt: 'desc' },
+        });
+
+    if (!run) {
+      return res.status(404).json({
+        success: false,
+        error: runId
+          ? 'Competitor orchestration run not found for this research job'
+          : 'No competitor orchestration run exists for this research job yet',
+      });
+    }
+
+    const [shortlistPayload, runDiagnostics, profiles, discoveredRows] = await Promise.all([
+      getCompetitorShortlist(researchJobId, run.id),
+      getOrchestrationRunDiagnostics(researchJobId, run.id),
+      prisma.competitorCandidateProfile.findMany({
+        where: {
+          researchJobId,
+          orchestrationRunId: run.id,
+        },
+        include: {
+          identity: {
+            select: {
+              id: true,
+              canonicalName: true,
+              websiteDomain: true,
+              businessType: true,
+              audienceSummary: true,
+            },
+          },
+          evidenceRows: {
+            orderBy: { createdAt: 'desc' },
+            take: 20,
+          },
+          discoveredCompetitors: {
+            select: {
+              id: true,
+              selectionState: true,
+              selectionReason: true,
+              status: true,
+              relevanceScore: true,
+              availabilityStatus: true,
+              availabilityReason: true,
+              discoveredAt: true,
+            },
+          },
+        },
+        orderBy: [{ relevanceScore: 'desc' }, { createdAt: 'asc' }],
+      }),
+      prisma.discoveredCompetitor.findMany({
+        where: {
+          researchJobId,
+          orchestrationRunId: run.id,
+        },
+        include: {
+          competitor: {
+            select: { id: true, handle: true, platform: true },
+          },
+        },
+        orderBy: [{ relevanceScore: 'desc' }, { discoveredAt: 'desc' }],
+      }),
+    ]);
+
+    const profileRows = profiles.map((profile) => ({
+      candidateProfileId: profile.id,
+      platform: profile.platform,
+      handle: profile.handle,
+      normalizedHandle: profile.normalizedHandle,
+      profileUrl: profile.profileUrl,
+      source: profile.source,
+      inputType: profile.inputType,
+      scrapeEligible: profile.scrapeEligible,
+      blockerReasonCode: profile.blockerReasonCode,
+      availabilityStatus: profile.availabilityStatus,
+      availabilityReason: profile.availabilityReason,
+      resolverConfidence: profile.resolverConfidence,
+      state: profile.state,
+      stateReason: profile.stateReason,
+      relevanceScore: profile.relevanceScore,
+      scoreBreakdown: profile.scoreBreakdown,
+      evidence: profile.evidence,
+      identity: profile.identity,
+      discoveredCompetitors: profile.discoveredCompetitors,
+      evidenceRows: profile.evidenceRows.map((row) => ({
+        id: row.id,
+        sourceType: row.sourceType,
+        query: row.query,
+        title: row.title,
+        url: row.url,
+        snippet: row.snippet,
+        signalScore: row.signalScore,
+        createdAt: row.createdAt,
+      })),
+      createdAt: profile.createdAt,
+      updatedAt: profile.updatedAt,
+    }));
+
+    const postValidationCandidates = profileRows.filter(
+      (row) =>
+        row.availabilityStatus !== 'INVALID_HANDLE' &&
+        row.availabilityStatus !== 'PROFILE_UNAVAILABLE'
+    );
+
+    const shortlistCandidates = postValidationCandidates.filter((row) =>
+      row.state === 'TOP_PICK' || row.state === 'SHORTLISTED' || row.state === 'APPROVED'
+    );
+
+    const filteredCandidates = profileRows.filter(
+      (row) => row.state === 'FILTERED_OUT' || row.state === 'REJECTED'
+    );
+
+    const dedupeGroupMap = new Map<
+      string,
+      {
+        groupKey: string;
+        identityId: string | null;
+        canonicalName: string;
+        websiteDomain: string | null;
+        members: Array<{
+          candidateProfileId: string;
+          platform: string;
+          handle: string;
+          relevanceScore: number | null;
+          state: string;
+          availabilityStatus: string;
+        }>;
+      }
+    >();
+
+    for (const row of profileRows) {
+      const canonicalName = String(row.identity?.canonicalName || row.handle || '').trim();
+      const websiteDomain = row.identity?.websiteDomain || null;
+      const groupKey = row.identity?.id
+        ? `identity:${row.identity.id}`
+        : `fallback:${canonicalName.toLowerCase()}|${String(websiteDomain || '').toLowerCase()}`;
+      const existing = dedupeGroupMap.get(groupKey);
+      const member = {
+        candidateProfileId: row.candidateProfileId,
+        platform: row.platform,
+        handle: row.handle,
+        relevanceScore: row.relevanceScore ?? null,
+        state: row.state,
+        availabilityStatus: row.availabilityStatus,
+      };
+
+      if (!existing) {
+        dedupeGroupMap.set(groupKey, {
+          groupKey,
+          identityId: row.identity?.id || null,
+          canonicalName,
+          websiteDomain,
+          members: [member],
+        });
+      } else {
+        existing.members.push(member);
+      }
+    }
+
+    const dedupeGroups = Array.from(dedupeGroupMap.values())
+      .map((group) => {
+        const representative =
+          group.members
+            .slice()
+            .sort((a, b) => Number(b.relevanceScore || 0) - Number(a.relevanceScore || 0))[0] ||
+          null;
+        return {
+          ...group,
+          memberCount: group.members.length,
+          representative,
+        };
+      })
+      .sort((a, b) => b.memberCount - a.memberCount);
+
+    const duplicateCandidates = dedupeGroups
+      .filter((group) => group.memberCount > 1)
+      .reduce((sum, group) => sum + group.memberCount - 1, 0);
+
+    const qualityMetrics = {
+      totalCandidates: profileRows.length,
+      postValidation: postValidationCandidates.length,
+      shortlistEligible: shortlistCandidates.length,
+      filteredOrRejected: filteredCandidates.length,
+      duplicateCandidates,
+      duplicateRatio:
+        profileRows.length > 0 ? Number((duplicateCandidates / profileRows.length).toFixed(4)) : 0,
+      activeDiscovered: discoveredRows.filter((row) => {
+        const state = String(row.selectionState || '').toUpperCase();
+        return state !== 'FILTERED_OUT' && state !== 'REJECTED';
+      }).length,
+      filteredDiscovered: discoveredRows.filter((row) => {
+        const state = String(row.selectionState || '').toUpperCase();
+        return state === 'FILTERED_OUT' || state === 'REJECTED';
+      }).length,
+    };
+
+    return res.json({
+      success: true,
+      researchJobId,
+      exportedAt: new Date().toISOString(),
+      run: {
+        id: run.id,
+        status: run.status,
+        phase: run.phase,
+        mode: run.mode,
+        targetCount: run.targetCount,
+        strategyVersion: run.strategyVersion,
+        startedAt: run.startedAt,
+        completedAt: run.completedAt,
+      },
+      diagnostics: runDiagnostics,
+      qualityMetrics,
+      candidates: {
+        raw: profileRows,
+        postValidation: postValidationCandidates,
+        shortlist: shortlistCandidates,
+        filtered: filteredCandidates,
+      },
+      discovered: discoveredRows,
+      dedupeGroups,
+      shortlistView: shortlistPayload,
+    });
+  } catch (error: any) {
+    if (error?.message?.includes('runId')) {
+      return res.status(400).json({
+        success: false,
+        error: error.message,
+      });
+    }
+    const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
+    return res.status(status).json({
+      success: false,
+      error: error?.message || 'Failed to export competitor debug payload',
+    });
   }
 });
 

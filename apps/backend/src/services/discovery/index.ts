@@ -15,6 +15,7 @@ import { googleSearchForCompetitors, searchBrandContext, type SearchResult } fro
 import {
   searchBrandContextDDG, 
   searchCompetitorsDDG, 
+  inferCompetitorDiscoveryIntent,
   validateHandleDDG, 
   GatherAllResult, 
   gatherAllDDG, 
@@ -295,7 +296,21 @@ export async function gatherInformation(input: GatheringInput): Promise<Informat
   // Layer 0: DDG Python Library (Generic niche-based search)
   try {
     console.log(`[InfoGather] Layer 0: DDG Python Library...`);
-    const ddgCompetitors = await searchCompetitorsDDG(input.handle, effectiveNiche, 15);
+    const competitorIntent = inferCompetitorDiscoveryIntent({
+      niche: effectiveNiche,
+      description: [input.bio, targetIntel.marketPosition, ...(targetIntel.contentThemes || [])]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+        .join(' | '),
+      targetMarket: targetIntel.targetAudience,
+    });
+    const ddgCompetitors = await searchCompetitorsDDG(
+      input.handle,
+      effectiveNiche,
+      15,
+      undefined,
+      competitorIntent
+    );
     
     if (ddgCompetitors.length > 0) {
       const existingHandles = new Set(competitors.map(c => c.handle.toLowerCase()));

@@ -138,6 +138,50 @@ export interface CompetitorSearchResult {
   raw_results: RawSearchResult[];
   total_raw: number;
   total_handles: number;
+  intent?: CompetitorDiscoveryIntent;
+  queries?: string[];
+}
+
+export type CompetitorDiscoveryIntent =
+  | 'COMPANY_BRAND'
+  | 'CREATOR'
+  | 'LOCAL_BUSINESS'
+  | 'B2B_SAAS';
+
+export interface CompetitorDiscoveryIntentSignals {
+  businessType?: string | null;
+  offerModel?: string | null;
+  targetMarket?: string | null;
+  niche?: string | null;
+  description?: string | null;
+}
+
+const CREATOR_HINT_RE =
+  /(creator|influencer|blogger|youtuber|tiktoker|personal brand|ugc|content creator|coach creator)/i;
+const LOCAL_HINT_RE =
+  /(local|clinic|dental|salon|barber|restaurant|cafe|spa|gym|studio|near me|city|neighborhood)/i;
+const SAAS_HINT_RE =
+  /(saas|software|platform|crm|b2b|enterprise|api|automation|workflow|tool)/i;
+
+export function inferCompetitorDiscoveryIntent(
+  signals: CompetitorDiscoveryIntentSignals
+): CompetitorDiscoveryIntent {
+  const haystack = [
+    signals.businessType,
+    signals.offerModel,
+    signals.targetMarket,
+    signals.niche,
+    signals.description,
+  ]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+    .join(' ');
+
+  if (!haystack) return 'COMPANY_BRAND';
+  if (CREATOR_HINT_RE.test(haystack)) return 'CREATOR';
+  if (LOCAL_HINT_RE.test(haystack)) return 'LOCAL_BUSINESS';
+  if (SAAS_HINT_RE.test(haystack)) return 'B2B_SAAS';
+  return 'COMPANY_BRAND';
 }
 
 export interface HandleValidationResult {
@@ -428,13 +472,16 @@ export async function searchCompetitorsDDG(
   handle: string,
   niche: string,
   maxResults: number = 100,
-  researchJobId?: string
+  researchJobId?: string,
+  intent: CompetitorDiscoveryIntent = 'COMPANY_BRAND'
 ): Promise<string[]> {
-  console.log(`[DDGSearch] Searching competitors for @${handle} in "${niche}"`);
+  console.log(
+    `[DDGSearch] Searching competitors for @${handle} in "${niche}" with intent=${intent}`
+  );
   
   try {
     const { stdout, stderr } = await runDdgCommand(
-      ['competitors', handle, niche, String(maxResults)],
+      ['competitors', handle, niche, String(maxResults), intent],
       60_000
     );
     
@@ -526,13 +573,16 @@ export async function searchCompetitorsDDGFull(
   handle: string,
   niche: string,
   maxResults: number = 100,
-  researchJobId?: string
+  researchJobId?: string,
+  intent: CompetitorDiscoveryIntent = 'COMPANY_BRAND'
 ): Promise<CompetitorSearchResult> {
-  console.log(`[DDGSearch] Full competitor search for @${handle} in "${niche}"`);
+  console.log(
+    `[DDGSearch] Full competitor search for @${handle} in "${niche}" with intent=${intent}`
+  );
   
   try {
     const { stdout, stderr } = await runDdgCommand(
-      ['competitors', handle, niche, String(maxResults)],
+      ['competitors', handle, niche, String(maxResults), intent],
       60_000
     );
     

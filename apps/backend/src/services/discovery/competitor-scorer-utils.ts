@@ -11,17 +11,13 @@ export const SCORE_WEIGHTS = {
 } as const;
 
 const GENERIC_HANDLE_BLOCKLIST = new Set([
-  'google',
-  'nike',
-  'ibm',
-  'netflix',
-  'youtube',
-  'linkedin',
-  'facebook',
-  'twitter',
-  'x',
+  'official',
+  'updates',
+  'media',
+  'daily',
   'entrepreneur',
   'creators',
+  'creator',
   'business',
   'marketing',
   'startup',

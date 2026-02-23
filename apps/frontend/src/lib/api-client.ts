@@ -60,7 +60,12 @@ export const apiClient = {
       confirmationReasons?: string[];
     }>('/clients/suggest-intake-completion', partialPayload),
 
-  getResearchJob: (jobId: string) => apiFetch<any>(`/research-jobs/${jobId}`),
+  getResearchJob: (jobId: string, options?: { includeFiltered?: boolean }) => {
+    const params = new URLSearchParams();
+    if (options?.includeFiltered) params.set('includeFiltered', 'true');
+    const query = params.toString();
+    return apiFetch<any>(`/research-jobs/${jobId}${query ? `?${query}` : ''}`);
+  },
 
   getResearchJobOverview: (jobId: string) => apiFetch<any>(`/research-jobs/${jobId}/overview`),
 
@@ -115,7 +120,19 @@ export const apiClient = {
 
   getPostMedia: (postId: string) => apiFetch<any>(`/media/post/${postId}`),
 
-  getCompetitors: (clientId: string) => apiFetch<any>(`/competitors/client/${clientId}`),
+  getCompetitors: (clientId: string, options?: { includeFiltered?: boolean }) => {
+    const params = new URLSearchParams();
+    if (options?.includeFiltered) params.set('includeFiltered', 'true');
+    const query = params.toString();
+    return apiFetch<any>(`/competitors/client/${clientId}${query ? `?${query}` : ''}`);
+  },
+
+  getCompetitorDebugExport: (jobId: string, runId?: string) => {
+    const params = new URLSearchParams();
+    if (runId) params.set('runId', runId);
+    const query = params.toString();
+    return apiFetch<any>(`/research-jobs/${jobId}/competitors/debug-export${query ? `?${query}` : ''}`);
+  },
 
   scrapeCompetitor: (discoveredId: string) => post<any>(`/competitors/discovered/${discoveredId}/scrape`),
 

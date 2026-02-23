@@ -1,6 +1,6 @@
 'use client';
 
-import { Building2, Clock3, PlayCircle, Sparkles } from 'lucide-react';
+import { Building2, Clock3, Download, PlayCircle, Sparkles } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 
@@ -10,6 +10,8 @@ interface BatClientTopbarProps {
   activeModuleLabel: string;
   onContinueNow?: () => void | Promise<void>;
   isContinuing?: boolean;
+  onExportCompetitors?: () => void | Promise<void>;
+  isExportingCompetitors?: boolean;
 }
 
 function normalizeStatus(status?: string) {
@@ -28,6 +30,8 @@ export function BatClientTopbar({
   activeModuleLabel,
   onContinueNow,
   isContinuing = false,
+  onExportCompetitors,
+  isExportingCompetitors = false,
 }: BatClientTopbarProps) {
   const status = normalizeStatus(typeof job?.status === 'string' ? job.status : undefined);
   const clientAccounts = Array.isArray(client?.clientAccounts)
@@ -72,6 +76,18 @@ export function BatClientTopbar({
           <Clock3 className="h-3 w-3" />
           {continuityEnabled ? `Auto ${Math.max(2, continuityIntervalHours)}h` : 'Auto off'}
         </Badge>
+        {onExportCompetitors ? (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onExportCompetitors}
+            disabled={isExportingCompetitors}
+            className="gap-1.5"
+          >
+            <Download className="h-3.5 w-3.5" />
+            {isExportingCompetitors ? 'Exporting...' : 'Export competitors'}
+          </Button>
+        ) : null}
         {onContinueNow ? (
           <Button size="sm" onClick={onContinueNow} disabled={isContinuing} className="gap-1.5">
             <PlayCircle className="h-3.5 w-3.5" />

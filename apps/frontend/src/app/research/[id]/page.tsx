@@ -111,6 +111,7 @@ export default function ResearchPage() {
   const moduleParam = searchParams.get('module');
 
   const [isContinuing, setIsContinuing] = useState(false);
+  const [isExportingCompetitors, setIsExportingCompetitors] = useState(false);
   const [brainPayload, setBrainPayload] = useState<Record<string, unknown> | null>(null);
   const activeModule: BatWorkspaceModuleKey = isWorkspaceModule(moduleParam) ? moduleParam : 'brain';
 
@@ -177,6 +178,38 @@ export default function ResearchPage() {
       });
     } finally {
       setIsContinuing(false);
+    }
+  }
+
+  async function handleExportCompetitorDebug() {
+    try {
+      setIsExportingCompetitors(true);
+      const payload = await apiClient.getCompetitorDebugExport(jobId);
+      const runId =
+        typeof payload?.run?.id === 'string' && payload.run.id.trim().length > 0
+          ? payload.run.id.trim()
+          : 'latest';
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `competitor-debug-${jobId}-${runId}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      toast({
+        title: 'Competitor export ready',
+        description: `Downloaded debug payload for run ${runId}.`,
+      });
+    } catch (requestError: any) {
+      toast({
+        title: 'Export failed',
+        description: requestError?.message || 'Could not export competitor debug payload',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsExportingCompetitors(false);
     }
   }
 
@@ -460,6 +493,8 @@ export default function ResearchPage() {
           client={client}
           job={data}
           activeModuleLabel={activeModuleLabel}
+          onExportCompetitors={handleExportCompetitorDebug}
+          isExportingCompetitors={isExportingCompetitors}
           onContinueNow={handleContinueNow}
           isContinuing={isContinuing}
         />

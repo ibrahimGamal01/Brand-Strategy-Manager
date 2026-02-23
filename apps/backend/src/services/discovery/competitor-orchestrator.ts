@@ -11,6 +11,7 @@ import { resolveModelForTask } from '../ai/model-router';
 import {
   performDirectCompetitorSearch,
   performDirectCompetitorSearchForPlatform,
+  inferCompetitorDiscoveryIntent,
   searchCompetitorsDDG,
   validateHandleDDG,
   HandleValidationResult,
@@ -1522,6 +1523,17 @@ export async function orchestrateCompetitorsForJob(
     });
     try {
       const algorithmicSeed = seedHandle || normalizeHandle(brandName) || brandName;
+      const algorithmicIntent = inferCompetitorDiscoveryIntent({
+        businessType: String((inputData as Record<string, unknown>).businessType || ''),
+        offerModel: String((inputData as Record<string, unknown>).offerModel || ''),
+        targetMarket: String((inputData as Record<string, unknown>).targetAudience || ''),
+        niche,
+        description: String(
+          (inputData as Record<string, unknown>).description ||
+            (inputData as Record<string, unknown>).businessOverview ||
+            ''
+        ),
+      });
       const algorithmicNiches = Array.from(
         new Set(
           [
@@ -1539,7 +1551,8 @@ export async function orchestrateCompetitorsForJob(
             algorithmicSeed,
             nicheHint,
             24,
-            researchJobId
+            researchJobId,
+            algorithmicIntent
           );
           for (const handle of handles) {
             pushCandidate(

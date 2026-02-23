@@ -130,24 +130,75 @@ def search_brand_context(brand_name: str) -> Dict:
     return results
 
 
-def search_competitors(handle: str, niche: str, max_results: int = 100) -> Dict:
+def _normalize_competitor_intent(intent: str) -> str:
+    normalized = str(intent or '').strip().upper()
+    if normalized in {'COMPANY_BRAND', 'CREATOR', 'LOCAL_BUSINESS', 'B2B_SAAS'}:
+        return normalized
+    return 'COMPANY_BRAND'
+
+
+def _build_competitor_queries(handle: str, niche: str, intent: str) -> List[str]:
+    """Build intent-aware competitor discovery queries."""
+    normalized_intent = _normalize_competitor_intent(intent)
+    clean_niche = str(niche or 'business').strip()
+    clean_handle = str(handle or '').strip().replace('@', '')
+
+    if normalized_intent == 'CREATOR':
+        return [
+            f'{clean_niche} instagram creators',
+            f'{clean_niche} instagram influencers',
+            f'{clean_niche} instagram accounts to follow',
+            f'top {clean_niche} instagram creators',
+            f'instagram accounts like @{clean_handle}',
+            f'similar to @{clean_handle} instagram',
+            f'{clean_niche} content creators instagram',
+            f'{clean_niche} instagram experts',
+        ]
+
+    if normalized_intent == 'LOCAL_BUSINESS':
+        return [
+            f'{clean_niche} local businesses instagram',
+            f'{clean_niche} businesses near me instagram',
+            f'top {clean_niche} businesses instagram',
+            f'{clean_niche} service providers instagram',
+            f'brands like @{clean_handle} instagram',
+            f'similar companies to @{clean_handle}',
+            f'site:instagram.com "{clean_niche}" local brand',
+            f'site:instagram.com "{clean_niche}" business profile',
+        ]
+
+    if normalized_intent == 'B2B_SAAS':
+        return [
+            f'{clean_niche} saas competitors',
+            f'{clean_niche} software alternatives',
+            f'b2b {clean_niche} platforms',
+            f'{clean_niche} tools like @{clean_handle}',
+            f'companies like @{clean_handle}',
+            f'site:linkedin.com/company "{clean_niche}" software',
+            f'site:instagram.com "{clean_niche}" software brand',
+            f'site:youtube.com "{clean_niche}" software company',
+        ]
+
+    # Default COMPANY_BRAND
+    return [
+        f'{clean_niche} competitors',
+        f'companies like {clean_niche}',
+        f'{clean_niche} market leaders',
+        f'{clean_niche} brands alternatives',
+        f'brands like @{clean_handle}',
+        f'competitors of @{clean_handle}',
+        f'site:instagram.com "{clean_niche}" brand',
+        f'site:linkedin.com/company "{clean_niche}" company',
+        f'site:youtube.com "{clean_niche}" brand channel',
+    ]
+
+
+def search_competitors(handle: str, niche: str, max_results: int = 100, intent: str = 'COMPANY_BRAND') -> Dict:
     """
     Find competitor Instagram handles based on handle and niche
     Returns raw results + extracted handles
     """
-    # Broader queries for maximum coverage
-    queries = [
-        f'{niche} instagram influencers',
-        f'{niche} instagram accounts to follow',
-        f'best {niche} instagram creators 2024',
-        f'top {niche} instagram accounts',
-        f'{niche} instagram bloggers',
-        f'instagram accounts like @{handle}',
-        f'similar to @{handle} instagram',
-        f'{niche} content creators instagram',
-        f'{niche} instagram community',
-        f'{niche} instagram experts',
-    ]
+    queries = _build_competitor_queries(handle, niche, intent)
     
     raw = raw_search(queries, max_per_query=MAX_RESULTS_PER_QUERY)
     
@@ -174,7 +225,9 @@ def search_competitors(handle: str, niche: str, max_results: int = 100) -> Dict:
         'competitors': list(handles)[:max_results],
         'raw_results': raw,
         'total_raw': len(raw),
-        'total_handles': len(handles)
+        'total_handles': len(handles),
+        'intent': _normalize_competitor_intent(intent),
+        'queries': queries,
     }
 
 
@@ -796,7 +849,7 @@ if __name__ == '__main__':
             'error': 'Usage: python3 ddg_search.py <action> <args...>',
             'actions': [
                 'brand_context <brand_name>',
-                'competitors <handle> <niche> [max_results]',
+                'competitors <handle> <niche> [max_results] [intent]',
                 'validate <handle> [platform]',
                 'news <query1> [query2] ...',
                 'videos <query1> [query2] ...',
@@ -818,8 +871,15 @@ if __name__ == '__main__':
     elif action == 'competitors':
         handle = sys.argv[2]
         niche = sys.argv[3] if len(sys.argv) > 3 else 'business'
-        max_results = int(sys.argv[4]) if len(sys.argv) > 4 else 100
-        result = search_competitors(handle, niche, max_results)
+        max_results = 100
+        intent = 'COMPANY_BRAND'
+        if len(sys.argv) > 4:
+            try:
+                max_results = int(sys.argv[4])
+                intent = sys.argv[5] if len(sys.argv) > 5 else 'COMPANY_BRAND'
+            except Exception:
+                intent = sys.argv[4]
+        result = search_competitors(handle, niche, max_results, intent)
         print(json.dumps(result, indent=2))
         
     elif action == 'validate':
@@ -879,4 +939,3 @@ if __name__ == '__main__':
     else:
         print(json.dumps({'error': f'Unknown action: {action}'}))
         sys.exit(1)
-
