@@ -6,6 +6,16 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api/http';
 import { useToast } from '@/hooks/use-toast';
 import { useChatSocket } from '@/lib/ws/useChatSocket';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { ChatSessionList } from './ChatSessionList';
 import { ChatThread } from './ChatThread';
 import { SidebarContextPanel } from './SidebarContextPanel';
@@ -54,6 +64,12 @@ type WorkspaceModuleKey =
   | 'content_calendar'
   | 'content_generators'
   | 'performance';
+
+interface PendingCrudConfirmation {
+  section: IntelligenceSectionKey;
+  action: IntelligenceCrudAction;
+  estimatedCount: number | null;
+}
 
 const SECTION_MATCH_FIELDS: Record<IntelligenceSectionKey, string[]> = {
   client_profiles: ['handle', 'platform', 'profileUrl', 'bio'],
@@ -200,10 +216,12 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
   const [streamingMessage, setStreamingMessage] = useState<ChatMessage | null>(null);
   const [draft, setDraft] = useState('');
   const [crudOpen, setCrudOpen] = useState(false);
+  const [pendingCrudConfirmation, setPendingCrudConfirmation] = useState<PendingCrudConfirmation | null>(null);
 
   const activeSessionStorageKey = useMemo(() => `bat.chat.activeSession.${jobId}`, [jobId]);
   const lastUserCommandRef = useRef('');
   const autoCrudHandledRef = useRef<Set<string>>(new Set());
+  const confirmResolverRef = useRef<((confirmed: boolean) => void) | null>(null);
 
   // ── Queries ──────────────────────────────────────────────────────────────
 
@@ -281,6 +299,13 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
     if (autoCrudHandledRef.current.has(messageId)) return;
     const intent = detectCrudIntent(lastUserCommandRef.current);
     if (!intent) return;
+    if (intent !== 'read') {
+      console.info('[ChatWorkspace] Blocked auto-run for mutation intent', {
+        messageId,
+        intent,
+      });
+      return;
+    }
 
     const crudButtons = blocks.flatMap((block) => {
       if (String(block.type || '').toLowerCase() !== 'action_buttons') return [];
@@ -295,8 +320,10 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
     if (!crudButtons.length) return;
 
     const matched = crudButtons.find((button) => {
-      const normalized = resolveIntelligenceCrudAction(button.action.replace(/^intel_/, ''));
-      return normalized === intent;
+      const normalizedAction = String(button.action || '').toLowerCase();
+      const normalizedCrud = resolveIntelligenceCrudAction(normalizedAction.replace(/^intel_/, ''));
+      if (normalizedCrud === 'read' && intent === 'read') return true;
+      return normalizedAction === 'intel_read' || normalizedAction === 'intel_get' || normalizedAction === 'intel_list';
     });
     if (!matched) return;
 
@@ -528,6 +555,50 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
       }
     }
     return response;
+  }
+
+  async function estimateDestructiveCount(
+    section: IntelligenceSectionKey,
+    action: IntelligenceCrudAction,
+    itemId: string | undefined,
+    data?: Record<string, unknown>,
+    target?: Record<string, unknown> | string,
+    contextQuery?: string
+  ): Promise<number | null> {
+    if (action === 'delete') {
+      const resolvedItemId = await resolveCrudItemId(section, itemId, data, target, contextQuery);
+      return resolvedItemId ? 1 : null;
+    }
+    if (action === 'clear') {
+      const response = await apiFetch<{ data?: IntelligenceRow[] } | IntelligenceRow[]>(
+        `/research-jobs/${jobId}/intelligence/${section}?limit=300`
+      );
+      const rows = Array.isArray(response)
+        ? response
+        : Array.isArray((response as { data?: unknown[] }).data)
+          ? ((response as { data?: IntelligenceRow[] }).data as IntelligenceRow[])
+          : [];
+      return rows.length;
+    }
+    return null;
+  }
+
+  function requestCrudConfirmation(
+    section: IntelligenceSectionKey,
+    action: IntelligenceCrudAction,
+    estimatedCount: number | null
+  ): Promise<boolean> {
+    return new Promise((resolve) => {
+      confirmResolverRef.current = resolve;
+      setPendingCrudConfirmation({ section, action, estimatedCount });
+    });
+  }
+
+  function resolveCrudConfirmation(confirmed: boolean) {
+    const resolve = confirmResolverRef.current;
+    confirmResolverRef.current = null;
+    setPendingCrudConfirmation(null);
+    if (resolve) resolve(confirmed);
   }
 
   async function listCompetitorRows(): Promise<IntelligenceRow[]> {
@@ -838,13 +909,17 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
       const body = payload && typeof payload.data === 'object' && payload.data !== null ? (payload.data as Record<string, unknown>) : (fallbackPayloadData as Record<string, unknown>);
       const lastUserText = [...messages].reverse().find((m) => m.role === 'USER' && String(m.content || '').trim())?.content || lastUserCommandRef.current;
       if (DESTRUCTIVE_CRUD_ACTIONS.has(resolvedAction)) {
-        const shouldProceed =
-          typeof window === 'undefined' ||
-          window.confirm(
-            `Confirm ${resolvedAction.toUpperCase()} on ${section.replace(/_/g, ' ')}${
-              itemId ? ` (id: ${itemId})` : ''
-            }?`
-          );
+        const estimatedCount = await estimateDestructiveCount(
+          section,
+          resolvedAction,
+          itemId,
+          body,
+          typeof targetCandidate === 'string' || asRecord(targetCandidate)
+            ? (targetCandidate as Record<string, unknown> | string)
+            : undefined,
+          lastUserText
+        );
+        const shouldProceed = await requestCrudConfirmation(section, resolvedAction, estimatedCount);
         if (!shouldProceed) return;
       }
       await runIntelligenceCrud({ section, action: resolvedAction, itemId, data: body, target: typeof targetCandidate === 'string' || asRecord(targetCandidate) ? (targetCandidate as Record<string, unknown> | string) : undefined, contextQuery: lastUserText });
@@ -975,9 +1050,25 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
 
   const displayMessageCount = messages.length + (streamingMessage ? 1 : 0);
   const sessionError = sessionsQuery.error as Error | null;
+  const destructiveCrudNoun =
+    pendingCrudConfirmation?.action === 'delete'
+      ? 'delete'
+      : pendingCrudConfirmation?.action === 'clear'
+        ? 'clear'
+        : 'change';
+  const destructiveCrudCountLabel =
+    pendingCrudConfirmation?.estimatedCount === null
+      ? 'selected items'
+      : `${pendingCrudConfirmation?.estimatedCount ?? 0} item${pendingCrudConfirmation?.estimatedCount === 1 ? '' : 's'}`;
 
   return (
-    <div className="relative flex flex-col h-[calc(100vh-12rem)] min-h-[600px] overflow-hidden rounded-2xl border border-primary/20 bg-background/40 shadow-2xl backdrop-blur-md">
+    <AlertDialog
+      open={Boolean(pendingCrudConfirmation)}
+      onOpenChange={(open) => {
+        if (!open && pendingCrudConfirmation) resolveCrudConfirmation(false);
+      }}
+    >
+      <div className="relative flex flex-col h-[calc(100vh-12rem)] min-h-[600px] overflow-hidden rounded-2xl border border-primary/20 bg-background/40 shadow-2xl backdrop-blur-md">
       {/* Ambient glow — uses theme primary */}
       <div className="pointer-events-none absolute inset-0 -z-10 bg-linear-to-b from-primary/6 to-transparent" />
 
@@ -1052,6 +1143,30 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
         onRunCrud={runIntelligenceCrud}
         onOpenSection={openIntelligenceSection}
       />
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            Confirm {pendingCrudConfirmation?.action?.toUpperCase() || 'Mutation'}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {pendingCrudConfirmation
+              ? `You’re about to ${destructiveCrudNoun} ${destructiveCrudCountLabel} in section ${pendingCrudConfirmation.section.replace(/_/g, ' ')}. This action may be destructive.`
+              : 'Confirm this mutation before continuing.'}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={() => resolveCrudConfirmation(false)}>
+            Cancel
+          </AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            onClick={() => resolveCrudConfirmation(true)}
+          >
+            Confirm
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
     </div>
+    </AlertDialog>
   );
 }
