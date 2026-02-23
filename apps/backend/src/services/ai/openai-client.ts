@@ -38,6 +38,27 @@ type BatChatCompletionParams = Omit<ChatCompletionCreateParams, 'model'> & {
   model?: string;
 };
 
+function isGpt5Family(model: string): boolean {
+  const normalized = String(model || '').trim().toLowerCase();
+  return normalized.startsWith('gpt-5');
+}
+
+function applyTokenCompatibility(
+  params: ChatCompletionCreateParams,
+  model: string,
+): ChatCompletionCreateParams {
+  const payload = { ...((params as unknown) as Record<string, unknown>) };
+  if (!isGpt5Family(model)) return payload as unknown as ChatCompletionCreateParams;
+
+  const maxCompletion = payload.max_completion_tokens;
+  const maxTokens = payload.max_tokens;
+  if (maxCompletion == null && typeof maxTokens === 'number') {
+    payload.max_completion_tokens = maxTokens;
+  }
+  delete payload.max_tokens;
+  return payload as unknown as ChatCompletionCreateParams;
+}
+
 function getRetryAfterMs(error: any): number | null {
   const headers = error?.headers;
   if (!headers) return null;
@@ -201,10 +222,13 @@ class EnhancedOpenAIClient {
 
     const { batTask, ...rest } = params as any;
     return {
-      params: {
-        ...rest,
-        model: primaryModel,
-      },
+      params: applyTokenCompatibility(
+        {
+          ...rest,
+          model: primaryModel,
+        } as ChatCompletionCreateParams,
+        primaryModel,
+      ),
       task,
       provider,
       primaryModel,
@@ -277,7 +301,7 @@ class EnhancedOpenAIClient {
           );
         }
         return await this.executeWithProvider(routed.provider, {
-          ...routed.params,
+          ...applyTokenCompatibility(routed.params, model),
           model,
         });
       } catch (error: any) {
