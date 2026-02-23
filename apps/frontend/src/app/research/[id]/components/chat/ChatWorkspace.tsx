@@ -958,7 +958,7 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
     }
 
     if (normalizedAction === 'document_generate') {
-      const template = String(payload?.template || payload?.docType || 'strategy_export').trim().toLowerCase();
+      const templateRaw = String(payload?.template || payload?.docType || 'strategy_brief').trim().toLowerCase();
       const format = String(payload?.format || 'pdf').trim().toLowerCase();
       if (format !== 'pdf') {
         toast({
@@ -968,30 +968,39 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
         });
         return;
       }
-      if (template !== 'strategy_export') {
-        toast({
-          title: 'Template queued for next phase',
-          description: `Template "${template}" is not wired yet. Running strategy export for now.`,
-        });
+
+      const templateToDocType: Record<string, 'STRATEGY_BRIEF' | 'COMPETITOR_AUDIT' | 'CONTENT_CALENDAR'> = {
+        strategy_export: 'STRATEGY_BRIEF',
+        strategy_brief: 'STRATEGY_BRIEF',
+        competitor_audit: 'COMPETITOR_AUDIT',
+        executive_summary: 'COMPETITOR_AUDIT',
+        content_calendar: 'CONTENT_CALENDAR',
+      };
+      const docType = templateToDocType[templateRaw] || 'STRATEGY_BRIEF';
+
+      const response = await apiFetch<{ ok: boolean; document?: { title?: string; storagePath?: string; filePath?: string } }>(
+        `/research-jobs/${jobId}/documents/generate`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            docType,
+            title: typeof payload?.title === 'string' ? payload.title : undefined,
+            audience: typeof payload?.audience === 'string' ? payload.audience : undefined,
+            timeframeDays: Number.isFinite(Number(payload?.timeframeDays)) ? Number(payload?.timeframeDays) : undefined,
+            depth: typeof payload?.depth === 'string' ? payload.depth : undefined,
+          }),
+        }
+      );
+      const filePath = String(response?.document?.storagePath || response?.document?.filePath || '').trim();
+      if (!filePath) {
+        throw new Error('Document generated but no download path was returned.');
       }
-      const filename = `strategy-${jobId}-${new Date().toISOString().slice(0, 10)}.pdf`;
-      const pdfResponse = await fetch(`/api/strategy/${jobId}/export`);
-      if (!pdfResponse.ok) {
-        throw new Error('Failed to generate strategy PDF');
-      }
-      const blob = await pdfResponse.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = objectUrl;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(objectUrl);
-      await appendToolResultMessage(`Generated and downloaded \`${filename}\`. Ask me for another template or a scoped export.`);
+      const resolvedPath = filePath.startsWith('/') ? filePath : `/${filePath}`;
+      window.open(resolvedPath, '_blank');
+      await appendToolResultMessage(`Generated ${response?.document?.title || 'PDF document'}: ${resolvedPath}`);
       toast({
         title: 'PDF generated',
-        description: `Downloaded ${filename}.`,
+        description: response?.document?.title || 'Document is ready.',
       });
       return;
     }

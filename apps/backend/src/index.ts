@@ -24,6 +24,7 @@ import contentCalendarRouter from './routes/content-calendar';
 import chatRouter from './routes/research-jobs-chat';
 import screenshotsRouter from './routes/research-jobs-screenshots';
 import questionsRouter from './routes/research-jobs-questions';
+import documentsRouter from './routes/research-jobs-documents';
 import { STORAGE_ROOT } from './services/storage/storage-root';
 import { attachChatWebSocketServer } from './services/chat/chat-ws';
 
@@ -90,6 +91,7 @@ app.use('/api/research-jobs', researchJobsRouter);
 app.use('/api/research-jobs', chatRouter);
 app.use('/api/research-jobs', screenshotsRouter);
 app.use('/api/research-jobs', questionsRouter);
+app.use('/api/research-jobs', documentsRouter);
 app.use('/api/media', mediaRouter);
 app.use('/api/competitors', competitorsRouter);
 app.use('/api/analytics', analyticsRouter);
