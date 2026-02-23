@@ -3,10 +3,11 @@ import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: './e2e',
   timeout: 120_000,
+  workers: 1,
   expect: {
     timeout: 45_000,
   },
-  retries: process.env.CI ? 1 : 0,
+  retries: Number(process.env.PW_RETRIES || (process.env.CI ? '2' : '1')),
   fullyParallel: false,
   reporter: [['list']],
   use: {
@@ -16,4 +17,3 @@ export default defineConfig({
     video: 'retain-on-failure',
   },
 });
-
