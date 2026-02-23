@@ -8,6 +8,9 @@ export type EvidencePostsArgs = {
   limit?: number;
   includeCompetitors?: boolean;
   includeClient?: boolean;
+  startDateIso?: string;
+  endDateIso?: string;
+  lastNDays?: number;
 };
 
 export type EvidencePostItem = {
@@ -54,10 +57,34 @@ export type EvidenceFeedResult = {
 
 export const MAX_EVIDENCE_LIMIT = 50;
 export const DEFAULT_EVIDENCE_LIMIT = 10;
+const MS_IN_DAY = 24 * 60 * 60 * 1000;
 
 export function clampLimit(limit: number | undefined): number {
   if (!Number.isFinite(limit)) return DEFAULT_EVIDENCE_LIMIT;
   return Math.max(1, Math.min(MAX_EVIDENCE_LIMIT, Number(limit)));
+}
+
+function parseDate(value: unknown): number | null {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const parsed = new Date(raw).getTime();
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function resolveTimeRange(args: EvidencePostsArgs): { startMs: number | null; endMs: number | null } {
+  const lastNDays = typeof args.lastNDays === 'number' && Number.isFinite(args.lastNDays)
+    ? Math.max(1, Math.min(365, Math.round(args.lastNDays)))
+    : null;
+
+  const derivedStart = lastNDays ? Date.now() - (lastNDays * MS_IN_DAY) : null;
+  const startMs = parseDate(args.startDateIso) ?? derivedStart;
+  const endMs = parseDate(args.endDateIso);
+
+  if (startMs && endMs && endMs < startMs) {
+    return { startMs, endMs: startMs + MS_IN_DAY };
+  }
+
+  return { startMs, endMs };
 }
 
 export function compactSnippet(value: unknown, max = 180): string {

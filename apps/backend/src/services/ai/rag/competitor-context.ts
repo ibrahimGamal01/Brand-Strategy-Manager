@@ -30,10 +30,27 @@ export interface CompetitorData {
   qualityScore: DataQualityScore;
 }
 
+export type CompetitorContextMode = 'strict' | 'chat_relaxed';
+
+export interface CompetitorPipelineStatus {
+  mode: CompetitorContextMode;
+  discoveredTotal: number;
+  filteredTotal: number;
+  readinessQualifiedTotal: number;
+  returnedTotal: number;
+  statusCounts: Record<string, number>;
+  hasReadinessQualified: boolean;
+}
+
 export interface CompetitorContext {
   all10: CompetitorData[];
   priority3: CompetitorData[];
   overallQuality: DataQualityScore;
+  pipelineStatus: CompetitorPipelineStatus;
+}
+
+export interface GetCompetitorContextOptions {
+  mode?: CompetitorContextMode;
 }
 
 /**
@@ -42,8 +59,10 @@ export interface CompetitorContext {
  */
 export async function getCompetitorContext(
   researchJobId: string,
-  readinessScope?: RagReadinessScope
+  readinessScope?: RagReadinessScope,
+  options: GetCompetitorContextOptions = {}
 ): Promise<CompetitorContext> {
+  const mode = options.mode || 'strict';
   const scope = readinessScope || (await buildRagReadinessScope(researchJobId));
 
   // Get client name to filter out client-related handles
@@ -89,16 +108,25 @@ export async function getCompetitorContext(
   }
 
   const beforeReadinessFilter = filtered.length;
-  let externalCompetitors = filtered;
-  if (scope.competitorProfileKeys.size > 0) {
-    externalCompetitors = filtered.filter((row) =>
-      scope.competitorProfileKeys.has(buildProfileKey(row.platform, row.handle))
-    );
-  } else {
-    externalCompetitors = [];
+  const readinessQualifiedCompetitors =
+    scope.competitorProfileKeys.size > 0
+      ? filtered.filter((row) => scope.competitorProfileKeys.has(buildProfileKey(row.platform, row.handle)))
+      : [];
+
+  let externalCompetitors = readinessQualifiedCompetitors;
+  if (!scope.competitorProfileKeys.size && mode === 'chat_relaxed') {
+    externalCompetitors = filtered;
   }
 
-  console.log(`[Competitor Context] Found ${discoveredCompetitors.length} discovered competitors, ${externalCompetitors.length} after filtering client handles and non-competitors`);
+  const statusCounts = discoveredCompetitors.reduce<Record<string, number>>((acc, row) => {
+    const status = String(row.status || 'UNKNOWN').toUpperCase();
+    acc[status] = (acc[status] || 0) + 1;
+    return acc;
+  }, {});
+
+  console.log(
+    `[Competitor Context] mode=${mode} discovered=${discoveredCompetitors.length} filtered=${filtered.length} readinessQualified=${readinessQualifiedCompetitors.length} returned=${externalCompetitors.length}`
+  );
 
   // Get social profile data for these competitors
   const competitorHandles = externalCompetitors.map(c => c.handle);
@@ -129,10 +157,13 @@ export async function getCompetitorContext(
 
   if (!scope.hasCompetitorReady) {
     issues.push('No readiness-qualified competitor snapshots are available');
+    if (mode === 'chat_relaxed' && filtered.length > 0) {
+      warnings.push('Using discovered competitors without readiness-qualified snapshots (unverified metrics)');
+    }
   }
-  if (scope.hasCompetitorReady && beforeReadinessFilter > externalCompetitors.length) {
+  if (scope.hasCompetitorReady && beforeReadinessFilter > readinessQualifiedCompetitors.length) {
     warnings.push(
-      `Filtered ${beforeReadinessFilter - externalCompetitors.length} competitors due to readiness gate`
+      `Filtered ${beforeReadinessFilter - readinessQualifiedCompetitors.length} competitors due to readiness gate`
     );
   }
 
@@ -140,7 +171,9 @@ export async function getCompetitorContext(
     warnings.push(`Only ${externalCompetitors.length}/10 external competitors found`);
   }
 
-  if (externalCompetitors.length === 0) {
+  if (externalCompetitors.length === 0 && filtered.length > 0 && mode === 'strict') {
+    issues.push('Competitors were discovered but none passed readiness qualification');
+  } else if (externalCompetitors.length === 0) {
     issues.push('No external competitors found - only client handles detected');
   }
 
@@ -244,6 +277,15 @@ export async function getCompetitorContext(
   return {
     all10: allCompetitors.slice(0, 10),
     priority3: priority3.slice(0, 3),
-    overallQuality
+    overallQuality,
+    pipelineStatus: {
+      mode,
+      discoveredTotal: discoveredCompetitors.length,
+      filteredTotal: filtered.length,
+      readinessQualifiedTotal: readinessQualifiedCompetitors.length,
+      returnedTotal: externalCompetitors.length,
+      statusCounts,
+      hasReadinessQualified: scope.hasCompetitorReady,
+    },
   };
 }

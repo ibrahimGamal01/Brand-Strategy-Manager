@@ -7,7 +7,7 @@
 import { DataQualityScore, crossReferenceData } from './data-quality';
 import { BusinessContext, getBusinessContext } from './business-context';
 import { AIInsights, getAIInsights } from './ai-insights';
-import { CompetitorContext, getCompetitorContext } from './competitor-context';
+import { CompetitorContext, CompetitorContextMode, getCompetitorContext } from './competitor-context';
 import { SocialContext, CommunityContext, getSocialContext, getCommunityContext } from './social-community-context';
 import { ContentIntelligence, getContentIntelligence } from './content-intelligence';
 import {
@@ -44,10 +44,17 @@ export interface ResearchContext {
   missingData: string[];
 }
 
+export interface GetFullResearchContextOptions {
+  competitorContextMode?: CompetitorContextMode;
+}
+
 /**
  * Main function: Get full research context with comprehensive validation
  */
-export async function getFullResearchContext(researchJobId: string): Promise<ResearchContext> {
+export async function getFullResearchContext(
+  researchJobId: string,
+  options: GetFullResearchContextOptions = {}
+): Promise<ResearchContext> {
   console.log(`[RAG] Fetching context for job: ${researchJobId}`);
 
   const readinessScope = await buildRagReadinessScope(researchJobId, {
@@ -73,7 +80,9 @@ export async function getFullResearchContext(researchJobId: string): Promise<Res
       } as BrainProfileContext;
     }),
     getAIInsights(researchJobId),
-    getCompetitorContext(researchJobId, readinessScope),
+    getCompetitorContext(researchJobId, readinessScope, {
+      mode: options.competitorContextMode || 'strict',
+    }),
     getSocialContext(researchJobId),
     getCommunityContext(researchJobId),
     getContentIntelligence(researchJobId, readinessScope).catch(() => ({

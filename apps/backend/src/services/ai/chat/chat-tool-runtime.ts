@@ -5,6 +5,7 @@ import { buildChatRagContext, formatChatContextForLLM } from './chat-rag-context
 import { createAgentLinkHelpers, type AgentContext } from './agent-context';
 import { listUserContexts } from '../../chat/user-context-repository';
 import { TOOL_REGISTRY, getTool } from './tools/tool-registry';
+import { inferHeuristicToolCalls, type PlannerToolCall } from './tool-hints';
 
 const TOOL_TIMEOUT_MS = 10_000;
 const TOTAL_TOOL_TIMEOUT_MS = 20_000;
@@ -17,14 +18,68 @@ export type ToolExecutionResult = {
   error?: string;
 };
 
-type PlannerToolCall = {
-  name: string;
-  args: Record<string, unknown>;
-};
-
 type PlannerPayload = {
   tool_calls: PlannerToolCall[];
 };
+
+function parsePlannerPayload(raw: string): PlannerPayload {
+  const text = String(raw || '').trim();
+  if (!text) return { tool_calls: [] };
+
+  const candidates = [text];
+  const fenceMatch = text.match(/```json\s*([\s\S]*?)\s*```/i);
+  if (fenceMatch?.[1]) candidates.push(fenceMatch[1].trim());
+  const objectMatch = text.match(/\{[\s\S]*\}/);
+  if (objectMatch?.[0]) candidates.push(objectMatch[0].trim());
+
+  for (const candidate of candidates) {
+    try {
+      const value = JSON.parse(candidate);
+      if (!isRecord(value) || !Array.isArray(value.tool_calls)) continue;
+      return {
+        tool_calls: value.tool_calls
+          .filter((entry) => isRecord(entry))
+          .map((entry) => ({
+            name: String(entry.name || ''),
+            args: isRecord(entry.args) ? entry.args : {},
+          }))
+          .filter((entry) => entry.name),
+      };
+    } catch {
+      // Keep trying alternatives.
+    }
+  }
+
+  return { tool_calls: [] };
+}
+
+function summarizeReadOnlyTools(): string {
+  const tools = TOOL_REGISTRY.filter((tool) => !tool.mutate);
+  if (!tools.length) return '- none';
+  return tools
+    .map((tool) => {
+      const properties = isRecord(tool.argsSchema?.properties)
+        ? Object.keys(tool.argsSchema.properties as Record<string, unknown>)
+        : [];
+      const argsLabel = properties.length ? properties.join(', ') : 'none';
+      return `- ${tool.name}: ${tool.description} | args: ${argsLabel}`;
+    })
+    .join('\n');
+}
+
+function dedupeToolCalls(calls: PlannerToolCall[]): PlannerToolCall[] {
+  const seen = new Set<string>();
+  const deduped: PlannerToolCall[] = [];
+
+  for (const call of calls) {
+    const key = `${call.name}:${JSON.stringify(call.args || {})}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(call);
+  }
+
+  return deduped;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -87,12 +142,19 @@ async function runPlanner(params: {
   userMessage: string;
   toolResults: ToolExecutionResult[];
 }): Promise<PlannerPayload> {
-  const toolNames = TOOL_REGISTRY.filter((tool) => !tool.mutate).map((tool) => tool.name);
+  const toolSummary = summarizeReadOnlyTools();
   const plannerSystemPrompt = [
     'You are BAT planner.',
     'Return strict JSON only. No markdown.',
-    `Allowed read-only tools: ${toolNames.join(', ') || 'none'}.`,
+    'Allowed read-only tools and usage:',
+    toolSummary,
     'Never call mutate tools.',
+    'Call tools whenever the user asks for specific evidence, links, examples, performance, videos, or news.',
+    'Trigger hints:',
+    '- "best/top post", "highest engagement", "last week" -> evidence.posts',
+    '- "show links/examples/posts" -> evidence.posts',
+    '- "videos/youtube" -> evidence.videos',
+    '- "news/press/articles" -> evidence.news',
     'If no tools are required, return {"tool_calls":[]}.',
     'JSON schema:',
     '{"tool_calls":[{"name":"tool","args":{}}]}',
@@ -118,23 +180,11 @@ async function runPlanner(params: {
   }
 
   const raw = plannerResponse.choices?.[0]?.message?.content || '';
-  try {
-    const value = JSON.parse(raw);
-    if (!isRecord(value) || !Array.isArray(value.tool_calls)) return { tool_calls: [] };
-
-    return {
-      tool_calls: value.tool_calls
-        .filter((entry) => isRecord(entry))
-        .map((entry) => ({
-          name: String(entry.name || ''),
-          args: isRecord(entry.args) ? entry.args : {},
-        }))
-        .filter((entry) => entry.name),
-    };
-  } catch (error) {
-    console.warn('[Chat Planner] Failed to parse planner JSON:', (error as Error).message);
-    return { tool_calls: [] };
+  const parsed = parsePlannerPayload(raw);
+  if (!parsed.tool_calls.length && raw.trim()) {
+    console.warn('[Chat Planner] Failed to parse planner JSON payload, defaulting to no calls.');
   }
+  return parsed;
 }
 
 async function executeReadOnlyTools(context: AgentContext, calls: PlannerToolCall[]): Promise<ToolExecutionResult[]> {
@@ -230,15 +280,24 @@ export async function runPlannerToolLoop(params: {
       userMessage: params.userMessage,
       toolResults,
     });
+    const heuristicCalls = inferHeuristicToolCalls({
+      userMessage: params.userMessage,
+      existingCalls: planner.tool_calls,
+    });
+    const mergedCalls = dedupeToolCalls([
+      ...planner.tool_calls,
+      ...heuristicCalls.map((call) => ({ name: call.name, args: call.args })),
+    ]);
     console.info('[Chat Tool Loop] Planner iteration result', {
       researchJobId: params.agentContext.researchJobId,
       iteration: iteration + 1,
       toolCalls: planner.tool_calls.map((entry) => entry.name),
+      heuristicCalls: heuristicCalls.map((entry) => ({ name: entry.name, reason: entry.reason })),
     });
 
-    if (!planner.tool_calls.length) break;
+    if (!mergedCalls.length) break;
 
-    const execution = await executeReadOnlyTools(params.agentContext, planner.tool_calls.slice(0, 4));
+    const execution = await executeReadOnlyTools(params.agentContext, mergedCalls.slice(0, 4));
     console.info('[Chat Tool Loop] Tool execution summary', {
       researchJobId: params.agentContext.researchJobId,
       iteration: iteration + 1,

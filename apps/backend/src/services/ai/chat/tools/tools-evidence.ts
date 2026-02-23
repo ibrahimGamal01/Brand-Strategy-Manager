@@ -7,6 +7,7 @@ import {
   getPostPermalink,
   normalizeHandle,
   normalizePlatform,
+  resolveTimeRange,
   resolveProfileFilters,
   type EvidenceFeedArgs,
   type EvidenceFeedResult,
@@ -22,6 +23,7 @@ async function runEvidencePosts(
   const args = rawArgs || {};
   const limit = clampLimit(args.limit);
   const filters = await resolveProfileFilters(context, args);
+  const timeRange = resolveTimeRange(args);
 
   const posts = await prisma.socialPost.findMany({
     where: {
@@ -40,9 +42,12 @@ async function runEvidencePosts(
   const filtered = posts.filter((post) => {
     const handle = normalizeHandle(post.socialProfile.handle);
     const platform = normalizePlatform(post.socialProfile.platform);
+    const postTimestamp = post.postedAt?.getTime() || post.scrapedAt.getTime();
 
     if (filters.handleSet && !filters.handleSet.has(handle)) return false;
     if (filters.platform && platform !== filters.platform) return false;
+    if (timeRange.startMs && postTimestamp < timeRange.startMs) return false;
+    if (timeRange.endMs && postTimestamp > timeRange.endMs) return false;
     return true;
   });
 
@@ -89,9 +94,14 @@ async function runEvidencePosts(
   });
 
   if (!items.length) {
+    const rangeHint = args.lastNDays
+      ? ` for the last ${Math.max(1, Math.round(args.lastNDays))} day(s)`
+      : args.startDateIso || args.endDateIso
+        ? ' for the requested timeframe'
+        : '';
     return {
       items,
-      reason: 'No social posts match the requested filters in this research workspace yet.',
+      reason: `No social posts match the requested filters${rangeHint} in this research workspace yet.`,
     };
   }
 
@@ -197,6 +207,9 @@ export const evidenceTools: ToolDefinition<Record<string, unknown>, Record<strin
         limit: { type: 'number', minimum: 1, maximum: MAX_EVIDENCE_LIMIT },
         includeCompetitors: { type: 'boolean' },
         includeClient: { type: 'boolean' },
+        startDateIso: { type: 'string' },
+        endDateIso: { type: 'string' },
+        lastNDays: { type: 'number', minimum: 1, maximum: 365 },
       },
       additionalProperties: false,
     },

@@ -79,6 +79,24 @@ function formatCompetitorRows(context: ResearchContext): string {
     .join('\n');
 }
 
+function formatCompetitorPipeline(context: ResearchContext): string {
+  const pipeline = context.competitors?.pipelineStatus;
+  if (!pipeline) return '- unavailable';
+  const statusSummary = Object.entries(pipeline.statusCounts || {})
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([status, count]) => `${status}:${count}`)
+    .join(', ');
+  return [
+    `- Mode: ${pipeline.mode}`,
+    `- Discovered: ${pipeline.discoveredTotal}`,
+    `- After filtering: ${pipeline.filteredTotal}`,
+    `- Readiness-qualified: ${pipeline.readinessQualifiedTotal}`,
+    `- Returned to chat: ${pipeline.returnedTotal}`,
+    `- Statuses: ${statusSummary || 'none'}`,
+    `- Readiness-qualified snapshots available: ${pipeline.hasReadinessQualified ? 'yes' : 'no'}`,
+  ].join('\n');
+}
+
 function formatTrends(context: ResearchContext): string {
   const trends = (context.community?.searchTrends || []) as Array<Record<string, unknown>>;
   if (!trends.length) return '- none';
@@ -124,8 +142,11 @@ Primary Goal: ${primaryGoal}
 Target Market: ${targetMarket}
 Channels: ${channels}
 
-Competitor Metrics (verified):
+Competitor Metrics (available to chat):
 ${formatCompetitorRows(context)}
+
+Competitor Pipeline Status:
+${formatCompetitorPipeline(context)}
 
 Search Trends:
 ${formatTrends(context)}
@@ -145,7 +166,9 @@ ${formatWarnings(context)}
 }
 
 export async function buildChatRagContext(researchJobId: string, sessionId: string): Promise<ChatRagContext> {
-  const researchContext = await getFullResearchContext(researchJobId);
+  const researchContext = await getFullResearchContext(researchJobId, {
+    competitorContextMode: 'chat_relaxed',
+  });
   const researchContextText = formatChatResearchContext(researchContext);
 
   const messages = await prisma.chatMessage.findMany({
