@@ -104,6 +104,7 @@ model ResearchJob {
   strategyDocChatSessions     StrategyDocChatSession[]
   clientIntakeAnswers         ClientIntakeAnswer[]
   screenshotAttachments       ScreenshotAttachment[]
+  chatMutations               ChatMutation[]
   userSuppliedContexts        UserSuppliedContext[]
 
   @@map("research_jobs")
@@ -1421,6 +1422,7 @@ model ChatSession {
   messages    ChatMessage[]
   blockEvents ChatBlockEvent[]
   savedBlocks ChatSavedBlock[]
+  mutations   ChatMutation[]
 
   @@index([researchJobId, lastActiveAt(sort: Desc)])
   @@map("chat_sessions")
@@ -1492,6 +1494,30 @@ model ChatSavedBlock {
   @@unique([sessionId, blockId])
   @@index([sessionId, createdAt])
   @@map("chat_saved_blocks")
+}
+
+enum ChatMutationKind {
+  CREATE
+  UPDATE
+  DELETE
+  CLEAR
+}
+
+model ChatMutation {
+  id            String           @id @default(uuid())
+  researchJobId String           @map("research_job_id")
+  sessionId     String           @map("session_id")
+  kind          ChatMutationKind
+  section       String
+  requestJson   Json             @map("request_json")
+  previewJson   Json             @map("preview_json")
+  createdAt     DateTime         @default(now()) @map("created_at")
+  researchJob   ResearchJob      @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  session       ChatSession      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([researchJobId, createdAt(sort: Desc)])
+  @@index([sessionId, createdAt(sort: Desc)])
+  @@map("chat_mutations")
 }
 
 // Stores answers to the client questioning workflow
@@ -1638,4 +1664,3 @@ model UserSuppliedContext {
   @@index([researchJobId, isActive])
   @@map("user_supplied_contexts")
 }
-
