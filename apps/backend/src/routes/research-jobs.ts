@@ -160,6 +160,16 @@ function parseCompetitorIds(value: unknown): string[] | undefined {
 }
 
 type CandidateStateValue = 'TOP_PICK' | 'SHORTLISTED' | 'APPROVED' | 'FILTERED_OUT' | 'REJECTED';
+type CompetitorScopeValue = 'latest_run' | 'all_jobs';
+type CompetitorTypeValue =
+  | 'DIRECT'
+  | 'INDIRECT'
+  | 'ADJACENT'
+  | 'MARKETPLACE'
+  | 'MEDIA'
+  | 'INFLUENCER'
+  | 'COMMUNITY'
+  | 'UNKNOWN';
 
 function parseCandidateState(value: unknown): CandidateStateValue {
   const normalized = String(value || '').trim().toUpperCase();
@@ -174,6 +184,32 @@ function parseCandidateState(value: unknown): CandidateStateValue {
     throw new Error(`state must be one of: ${validStates.join(', ')}`);
   }
   return normalized as CandidateStateValue;
+}
+
+function parseCompetitorType(value: unknown): CompetitorTypeValue {
+  const normalized = String(value || '').trim().toUpperCase();
+  const validTypes: CompetitorTypeValue[] = [
+    'DIRECT',
+    'INDIRECT',
+    'ADJACENT',
+    'MARKETPLACE',
+    'MEDIA',
+    'INFLUENCER',
+    'COMMUNITY',
+    'UNKNOWN',
+  ];
+  if (!validTypes.includes(normalized as CompetitorTypeValue)) {
+    throw new Error(`competitorType must be one of: ${validTypes.join(', ')}`);
+  }
+  return normalized as CompetitorTypeValue;
+}
+
+function parseCompetitorScope(value: unknown): CompetitorScopeValue {
+  const normalized = String(value || 'latest_run').trim().toLowerCase();
+  if (normalized !== 'latest_run' && normalized !== 'all_jobs') {
+    throw new Error('competitorScope must be latest_run or all_jobs');
+  }
+  return normalized as CompetitorScopeValue;
 }
 
 function parseBooleanQuery(value: unknown, fallback: boolean = false): boolean {
@@ -250,6 +286,26 @@ router.get('/:id', async (req: Request, res: Response) => {
       Array.isArray(req.query.includeFiltered) ? req.query.includeFiltered[0] : req.query.includeFiltered,
       false
     );
+    const competitorScopeRaw = Array.isArray(req.query.competitorScope)
+      ? req.query.competitorScope[0]
+      : req.query.competitorScope;
+    const competitorRunIdRaw = Array.isArray(req.query.competitorRunId)
+      ? req.query.competitorRunId[0]
+      : req.query.competitorRunId;
+
+    let competitorScope: CompetitorScopeValue;
+    try {
+      competitorScope = parseCompetitorScope(competitorScopeRaw);
+    } catch (error: any) {
+      return res.status(400).json({ error: error?.message || 'Invalid competitorScope' });
+    }
+
+    let competitorRunId: string | undefined;
+    try {
+      competitorRunId = parseRunId(competitorRunIdRaw);
+    } catch (error: any) {
+      return res.status(400).json({ error: error?.message || 'Invalid competitorRunId' });
+    }
 
     const job = await prisma.researchJob.findUnique({
       where: { id },
@@ -332,18 +388,55 @@ router.get('/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Research job not found' });
     }
 
-    // CONTINUITY FIX: Fetch aggregated data from ALL jobs for this client
-    // This allows "stacking" of research results over time
     const clientJobIds = (await prisma.researchJob.findMany({
         where: { clientId: job.clientId },
         select: { id: true }
     })).map(j => j.id);
+    const latestRun = competitorRunId
+      ? await prisma.competitorOrchestrationRun.findFirst({
+          where: { id: competitorRunId, researchJobId: id },
+          select: { id: true },
+        })
+      : await prisma.competitorOrchestrationRun.findFirst({
+          where: { researchJobId: id },
+          orderBy: { createdAt: 'desc' },
+          select: { id: true },
+        });
+    if (competitorRunId && !latestRun) {
+      return res.status(404).json({ error: 'competitorRunId not found for this research job' });
+    }
+    const selectedRunId = latestRun?.id || null;
 
-    const aggregatedCompetitorsRaw = await prisma.discoveredCompetitor.findMany({
+    let scopedCompetitorsRaw: Array<any> = [];
+    if (competitorScope === 'all_jobs') {
+      scopedCompetitorsRaw = await prisma.discoveredCompetitor.findMany({
         where: { researchJobId: { in: clientJobIds } },
         include: { competitor: true },
-        orderBy: { discoveredAt: 'desc' }
-    });
+        orderBy: { discoveredAt: 'desc' },
+      });
+    } else if (selectedRunId) {
+      scopedCompetitorsRaw = await prisma.discoveredCompetitor.findMany({
+        where: {
+          researchJobId: id,
+          orchestrationRunId: selectedRunId,
+        },
+        include: { competitor: true },
+        orderBy: { discoveredAt: 'desc' },
+      });
+      if (scopedCompetitorsRaw.length === 0 && !competitorRunId) {
+        scopedCompetitorsRaw = await prisma.discoveredCompetitor.findMany({
+          where: { researchJobId: id },
+          include: { competitor: true },
+          orderBy: { discoveredAt: 'desc' },
+        });
+      }
+    } else {
+      scopedCompetitorsRaw = await prisma.discoveredCompetitor.findMany({
+        where: { researchJobId: id },
+        include: { competitor: true },
+        orderBy: { discoveredAt: 'desc' },
+      });
+    }
 
     const selectionPriority: Record<string, number> = {
         APPROVED: 5,
@@ -361,40 +454,45 @@ router.get('/:id', async (req: Request, res: Response) => {
         REJECTED: 1,
     };
 
-    const mergedCompetitorsByKey = new Map<string, (typeof aggregatedCompetitorsRaw)[number]>();
-    for (const competitor of aggregatedCompetitorsRaw) {
-        const key = `${competitor.platform}:${competitor.handle}`.toLowerCase();
-        const existing = mergedCompetitorsByKey.get(key);
-        if (!existing) {
-            mergedCompetitorsByKey.set(key, competitor);
-            continue;
-        }
+    const mergedCompetitorsByKey = new Map<string, (typeof scopedCompetitorsRaw)[number]>();
+    if (competitorScope === 'all_jobs') {
+      for (const competitor of scopedCompetitorsRaw) {
+          const key = `${competitor.platform}:${competitor.handle}`.toLowerCase();
+          const existing = mergedCompetitorsByKey.get(key);
+          if (!existing) {
+              mergedCompetitorsByKey.set(key, competitor);
+              continue;
+          }
 
-        const existingSelection = selectionPriority[String(existing.selectionState || '')] || 0;
-        const incomingSelection = selectionPriority[String(competitor.selectionState || '')] || 0;
-        const existingStatus = statusPriority[String(existing.status || '')] || 0;
-        const incomingStatus = statusPriority[String(competitor.status || '')] || 0;
-        const existingScore = Number(existing.relevanceScore || 0);
-        const incomingScore = Number(competitor.relevanceScore || 0);
-        const existingDiscoveredAt = new Date(existing.discoveredAt || 0).getTime();
-        const incomingDiscoveredAt = new Date(competitor.discoveredAt || 0).getTime();
+          const existingSelection = selectionPriority[String(existing.selectionState || '')] || 0;
+          const incomingSelection = selectionPriority[String(competitor.selectionState || '')] || 0;
+          const existingStatus = statusPriority[String(existing.status || '')] || 0;
+          const incomingStatus = statusPriority[String(competitor.status || '')] || 0;
+          const existingScore = Number(existing.relevanceScore || 0);
+          const incomingScore = Number(competitor.relevanceScore || 0);
+          const existingDiscoveredAt = new Date(existing.discoveredAt || 0).getTime();
+          const incomingDiscoveredAt = new Date(competitor.discoveredAt || 0).getTime();
 
-        // Single source of truth: the most recent orchestration state wins for each platform+handle.
-        // This prevents stale "SHORTLISTED" rows from older runs overriding newer "FILTERED_OUT" decisions.
-        const shouldReplace =
-            incomingDiscoveredAt > existingDiscoveredAt ||
-            (incomingDiscoveredAt === existingDiscoveredAt && incomingSelection > existingSelection) ||
-            (incomingDiscoveredAt === existingDiscoveredAt &&
-                incomingSelection === existingSelection &&
-                incomingStatus > existingStatus) ||
-            (incomingDiscoveredAt === existingDiscoveredAt &&
-                incomingSelection === existingSelection &&
-                incomingStatus === existingStatus &&
-                incomingScore > existingScore);
+          // Single source of truth: the most recent orchestration state wins for each platform+handle.
+          const shouldReplace =
+              incomingDiscoveredAt > existingDiscoveredAt ||
+              (incomingDiscoveredAt === existingDiscoveredAt && incomingSelection > existingSelection) ||
+              (incomingDiscoveredAt === existingDiscoveredAt &&
+                  incomingSelection === existingSelection &&
+                  incomingStatus > existingStatus) ||
+              (incomingDiscoveredAt === existingDiscoveredAt &&
+                  incomingSelection === existingSelection &&
+                  incomingStatus === existingStatus &&
+                  incomingScore > existingScore);
 
-        if (shouldReplace) {
-            mergedCompetitorsByKey.set(key, competitor);
-        }
+          if (shouldReplace) {
+              mergedCompetitorsByKey.set(key, competitor);
+          }
+      }
+    } else {
+      for (const competitor of scopedCompetitorsRaw) {
+        mergedCompetitorsByKey.set(`${competitor.platform}:${competitor.handle}`.toLowerCase(), competitor);
+      }
     }
 
     const mergedCompetitors = Array.from(mergedCompetitorsByKey.values());
@@ -495,18 +593,18 @@ router.get('/:id', async (req: Request, res: Response) => {
         take: 100
     });
 
-    const latestRun = await prisma.competitorOrchestrationRun.findFirst({
-      where: { researchJobId: id },
-      orderBy: { createdAt: 'desc' },
-      select: { id: true },
-    });
     const latestMediaAnalysisRun = await getLatestMediaAnalysisRunSummary(id);
 
+    const candidateCountScope =
+      competitorScope === 'latest_run' && selectedRunId
+        ? { researchJobId: id, orchestrationRunId: selectedRunId }
+        : { researchJobId: id };
+
     const [topPicks, shortlisted, approved, filtered] = await Promise.all([
-      prisma.competitorCandidateProfile.count({ where: { researchJobId: id, state: 'TOP_PICK' } }),
-      prisma.competitorCandidateProfile.count({ where: { researchJobId: id, state: 'SHORTLISTED' } }),
-      prisma.competitorCandidateProfile.count({ where: { researchJobId: id, state: 'APPROVED' } }),
-      prisma.competitorCandidateProfile.count({ where: { researchJobId: id, state: 'FILTERED_OUT' } }),
+      prisma.competitorCandidateProfile.count({ where: { ...candidateCountScope, state: 'TOP_PICK' } }),
+      prisma.competitorCandidateProfile.count({ where: { ...candidateCountScope, state: 'SHORTLISTED' } }),
+      prisma.competitorCandidateProfile.count({ where: { ...candidateCountScope, state: 'APPROVED' } }),
+      prisma.competitorCandidateProfile.count({ where: { ...candidateCountScope, state: 'FILTERED_OUT' } }),
     ]);
     
     // Transform socialProfiles posts to match frontend expectations
@@ -736,6 +834,8 @@ router.get('/:id', async (req: Request, res: Response) => {
           filtered: filteredCompetitors,
           includeFiltered,
           filteredCap,
+          scope: competitorScope,
+          runId: selectedRunId,
         },
         searchTrends: aggregatedTrends,
         socialTrends: aggregatedSocialTrends,
@@ -754,7 +854,8 @@ router.get('/:id', async (req: Request, res: Response) => {
         brainProfile: jobBrainProfile ?? job.client?.brainProfile ?? null,
         brainCommands: job.brainCommands || [],
         competitorSummary: {
-          runId: latestRun?.id || null,
+          runId: selectedRunId,
+          scope: competitorScope,
           topPicks,
           shortlisted,
           approved,
@@ -2241,6 +2342,158 @@ router.post('/:id/competitors/continue-scrape', async (req: Request, res: Respon
 });
 
 /**
+ * PATCH /api/research-jobs/:id/competitors/bulk-update
+ * Bulk update candidate states/types and keep discovered rows synchronized.
+ */
+router.patch('/:id/competitors/bulk-update', async (req: Request, res: Response) => {
+  try {
+    const { id: researchJobId } = req.params;
+    const candidateProfileIds =
+      parseCompetitorIds(req.body?.candidateProfileIds) ||
+      parseCompetitorIds(req.body?.competitorIds);
+    if (!candidateProfileIds || candidateProfileIds.length === 0) {
+      return res.status(400).json({ success: false, error: 'candidateProfileIds is required' });
+    }
+
+    const state = req.body?.state ? parseCandidateState(req.body.state) : undefined;
+    const competitorType = req.body?.competitorType
+      ? parseCompetitorType(req.body.competitorType)
+      : undefined;
+    const reason = String(req.body?.reason || '').trim();
+
+    let typeConfidence: number | undefined;
+    if (req.body?.typeConfidence !== undefined) {
+      const parsed = Number(req.body.typeConfidence);
+      if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+        return res.status(400).json({ success: false, error: 'typeConfidence must be between 0 and 1' });
+      }
+      typeConfidence = parsed;
+    }
+
+    let entityFlags: string[] | undefined;
+    if (req.body?.entityFlags !== undefined) {
+      if (!Array.isArray(req.body.entityFlags)) {
+        return res.status(400).json({ success: false, error: 'entityFlags must be an array when provided' });
+      }
+      const normalizedFlags = (req.body.entityFlags as unknown[])
+        .map((entry) => String(entry || '').trim().toLowerCase())
+        .filter((entry) => entry.length > 0);
+      entityFlags = Array.from(new Set<string>(normalizedFlags)).slice(0, 20);
+    }
+
+    if (
+      state === undefined &&
+      competitorType === undefined &&
+      typeConfidence === undefined &&
+      entityFlags === undefined
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: 'At least one update field is required: state, competitorType, typeConfidence, or entityFlags',
+      });
+    }
+
+    const candidates = await prisma.competitorCandidateProfile.findMany({
+      where: {
+        researchJobId,
+        id: { in: candidateProfileIds },
+      },
+      select: {
+        id: true,
+        state: true,
+        platform: true,
+        handle: true,
+      },
+    });
+
+    if (candidates.length === 0) {
+      return res.status(404).json({ success: false, error: 'No matching candidate profiles found' });
+    }
+
+    const candidateIds = candidates.map((row) => row.id);
+    const stateReason = state ? reason || `Bulk updated to ${state}` : undefined;
+
+    const candidateUpdateData: Record<string, unknown> = {};
+    if (state) {
+      candidateUpdateData.state = state;
+      candidateUpdateData.stateReason = stateReason;
+    }
+    if (competitorType) candidateUpdateData.competitorType = competitorType;
+    if (typeConfidence !== undefined) candidateUpdateData.typeConfidence = typeConfidence;
+    if (entityFlags !== undefined) {
+      candidateUpdateData.entityFlags = entityFlags as unknown as object;
+    }
+
+    const discoveredUpdateData: Record<string, unknown> = {
+      manuallyModified: true,
+      lastModifiedBy: 'user:bulk_update',
+      lastModifiedAt: new Date(),
+    };
+    if (state) {
+      discoveredUpdateData.selectionState = state;
+      discoveredUpdateData.selectionReason = stateReason;
+    }
+    if (competitorType) discoveredUpdateData.competitorType = competitorType;
+    if (typeConfidence !== undefined) discoveredUpdateData.typeConfidence = typeConfidence;
+    if (entityFlags !== undefined) {
+      discoveredUpdateData.entityFlags = entityFlags as unknown as object;
+    }
+
+    const [candidateUpdateResult, discoveredUpdateResult] = await prisma.$transaction([
+      prisma.competitorCandidateProfile.updateMany({
+        where: { id: { in: candidateIds } },
+        data: candidateUpdateData,
+      }),
+      prisma.discoveredCompetitor.updateMany({
+        where: {
+          researchJobId,
+          candidateProfileId: { in: candidateIds },
+        },
+        data: discoveredUpdateData,
+      }),
+    ]);
+
+    emitResearchJobEvent({
+      researchJobId,
+      source: 'competitor-orchestrator-v2',
+      code: 'competitor.bulk_update.applied',
+      level: 'info',
+      message: `Bulk updated ${candidateUpdateResult.count} competitor candidate profiles`,
+      metrics: {
+        candidateUpdatedCount: candidateUpdateResult.count,
+        discoveredUpdatedCount: discoveredUpdateResult.count,
+      },
+      metadata: {
+        state: state || null,
+        competitorType: competitorType || null,
+        typeConfidence: typeConfidence ?? null,
+        entityFlags: entityFlags || null,
+      },
+    });
+
+    return res.json({
+      success: true,
+      candidateUpdatedCount: candidateUpdateResult.count,
+      discoveredUpdatedCount: discoveredUpdateResult.count,
+      candidateProfileIds: candidateIds,
+    });
+  } catch (error: any) {
+    console.error('[API] Failed to bulk update competitor candidates:', error);
+    if (
+      error?.message?.includes('state must be one of') ||
+      error?.message?.includes('competitorType must be one of') ||
+      error?.message?.includes('candidateProfileIds')
+    ) {
+      return res.status(400).json({ success: false, error: error.message });
+    }
+    return res.status(500).json({
+      success: false,
+      error: error?.message || 'Failed to bulk update competitor candidates',
+    });
+  }
+});
+
+/**
  * PATCH /api/research-jobs/:id/competitors/candidate-state
  * Update candidate profile state directly (works even before discovered competitor materialization).
  */
@@ -2442,6 +2695,9 @@ router.get('/:id/competitors/debug-export', async (req: Request, res: Response) 
               selectionReason: true,
               status: true,
               relevanceScore: true,
+              competitorType: true,
+              typeConfidence: true,
+              entityFlags: true,
               availabilityStatus: true,
               availabilityReason: true,
               discoveredAt: true,
@@ -2479,6 +2735,9 @@ router.get('/:id/competitors/debug-export', async (req: Request, res: Response) 
       resolverConfidence: profile.resolverConfidence,
       state: profile.state,
       stateReason: profile.stateReason,
+      competitorType: profile.competitorType,
+      typeConfidence: profile.typeConfidence,
+      entityFlags: profile.entityFlags,
       relevanceScore: profile.relevanceScore,
       scoreBreakdown: profile.scoreBreakdown,
       evidence: profile.evidence,

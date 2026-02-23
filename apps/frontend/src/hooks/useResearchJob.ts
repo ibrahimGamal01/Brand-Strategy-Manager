@@ -59,7 +59,8 @@ export interface ResearchJob {
 export function useResearchJob(id: string, options: { sseHealthy?: boolean } = {}) {
   return useQuery({
     queryKey: ['researchJob', id],
-    queryFn: async () => (await apiClient.getResearchJob(id)) as ResearchJob,
+    queryFn: async () =>
+      (await apiClient.getResearchJob(id, { competitorScope: 'latest_run' })) as ResearchJob,
     refetchInterval: (data) => {
       // Stop polling if complete or failed
       if (

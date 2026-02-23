@@ -1,10 +1,14 @@
-import { CompetitorCandidateState } from '@prisma/client';
+import { CompetitorCandidateState, CompetitorType } from '@prisma/client';
 import { WebsitePolicy } from './competitor-policy-engine';
 import { ResolvedCandidate } from './competitor-resolver';
+import { classifyCompetitorCandidate } from './competitor-classifier';
 import { SCORE_WEIGHTS, clamp01, hasCorroboration, isBlockedHandle, overlapScore, toScoringTokens, toTokenSet } from './competitor-scorer-utils';
 export interface ScoredCandidate extends ResolvedCandidate {
   state: CompetitorCandidateState;
   stateReason: string;
+  competitorType: CompetitorType;
+  typeConfidence: number;
+  entityFlags: string[];
   relevanceScore: number;
   totalScore: number;
   scoreBreakdown: {
@@ -74,8 +78,18 @@ function scoreCandidate(
   const sizeSimilarity = sourceCount >= 2 ? 0.72 : 0.52;
   const sourceConfidence = clamp01(sourceCount / 3) * 0.65 + clamp01(candidate.resolverConfidence) * 0.35;
   const weightedBase = offerOverlap * SCORE_WEIGHTS.offerOverlap + audienceOverlap * SCORE_WEIGHTS.audienceOverlap + nicheSemanticMatch * SCORE_WEIGHTS.nicheSemanticMatch + activityRecency * SCORE_WEIGHTS.activityRecency + sizeSimilarity * SCORE_WEIGHTS.sizeSimilarity + sourceConfidence * SCORE_WEIGHTS.sourceConfidence;
-
-  const weightedTotal = Math.min(100, weightedBase + ragAlignment * 8);
+  const classification = classifyCompetitorCandidate({
+    candidate,
+    scoreBreakdown: {
+      offerOverlap,
+      audienceOverlap,
+      nicheSemanticMatch,
+      ragAlignment,
+    },
+    precision,
+  });
+  const typePenalty = classification.excludedByPolicy ? 16 : 0;
+  const weightedTotal = Math.max(0, Math.min(100, weightedBase + ragAlignment * 8 - typePenalty));
 
   const minOffer = precision === 'high' ? 0.14 : 0.1;
   const minAudience = precision === 'high' ? 0.1 : 0.08;
@@ -91,7 +105,7 @@ function scoreCandidate(
     (offerOverlap + audienceOverlap + nicheSemanticMatch >= minCombined ||
       ragAlignment >= minRag ||
       semanticPeak >= (precision === 'high' ? 0.2 : 0.16));
-  const blocked = excludeHandles.has(normalizedHandle) || isBlockedHandle(normalizedHandle) || brandOverlap > 0 || candidate.availabilityStatus === 'PROFILE_UNAVAILABLE' || candidate.availabilityStatus === 'INVALID_HANDLE';
+  const blocked = excludeHandles.has(normalizedHandle) || isBlockedHandle(normalizedHandle) || brandOverlap > 0 || candidate.availabilityStatus === 'PROFILE_UNAVAILABLE' || candidate.availabilityStatus === 'INVALID_HANDLE' || classification.excludedByPolicy;
 
   const socialTopPickThreshold = precision === 'high' ? 70 : 66;
   const socialShortlistThreshold = precision === 'high' ? 56 : 50;
@@ -109,6 +123,8 @@ function scoreCandidate(
         ? 'Profile is not available'
         : candidate.availabilityStatus === 'INVALID_HANDLE'
           ? 'Invalid handle/domain'
+          : classification.excludedByPolicy
+            ? `Excluded by entity type (${classification.competitorType.toLowerCase()})`
           : 'Excluded self/generic handle';
   } else if (!corroborated) {
     stateReason = 'Rejected: no corroboration across sources/evidence';
@@ -116,12 +132,27 @@ function scoreCandidate(
     stateReason = `Website availability not verified (${candidate.availabilityStatus})`;
   } else if (candidate.platform === 'website' && policy.websitePolicy === 'evidence_only') {
     stateReason = 'Website policy set to evidence_only (website cannot be shortlisted directly)';
-  } else if (weightedTotal >= topPickThreshold && directPeerEvidence) {
+  } else if (
+    weightedTotal >= topPickThreshold &&
+    directPeerEvidence &&
+    (classification.competitorType === 'DIRECT' || classification.competitorType === 'INDIRECT')
+  ) {
     state = 'TOP_PICK';
     stateReason = 'Direct peer with high evidence score';
-  } else if (weightedTotal >= shortlistThreshold && directPeerEvidence) {
+  } else if (
+    weightedTotal >= shortlistThreshold &&
+    directPeerEvidence &&
+    (classification.competitorType === 'DIRECT' || classification.competitorType === 'INDIRECT')
+  ) {
     state = 'SHORTLISTED';
     stateReason = 'Direct peer with moderate evidence score';
+  } else if (
+    weightedTotal >= shortlistThreshold + 6 &&
+    directPeerEvidence &&
+    classification.competitorType === 'ADJACENT'
+  ) {
+    state = 'SHORTLISTED';
+    stateReason = 'Adjacent competitor admitted with strong evidence score';
   } else {
     stateReason = 'Below shortlist quality threshold';
   }
@@ -130,6 +161,9 @@ function scoreCandidate(
     ...candidate,
     state,
     stateReason,
+    competitorType: classification.competitorType,
+    typeConfidence: classification.typeConfidence,
+    entityFlags: classification.entityFlags,
     relevanceScore: clamp01(weightedTotal / 100),
     totalScore: weightedTotal,
     scoreBreakdown: {

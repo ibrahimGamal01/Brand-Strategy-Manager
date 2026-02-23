@@ -60,9 +60,14 @@ export const apiClient = {
       confirmationReasons?: string[];
     }>('/clients/suggest-intake-completion', partialPayload),
 
-  getResearchJob: (jobId: string, options?: { includeFiltered?: boolean }) => {
+  getResearchJob: (
+    jobId: string,
+    options?: { includeFiltered?: boolean; competitorScope?: 'latest_run' | 'all_jobs'; competitorRunId?: string }
+  ) => {
     const params = new URLSearchParams();
     if (options?.includeFiltered) params.set('includeFiltered', 'true');
+    if (options?.competitorScope) params.set('competitorScope', options.competitorScope);
+    if (options?.competitorRunId) params.set('competitorRunId', options.competitorRunId);
     const query = params.toString();
     return apiFetch<any>(`/research-jobs/${jobId}${query ? `?${query}` : ''}`);
   },
@@ -229,6 +234,25 @@ export const apiClient = {
       `/research-jobs/${jobId}/competitors/candidate-state`,
       payload
     ),
+
+  bulkUpdateCompetitorCandidates: (
+    jobId: string,
+    payload: {
+      candidateProfileIds: string[];
+      state?: string;
+      competitorType?: string;
+      typeConfidence?: number;
+      entityFlags?: string[];
+      reason?: string;
+    }
+  ) =>
+    patch<{
+      success: boolean;
+      candidateUpdatedCount?: number;
+      discoveredUpdatedCount?: number;
+      candidateProfileIds?: string[];
+      error?: string;
+    }>(`/research-jobs/${jobId}/competitors/bulk-update`, payload),
 
   getCompetitorAnalysis: (competitorId: string) => apiFetch<any>(`/competitors/${competitorId}/analysis`),
 

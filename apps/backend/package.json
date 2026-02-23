@@ -18,6 +18,7 @@
         "test:model-router": "tsx src/scripts/test-model-router.ts",
         "test:chat-ws-contract": "tsx src/scripts/test-chat-ws-contract.ts",
         "test:competitor-scoring": "tsx src/scripts/test-competitor-scorer-utils.ts",
+        "test:competitor-quality-v3": "tsx src/scripts/test-competitor-quality-v3.ts",
         "export:chat-training": "tsx -r dotenv/config src/scripts/export-chat-training-samples.ts",
         "test:camoufox": "tsx src/scripts/test-camoufox-integration.ts",
         "delete-evolving-ai": "tsx -r dotenv/config scripts/delete-evolving-ai-data.ts",

@@ -44,6 +44,9 @@ export interface CandidateProfileView {
   resolverConfidence: number | null;
   state: CompetitorCandidateState;
   stateReason: string | null;
+  competitorType: string | null;
+  typeConfidence: number | null;
+  entityFlags: string[];
   relevanceScore: number | null;
   scoreBreakdown: Record<string, unknown> | null;
   evidence: Record<string, unknown> | null;
@@ -190,6 +193,9 @@ async function materializeCandidateToDiscovered(
       scoreBreakdown: candidate.scoreBreakdown || undefined,
       selectionState,
       selectionReason: candidate.stateReason,
+      competitorType: candidate.competitorType,
+      typeConfidence: candidate.typeConfidence,
+      entityFlags: toJson(candidate.entityFlags),
       status: selectDiscoveredStatus(selectionState, existing?.status),
     },
     update: {
@@ -204,6 +210,9 @@ async function materializeCandidateToDiscovered(
       scoreBreakdown: candidate.scoreBreakdown || undefined,
       selectionState,
       selectionReason: candidate.stateReason,
+      competitorType: candidate.competitorType,
+      typeConfidence: candidate.typeConfidence,
+      entityFlags: toJson(candidate.entityFlags),
       status: selectDiscoveredStatus(selectionState, existing?.status),
     },
     select: { id: true },
@@ -347,6 +356,9 @@ export async function persistOrchestrationCandidates(input: {
         resolverConfidence: row.resolverConfidence,
         state: nextState,
         stateReason: nextReason,
+        competitorType: row.competitorType,
+        typeConfidence: row.typeConfidence,
+        entityFlags: toJson(row.entityFlags),
         relevanceScore: row.relevanceScore,
         scoreBreakdown: toJson(row.scoreBreakdown),
         evidence: toJson({
@@ -369,6 +381,9 @@ export async function persistOrchestrationCandidates(input: {
         resolverConfidence: row.resolverConfidence,
         state: nextState,
         stateReason: nextReason,
+        competitorType: row.competitorType,
+        typeConfidence: row.typeConfidence,
+        entityFlags: toJson(row.entityFlags),
         relevanceScore: row.relevanceScore,
         scoreBreakdown: toJson(row.scoreBreakdown),
         evidence: toJson({
@@ -632,6 +647,11 @@ function profileToView(
     resolverConfidence: profile.resolverConfidence,
     state: profile.state,
     stateReason: profile.stateReason,
+    competitorType: profile.competitorType,
+    typeConfidence: profile.typeConfidence,
+    entityFlags: Array.isArray(profile.entityFlags)
+      ? (profile.entityFlags as string[]).map((value) => String(value))
+      : [],
     relevanceScore: profile.relevanceScore,
     scoreBreakdown: (profile.scoreBreakdown || null) as Record<string, unknown> | null,
     evidence: {

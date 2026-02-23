@@ -37,13 +37,17 @@ const SECTION_CONFIG: Record<string, SectionConfig> = {
       'postsScraped',
       'selectionState',
       'selectionReason',
+      'competitorType',
+      'typeConfidence',
+      'entityFlags',
       'availabilityStatus',
       'availabilityReason',
       'displayOrder',
       'evidence',
       'scoreBreakdown',
     ],
-    numberFields: ['relevanceScore', 'postsScraped', 'displayOrder'],
+    numberFields: ['relevanceScore', 'postsScraped', 'displayOrder', 'typeConfidence'],
+    jsonArrayFields: ['entityFlags'],
   },
   search_results: {
     model: 'rawSearchResult',
@@ -195,6 +199,23 @@ const AI_QUESTION_TYPE_VALUES = new Set([
   'CUSTOM',
   'COMPETITOR_DISCOVERY_METHOD',
 ]);
+const COMPETITOR_SELECTION_STATE_VALUES = new Set([
+  'FILTERED_OUT',
+  'SHORTLISTED',
+  'TOP_PICK',
+  'APPROVED',
+  'REJECTED',
+]);
+const COMPETITOR_TYPE_VALUES = new Set([
+  'DIRECT',
+  'INDIRECT',
+  'ADJACENT',
+  'MARKETPLACE',
+  'MEDIA',
+  'INFLUENCER',
+  'COMMUNITY',
+  'UNKNOWN',
+]);
 
 const router = Router();
 
@@ -287,6 +308,22 @@ function cleanPayload(section: string, config: SectionConfig, raw: Record<string
   if (section === 'ai_questions' && typeof out.questionType === 'string') {
     const upper = out.questionType.toUpperCase();
     out.questionType = AI_QUESTION_TYPE_VALUES.has(upper) ? upper : 'CUSTOM';
+  }
+
+  if (section === 'competitors') {
+    if (typeof out.selectionState === 'string') {
+      const upper = out.selectionState.toUpperCase();
+      out.selectionState = COMPETITOR_SELECTION_STATE_VALUES.has(upper)
+        ? upper
+        : 'SHORTLISTED';
+    }
+    if (typeof out.competitorType === 'string') {
+      const upper = out.competitorType.toUpperCase();
+      out.competitorType = COMPETITOR_TYPE_VALUES.has(upper) ? upper : 'UNKNOWN';
+    }
+    if (typeof out.typeConfidence === 'number') {
+      out.typeConfidence = Math.max(0, Math.min(1, out.typeConfidence));
+    }
   }
 
   return out;
@@ -502,4 +539,3 @@ router.delete('/:id/intelligence/:section', async (req, res) => {
 });
 
 export default router;
-

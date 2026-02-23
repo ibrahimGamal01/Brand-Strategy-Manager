@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import {
   apiClient,
+  type CompetitorType,
   CompetitorShortlistResponse,
   OrchestratedCompetitorIdentityGroup,
   OrchestratedCompetitorProfile,
@@ -130,6 +131,7 @@ export function CompetitorOrchestrationPanel({
   const [recheckingByProfile, setRecheckingByProfile] = useState<Record<string, boolean>>({});
   const [syncingClientInputs, setSyncingClientInputs] = useState(false);
   const [queueingClientInputs, setQueueingClientInputs] = useState(false);
+  const [typeFilter, setTypeFilter] = useState<'all' | CompetitorType>('all');
 
   const runId = data?.runId || null;
 
@@ -662,6 +664,12 @@ export function CompetitorOrchestrationPanel({
       | 'scraped_ready'
       | 'blocked'
   ) {
+    const visibleProfiles = (group.profiles || []).filter((profile) => {
+      if (typeFilter === 'all') return true;
+      return (profile.competitorType || 'UNKNOWN') === typeFilter;
+    });
+    if (visibleProfiles.length === 0) return null;
+
     return (
       <div key={`${group.identityId || group.canonicalName}`} className="rounded-md border border-border/50 bg-muted/10 p-3">
         <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -675,7 +683,7 @@ export function CompetitorOrchestrationPanel({
         </div>
 
         <div className="space-y-2">
-          {(group.profiles || []).map((profile) => {
+          {visibleProfiles.map((profile) => {
             const checked = selectedIds.has(profile.id);
             const rowScrapeEligible = isScrapeEligible(profile);
             const isFiltered = section === 'filtered' || section === 'blocked';
@@ -721,9 +729,19 @@ export function CompetitorOrchestrationPanel({
                     <Badge variant={selectionVariant(profile.state)} className="h-5 text-[10px] uppercase">
                       {profile.state.replaceAll('_', ' ')}
                     </Badge>
+                    {profile.competitorType ? (
+                      <Badge variant="outline" className="h-5 text-[10px] uppercase">
+                        {profile.competitorType.replaceAll('_', ' ')}
+                      </Badge>
+                    ) : null}
                     <Badge variant={availabilityVariant(profile.availabilityStatus)} className="h-5 text-[10px] uppercase">
                       {profile.availabilityStatus.replaceAll('_', ' ')}
                     </Badge>
+                    {typeof profile.typeConfidence === 'number' ? (
+                      <Badge variant="secondary" className="h-5 text-[10px] uppercase">
+                        Type {Math.round(profile.typeConfidence * 100)}%
+                      </Badge>
+                    ) : null}
                     {profile.readinessStatus ? (
                       <Badge
                         variant={profile.readinessStatus === 'READY' ? 'default' : profile.readinessStatus === 'DEGRADED' ? 'secondary' : 'destructive'}
@@ -763,6 +781,11 @@ export function CompetitorOrchestrationPanel({
                   {profile.blockerReasonCode ? (
                     <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
                       Blocker: {blockerReasonLabel(profile.blockerReasonCode)}
+                    </p>
+                  ) : null}
+                  {profile.entityFlags?.length ? (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Flags: {profile.entityFlags.join(', ')}
                     </p>
                   ) : null}
                   {profile.lastStateTransitionAt ? (
@@ -963,6 +986,23 @@ export function CompetitorOrchestrationPanel({
         {data?.controlMode === 'manual' && (
           <span className="text-[10px] text-muted-foreground">(Orchestrator will not auto-queue)</span>
         )}
+        <span className="ml-2 text-xs text-muted-foreground">Type filter:</span>
+        <Select value={typeFilter} onValueChange={(value) => setTypeFilter(value as 'all' | CompetitorType)}>
+          <SelectTrigger className="h-7 w-[170px] text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All types</SelectItem>
+            <SelectItem value="DIRECT">Direct</SelectItem>
+            <SelectItem value="INDIRECT">Indirect</SelectItem>
+            <SelectItem value="ADJACENT">Adjacent</SelectItem>
+            <SelectItem value="MARKETPLACE">Marketplace</SelectItem>
+            <SelectItem value="MEDIA">Media</SelectItem>
+            <SelectItem value="INFLUENCER">Influencer</SelectItem>
+            <SelectItem value="COMMUNITY">Community</SelectItem>
+            <SelectItem value="UNKNOWN">Unknown</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {data?.controlMode === 'manual' ? (

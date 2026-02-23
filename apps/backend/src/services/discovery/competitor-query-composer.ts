@@ -7,6 +7,7 @@ type BusinessArchetype =
   | 'creator'
   | 'ecommerce'
   | 'saas'
+  | 'enterprise_brand'
   | 'local_business'
   | 'personal_brand'
   | 'nonprofit'
@@ -166,6 +167,7 @@ const ARCHETYPE_KEYWORDS: Record<BusinessArchetype, string[]> = {
   creator: ['creator', 'content', 'influencer', 'media', 'community'],
   ecommerce: ['shop', 'store', 'ecommerce', 'product', 'brand'],
   saas: ['saas', 'software', 'platform', 'tool', 'app'],
+  enterprise_brand: ['manufacturer', 'category leader', 'brand', 'product company', 'enterprise'],
   local_business: ['local business', 'near me', 'city', 'studio', 'clinic'],
   personal_brand: ['personal brand', 'coach', 'mentor', 'speaker', 'expert'],
   nonprofit: ['nonprofit', 'foundation', 'charity', 'community', 'mission'],
@@ -241,6 +243,12 @@ function inferBusinessArchetype(input: CompetitorQueryComposerInput): BusinessAr
   ) {
     return 'saas';
   }
+  if (
+    has(/\b(automotive|manufacturer|vehicle|consumer brand|enterprise brand|industrial|public company)\b/) ||
+    (has(/\b(product)\b/) && has(/\b(category leader|market leader|enterprise)\b/))
+  ) {
+    return 'enterprise_brand';
+  }
   if (has(/\b(personal brand|coach|mentor|speaker|thought leader)\b/)) return 'personal_brand';
   if (has(/\b(creator|influencer|content creator|ugc)\b/)) return 'creator';
   if (has(/\b(nonprofit|charity|foundation|mission-driven)\b/)) return 'nonprofit';
@@ -249,7 +257,10 @@ function inferBusinessArchetype(input: CompetitorQueryComposerInput): BusinessAr
   return 'general';
 }
 
-function computeNegativeTerms(input: CompetitorQueryComposerInput): string[] {
+function computeNegativeTerms(
+  input: CompetitorQueryComposerInput,
+  archetype: BusinessArchetype
+): string[] {
   const corpus = `${input.niche} ${input.businessOverview} ${input.audienceSummary}`.toLowerCase();
   const allowed = new Set<string>();
 
@@ -263,6 +274,31 @@ function computeNegativeTerms(input: CompetitorQueryComposerInput): string[] {
   }
 
   const base = NEGATIVE_TERMS_BASE.filter((term) => !allowed.has(term));
+  const domainSpecific: string[] = [];
+  const financeHeavyBusiness = /\b(finance|financial|investment|investor|trading|broker|stocks?)\b/.test(
+    corpus
+  );
+
+  if (archetype === 'enterprise_brand' && !financeHeavyBusiness) {
+    domainSpecific.push(
+      'stock',
+      'stocks',
+      'share price',
+      'earnings',
+      'investor',
+      'rumor',
+      'owner club',
+      'fan club',
+      'review channel',
+      'news'
+    );
+  }
+  if (archetype === 'saas') {
+    domainSpecific.push('job board', 'template download');
+  }
+  if (archetype === 'ecommerce') {
+    domainSpecific.push('coupon code', 'deal alert');
+  }
   const extra = Array.from(
     new Set(
       (input.extraNegativeTerms || [])
@@ -270,7 +306,7 @@ function computeNegativeTerms(input: CompetitorQueryComposerInput): string[] {
         .filter((term) => term.length >= 3)
     )
   );
-  return Array.from(new Set([...base, ...extra]));
+  return Array.from(new Set([...base, ...domainSpecific, ...extra]));
 }
 
 function buildSurfaceQueries(
@@ -287,6 +323,10 @@ function buildSurfaceQueries(
   const archetypeTerms = ARCHETYPE_KEYWORDS[archetype].slice(0, 2).join('" OR "');
   const archetypeClause = `"${archetypeTerms}"`;
   const top = `${strictPrefix} "${businessAnchor}" "${audienceAnchor}" ${archetypeClause} ${negativeClause}`.trim();
+  const enterpriseQueryAnchor =
+    archetype === 'enterprise_brand'
+      ? `"${businessAnchor}" competitors alternatives manufacturer ${negativeClause}`
+      : null;
 
   switch (surface) {
     case 'instagram':
@@ -294,6 +334,7 @@ function buildSurfaceQueries(
         `site:instagram.com ${top}`,
         `site:instagram.com "${businessAnchor}" "${audienceAnchor}" ${archetypeClause} ${negativeClause}`,
         `site:instagram.com "${brandName}" competitors "${audienceAnchor}" ${negativeClause}`,
+        ...(enterpriseQueryAnchor ? [`site:instagram.com ${enterpriseQueryAnchor}`] : []),
       ]);
 
     case 'tiktok':
@@ -301,6 +342,7 @@ function buildSurfaceQueries(
         `site:tiktok.com ${top}`,
         `site:tiktok.com "${businessAnchor}" "${audienceAnchor}" ${archetypeClause} ${negativeClause}`,
         `site:tiktok.com "${brandName}" competitors ${archetypeClause} ${negativeClause}`,
+        ...(enterpriseQueryAnchor ? [`site:tiktok.com ${enterpriseQueryAnchor}`] : []),
       ]);
 
     case 'youtube':
@@ -332,6 +374,12 @@ function buildSurfaceQueries(
         `"${businessAnchor}" "${audienceAnchor}" competitors alternatives ${negativeClause}`,
         `"${brandName}" competitors alternatives ${archetypeClause} ${negativeClause}`,
         `best ${ARCHETYPE_KEYWORDS[archetype][0]} for "${audienceAnchor}" ${negativeClause}`,
+        ...(archetype === 'enterprise_brand'
+          ? [
+              `"${brandName}" direct competitors in ${businessAnchor} category ${negativeClause}`,
+              `"${businessAnchor}" category leaders alternatives ${negativeClause}`,
+            ]
+          : []),
       ]);
 
     default:
@@ -363,7 +411,7 @@ export function buildPointyCompetitorQueryPlan(
     audienceSummary,
   };
   const businessType = inferBusinessArchetype(sanitizedInput);
-  const negatives = computeNegativeTerms(sanitizedInput);
+  const negatives = computeNegativeTerms(sanitizedInput, businessType);
 
   const businessKeywords = topKeywords(
     [brandName, niche, businessOverview],

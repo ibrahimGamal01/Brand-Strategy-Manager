@@ -505,6 +505,9 @@ model DiscoveredCompetitor {
   scoreBreakdown     Json?                        @map("score_breakdown")
   selectionReason    String?                      @map("selection_reason")
   selectionState     CompetitorSelectionState     @default(SHORTLISTED) @map("selection_state")
+  competitorType     CompetitorType?              @map("competitor_type")
+  typeConfidence     Float?                       @map("type_confidence")
+  entityFlags        Json?                        @map("entity_flags")
   candidateProfileId String?                      @map("candidate_profile_id")
   availabilityStatus CompetitorAvailabilityStatus @default(UNVERIFIED) @map("availability_status")
   availabilityReason String?                      @map("availability_reason")
@@ -521,6 +524,7 @@ model DiscoveredCompetitor {
   @@index([researchJobId, selectionState, relevanceScore(sort: Desc)])
   @@index([orchestrationRunId])
   @@index([candidateProfileId])
+  @@index([researchJobId, competitorType, selectionState], map: "discovered_competitors_type_state_idx")
   @@index([researchJobId, selectionState, relevanceScore(sort: Desc)], map: "discovered_competitors_research_job_id_selection_state_relevanc")
   @@map("discovered_competitors")
 }
@@ -607,6 +611,9 @@ model CompetitorCandidateProfile {
   resolverConfidence    Float?                        @map("resolver_confidence")
   state                 CompetitorCandidateState      @default(DISCOVERED)
   stateReason           String?                       @map("state_reason")
+  competitorType        CompetitorType?               @map("competitor_type")
+  typeConfidence        Float?                        @map("type_confidence")
+  entityFlags           Json?                         @map("entity_flags")
   relevanceScore        Float?                        @map("relevance_score")
   scoreBreakdown        Json?                         @map("score_breakdown")
   evidence              Json?
@@ -624,6 +631,7 @@ model CompetitorCandidateProfile {
 
   @@unique([researchJobId, platform, normalizedHandle])
   @@index([researchJobId, state, relevanceScore(sort: Desc)])
+  @@index([researchJobId, competitorType, state], map: "competitor_candidate_type_state_idx")
   @@index([researchJobId, availabilityStatus])
   @@index([researchJobId, scrapeEligible, state, availabilityStatus])
   @@index([orchestrationRunId, platform])
@@ -1123,6 +1131,17 @@ enum CompetitorSelectionState {
   TOP_PICK
   APPROVED
   REJECTED
+}
+
+enum CompetitorType {
+  DIRECT
+  INDIRECT
+  ADJACENT
+  MARKETPLACE
+  MEDIA
+  INFLUENCER
+  COMMUNITY
+  UNKNOWN
 }
 
 enum CompetitorAvailabilityStatus {

@@ -118,6 +118,16 @@ export type CompetitorAvailabilityStatus =
   | 'RATE_LIMITED'
   | 'CONNECTOR_ERROR';
 
+export type CompetitorType =
+  | 'DIRECT'
+  | 'INDIRECT'
+  | 'ADJACENT'
+  | 'MARKETPLACE'
+  | 'MEDIA'
+  | 'INFLUENCER'
+  | 'COMMUNITY'
+  | 'UNKNOWN';
+
 export interface OrchestratedCompetitorProfile {
   id: string;
   platform: 'instagram' | 'tiktok' | 'youtube' | 'linkedin' | 'x' | 'facebook' | 'website' | string;
@@ -129,6 +139,9 @@ export interface OrchestratedCompetitorProfile {
   resolverConfidence?: number | null;
   state: CompetitorSelectionState;
   stateReason?: string | null;
+  competitorType?: CompetitorType | null;
+  typeConfidence?: number | null;
+  entityFlags?: string[];
   relevanceScore?: number | null;
   discoveredCompetitorId?: string | null;
   discoveredStatus?: 'SUGGESTED' | 'SCRAPING' | 'SCRAPED' | 'FAILED' | 'CONFIRMED' | 'REJECTED' | null;
