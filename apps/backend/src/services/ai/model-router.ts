@@ -2,6 +2,9 @@ export type AiProvider = 'openai';
 
 export type AiModelTask =
   | 'workspace_chat'
+  | 'workspace_chat_planner'
+  | 'workspace_chat_writer'
+  | 'workspace_chat_validator'
   | 'strategy_doc_chat'
   | 'competitor_discovery'
   | 'competitor_planner'
@@ -16,6 +19,9 @@ export type AiModelTask =
 
 export const AI_MODEL_TASKS: AiModelTask[] = [
   'workspace_chat',
+  'workspace_chat_planner',
+  'workspace_chat_writer',
+  'workspace_chat_validator',
   'strategy_doc_chat',
   'competitor_discovery',
   'competitor_planner',
@@ -33,6 +39,9 @@ type ModelTier = 'fast' | 'quality';
 
 const TASK_ENV_KEYS: Record<AiModelTask, string> = {
   workspace_chat: 'AI_MODEL_WORKSPACE_CHAT',
+  workspace_chat_planner: 'AI_MODEL_WORKSPACE_CHAT_PLANNER',
+  workspace_chat_writer: 'AI_MODEL_WORKSPACE_CHAT_WRITER',
+  workspace_chat_validator: 'AI_MODEL_WORKSPACE_CHAT_VALIDATOR',
   strategy_doc_chat: 'AI_MODEL_STRATEGY_DOC_CHAT',
   competitor_discovery: 'AI_MODEL_COMPETITOR_DISCOVERY',
   competitor_planner: 'AI_MODEL_COMPETITOR_PLANNER',
@@ -48,6 +57,9 @@ const TASK_ENV_KEYS: Record<AiModelTask, string> = {
 
 const TASK_TIERS: Record<AiModelTask, ModelTier> = {
   workspace_chat: 'fast',
+  workspace_chat_planner: 'fast',
+  workspace_chat_writer: 'quality',
+  workspace_chat_validator: 'fast',
   strategy_doc_chat: 'fast',
   competitor_discovery: 'fast',
   competitor_planner: 'fast',
@@ -111,6 +123,28 @@ export function resolveModelForTask(task: AiModelTask, fallbackModel?: string): 
   // Backward-compatibility with existing env variables used before introducing the task router.
   if (task === 'workspace_chat') {
     return readEnv('WORKSPACE_CHAT_MODEL') || getDefaultModelForTier(TASK_TIERS[task]);
+  }
+  if (task === 'workspace_chat_planner') {
+    return (
+      readEnv('AI_MODEL_ANALYSIS_FAST') ||
+      readEnv('WORKSPACE_CHAT_MODEL') ||
+      getDefaultModelForTier(TASK_TIERS[task])
+    );
+  }
+  if (task === 'workspace_chat_writer') {
+    return (
+      readEnv('AI_MODEL_WORKSPACE_CHAT') ||
+      readEnv('WORKSPACE_CHAT_MODEL') ||
+      getDefaultModelForTier(TASK_TIERS[task])
+    );
+  }
+  if (task === 'workspace_chat_validator') {
+    return (
+      readEnv('AI_MODEL_VALIDATION_FAST') ||
+      readEnv('AI_MODEL_ANALYSIS_FAST') ||
+      readEnv('WORKSPACE_CHAT_MODEL') ||
+      getDefaultModelForTier(TASK_TIERS[task])
+    );
   }
   if (task === 'strategy_doc_chat') {
     return readEnv('STRATEGY_DOC_CHAT_MODEL') || getDefaultModelForTier(TASK_TIERS[task]);

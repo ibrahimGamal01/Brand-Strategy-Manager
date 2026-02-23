@@ -36,8 +36,16 @@ export async function streamChatCompletion(params: {
   userMessage: string;
   callbacks?: ChatStreamCallbacks;
 }): Promise<ChatGenerationResult> {
-  const chatModel = resolveModelForTask('workspace_chat');
-  const plannerModel = resolveModelForTask('analysis_fast');
+  const plannerModel = resolveModelForTask('workspace_chat_planner');
+  const writerModel = resolveModelForTask('workspace_chat_writer');
+  const validatorModel = resolveModelForTask('workspace_chat_validator');
+
+  console.info('[Chat Generator] Model routing', {
+    researchJobId: params.researchJobId,
+    plannerModel,
+    writerModel,
+    validatorModel,
+  });
 
   const costCheck = checkCostLimit();
   if (!costCheck.allowed) {
@@ -108,7 +116,7 @@ export async function streamChatCompletion(params: {
   ];
 
   const writerOutput = await runWriterStream({
-    model: chatModel,
+    model: writerModel,
     messages: writerMessages,
     callbacks: params.callbacks,
   });
@@ -134,7 +142,7 @@ export async function streamChatCompletion(params: {
   params.callbacks?.onDone?.();
 
   if (writerOutput.usage?.prompt_tokens && writerOutput.usage?.completion_tokens) {
-    costTracker.addUsage(chatModel, writerOutput.usage.prompt_tokens, writerOutput.usage.completion_tokens);
+    costTracker.addUsage(writerModel, writerOutput.usage.prompt_tokens, writerOutput.usage.completion_tokens);
   }
 
   return normalized;
