@@ -34,6 +34,8 @@ class CostTracker {
 
   private buildPricingMap(): Record<string, { input: number; output: number }> {
     const defaults: Record<string, { input: number; output: number }> = {
+      'gpt-5.2': { input: 0.005, output: 0.015 },
+      'gpt-5-mini': { input: 0.00015, output: 0.0006 },
       'gpt-4o': { input: 0.005, output: 0.015 },
       'gpt-4o-mini': { input: 0.00015, output: 0.0006 },
     };
@@ -58,6 +60,12 @@ class CostTracker {
   private getModelPricing(model: string): { input: number; output: number } {
     const direct = this.COST_PER_1K_TOKENS[model];
     if (direct) return direct;
+    if (model.includes('mini') && this.COST_PER_1K_TOKENS['gpt-5-mini']) {
+      return this.COST_PER_1K_TOKENS['gpt-5-mini'];
+    }
+    if (this.COST_PER_1K_TOKENS['gpt-5.2']) {
+      return this.COST_PER_1K_TOKENS['gpt-5.2'];
+    }
     if (model.includes('mini') && this.COST_PER_1K_TOKENS['gpt-4o-mini']) {
       return this.COST_PER_1K_TOKENS['gpt-4o-mini'];
     }

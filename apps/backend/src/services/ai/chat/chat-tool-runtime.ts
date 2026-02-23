@@ -137,7 +137,6 @@ function summarizeToolResults(results: ToolExecutionResult[]): string {
 }
 
 async function runPlanner(params: {
-  model: string;
   contextText: string;
   userMessage: string;
   toolResults: ToolExecutionResult[];
@@ -165,8 +164,7 @@ async function runPlanner(params: {
     `\nPrevious tool results:\n${summarizeToolResults(params.toolResults)}`,
   ].join('\n');
 
-  const plannerResponse = (await openai.chat.completions.create({
-    model: params.model,
+  const plannerResponse = (await openai.bat.chatCompletion('workspace_chat_planner', {
     messages: [
       { role: 'system', content: plannerSystemPrompt },
       { role: 'user', content: plannerUserPrompt },
@@ -176,7 +174,11 @@ async function runPlanner(params: {
   })) as OpenAI.Chat.Completions.ChatCompletion;
 
   if (plannerResponse.usage?.prompt_tokens && plannerResponse.usage?.completion_tokens) {
-    costTracker.addUsage(params.model, plannerResponse.usage.prompt_tokens, plannerResponse.usage.completion_tokens);
+    costTracker.addUsage(
+      plannerResponse.model || 'workspace_chat_planner',
+      plannerResponse.usage.prompt_tokens,
+      plannerResponse.usage.completion_tokens,
+    );
   }
 
   const raw = plannerResponse.choices?.[0]?.message?.content || '';
@@ -267,7 +269,6 @@ export async function buildAgentContext(
 }
 
 export async function runPlannerToolLoop(params: {
-  plannerModel: string;
   contextText: string;
   userMessage: string;
   agentContext: AgentContext;
@@ -275,7 +276,6 @@ export async function runPlannerToolLoop(params: {
   const toolResults: ToolExecutionResult[] = [];
   for (let iteration = 0; iteration < MAX_TOOL_LOOP_ITERATIONS; iteration += 1) {
     const planner = await runPlanner({
-      model: params.plannerModel,
       contextText: params.contextText,
       userMessage: params.userMessage,
       toolResults,

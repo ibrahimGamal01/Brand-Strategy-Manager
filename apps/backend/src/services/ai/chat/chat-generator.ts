@@ -89,7 +89,6 @@ export async function streamChatCompletion(params: {
   let toolResults: Awaited<ReturnType<typeof runPlannerToolLoop>> = [];
   try {
     toolResults = await runPlannerToolLoop({
-      plannerModel,
       contextText,
       userMessage: params.userMessage,
       agentContext,
@@ -116,6 +115,7 @@ export async function streamChatCompletion(params: {
   ];
 
   const writerOutput = await runWriterStream({
+    task: 'workspace_chat_writer',
     model: writerModel,
     messages: writerMessages,
     callbacks: params.callbacks,
@@ -142,7 +142,11 @@ export async function streamChatCompletion(params: {
   params.callbacks?.onDone?.();
 
   if (writerOutput.usage?.prompt_tokens && writerOutput.usage?.completion_tokens) {
-    costTracker.addUsage(writerModel, writerOutput.usage.prompt_tokens, writerOutput.usage.completion_tokens);
+    costTracker.addUsage(
+      writerOutput.modelUsed || writerModel,
+      writerOutput.usage.prompt_tokens,
+      writerOutput.usage.completion_tokens,
+    );
   }
 
   return normalized;

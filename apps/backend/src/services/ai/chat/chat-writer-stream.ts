@@ -7,16 +7,18 @@ type WriterCallbacks = {
 };
 
 export async function runWriterStream(params: {
-  model: string;
+  task: 'workspace_chat_writer' | 'strategy_doc_chat';
+  model?: string;
   messages: OpenAI.Chat.ChatCompletionMessageParam[];
   callbacks?: WriterCallbacks;
 }): Promise<{
   content: string;
   parsedPayload: ParsedBlocksPayload;
+  modelUsed: string | null;
   usage: { prompt_tokens?: number; completion_tokens?: number } | null;
 }> {
-  const response = (await openai.chat.completions.create({
-    model: params.model,
+  const response = (await openai.bat.chatCompletion(params.task, {
+    ...(params.model ? { model: params.model } : {}),
     messages: params.messages,
     temperature: 0.25,
     max_tokens: Math.min(900, COST_PROTECTION.maxTokensPerCall),
@@ -28,9 +30,13 @@ export async function runWriterStream(params: {
   let blocksBuffer = '';
   let pending = '';
   let inBlocks = false;
+  let modelUsed: string | null = null;
   let usage: { prompt_tokens?: number; completion_tokens?: number } | null = null;
 
   for await (const chunk of response) {
+    if (!modelUsed && typeof chunk?.model === 'string' && chunk.model.trim()) {
+      modelUsed = chunk.model.trim();
+    }
     const delta = chunk?.choices?.[0]?.delta?.content || '';
     if (delta) {
       if (!inBlocks) {
@@ -71,5 +77,5 @@ export async function runWriterStream(params: {
   const endIndex = payload.indexOf(CHAT_BLOCKS_END);
   if (endIndex !== -1) payload = payload.slice(0, endIndex);
 
-  return { content, parsedPayload: parseBlocksPayload(payload), usage };
+  return { content, parsedPayload: parseBlocksPayload(payload), modelUsed, usage };
 }
