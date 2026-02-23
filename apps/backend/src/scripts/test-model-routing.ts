@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { resolveModelForTask } from '../services/ai/model-router';
+import { resolveModelForTask, resolveModelFromLegacy } from '../services/ai/model-router';
 
 const ENV_KEYS = [
   'AI_MODEL_WORKSPACE_CHAT_PLANNER',
@@ -13,6 +13,8 @@ const ENV_KEYS = [
   'AI_MODEL_DEFAULT_QUALITY',
   'OPENAI_MODEL_DEFAULT_FAST',
   'OPENAI_MODEL_DEFAULT_QUALITY',
+  'AI_ALLOW_LEGACY_CHAT_MODEL_FALLBACK',
+  'AI_ENABLE_LEGACY_MODEL_REMAPPING',
 ];
 
 function withCleanEnv(run: () => void) {
@@ -48,14 +50,19 @@ withCleanEnv(() => {
   process.env.WORKSPACE_CHAT_MODEL = 'legacy-chat-x';
   process.env.AI_MODEL_DEFAULT_FAST = 'default-fast-x';
   process.env.AI_MODEL_DEFAULT_QUALITY = 'default-quality-x';
+  process.env.AI_ALLOW_LEGACY_CHAT_MODEL_FALLBACK = 'false';
 
   assert.equal(resolveModelForTask('workspace_chat_planner'), 'analysis-fast-x');
-  assert.equal(resolveModelForTask('workspace_chat_writer'), 'workspace-chat-x');
+  assert.equal(resolveModelForTask('workspace_chat_writer'), 'default-quality-x');
   assert.equal(resolveModelForTask('workspace_chat_validator'), 'validation-fast-x');
+
+  process.env.AI_ALLOW_LEGACY_CHAT_MODEL_FALLBACK = 'true';
+  assert.equal(resolveModelForTask('workspace_chat_writer'), 'workspace-chat-x');
 
   delete process.env.AI_MODEL_ANALYSIS_FAST;
   delete process.env.AI_MODEL_VALIDATION_FAST;
   delete process.env.AI_MODEL_WORKSPACE_CHAT;
+  process.env.AI_ALLOW_LEGACY_CHAT_MODEL_FALLBACK = 'true';
   assert.equal(resolveModelForTask('workspace_chat_planner'), 'legacy-chat-x');
   assert.equal(resolveModelForTask('workspace_chat_writer'), 'legacy-chat-x');
   assert.equal(resolveModelForTask('workspace_chat_validator'), 'legacy-chat-x');
@@ -64,7 +71,11 @@ withCleanEnv(() => {
   assert.equal(resolveModelForTask('workspace_chat_planner'), 'default-fast-x');
   assert.equal(resolveModelForTask('workspace_chat_writer'), 'default-quality-x');
   assert.equal(resolveModelForTask('workspace_chat_validator'), 'default-fast-x');
+
+  process.env.AI_ENABLE_LEGACY_MODEL_REMAPPING = 'false';
+  assert.equal(resolveModelFromLegacy('gpt-4o'), 'gpt-4o');
+  process.env.AI_ENABLE_LEGACY_MODEL_REMAPPING = 'true';
+  assert.equal(resolveModelFromLegacy('gpt-4o'), 'default-quality-x');
 });
 
 console.log('Model routing test passed.');
-
