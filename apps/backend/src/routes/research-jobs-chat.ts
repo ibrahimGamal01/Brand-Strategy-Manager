@@ -20,6 +20,7 @@ import {
   upsertUserContext,
   UscCategory,
 } from '../services/chat/user-context-repository';
+import { applyMutation, undoMutation } from '../services/ai/chat/mutations/mutation-service';
 
 
 const router = Router();
@@ -172,6 +173,44 @@ router.post('/:id/chat/sessions/:sessionId/system-message', async (req, res) => 
   } catch (error: any) {
     console.error('[Chat] Failed to post system message:', error);
     return res.status(500).json({ error: 'Failed to post system message', details: error.message });
+  }
+});
+
+router.post('/:id/chat/sessions/:sessionId/mutations/:mutationId/apply', async (req, res) => {
+  try {
+    const { id: researchJobId, sessionId, mutationId } = req.params;
+    const confirmToken = String(req.body?.confirmToken || '').trim();
+    if (!confirmToken) {
+      return res.status(400).json({ error: 'confirmToken is required' });
+    }
+    const session = await getChatSession(researchJobId, sessionId);
+    if (!session) return res.status(404).json({ error: 'Chat session not found' });
+
+    const result = await applyMutation({ researchJobId, sessionId }, { mutationId, confirmToken });
+    await touchChatSession(sessionId);
+    return res.json({ ok: true, result });
+  } catch (error: any) {
+    console.error('[Chat] Failed to apply mutation:', error);
+    return res.status(500).json({ error: 'Failed to apply mutation', details: error.message });
+  }
+});
+
+router.post('/:id/chat/sessions/:sessionId/mutations/:mutationId/undo', async (req, res) => {
+  try {
+    const { id: researchJobId, sessionId, mutationId } = req.params;
+    const undoToken = String(req.body?.undoToken || '').trim();
+    if (!undoToken) {
+      return res.status(400).json({ error: 'undoToken is required' });
+    }
+    const session = await getChatSession(researchJobId, sessionId);
+    if (!session) return res.status(404).json({ error: 'Chat session not found' });
+
+    const result = await undoMutation({ researchJobId, sessionId }, { mutationId, undoToken });
+    await touchChatSession(sessionId);
+    return res.json({ ok: true, result });
+  } catch (error: any) {
+    console.error('[Chat] Failed to undo mutation:', error);
+    return res.status(500).json({ error: 'Failed to undo mutation', details: error.message });
   }
 });
 

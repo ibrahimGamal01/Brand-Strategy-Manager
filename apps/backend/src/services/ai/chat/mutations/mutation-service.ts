@@ -20,6 +20,8 @@ import {
   toJsonSafe,
 } from './mutation-utils';
 
+type MutationContext = Pick<AgentContext, 'researchJobId' | 'sessionId'>;
+
 const SUPPORTED_SECTION = 'competitors';
 const COMPETITOR_ALLOWED_FIELDS = new Set([
   'handle',
@@ -111,7 +113,7 @@ function parseStoredRequest(value: Prisma.JsonValue): MutationRequest {
   };
 }
 
-async function getScopedMutation(context: AgentContext, mutationId: string) {
+async function getScopedMutation(context: MutationContext, mutationId: string) {
   const mutation = await prisma.chatMutation.findUnique({
     where: { id: mutationId },
     include: { undoSnapshots: true },
@@ -123,7 +125,7 @@ async function getScopedMutation(context: AgentContext, mutationId: string) {
   return mutation;
 }
 
-export async function stageMutation(context: AgentContext, request: MutationRequest): Promise<MutationPreview> {
+export async function stageMutation(context: MutationContext, request: MutationRequest): Promise<MutationPreview> {
   const section = String(request.section || '').trim().toLowerCase();
   if (section !== SUPPORTED_SECTION) {
     throw new Error(`Unsupported mutation section: ${section}. Currently only "${SUPPORTED_SECTION}" is enabled.`);
@@ -168,7 +170,7 @@ export async function stageMutation(context: AgentContext, request: MutationRequ
   };
 }
 
-export async function applyMutation(context: AgentContext, request: ApplyMutationRequest): Promise<ApplyMutationResult> {
+export async function applyMutation(context: MutationContext, request: ApplyMutationRequest): Promise<ApplyMutationResult> {
   const mutation = await getScopedMutation(context, request.mutationId);
   assertToken(request.confirmToken, createConfirmToken(mutation), 'confirm token');
 
@@ -252,7 +254,7 @@ export async function applyMutation(context: AgentContext, request: ApplyMutatio
   };
 }
 
-export async function undoMutation(context: AgentContext, request: UndoMutationRequest): Promise<UndoMutationResult> {
+export async function undoMutation(context: MutationContext, request: UndoMutationRequest): Promise<UndoMutationResult> {
   const mutation = await getScopedMutation(context, request.mutationId);
   if (!mutation.appliedAt) throw new Error('Mutation has not been applied yet.');
   if (mutation.undoneAt) throw new Error('Mutation was already undone.');

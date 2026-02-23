@@ -64,6 +64,8 @@ export type ActionButtonsBlock = BaseBlock & {
       | 'document_generate'
       | 'user_context_upsert'
       | 'user_context_delete'
+      | 'mutation_apply'
+      | 'mutation_undo'
       | 'intel_crud'
       | 'intel_create'
       | 'intel_read'

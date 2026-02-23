@@ -851,6 +851,112 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
       return;
     }
 
+    if (normalizedAction === 'mutation_apply') {
+      const sessionId = activeSessionId;
+      const hrefParams = parseHrefParams(href);
+      const mutationId =
+        (typeof payload?.mutationId === 'string' && payload.mutationId) ||
+        (typeof payload?.id === 'string' && payload.id) ||
+        hrefParams.mutationId ||
+        hrefParams.id ||
+        '';
+      const confirmToken =
+        (typeof payload?.confirmToken === 'string' && payload.confirmToken) ||
+        hrefParams.confirmToken ||
+        '';
+
+      if (!sessionId || !mutationId || !confirmToken) {
+        toast({
+          title: 'Missing mutation payload',
+          description: 'mutation_apply requires mutationId + confirmToken.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const response = await apiFetch<{ ok: boolean; result?: { changedCount?: number; undoToken?: string; section?: string; kind?: string } }>(
+        `/research-jobs/${jobId}/chat/sessions/${sessionId}/mutations/${mutationId}/apply`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ confirmToken }),
+        }
+      );
+
+      const changedCount = Number(response?.result?.changedCount || 0);
+      const undoToken = typeof response?.result?.undoToken === 'string' ? response.result.undoToken : null;
+      const section = resolveIntelligenceSection(payload?.section || response?.result?.section || 'competitors');
+
+      if (undoToken) {
+        await appendToolResultMessage(`Applied mutation (${changedCount} row${changedCount === 1 ? '' : 's'} changed).`, {
+          role: 'SYSTEM',
+          blocks: [
+            {
+              type: 'action_buttons',
+              blockId: `mutation-undo-${mutationId}-${Date.now()}`,
+              title: 'Need to revert this?',
+              buttons: [
+                {
+                  label: 'Undo mutation',
+                  action: 'mutation_undo',
+                  intent: 'secondary',
+                  payload: { mutationId, undoToken, section },
+                },
+              ],
+            } as ChatBlock,
+          ],
+        });
+      } else {
+        await appendToolResultMessage(`Applied mutation (${changedCount} row${changedCount === 1 ? '' : 's'} changed).`);
+      }
+
+      if (section) openIntelligenceSection(section);
+      toast({
+        title: 'Mutation applied',
+        description: `${changedCount} row${changedCount === 1 ? '' : 's'} updated.`,
+      });
+      return;
+    }
+
+    if (normalizedAction === 'mutation_undo') {
+      const sessionId = activeSessionId;
+      const hrefParams = parseHrefParams(href);
+      const mutationId =
+        (typeof payload?.mutationId === 'string' && payload.mutationId) ||
+        (typeof payload?.id === 'string' && payload.id) ||
+        hrefParams.mutationId ||
+        hrefParams.id ||
+        '';
+      const undoToken =
+        (typeof payload?.undoToken === 'string' && payload.undoToken) ||
+        hrefParams.undoToken ||
+        '';
+      if (!sessionId || !mutationId || !undoToken) {
+        toast({
+          title: 'Missing undo payload',
+          description: 'mutation_undo requires mutationId + undoToken.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const response = await apiFetch<{ ok: boolean; result?: { restoredCount?: number } }>(
+        `/research-jobs/${jobId}/chat/sessions/${sessionId}/mutations/${mutationId}/undo`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ undoToken }),
+        }
+      );
+      const restoredCount = Number(response?.result?.restoredCount || 0);
+      await appendToolResultMessage(`Undo complete. Restored ${restoredCount} row${restoredCount === 1 ? '' : 's'}.`);
+      const section = resolveIntelligenceSection(payload?.section || 'competitors');
+      if (section) openIntelligenceSection(section);
+      toast({
+        title: 'Mutation undone',
+        description: `${restoredCount} row${restoredCount === 1 ? '' : 's'} restored.`,
+      });
+      return;
+    }
+
     if (normalizedAction === 'document_generate') {
       const template = String(payload?.template || payload?.docType || 'strategy_export').trim().toLowerCase();
       const format = String(payload?.format || 'pdf').trim().toLowerCase();
