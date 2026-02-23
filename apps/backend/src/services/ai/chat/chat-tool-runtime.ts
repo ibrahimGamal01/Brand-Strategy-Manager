@@ -105,11 +105,14 @@ function normalizeArgsAgainstSchema(
       const parsed = Number(value);
       if (Number.isFinite(parsed)) value = parsed;
     }
+    if (fieldSchema.type === 'string' && value != null && typeof value !== 'string') value = String(value);
     if (fieldSchema.type === 'boolean' && typeof value === 'string') {
       const lowered = value.toLowerCase();
       if (lowered === 'true') value = true;
       if (lowered === 'false') value = false;
     }
+    if (fieldSchema.type === 'boolean' && typeof value === 'number') value = value === 1;
+    if (fieldSchema.type === 'array' && typeof value === 'string') value = [value];
     if (Array.isArray(fieldSchema.enum) && !fieldSchema.enum.includes(value)) return null;
     if (fieldSchema.type === 'number' && typeof value !== 'number') return null;
     if (fieldSchema.type === 'string' && typeof value !== 'string') return null;
