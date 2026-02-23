@@ -85,29 +85,43 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function validateArgsAgainstSchema(args: Record<string, unknown>, schema: Record<string, unknown>): boolean {
-  if (!isRecord(schema) || schema.type !== 'object') return true;
+function normalizeArgsAgainstSchema(
+  args: Record<string, unknown>,
+  schema: Record<string, unknown>,
+): Record<string, unknown> | null {
+  if (!isRecord(schema) || schema.type !== 'object') return args;
   const properties = isRecord(schema.properties) ? schema.properties : {};
-  if (schema.additionalProperties === false) {
-    const keys = Object.keys(args);
-    if (keys.some((key) => !Object.hasOwn(properties, key))) return false;
+  const normalized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(args)) {
+    if (schema.additionalProperties === false && !Object.hasOwn(properties, key)) continue;
+    normalized[key] = value;
   }
 
   for (const [key, fieldSchema] of Object.entries(properties)) {
-    if (!Object.hasOwn(args, key)) continue;
-    const value = args[key];
+    if (!Object.hasOwn(normalized, key)) continue;
+    let value = normalized[key];
     if (!isRecord(fieldSchema)) continue;
-    if (Array.isArray(fieldSchema.enum) && !fieldSchema.enum.includes(value)) return false;
-    if (fieldSchema.type === 'number' && typeof value !== 'number') return false;
-    if (fieldSchema.type === 'string' && typeof value !== 'string') return false;
-    if (fieldSchema.type === 'boolean' && typeof value !== 'boolean') return false;
-    if (fieldSchema.type === 'array' && !Array.isArray(value)) return false;
-    if (typeof value === 'number') {
-      if (typeof fieldSchema.minimum === 'number' && value < fieldSchema.minimum) return false;
-      if (typeof fieldSchema.maximum === 'number' && value > fieldSchema.maximum) return false;
+    if (fieldSchema.type === 'number' && typeof value === 'string' && value.trim()) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) value = parsed;
     }
+    if (fieldSchema.type === 'boolean' && typeof value === 'string') {
+      const lowered = value.toLowerCase();
+      if (lowered === 'true') value = true;
+      if (lowered === 'false') value = false;
+    }
+    if (Array.isArray(fieldSchema.enum) && !fieldSchema.enum.includes(value)) return null;
+    if (fieldSchema.type === 'number' && typeof value !== 'number') return null;
+    if (fieldSchema.type === 'string' && typeof value !== 'string') return null;
+    if (fieldSchema.type === 'boolean' && typeof value !== 'boolean') return null;
+    if (fieldSchema.type === 'array' && !Array.isArray(value)) return null;
+    if (typeof value === 'number') {
+      if (typeof fieldSchema.minimum === 'number' && value < fieldSchema.minimum) return null;
+      if (typeof fieldSchema.maximum === 'number' && value > fieldSchema.maximum) return null;
+    }
+    normalized[key] = value;
   }
-  return true;
+  return normalized;
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -213,14 +227,15 @@ async function executeReadOnlyTools(context: AgentContext, calls: PlannerToolCal
       results.push({ name: call.name, args: call.args, error: 'Mutation tools are disabled in planner mode.' });
       continue;
     }
-    if (!validateArgsAgainstSchema(call.args, tool.argsSchema)) {
+    const normalizedArgs = normalizeArgsAgainstSchema(call.args, tool.argsSchema);
+    if (!normalizedArgs) {
       results.push({ name: call.name, args: call.args, error: 'Tool args failed schema validation.' });
       continue;
     }
 
     try {
-      const result = await withTimeout(tool.execute(context, call.args), TOOL_TIMEOUT_MS, `Tool ${tool.name}`);
-      results.push({ name: call.name, args: call.args, result });
+      const result = await withTimeout(tool.execute(context, normalizedArgs), TOOL_TIMEOUT_MS, `Tool ${tool.name}`);
+      results.push({ name: call.name, args: normalizedArgs, result });
     } catch (error) {
       results.push({
         name: call.name,
