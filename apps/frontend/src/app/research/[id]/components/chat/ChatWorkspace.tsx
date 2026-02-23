@@ -599,6 +599,37 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
     router.push(`${pathname}?${nextParams.toString()}`);
   }
 
+  async function appendToolResultMessage(
+    content: string,
+    options?: {
+      role?: 'ASSISTANT' | 'SYSTEM';
+      blocks?: ChatBlock[];
+      designOptions?: unknown[];
+      attachments?: string[];
+    }
+  ) {
+    const sessionId = activeSessionId;
+    if (!sessionId) return;
+    const trimmed = String(content || '').trim();
+    if (!trimmed) return;
+    try {
+      await apiFetch(`/research-jobs/${jobId}/chat/sessions/${sessionId}/system-message`, {
+        method: 'POST',
+        body: JSON.stringify({
+          role: options?.role || 'SYSTEM',
+          content: trimmed,
+          blocks: options?.blocks,
+          designOptions: options?.designOptions,
+          attachments: options?.attachments || [],
+        }),
+      });
+      await sessionDetailQuery.refetch();
+      await sessionsQuery.refetch();
+    } catch (error) {
+      console.warn('[ChatWorkspace] Failed to append tool result message:', error);
+    }
+  }
+
   async function handleActionIntent(action?: string, href?: string, payload?: Record<string, unknown>) {
     const normalizedAction = String(action || '').toLowerCase();
 
@@ -636,6 +667,7 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
 
     if (normalizedAction === 'run_orchestration') {
       await apiFetch(`/research-jobs/${jobId}/orchestration/run`, { method: 'POST' });
+      await appendToolResultMessage('Orchestration cycle started. I will fold new outputs into this chat as data lands.');
       toast({
         title: 'Full orchestration started',
         description: 'Running cross-module orchestration cycle for this workspace.',
@@ -683,6 +715,9 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
         method: 'POST',
         body: JSON.stringify({ forceUnavailable: Boolean(payload?.forceUnavailable) }),
       });
+      await appendToolResultMessage(
+        `Started ${resolved.platform} scrape for @${resolved.handle || 'competitor'}. I will use the refreshed outputs in the next response.`
+      );
       toast({
         title: 'Scraper started',
         description: `Queued scrape for @${resolved.handle || 'competitor'} on ${resolved.platform}.`,
@@ -712,6 +747,7 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
           sourceMessage: lastUserCommandRef.current || undefined,
         }),
       });
+      await appendToolResultMessage(`Saved context (${category}): ${value}`);
       toast({
         title: 'Context saved',
         description: 'Added to persistent chat memory for this workspace.',
@@ -736,6 +772,7 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
         return;
       }
       await apiFetch(`/research-jobs/${jobId}/chat/user-context/${contextId}`, { method: 'DELETE' });
+      await appendToolResultMessage('Removed one saved context item from this workspace memory.');
       toast({
         title: 'Context removed',
         description: 'The memory item was removed from this workspace.',
@@ -774,6 +811,7 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
       link.click();
       link.remove();
       URL.revokeObjectURL(objectUrl);
+      await appendToolResultMessage(`Generated and downloaded \`${filename}\`. Ask me for another template or a scoped export.`);
       toast({
         title: 'PDF generated',
         description: `Downloaded ${filename}.`,

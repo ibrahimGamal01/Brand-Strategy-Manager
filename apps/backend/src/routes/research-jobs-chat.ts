@@ -138,6 +138,43 @@ router.post('/:id/chat/sessions/:sessionId/messages', async (req, res) => {
   }
 });
 
+router.post('/:id/chat/sessions/:sessionId/system-message', async (req, res) => {
+  try {
+    const { id: researchJobId, sessionId } = req.params;
+    const content = String(req.body?.content || '').trim();
+    const attachments = Array.isArray(req.body?.attachments)
+      ? (req.body.attachments as string[]).filter((entry) => typeof entry === 'string' && entry.trim().length > 0)
+      : [];
+    const roleRaw = String(req.body?.role || 'SYSTEM').trim().toUpperCase();
+    const role = roleRaw === 'ASSISTANT' ? 'ASSISTANT' : 'SYSTEM';
+    const blocks = Array.isArray(req.body?.blocks) ? req.body.blocks : undefined;
+    const designOptions = Array.isArray(req.body?.designOptions) ? req.body.designOptions : undefined;
+
+    if (!content && attachments.length === 0) {
+      return res.status(400).json({ error: 'content is required' });
+    }
+
+    const session = await getChatSession(researchJobId, sessionId);
+    if (!session) {
+      return res.status(404).json({ error: 'Chat session not found' });
+    }
+
+    const message = await createChatMessage(session.id, role, content, {
+      blocks: blocks ?? null,
+      designOptions: designOptions ?? null,
+    });
+    if (attachments.length) {
+      await attachScreenshotsToMessage(message.id, attachments);
+    }
+    await touchChatSession(session.id);
+
+    return res.json({ ok: true, message });
+  } catch (error: any) {
+    console.error('[Chat] Failed to post system message:', error);
+    return res.status(500).json({ error: 'Failed to post system message', details: error.message });
+  }
+});
+
 router.post('/:id/chat/sessions/:sessionId/events', async (req, res) => {
   try {
     const { id: researchJobId, sessionId } = req.params;

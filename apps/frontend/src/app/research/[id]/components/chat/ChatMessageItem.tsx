@@ -289,6 +289,10 @@ function ChatMessageItemImpl({
                       fetch(`/api/research-jobs/${researchJobId}/orchestration/run`, { method: 'POST' }).catch(() => {});
                       return;
                     }
+                    if (action === 'run_scraper') {
+                      if (href) window.open(href, href.startsWith('http') ? '_blank' : '_self');
+                      return;
+                    }
                     if (action === 'document_generate') {
                       window.open(`/api/strategy/${researchJobId}/export`, '_blank');
                       return;
