@@ -978,7 +978,11 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
       };
       const docType = templateToDocType[templateRaw] || 'STRATEGY_BRIEF';
 
-      const response = await apiFetch<{ ok: boolean; document?: { title?: string; storagePath?: string; filePath?: string } }>(
+      const response = await apiFetch<{
+        ok: boolean;
+        attachmentId?: string | null;
+        document?: { title?: string; storagePath?: string; filePath?: string };
+      }>(
         `/research-jobs/${jobId}/documents/generate`,
         {
           method: 'POST',
@@ -988,6 +992,7 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
             audience: typeof payload?.audience === 'string' ? payload.audience : undefined,
             timeframeDays: Number.isFinite(Number(payload?.timeframeDays)) ? Number(payload?.timeframeDays) : undefined,
             depth: typeof payload?.depth === 'string' ? payload.depth : undefined,
+            attachToChat: true,
           }),
         }
       );
@@ -997,7 +1002,10 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
       }
       const resolvedPath = filePath.startsWith('/') ? filePath : `/${filePath}`;
       window.open(resolvedPath, '_blank');
-      await appendToolResultMessage(`Generated ${response?.document?.title || 'PDF document'}: ${resolvedPath}`);
+      await appendToolResultMessage(`Generated ${response?.document?.title || 'PDF document'}: ${resolvedPath}`, {
+        role: 'SYSTEM',
+        attachments: response?.attachmentId ? [response.attachmentId] : [],
+      });
       toast({
         title: 'PDF generated',
         description: response?.document?.title || 'Document is ready.',

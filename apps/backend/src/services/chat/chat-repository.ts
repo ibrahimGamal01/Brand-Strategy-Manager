@@ -45,12 +45,17 @@ export async function listChatMessages(sessionId: string, limit = 200) {
     take: limit,
   });
   const ids = messages.map((m) => m.id);
-  const attachments = ids.length
-    ? await prisma.screenshotAttachment.findMany({ where: { chatMessageId: { in: ids } } })
-    : [];
-  const attachmentMap = attachments.reduce<Record<string, ChatAttachment[]>>((acc, att) => {
-    acc[att.chatMessageId || ''] = acc[att.chatMessageId || ''] || [];
-    acc[att.chatMessageId || ''].push({
+  const [screenshotAttachments, fileAttachments] = ids.length
+    ? await Promise.all([
+        prisma.screenshotAttachment.findMany({ where: { chatMessageId: { in: ids } } }),
+        prisma.fileAttachment.findMany({ where: { chatMessageId: { in: ids } } }),
+      ])
+    : [[], []];
+
+  const attachmentMap = screenshotAttachments.reduce<Record<string, ChatAttachment[]>>((acc, att) => {
+    const key = att.chatMessageId || '';
+    acc[key] = acc[key] || [];
+    acc[key].push({
       id: att.id,
       storagePath: att.storagePath,
       mimeType: att.mimeType,
@@ -61,6 +66,22 @@ export async function listChatMessages(sessionId: string, limit = 200) {
     });
     return acc;
   }, {});
+
+  fileAttachments.forEach((att) => {
+    const key = att.chatMessageId || '';
+    attachmentMap[key] = attachmentMap[key] || [];
+    attachmentMap[key].push({
+      id: att.id,
+      storagePath: att.storagePath,
+      mimeType: att.mimeType,
+      fileName: att.fileName,
+      aiSummary: null,
+      recordType: null,
+      recordId: null,
+      isAppScreenshot: false,
+    });
+  });
+
   return messages.map((m) => ({
     ...m,
     attachments: attachmentMap[m.id] || [],

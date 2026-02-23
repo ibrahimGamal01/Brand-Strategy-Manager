@@ -5,15 +5,30 @@ import {
   listGeneratedDocuments,
 } from '../services/documents/document-service';
 import type { DocumentPlan } from '../services/documents/document-spec';
+import { createFileAttachment } from '../services/chat/file-attachments';
 
 const router = Router();
 
 router.post('/:id/documents/generate', async (req, res) => {
   try {
     const { id: researchJobId } = req.params;
-    const body = (req.body || {}) as Partial<DocumentPlan>;
+    const body = (req.body || {}) as Partial<DocumentPlan> & { attachToChat?: boolean };
     const result = await generateDocumentForResearchJob(researchJobId, body);
-    return res.json({ ok: true, document: result });
+    const shouldCreateAttachment = body.attachToChat !== false;
+    let attachmentId: string | null = null;
+
+    if (shouldCreateAttachment) {
+      const attachment = await createFileAttachment({
+        researchJobId,
+        fileName: result.title ? `${result.title}.pdf` : 'document.pdf',
+        storagePath: result.storagePath,
+        mimeType: result.mimeType,
+        fileSizeBytes: result.sizeBytes,
+      });
+      attachmentId = attachment.id;
+    }
+
+    return res.json({ ok: true, document: result, attachmentId });
   } catch (error: any) {
     console.error('[Documents] Failed to generate document:', error);
     return res.status(500).json({ error: 'Failed to generate document', details: error.message });

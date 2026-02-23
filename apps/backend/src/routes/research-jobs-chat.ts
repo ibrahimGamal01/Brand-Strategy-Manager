@@ -12,6 +12,7 @@ import {
   listSavedBlocks,
 } from '../services/chat/chat-repository';
 import { attachScreenshotsToMessage } from '../services/chat/chat-attachments';
+import { attachFileAttachmentsToMessage } from '../services/chat/file-attachments';
 import { handleChatBlockEvent } from '../services/chat/chat-events';
 import { streamChatCompletion } from '../services/ai/chat/chat-generator';
 import {
@@ -166,6 +167,7 @@ router.post('/:id/chat/sessions/:sessionId/system-message', async (req, res) => 
     });
     if (attachments.length) {
       await attachScreenshotsToMessage(message.id, attachments);
+      await attachFileAttachmentsToMessage(message.id, attachments);
     }
     await touchChatSession(session.id);
 

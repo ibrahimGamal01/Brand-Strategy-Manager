@@ -17,6 +17,7 @@ export type ChatAttachment = {
   id: string;
   storagePath: string;
   mimeType: string;
+  fileName?: string | null;
   aiSummary?: string | null;
   recordType?: string | null;
   recordId?: string | null;
