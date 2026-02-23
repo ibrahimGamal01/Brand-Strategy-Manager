@@ -1512,12 +1512,29 @@ model ChatMutation {
   requestJson   Json             @map("request_json")
   previewJson   Json             @map("preview_json")
   createdAt     DateTime         @default(now()) @map("created_at")
+  appliedAt     DateTime?        @map("applied_at")
+  undoneAt      DateTime?        @map("undone_at")
   researchJob   ResearchJob      @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
   session       ChatSession      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  undoSnapshots ChatMutationUndoSnapshot[]
 
   @@index([researchJobId, createdAt(sort: Desc)])
   @@index([sessionId, createdAt(sort: Desc)])
   @@map("chat_mutations")
+}
+
+model ChatMutationUndoSnapshot {
+  id         String       @id @default(uuid())
+  mutationId String       @map("mutation_id")
+  modelName  String       @map("model_name")
+  recordId   String       @map("record_id")
+  beforeJson Json         @map("before_json")
+  createdAt  DateTime     @default(now()) @map("created_at")
+  mutation   ChatMutation @relation(fields: [mutationId], references: [id], onDelete: Cascade)
+
+  @@index([mutationId])
+  @@index([modelName, recordId])
+  @@map("chat_mutation_undo_snapshots")
 }
 
 // Stores answers to the client questioning workflow
