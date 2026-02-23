@@ -14,10 +14,23 @@ import {
 import { attachScreenshotsToMessage } from '../services/chat/chat-attachments';
 import { handleChatBlockEvent } from '../services/chat/chat-events';
 import { streamChatCompletion } from '../services/ai/chat/chat-generator';
-import { listUserContexts, deactivateUserContext } from '../services/chat/user-context-repository';
+import {
+  listUserContexts,
+  deactivateUserContext,
+  upsertUserContext,
+  UscCategory,
+} from '../services/chat/user-context-repository';
 
 
 const router = Router();
+const ALLOWED_USER_CONTEXT_CATEGORIES: UscCategory[] = [
+  'website',
+  'social_profile',
+  'fact',
+  'correction',
+  'document_url',
+  'free_text',
+];
 
 router.get('/:id/chat/sessions', async (req, res) => {
   try {
@@ -184,6 +197,39 @@ router.get('/:id/chat/user-context', async (req, res) => {
     return res.json({ items });
   } catch (error: any) {
     return res.status(500).json({ error: 'Failed to list user contexts', details: error.message });
+  }
+});
+
+router.post('/:id/chat/user-context', async (req, res) => {
+  try {
+    const { id: researchJobId } = req.params;
+    const categoryRaw = String(req.body?.category || '').trim().toLowerCase();
+    const value = String(req.body?.value || '').trim();
+    const keyRaw = req.body?.key;
+    const labelRaw = req.body?.label;
+    const sourceMessageRaw = req.body?.sourceMessage;
+
+    if (!categoryRaw || !ALLOWED_USER_CONTEXT_CATEGORIES.includes(categoryRaw as UscCategory)) {
+      return res.status(400).json({
+        error: 'Invalid category',
+        details: `category must be one of: ${ALLOWED_USER_CONTEXT_CATEGORIES.join(', ')}`,
+      });
+    }
+    if (!value) {
+      return res.status(400).json({ error: 'value is required' });
+    }
+
+    const item = await upsertUserContext(
+      researchJobId,
+      categoryRaw as UscCategory,
+      typeof keyRaw === 'string' ? keyRaw : null,
+      value,
+      typeof labelRaw === 'string' ? labelRaw : null,
+      typeof sourceMessageRaw === 'string' ? sourceMessageRaw : null
+    );
+    return res.json({ ok: true, item });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Failed to upsert user context', details: error.message });
   }
 });
 

@@ -1,16 +1,16 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { motion } from 'framer-motion';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api/http';
 import { useToast } from '@/hooks/use-toast';
-import { Badge } from '@/components/ui/badge';
 import { useChatSocket } from '@/lib/ws/useChatSocket';
 import { ChatSessionList } from './ChatSessionList';
 import { ChatThread } from './ChatThread';
-import { ChatSavedPanel } from './ChatSavedPanel';
+import { SidebarContextPanel } from './SidebarContextPanel';
+import { CompactChatTopbar } from './CompactChatTopbar';
+import { CrudDrawer } from './CrudDrawer';
 import {
   ChatIntelligenceCrudPanel,
   type IntelligenceCrudRequest,
@@ -46,6 +46,14 @@ interface ChatSavedBlocksResponse {
 }
 
 type IntelligenceRow = Record<string, unknown> & { id?: string };
+type WorkspaceModuleKey =
+  | 'brain'
+  | 'chat'
+  | 'intelligence'
+  | 'strategy_docs'
+  | 'content_calendar'
+  | 'content_generators'
+  | 'performance';
 
 const SECTION_MATCH_FIELDS: Record<IntelligenceSectionKey, string[]> = {
   client_profiles: ['handle', 'platform', 'profileUrl', 'bio'],
@@ -62,19 +70,25 @@ const SECTION_MATCH_FIELDS: Record<IntelligenceSectionKey, string[]> = {
 };
 
 const IDENTIFIER_HINT_KEYS = [
-  'handle',
-  'platform',
-  'profileUrl',
-  'title',
-  'query',
-  'url',
-  'href',
-  'keyword',
-  'question',
-  'source',
-  'metric',
-  'sourceType',
+  'handle', 'platform', 'profileUrl', 'title', 'query', 'url',
+  'href', 'keyword', 'question', 'source', 'metric', 'sourceType',
 ];
+
+const DESTRUCTIVE_CRUD_ACTIONS = new Set<IntelligenceCrudAction>(['delete', 'clear']);
+const MODULE_ALIASES: Record<string, WorkspaceModuleKey> = {
+  home: 'brain',
+  brain: 'brain',
+  chat: 'chat',
+  intelligence: 'intelligence',
+  intel: 'intelligence',
+  strategy: 'strategy_docs',
+  strategy_docs: 'strategy_docs',
+  calendar: 'content_calendar',
+  content_calendar: 'content_calendar',
+  content_generators: 'content_generators',
+  generators: 'content_generators',
+  performance: 'performance',
+};
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -153,13 +167,24 @@ function parseHrefParams(href?: string): Record<string, string> {
   try {
     const url = new URL(href, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
     const values: Record<string, string> = {};
-    url.searchParams.forEach((value, key) => {
-      values[key] = value;
-    });
+    url.searchParams.forEach((value, key) => { values[key] = value; });
     return values;
   } catch {
     return {};
   }
+}
+
+function resolveModuleKey(value: unknown): WorkspaceModuleKey | null {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return null;
+  return MODULE_ALIASES[normalized] || null;
+}
+
+function normalizeScraperPlatform(value: unknown): 'INSTAGRAM' | 'TIKTOK' | null {
+  const raw = String(value || '').trim().toLowerCase();
+  if (raw === 'instagram' || raw === 'ig') return 'INSTAGRAM';
+  if (raw === 'tiktok' || raw === 'tt') return 'TIKTOK';
+  return null;
 }
 
 export default function ChatWorkspace({ jobId }: { jobId: string }) {
@@ -169,13 +194,18 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const searchParamsString = searchParams.toString();
+
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streamingMessage, setStreamingMessage] = useState<ChatMessage | null>(null);
   const [draft, setDraft] = useState('');
+  const [crudOpen, setCrudOpen] = useState(false);
+
   const activeSessionStorageKey = useMemo(() => `bat.chat.activeSession.${jobId}`, [jobId]);
   const lastUserCommandRef = useRef('');
   const autoCrudHandledRef = useRef<Set<string>>(new Set());
+
+  // ── Queries ──────────────────────────────────────────────────────────────
 
   const sessionsQuery = useQuery({
     queryKey: ['chatSessions', jobId],
@@ -198,32 +228,39 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
     enabled: Boolean(activeSessionId),
   });
 
-  useEffect(() => {
-    const sessions = sessionsQuery.data?.sessions || [];
-    if (!sessions.length) return;
-    const availableIds = new Set(sessions.map((session) => session.id));
+  // ── Derived values (single source, no repeated .find/.map on same array) ─
 
-    if (activeSessionId && availableIds.has(activeSessionId)) {
-      return;
-    }
+  const sessions = sessionsQuery.data?.sessions || [];
+
+  const activeSession = useMemo(
+    () => sessions.find((s) => s.id === activeSessionId) ?? null,
+    [sessions, activeSessionId]
+  );
+
+  const pinnedBlockIds = useMemo(() => {
+    const ids = new Set<string>();
+    (savedBlocksQuery.data?.blocks || []).forEach((block) => ids.add(block.blockId));
+    return ids;
+  }, [savedBlocksQuery.data?.blocks]);
+
+  // ── Session selection effects ─────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!sessions.length) return;
+    const availableIds = new Set(sessions.map((s) => s.id));
+    if (activeSessionId && availableIds.has(activeSessionId)) return;
 
     let fromStorage: string | null = null;
     if (typeof window !== 'undefined') {
       const stored = window.localStorage.getItem(activeSessionStorageKey);
-      if (stored && availableIds.has(stored)) {
-        fromStorage = stored;
-      }
+      if (stored && availableIds.has(stored)) fromStorage = stored;
     }
-
     const nextSessionId = fromStorage || sessions[0].id;
-    if (nextSessionId && nextSessionId !== activeSessionId) {
-      setActiveSessionId(nextSessionId);
-    }
-  }, [sessionsQuery.data?.sessions, activeSessionId, activeSessionStorageKey]);
+    if (nextSessionId && nextSessionId !== activeSessionId) setActiveSessionId(nextSessionId);
+  }, [sessions, activeSessionId, activeSessionStorageKey]);
 
   useEffect(() => {
-    if (!activeSessionId) return;
-    if (typeof window === 'undefined') return;
+    if (!activeSessionId || typeof window === 'undefined') return;
     window.localStorage.setItem(activeSessionStorageKey, activeSessionId);
   }, [activeSessionId, activeSessionStorageKey]);
 
@@ -235,16 +272,10 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
 
   useEffect(() => {
     setStreamingMessage(null);
-    if (activeSessionId && !sessionDetailQuery.data?.messages) {
-      setMessages([]);
-    }
+    if (activeSessionId && !sessionDetailQuery.data?.messages) setMessages([]);
   }, [activeSessionId]);
 
-  const pinnedBlockIds = useMemo(() => {
-    const ids = new Set<string>();
-    (savedBlocksQuery.data?.blocks || []).forEach((block) => ids.add(block.blockId));
-    return ids;
-  }, [savedBlocksQuery.data?.blocks]);
+  // ── CRUD auto-run ─────────────────────────────────────────────────────────
 
   async function maybeAutoRunCrudFromBlocks(messageId: string, blocks: ChatBlock[]) {
     if (autoCrudHandledRef.current.has(messageId)) return;
@@ -261,7 +292,6 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
         payload: asRecord(button.payload) || undefined,
       }));
     });
-
     if (!crudButtons.length) return;
 
     const matched = crudButtons.find((button) => {
@@ -270,7 +300,13 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
     });
     if (!matched) return;
 
+    // Cap ref size to prevent unbounded memory growth
+    if (autoCrudHandledRef.current.size >= 100) {
+      const [first] = autoCrudHandledRef.current;
+      autoCrudHandledRef.current.delete(first);
+    }
     autoCrudHandledRef.current.add(messageId);
+
     try {
       await handleActionIntent(matched.action, matched.href, matched.payload);
     } catch (error) {
@@ -285,6 +321,8 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
       });
     }
   }
+
+  // ── WebSocket ─────────────────────────────────────────────────────────────
 
   const socket = useChatSocket({
     researchJobId: jobId,
@@ -345,31 +383,22 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
           void maybeAutoRunCrudFromBlocks(msgId, safeBlocks);
           break;
         }
-
         case 'ASSISTANT_DONE': {
           const doneId = typeof event.messageId === 'string' ? event.messageId : null;
           const doneFollowUp = sanitizeFollowUp(event.followUp);
-          // Immediately promote the streaming message into the messages array with followUp
           setStreamingMessage((prev) => {
             if (prev && doneId && prev.id === doneId) {
-              const finalMsg = sanitizeChatMessage({
-                ...prev,
-                pending: false,
-                followUp: doneFollowUp,
-              });
+              const finalMsg = sanitizeChatMessage({ ...prev, pending: false, followUp: doneFollowUp });
               setMessages((msgs) => {
                 const exists = msgs.find((m) => m.id === doneId);
                 if (exists) {
                   return msgs.map((m) =>
                     m.id === doneId
                       ? sanitizeChatMessage({ ...m, followUp: doneFollowUp })
-                      : sanitizeChatMessage(m)
+                      : m
                   );
                 }
-                return [
-                  ...msgs.filter((m) => !m.pending || m.id !== doneId).map((m) => sanitizeChatMessage(m)),
-                  finalMsg,
-                ];
+                return [...msgs.filter((m) => !m.pending || m.id !== doneId), finalMsg];
               });
             }
             return null;
@@ -392,18 +421,7 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
     },
   });
 
-  const activeSession = sessionsQuery.data?.sessions?.find((session) => session.id === activeSessionId) || null;
-  const connectionBadge =
-    socket.status === 'open'
-      ? { label: 'connected', variant: 'success' as const }
-      : socket.status === 'reconnecting'
-        ? { label: 'reconnecting', variant: 'warning' as const }
-        : socket.status === 'connecting'
-          ? { label: 'connecting', variant: 'warning' as const }
-          : socket.status === 'error'
-            ? { label: 'error', variant: 'destructive' as const }
-            : { label: 'offline', variant: 'outline' as const };
-  const sessionError = sessionsQuery.error as Error | null;
+  // ── Intelligence CRUD ─────────────────────────────────────────────────────
 
   async function resolveCrudItemId(
     section: IntelligenceSectionKey,
@@ -445,14 +463,12 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
         let score = 0;
         if (targetRecord) {
           Object.entries(targetRecord).forEach(([key, value]) => {
-            if (value === null || value === undefined) return;
-            if (typeof value === 'object') return;
+            if (value === null || value === undefined || typeof value === 'object') return;
             const rowValue = row[key];
             const fieldWeight = sectionFields.includes(key) ? 1.6 : 1;
             score += scoreValueMatch(rowValue, value) * fieldWeight;
           });
         }
-
         if (termHints.length) {
           termHints.forEach((term) => {
             if (!term) return;
@@ -461,21 +477,14 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
             for (const field of fieldsToCheck) {
               const value = normalizeText(row[field]);
               if (!value) continue;
-              if (value.includes(term)) {
-                score += 1.25;
-                matched = true;
-                break;
-              }
+              if (value.includes(term)) { score += 1.25; matched = true; break; }
             }
             if (!matched) {
               const corpus = normalizeText(JSON.stringify(row));
-              if (corpus.includes(term)) {
-                score += 0.35;
-              }
+              if (corpus.includes(term)) score += 0.35;
             }
           });
         }
-
         return { row, score };
       })
       .sort((a, b) => b.score - a.score);
@@ -488,13 +497,7 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
   }
 
   async function runIntelligenceCrud({
-    section,
-    action,
-    itemId,
-    data,
-    quiet,
-    target,
-    contextQuery,
+    section, action, itemId, data, quiet, target, contextQuery,
   }: IntelligenceCrudRequest): Promise<unknown> {
     const config = INTELLIGENCE_SECTION_BY_KEY[section];
     const basePath = `/research-jobs/${jobId}/intelligence/${section}`;
@@ -503,31 +506,17 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
     if (action === 'read') {
       response = await apiFetch(basePath);
     } else if (action === 'create') {
-      response = await apiFetch(basePath, {
-        method: 'POST',
-        body: JSON.stringify(data || {}),
-      });
+      response = await apiFetch(basePath, { method: 'POST', body: JSON.stringify(data || {}) });
     } else if (action === 'update') {
       const resolvedItemId = await resolveCrudItemId(section, itemId, data, target, contextQuery);
-      if (!resolvedItemId) {
-        throw new Error(`Unable to identify which ${config.label} record to update. Mention a unique handle/title/url in chat.`);
-      }
-      response = await apiFetch(`${basePath}/${resolvedItemId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ data: data || {} }),
-      });
+      if (!resolvedItemId) throw new Error(`Unable to identify which ${config.label} record to update.`);
+      response = await apiFetch(`${basePath}/${resolvedItemId}`, { method: 'PATCH', body: JSON.stringify({ data: data || {} }) });
     } else if (action === 'delete') {
       const resolvedItemId = await resolveCrudItemId(section, itemId, data, target, contextQuery);
-      if (!resolvedItemId) {
-        throw new Error(`Unable to identify which ${config.label} record to delete. Mention a unique handle/title/url in chat.`);
-      }
-      response = await apiFetch(`${basePath}/${resolvedItemId}`, {
-        method: 'DELETE',
-      });
+      if (!resolvedItemId) throw new Error(`Unable to identify which ${config.label} record to delete.`);
+      response = await apiFetch(`${basePath}/${resolvedItemId}`, { method: 'DELETE' });
     } else if (action === 'clear') {
-      response = await apiFetch(basePath, {
-        method: 'DELETE',
-      });
+      response = await apiFetch(basePath, { method: 'DELETE' });
     }
 
     if (action !== 'read') {
@@ -535,22 +524,78 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
       queryClient.invalidateQueries({ queryKey: ['chatSessions', jobId] });
       queryClient.invalidateQueries({ queryKey: ['chatSession', jobId, activeSessionId] });
       if (!quiet) {
-        toast({
-          title: `${config.label}: ${action}`,
-          description: `Successfully ran ${action.toUpperCase()} on ${config.label}.`,
-        });
+        toast({ title: `${config.label}: ${action}`, description: `Successfully ran ${action.toUpperCase()} on ${config.label}.` });
+      }
+    }
+    return response;
+  }
+
+  async function listCompetitorRows(): Promise<IntelligenceRow[]> {
+    const response = await apiFetch<{ data?: IntelligenceRow[] } | IntelligenceRow[]>(
+      `/research-jobs/${jobId}/intelligence/competitors?limit=300`
+    );
+    if (Array.isArray(response)) return response;
+    if (Array.isArray((response as { data?: IntelligenceRow[] }).data)) {
+      return ((response as { data?: IntelligenceRow[] }).data || []) as IntelligenceRow[];
+    }
+    return [];
+  }
+
+  async function resolveScraperTarget(
+    itemId: string | undefined,
+    competitorId: string | undefined,
+    platformHint: 'INSTAGRAM' | 'TIKTOK' | null,
+    target: Record<string, unknown> | string | undefined,
+    contextQuery?: string
+  ): Promise<{ discoveredId: string; platform: 'INSTAGRAM' | 'TIKTOK'; handle: string } | null> {
+    const rows = await listCompetitorRows();
+    if (!rows.length) return null;
+
+    const byDiscoveredId = String(itemId || '').trim();
+    if (byDiscoveredId) {
+      const found = rows.find((row) => String(row.id || '') === byDiscoveredId);
+      if (found) {
+        return {
+          discoveredId: byDiscoveredId,
+          platform: normalizeScraperPlatform(found.platform) || platformHint || 'INSTAGRAM',
+          handle: String(found.handle || ''),
+        };
       }
     }
 
-    return response;
+    const byCompetitorId = String(competitorId || '').trim();
+    if (byCompetitorId) {
+      const found = rows.find((row) => String(row.competitorId || '') === byCompetitorId);
+      if (found && typeof found.id === 'string') {
+        return {
+          discoveredId: found.id,
+          platform: normalizeScraperPlatform(found.platform) || platformHint || 'INSTAGRAM',
+          handle: String(found.handle || ''),
+        };
+      }
+    }
+
+    const data = asRecord(target) || undefined;
+    const resolvedItemId = await resolveCrudItemId(
+      'competitors',
+      undefined,
+      data,
+      typeof target === 'string' || asRecord(target) ? (target as Record<string, unknown> | string) : undefined,
+      contextQuery
+    );
+    if (!resolvedItemId) return null;
+    const found = rows.find((row) => String(row.id || '') === resolvedItemId);
+    return {
+      discoveredId: resolvedItemId,
+      platform: normalizeScraperPlatform(found?.platform) || platformHint || 'INSTAGRAM',
+      handle: String(found?.handle || ''),
+    };
   }
 
   function openIntelligenceSection(sectionKey?: IntelligenceSectionKey) {
     const nextParams = new URLSearchParams(searchParamsString);
     nextParams.set('module', 'intelligence');
-    if (sectionKey) {
-      nextParams.set('intelSection', sectionKey);
-    }
+    if (sectionKey) nextParams.set('intelSection', sectionKey);
     router.push(`${pathname}?${nextParams.toString()}`);
   }
 
@@ -558,29 +603,180 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
     const normalizedAction = String(action || '').toLowerCase();
 
     if (normalizedAction === 'open_module') {
-      const fallbackTarget = `/research/${jobId}?module=intelligence`;
-      const target = href || fallbackTarget;
-      if (target.startsWith('http')) {
-        window.open(target, '_blank');
-      } else if (target.includes('module=intelligence')) {
-        const section = resolveIntelligenceSection(payload?.section || payload?.sectionKey);
-        openIntelligenceSection(section || undefined);
-      } else {
-        router.push(target);
+      const hrefParams = parseHrefParams(href);
+      const moduleKey = resolveModuleKey(
+        payload?.module || payload?.moduleKey || hrefParams.module || hrefParams.moduleKey
+      );
+      const section = resolveIntelligenceSection(
+        payload?.section || payload?.sectionKey || hrefParams.intelSection || hrefParams.section
+      );
+
+      if (href && href.startsWith('http')) {
+        window.open(href, '_blank');
+        return;
       }
+
+      const nextParams = new URLSearchParams(searchParamsString);
+      nextParams.set('module', moduleKey || 'intelligence');
+      if (section && (moduleKey || 'intelligence') === 'intelligence') {
+        nextParams.set('intelSection', section);
+      } else {
+        nextParams.delete('intelSection');
+      }
+      router.push(`${pathname}?${nextParams.toString()}`);
       return;
     }
 
-    if (
-      normalizedAction === 'run_intel' ||
-      normalizedAction === 'run_orchestrator' ||
-      normalizedAction === 'run_intelligence'
-    ) {
+    if (normalizedAction === 'run_intel' || normalizedAction === 'run_orchestrator' || normalizedAction === 'run_intelligence') {
       const target = href || `/api/research-jobs/${jobId}/brand-intelligence/orchestrate`;
-      await fetch(target, { method: 'POST' }).catch(() => { });
+      await apiFetch(target.replace('/api', ''), { method: 'POST' }).catch(() => {});
+      toast({ title: 'Intelligence run started', description: 'Queued orchestration for brand mentions and community insights.' });
+      return;
+    }
+
+    if (normalizedAction === 'run_orchestration') {
+      await apiFetch(`/research-jobs/${jobId}/orchestration/run`, { method: 'POST' });
       toast({
-        title: 'Intelligence run started',
-        description: 'Queued orchestration for brand mentions and community insights.',
+        title: 'Full orchestration started',
+        description: 'Running cross-module orchestration cycle for this workspace.',
+      });
+      return;
+    }
+
+    if (normalizedAction === 'run_scraper') {
+      const hrefParams = parseHrefParams(href);
+      const itemId =
+        (typeof payload?.itemId === 'string' && payload.itemId) ||
+        (typeof payload?.discoveredId === 'string' && payload.discoveredId) ||
+        (typeof payload?.id === 'string' && payload.id) ||
+        hrefParams.itemId ||
+        hrefParams.discoveredId ||
+        hrefParams.id ||
+        undefined;
+      const competitorId =
+        (typeof payload?.competitorId === 'string' && payload.competitorId) || hrefParams.competitorId || undefined;
+      const targetCandidate = payload?.target || payload?.where || payload?.match || payload?.record || payload?.item;
+      const platform = normalizeScraperPlatform(payload?.platform || hrefParams.platform);
+      const lastUserText =
+        [...messages].reverse().find((m) => m.role === 'USER' && String(m.content || '').trim())?.content ||
+        lastUserCommandRef.current;
+      const resolved = await resolveScraperTarget(
+        itemId,
+        competitorId,
+        platform,
+        typeof targetCandidate === 'string' || asRecord(targetCandidate)
+          ? (targetCandidate as Record<string, unknown> | string)
+          : undefined,
+        lastUserText
+      );
+      if (!resolved?.discoveredId) {
+        toast({
+          title: 'Could not resolve competitor to scrape',
+          description: 'Please include the exact competitor handle (and platform) in your request.',
+          variant: 'destructive',
+        });
+        openIntelligenceSection('competitors');
+        return;
+      }
+
+      await apiFetch(`/competitors/discovered/${resolved.discoveredId}/scrape`, {
+        method: 'POST',
+        body: JSON.stringify({ forceUnavailable: Boolean(payload?.forceUnavailable) }),
+      });
+      toast({
+        title: 'Scraper started',
+        description: `Queued scrape for @${resolved.handle || 'competitor'} on ${resolved.platform}.`,
+      });
+      openIntelligenceSection('competitors');
+      return;
+    }
+
+    if (normalizedAction === 'user_context_upsert') {
+      const category = String(payload?.category || '').trim();
+      const value = String(payload?.value || '').trim();
+      if (!category || !value) {
+        toast({
+          title: 'Missing context payload',
+          description: 'user_context_upsert requires category and value.',
+          variant: 'destructive',
+        });
+        return;
+      }
+      await apiFetch(`/research-jobs/${jobId}/chat/user-context`, {
+        method: 'POST',
+        body: JSON.stringify({
+          category,
+          key: typeof payload?.key === 'string' ? payload.key : null,
+          value,
+          label: typeof payload?.label === 'string' ? payload.label : null,
+          sourceMessage: lastUserCommandRef.current || undefined,
+        }),
+      });
+      toast({
+        title: 'Context saved',
+        description: 'Added to persistent chat memory for this workspace.',
+      });
+      return;
+    }
+
+    if (normalizedAction === 'user_context_delete') {
+      const contextId =
+        (typeof payload?.contextId === 'string' && payload.contextId) ||
+        (typeof payload?.id === 'string' && payload.id) ||
+        '';
+      if (!contextId) {
+        toast({
+          title: 'Missing context id',
+          description: 'user_context_delete requires payload.contextId',
+          variant: 'destructive',
+        });
+        return;
+      }
+      if (typeof window !== 'undefined' && !window.confirm('Remove this saved chat context item?')) {
+        return;
+      }
+      await apiFetch(`/research-jobs/${jobId}/chat/user-context/${contextId}`, { method: 'DELETE' });
+      toast({
+        title: 'Context removed',
+        description: 'The memory item was removed from this workspace.',
+      });
+      return;
+    }
+
+    if (normalizedAction === 'document_generate') {
+      const template = String(payload?.template || payload?.docType || 'strategy_export').trim().toLowerCase();
+      const format = String(payload?.format || 'pdf').trim().toLowerCase();
+      if (format !== 'pdf') {
+        toast({
+          title: 'Unsupported document format',
+          description: 'Only PDF generation is currently supported.',
+          variant: 'destructive',
+        });
+        return;
+      }
+      if (template !== 'strategy_export') {
+        toast({
+          title: 'Template queued for next phase',
+          description: `Template "${template}" is not wired yet. Running strategy export for now.`,
+        });
+      }
+      const filename = `strategy-${jobId}-${new Date().toISOString().slice(0, 10)}.pdf`;
+      const pdfResponse = await fetch(`/api/strategy/${jobId}/export`);
+      if (!pdfResponse.ok) {
+        throw new Error('Failed to generate strategy PDF');
+      }
+      const blob = await pdfResponse.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+      toast({
+        title: 'PDF generated',
+        description: `Downloaded ${filename}.`,
       });
       return;
     }
@@ -590,87 +786,35 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
       const section = resolveIntelligenceSection(
         payload?.section || payload?.sectionKey || hrefParams.section || hrefParams.sectionKey
       );
-      const actionFromButton =
-        normalizedAction === 'intel_crud' ? null : resolveIntelligenceCrudAction(normalizedAction.replace('intel_', ''));
-      const resolvedAction =
-        actionFromButton ||
-        resolveIntelligenceCrudAction(payload?.operation || payload?.action || hrefParams.operation || hrefParams.action);
+      const actionFromButton = normalizedAction === 'intel_crud' ? null : resolveIntelligenceCrudAction(normalizedAction.replace('intel_', ''));
+      const resolvedAction = actionFromButton || resolveIntelligenceCrudAction(payload?.operation || payload?.action || hrefParams.operation || hrefParams.action);
       if (!section || !resolvedAction) {
-        toast({
-          title: 'Invalid CRUD action',
-          description: 'The assistant action is missing a valid section or operation.',
-          variant: 'destructive',
-        });
+        toast({ title: 'Invalid CRUD action', description: 'The assistant action is missing a valid section or operation.', variant: 'destructive' });
         return;
       }
-      const itemId =
-        (typeof payload?.itemId === 'string' && payload.itemId) ||
-        (typeof payload?.id === 'string' && payload.id) ||
-        hrefParams.itemId ||
-        hrefParams.id ||
-        undefined;
-      const targetCandidate =
-        payload?.target ||
-        payload?.where ||
-        payload?.match ||
-        payload?.record ||
-        payload?.item ||
-        hrefParams.target ||
-        hrefParams.lookup ||
-        undefined;
-      const fallbackPayloadData =
-        payload && typeof payload === 'object'
-          ? Object.fromEntries(
-            Object.entries(payload).filter(
-              ([key]) =>
-                ![
-                  'section',
-                  'sectionKey',
-                  'operation',
-                  'action',
-                  'itemId',
-                  'id',
-                  'target',
-                  'where',
-                  'match',
-                  'record',
-                  'item',
-                  'href',
-                  'label',
-                  'intent',
-                  'method',
-                  'data',
-                ].includes(key)
-            )
-          )
-          : {};
-      const body =
-        payload && typeof payload.data === 'object' && payload.data !== null
-          ? (payload.data as Record<string, unknown>)
-          : (fallbackPayloadData as Record<string, unknown>);
-      const lastUserText =
-        [...messages].reverse().find((message) => message.role === 'USER' && String(message.content || '').trim())?.content ||
-        lastUserCommandRef.current;
-      await runIntelligenceCrud({
-        section,
-        action: resolvedAction,
-        itemId,
-        data: body,
-        target:
-          typeof targetCandidate === 'string' || asRecord(targetCandidate)
-            ? (targetCandidate as Record<string, unknown> | string)
-            : undefined,
-        contextQuery: lastUserText,
-      });
-      if (resolvedAction !== 'read') {
-        openIntelligenceSection(section);
+      const itemId = (typeof payload?.itemId === 'string' && payload.itemId) || (typeof payload?.id === 'string' && payload.id) || hrefParams.itemId || hrefParams.id || undefined;
+      const targetCandidate = payload?.target || payload?.where || payload?.match || payload?.record || payload?.item || hrefParams.target || hrefParams.lookup || undefined;
+      const fallbackPayloadData = payload && typeof payload === 'object'
+        ? Object.fromEntries(Object.entries(payload).filter(([key]) => !['section', 'sectionKey', 'operation', 'action', 'itemId', 'id', 'target', 'where', 'match', 'record', 'item', 'href', 'label', 'intent', 'method', 'data'].includes(key)))
+        : {};
+      const body = payload && typeof payload.data === 'object' && payload.data !== null ? (payload.data as Record<string, unknown>) : (fallbackPayloadData as Record<string, unknown>);
+      const lastUserText = [...messages].reverse().find((m) => m.role === 'USER' && String(m.content || '').trim())?.content || lastUserCommandRef.current;
+      if (DESTRUCTIVE_CRUD_ACTIONS.has(resolvedAction)) {
+        const shouldProceed =
+          typeof window === 'undefined' ||
+          window.confirm(
+            `Confirm ${resolvedAction.toUpperCase()} on ${section.replace(/_/g, ' ')}${
+              itemId ? ` (id: ${itemId})` : ''
+            }?`
+          );
+        if (!shouldProceed) return;
       }
+      await runIntelligenceCrud({ section, action: resolvedAction, itemId, data: body, target: typeof targetCandidate === 'string' || asRecord(targetCandidate) ? (targetCandidate as Record<string, unknown> | string) : undefined, contextQuery: lastUserText });
+      if (resolvedAction !== 'read') openIntelligenceSection(section);
       return;
     }
 
-    if (href) {
-      window.open(href, href.startsWith('http') ? '_blank' : '_self');
-    }
+    if (href) window.open(href, href.startsWith('http') ? '_blank' : '_self');
   }
 
   async function handleNewSession(): Promise<string | null> {
@@ -686,12 +830,7 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
       }
       return null;
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unable to start a new chat session';
-      toast({
-        title: 'Failed to create session',
-        description: message,
-        variant: 'destructive',
-      });
+      toast({ title: 'Failed to create session', description: error instanceof Error ? error.message : 'Unable to start a new chat session', variant: 'destructive' });
       return null;
     }
   }
@@ -699,31 +838,25 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
   async function submitMessage(rawContent: string, attachmentIds: string[] = []) {
     const trimmed = rawContent.trim();
     if (!trimmed && attachmentIds.length === 0) return;
-    if (trimmed) {
-      lastUserCommandRef.current = trimmed;
-    }
+    if (trimmed) lastUserCommandRef.current = trimmed;
+
     let sessionId = activeSessionId;
-    if (!sessionId) {
-      sessionId = await handleNewSession();
-    }
+    if (!sessionId) sessionId = await handleNewSession();
     if (!sessionId) return;
+
     const clientMessageId = `client-${Date.now()}`;
-    setMessages((prev) => [
-      ...prev.map((message) => sanitizeChatMessage(message)),
-      sanitizeChatMessage({
-        id: clientMessageId,
-        role: 'USER',
-        content: trimmed,
-        createdAt: new Date().toISOString(),
-        pending: true,
-        attachments: attachmentIds.map((id) => ({
-          id,
-          storagePath: '',
-          mimeType: '',
-          aiSummary: 'Uploading…',
-        })),
-      }),
-    ]);
+    const newMessage = sanitizeChatMessage({
+      id: clientMessageId,
+      role: 'USER',
+      content: trimmed,
+      createdAt: new Date().toISOString(),
+      pending: true,
+      attachments: attachmentIds.map((id) => ({ id, storagePath: '', mimeType: '', aiSummary: 'Uploading…' })),
+    });
+
+    // ✅ Fix: no O(n) re-sanitization of existing messages on every send
+    setMessages((prev) => [...prev, newMessage]);
+
     if (socket.status === 'open') {
       socket.sendUserMessage(trimmed, clientMessageId, attachmentIds);
     } else {
@@ -741,11 +874,7 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
     setDraft('');
   }
 
-  async function recordEvent(
-    message: ChatMessage,
-    block: ChatBlock,
-    eventType: 'VIEW' | 'PIN' | 'UNPIN'
-  ) {
+  async function recordEvent(message: ChatMessage, block: ChatBlock, eventType: 'VIEW' | 'PIN' | 'UNPIN') {
     if (!activeSessionId) return;
     const payload = { type: block.type, title: block.title || null };
     if (socket.status === 'open') {
@@ -756,9 +885,7 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
         body: JSON.stringify({ messageId: message.id, blockId: block.blockId, eventType, payload }),
       });
     }
-    if (eventType === 'PIN' || eventType === 'UNPIN') {
-      void savedBlocksQuery.refetch();
-    }
+    if (eventType === 'PIN' || eventType === 'UNPIN') void savedBlocksQuery.refetch();
   }
 
   async function handleSelectDesign(message: ChatMessage, designId: string) {
@@ -768,12 +895,7 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
     } else {
       await apiFetch(`/research-jobs/${jobId}/chat/sessions/${activeSessionId}/events`, {
         method: 'POST',
-        body: JSON.stringify({
-          messageId: message.id,
-          blockId: designId,
-          eventType: 'SELECT_DESIGN',
-          payload: { designId },
-        }),
+        body: JSON.stringify({ messageId: message.id, blockId: designId, eventType: 'SELECT_DESIGN', payload: { designId } }),
       });
     }
   }
@@ -782,29 +904,13 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
     if (!activeSessionId) return;
     const trimmedAnswer = answer.trim();
     if (!trimmedAnswer) return;
-    const payload = {
-      answer: trimmedAnswer,
-      type: block.type,
-      title: block.title || null,
-      autoSent: true,
-      timestamp: new Date().toISOString(),
-    };
+    const payload = { answer: trimmedAnswer, type: block.type, title: block.title || null, autoSent: true, timestamp: new Date().toISOString() };
     if (socket.status === 'open') {
-      socket.sendBlockEvent({
-        messageId: message.id,
-        blockId: block.blockId,
-        eventType: 'FORM_SUBMIT',
-        payload,
-      });
+      socket.sendBlockEvent({ messageId: message.id, blockId: block.blockId, eventType: 'FORM_SUBMIT', payload });
     } else {
       await apiFetch(`/research-jobs/${jobId}/chat/sessions/${activeSessionId}/events`, {
         method: 'POST',
-        body: JSON.stringify({
-          messageId: message.id,
-          blockId: block.blockId,
-          eventType: 'FORM_SUBMIT',
-          payload,
-        }),
+        body: JSON.stringify({ messageId: message.id, blockId: block.blockId, eventType: 'FORM_SUBMIT', payload }),
       });
     }
     await submitMessage(trimmedAnswer);
@@ -818,120 +924,96 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
     } else {
       await apiFetch(`/research-jobs/${jobId}/chat/sessions/${activeSessionId}/events`, {
         method: 'POST',
-        body: JSON.stringify({
-          messageId: message.id,
-          blockId: attachmentId,
-          eventType: 'ATTACH_VIEW',
-          payload,
-        }),
+        body: JSON.stringify({ messageId: message.id, blockId: attachmentId, eventType: 'ATTACH_VIEW', payload }),
       });
     }
   }
 
   async function handleUnpinSavedBlock(block: ChatSavedBlock) {
     if (!activeSessionId) return;
-    await recordEvent(
-      {
-        id: block.messageId,
-        role: 'ASSISTANT',
-        content: '',
-        createdAt: block.createdAt,
-      },
-      { ...block.blockData, blockId: block.blockId },
-      'UNPIN'
-    );
+    await recordEvent({ id: block.messageId, role: 'ASSISTANT', content: '', createdAt: block.createdAt }, { ...block.blockData, blockId: block.blockId }, 'UNPIN');
     queryClient.invalidateQueries({ queryKey: ['chatSavedBlocks', jobId, activeSessionId] });
   }
 
+  const displayMessageCount = messages.length + (streamingMessage ? 1 : 0);
+  const sessionError = sessionsQuery.error as Error | null;
+
   return (
-    <div className="relative flex flex-col h-[calc(100vh-12rem)] min-h-[600px] overflow-hidden rounded-2xl border border-emerald-500/20 bg-background/40 shadow-2xl backdrop-blur-md">
-      <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_top,rgba(16,185,129,0.1),transparent_70%)]" />
+    <div className="relative flex flex-col h-[calc(100vh-12rem)] min-h-[600px] overflow-hidden rounded-2xl border border-primary/20 bg-background/40 shadow-2xl backdrop-blur-md">
+      {/* Ambient glow — uses theme primary */}
+      <div className="pointer-events-none absolute inset-0 -z-10 bg-linear-to-b from-primary/6 to-transparent" />
 
-      {/* Global Header */}
-      <div className="flex-shrink-0 border-b border-border/40 bg-card/60 px-6 py-4 flex items-center justify-between backdrop-blur-md z-10">
-        <div>
-          <div className="flex items-center gap-2">
-            <div className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-emerald-500 to-cyan-500 text-[10px] font-bold text-white shadow-sm">
-              BAT
-            </div>
-            <h2 className="text-lg font-semibold tracking-tight">Intelligence Studio</h2>
-          </div>
-          <p className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-            <span className="uppercase tracking-widest text-[9px] font-medium opacity-80">Command Center</span>
-            <span>&bull;</span>
-            <span>Session-persistent guided workflows</span>
-          </p>
-        </div>
-        <div className="flex items-center gap-4">
-          <Badge variant={connectionBadge.variant} className="text-[10px] uppercase shadow-sm">
-            {connectionBadge.label}
-          </Badge>
-          <div className="h-4 w-px bg-border/60" />
-          <div className="flex items-center gap-3 text-xs text-muted-foreground font-medium">
-            <span>{messages.length + (streamingMessage ? 1 : 0)} msgs</span>
-            <span>{pinnedBlockIds.size} pinned</span>
-          </div>
-        </div>
-      </div>
+      {/* ── Single slim topbar (replaces double-header) ── */}
+      <CompactChatTopbar
+        sessionTitle={activeSession?.title}
+        sessionUpdatedAt={activeSession?.lastActiveAt || activeSession?.createdAt}
+        messageCount={displayMessageCount}
+        pinnedCount={pinnedBlockIds.size}
+        connectionStatus={socket.status}
+        isStreaming={socket.status === 'open' && Boolean(streamingMessage)}
+        onOpenCrud={() => setCrudOpen(true)}
+      />
 
+      {/* Error bar */}
       {sessionError ? (
-        <div className="flex-shrink-0 border-b border-destructive/20 bg-destructive/10 px-6 py-2 text-xs font-medium text-destructive">
+        <div className="flex-shrink-0 border-b border-destructive/20 bg-destructive/10 px-5 py-1.5 text-[11px] font-medium text-destructive">
           Failed to load chat sessions. {sessionError.message || 'Please retry.'}
         </div>
       ) : null}
 
+      {/* ── Two-column body (no right panel) ── */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Left Sidebar */}
-        <div className="flex-shrink-0 w-72 border-r border-border/40 bg-card/30 p-4 overflow-y-auto custom-scrollbar">
-          <ChatSessionList
-            sessions={sessionsQuery.data?.sessions || []}
-            activeSessionId={activeSessionId}
-            onSelect={setActiveSessionId}
-            onNewSession={handleNewSession}
-            isLoading={sessionsQuery.isLoading}
-          />
-        </div>
 
-        {/* Main Thread */}
-        <div className="flex-1 min-w-0 bg-background/20 relative">
-          <div className="absolute inset-0">
-            <ChatThread
-              messages={messages}
-              streamingMessage={streamingMessage}
-              sessionTitle={activeSession?.title || 'Untitled session'}
-              sessionUpdatedAt={activeSession?.lastActiveAt || activeSession?.createdAt}
-              draft={draft}
-              onDraftChange={setDraft}
-              onSend={handleSendMessage}
-              pinnedBlockIds={pinnedBlockIds}
-              onBlockView={(message, block) => recordEvent(message, block, 'VIEW')}
-              onBlockPin={(message, block) => recordEvent(message, block, 'PIN')}
-              onBlockUnpin={(message, block) => recordEvent(message, block, 'UNPIN')}
-              onBlockFormSubmit={handleFormSubmit}
-              onSelectDesign={handleSelectDesign}
-              onAttachmentView={handleAttachmentView}
-              onActionIntent={handleActionIntent}
-              isStreaming={socket.status === 'open' && Boolean(streamingMessage)}
-              connectionStatus={socket.status}
-              researchJobId={jobId}
+        {/* Left sidebar — narrowed to 220px, contains sessions + context panel */}
+        <div className="shrink-0 w-[220px] border-r border-border/40 bg-card/30 flex flex-col overflow-hidden">
+          <div className="flex-1 overflow-hidden flex flex-col">
+            <ChatSessionList
+              sessions={sessions}
+              activeSessionId={activeSessionId}
+              onSelect={setActiveSessionId}
+              onNewSession={handleNewSession}
+              isLoading={sessionsQuery.isLoading}
             />
           </div>
-        </div>
 
-        {/* Right Sidebar */}
-        <div className="flex-shrink-0 w-[340px] border-l border-border/40 bg-card/30 p-4 space-y-6 overflow-y-auto custom-scrollbar">
-          <ChatSavedPanel
+          {/* Context panel (Pinned / Stats / Export) in sidebar footer */}
+          <SidebarContextPanel
             blocks={savedBlocksQuery.data?.blocks || []}
             onUnpin={handleUnpinSavedBlock}
             isLoading={savedBlocksQuery.isLoading}
-            messageCount={messages.length + (streamingMessage ? 1 : 0)}
+            messageCount={displayMessageCount}
           />
-          <ChatIntelligenceCrudPanel
-            onRunCrud={runIntelligenceCrud}
-            onOpenSection={openIntelligenceSection}
+        </div>
+
+        {/* Main thread — fills remaining space */}
+        <div className="flex-1 min-w-0 bg-background/20 relative overflow-hidden">
+          <ChatThread
+            messages={messages}
+            streamingMessage={streamingMessage}
+            draft={draft}
+            onDraftChange={setDraft}
+            onSend={handleSendMessage}
+            pinnedBlockIds={pinnedBlockIds}
+            onBlockView={(message, block) => recordEvent(message, block, 'VIEW')}
+            onBlockPin={(message, block) => recordEvent(message, block, 'PIN')}
+            onBlockUnpin={(message, block) => recordEvent(message, block, 'UNPIN')}
+            onBlockFormSubmit={handleFormSubmit}
+            onSelectDesign={handleSelectDesign}
+            onAttachmentView={handleAttachmentView}
+            onActionIntent={handleActionIntent}
+            isStreaming={socket.status === 'open' && Boolean(streamingMessage)}
+            researchJobId={jobId}
           />
         </div>
       </div>
+
+      {/* ── CRUD slide-over drawer (was always-on right panel) ── */}
+      <CrudDrawer
+        open={crudOpen}
+        onClose={() => setCrudOpen(false)}
+        onRunCrud={runIntelligenceCrud}
+        onOpenSection={openIntelligenceSection}
+      />
     </div>
   );
 }

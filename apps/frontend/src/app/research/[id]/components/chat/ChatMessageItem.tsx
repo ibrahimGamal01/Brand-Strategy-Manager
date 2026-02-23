@@ -68,28 +68,20 @@ const COMPONENT_FIRST_BLOCKS = new Set([
 ]);
 
 /**
- * Aggressive JSON cleaner.
- * Strips:
- *  1. <chat_blocks>...</chat_blocks> blobs
- *  2. ```json {... } ``` fences
- *  3. Trailing partial { "blocks"... JSON
- *  4. Any trailing standalone { that starts a JSON object
+ * Aggressive JSON cleaner — strips chat_blocks payloads, fenced JSON, trailing JSON objects,
+ * bare markdown table rows, and heading markers from the narrative bubble.
  */
 function cleanContent(raw: string): string {
   let text = raw;
-  // Remove XML-wrapped blocks payload
   text = text.replace(/<chat_blocks>[\s\S]*?<\/chat_blocks>/gi, '');
-  // Remove fenced JSON blocks
   text = text.replace(/```json[\s\S]*?```/gi, '');
   text = text.replace(/```[\s\S]*?```/g, (m) => (m.includes('"blocks"') ? '' : m));
-  // Remove trailing standalone JSON object that starts with {
   text = text.replace(/\s*\{[\s\S]*$/m, (match) => {
     if (/"blocks"\s*:/.test(match) || /"designOptions"\s*:/.test(match) || /"follow_up"\s*:/.test(match)) {
       return '';
     }
     return match;
   });
-  // Remove markdown table rows and separators from narrative text.
   text = text
     .split('\n')
     .filter((line) => {
@@ -100,11 +92,13 @@ function cleanContent(raw: string): string {
       return true;
     })
     .join('\n');
-  // Remove heading markers to keep the bubble clean.
   text = text.replace(/^\s*#{1,6}\s*/gm, '');
   text = text.replace(/\*\*/g, '');
   return text.trim();
 }
+
+// Cap stagger delay so follow-up chips never feel slow even on rich responses (design review #7)
+const MAX_FOLLOWUP_DELAY = 0.4;
 
 function ChatMessageItemImpl({
   message,
@@ -133,22 +127,19 @@ function ChatMessageItemImpl({
   const activeBlocks = resolveBlocks(safeMessage, selectedDesign);
   const designOptions = asArray<ChatDesignOption>((safeMessage as any).designOptions);
   const cleanedContent = useMemo(() => cleanContent(safeMessage.content || ''), [safeMessage.content]);
-  const hasComponentFirstBlocks = useMemo(
-    () => activeBlocks.some((block) => COMPONENT_FIRST_BLOCKS.has(String(block?.type || '').toLowerCase())),
-    [activeBlocks]
-  );
   const hasInlineQuickReplyBar = useMemo(
     () => activeBlocks.some((block) => String(block?.type || '').toLowerCase() === 'quick_reply_bar'),
     [activeBlocks]
   );
-  const narrativeContent = useMemo(() => {
-    return cleanedContent || '';
-  }, [cleanedContent]);
+  const narrativeContent = cleanedContent || '';
 
   const followUp: string[] = useMemo(() => {
     if (Array.isArray(safeMessage.followUp) && safeMessage.followUp.length > 0) return safeMessage.followUp;
     return [];
   }, [safeMessage.followUp]);
+
+  // Capped follow-up delay — never longer than 0.5s regardless of block count
+  const followUpDelay = Math.min(0.3 + activeBlocks.length * 0.08, MAX_FOLLOWUP_DELAY);
 
   function handleRemix(content: string) {
     onComposerFill?.(`Remix this: "${content.slice(0, 120).replace(/\n/g, ' ')}"`);
@@ -164,19 +155,19 @@ function ChatMessageItemImpl({
     onComposerFill?.(answer);
   }
 
-  // ── USER BUBBLE ────────────────────────────────────────────────────────────
+  // ── USER BUBBLE ──────────────────────────────────────────────────────────
   if (isUser) {
     return (
       <motion.div
-        initial={{ opacity: 0, y: 10 }}
+        initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, ease: 'easeOut' }}
-        className="flex justify-end my-2"
+        transition={{ duration: 0.25, ease: 'easeOut' }}
+        className="flex justify-end my-1.5"
       >
-        <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-primary/10 px-5 py-3.5 text-[15px] text-foreground shadow-sm backdrop-blur-sm">
+        <div className="max-w-[82%] rounded-2xl rounded-tr-md bg-primary/10 px-4 py-3 text-[14px] text-foreground shadow-sm backdrop-blur-sm">
           <p className="whitespace-pre-wrap leading-relaxed">{safeMessage.content}</p>
-          <div className="mt-2 flex items-center justify-end gap-2">
-            <span className="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-widest">
+          <div className="mt-1.5 flex items-center justify-end gap-2">
+            <span className="text-[9px] font-medium text-muted-foreground/50 uppercase tracking-widest">
               {formatTimestamp(safeMessage.createdAt)}
             </span>
           </div>
@@ -185,65 +176,51 @@ function ChatMessageItemImpl({
     );
   }
 
-  // ── BAT RESPONSE ──────────────────────────────────────────────────────────
+  // ── ASSISTANT RESPONSE ──────────────────────────────────────────────────
   return (
     <motion.article
-      initial={{ opacity: 0, y: 10 }}
+      initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, ease: 'easeOut' }}
-      className="group relative my-4"
+      transition={{ duration: 0.3, ease: 'easeOut' }}
+      className="group my-3"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <div className="flex items-start gap-4">
-
-        {/* BAT avatar column */}
-        <div className="flex flex-shrink-0 flex-col items-center pt-0.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-cyan-600 text-[10px] font-bold tracking-wider text-white shadow-sm ring-1 ring-emerald-500/20">
-            BAT
-          </div>
+      <div className="flex items-start gap-3">
+        {/* BAT avatar */}
+        <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-accent text-[9px] font-bold tracking-wider text-primary-foreground shadow-sm ring-1 ring-primary/20 mt-0.5">
+          BAT
         </div>
 
         {/* Message body */}
-        <div className="min-w-0 flex-1 space-y-4 pt-1">
-
-          {/* Header row: label + timestamp */}
-          <div className="flex items-center gap-3">
-            <span className="text-xs font-semibold tracking-tight text-foreground">
+        <div className="min-w-0 flex-1 space-y-3">
+          {/* Header */}
+          <div className="flex items-center gap-2.5">
+            <span className="text-[12px] font-semibold tracking-tight text-foreground">
               BAT Intelligence
             </span>
-            <span className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground/50">
+            <span className="text-[9px] font-medium uppercase tracking-widest text-muted-foreground/40">
               {formatTimestamp(safeMessage.createdAt)}
             </span>
           </div>
 
-          {/* ZONE A: Narrative response */}
+          {/* Narrative text */}
           {narrativeContent ? (
-            <motion.div
-              initial={{ opacity: 0, y: 5 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, ease: 'easeOut' }}
-              className="prose prose-sm dark:prose-invert max-w-none"
-            >
-              <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-foreground/90">{narrativeContent}</p>
-            </motion.div>
+            <p className="whitespace-pre-wrap text-[14px] leading-relaxed text-foreground/90">
+              {narrativeContent}
+            </p>
           ) : null}
 
           {/* Design options selector */}
           {designOptions.length > 0 ? (
-            <motion.div
-              initial={{ opacity: 0, y: 5 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.1, ease: 'easeOut' }}
-              className="rounded-xl border border-border/40 bg-card/30 p-3 backdrop-blur-sm"
-            >
+            <div className="rounded-xl border border-border/40 bg-card/30 p-3 backdrop-blur-sm">
               <div className="mb-2 flex items-center justify-between">
-                <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                   Design Options
                 </span>
-                {selectedDesign ? (
-                  <Badge variant="outline" className="text-[10px] uppercase">{selectedDesign}</Badge>
-                ) : null}
+                {selectedDesign && (
+                  <Badge variant="outline" className="text-[9px] uppercase">{selectedDesign}</Badge>
+                )}
               </div>
               <ToggleGroup
                 type="single"
@@ -258,7 +235,7 @@ function ChatMessageItemImpl({
                 className="justify-start"
               >
                 {designOptions.map((option, index) => {
-                  const designId = String(option?.designId || `design - ${index + 1} `);
+                  const designId = String(option?.designId || `design-${index + 1}`);
                   return (
                     <ToggleGroupItem key={designId} value={designId} className="text-xs">
                       {option?.label || designId}
@@ -266,7 +243,7 @@ function ChatMessageItemImpl({
                   );
                 })}
               </ToggleGroup>
-            </motion.div>
+            </div>
           ) : null}
 
           {/* Attachments */}
@@ -279,53 +256,55 @@ function ChatMessageItemImpl({
             })}
           />
 
-          {/* ZONE B: Structured blocks */}
+          {/* Structured blocks — only newly-arriving ones get animation */}
           {activeBlocks.length > 0 ? (
-            <div className="mt-3 space-y-3">
+            <div className="space-y-3">
               {activeBlocks.map((block, index) => (
-                <motion.div
-                  key={String((block as any)?.blockId || `block - ${index} `)}
-                  initial={{ opacity: 0, y: 5 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3, delay: 0.2 + index * 0.1, ease: 'easeOut' }}
-                >
-                  <BlockRenderer
-                    block={block}
-                    isPinned={pinnedBlockIds.has(String((block as any)?.blockId || ''))}
-                    onView={(b) => onBlockView(safeMessage, b)}
-                    onPin={(b) => onBlockPin(safeMessage, b)}
-                    onUnpin={(b) => onBlockUnpin(safeMessage, b)}
-                    onClarify={handleClarify}
-                    onFormSubmit={(b, answer) => onBlockFormSubmit?.(safeMessage, b, answer)}
-                    onAction={(action, href, payload) => {
-                      if (onActionIntent) {
-                        onActionIntent(action, href, payload);
-                        return;
-                      }
-                      if (action === 'open_module') {
-                        const target = href || `/research/${researchJobId}?module=intelligence`;
-                        if (target.startsWith('http')) window.open(target, '_blank');
-                        else router.push(target);
-                        return;
-                      }
-                      if (action === 'run_intel' || action === 'run_orchestrator' || action === 'run_intelligence') {
-                        const target = href || `/api/research-jobs/${researchJobId}/brand-intelligence/orchestrate`;
-                        fetch(target, { method: 'POST' }).catch(() => { });
-                        return;
-                      }
-                      if (href) window.open(href, href.startsWith('http') ? '_blank' : '_self');
-                    }}
-                  />
-                </motion.div>
+                <BlockRenderer
+                  key={String((block as any)?.blockId || `block-${index}`)}
+                  block={block}
+                  isPinned={pinnedBlockIds.has(String((block as any)?.blockId || ''))}
+                  onView={(b) => onBlockView(safeMessage, b)}
+                  onPin={(b) => onBlockPin(safeMessage, b)}
+                  onUnpin={(b) => onBlockUnpin(safeMessage, b)}
+                  onClarify={handleClarify}
+                  onFormSubmit={(b, answer) => onBlockFormSubmit?.(safeMessage, b, answer)}
+                  onAction={(action, href, payload) => {
+                    if (onActionIntent) {
+                      onActionIntent(action, href, payload);
+                      return;
+                    }
+                    if (action === 'open_module') {
+                      const target = href || `/research/${researchJobId}?module=intelligence`;
+                      if (target.startsWith('http')) window.open(target, '_blank');
+                      else router.push(target);
+                      return;
+                    }
+                    if (action === 'run_intel' || action === 'run_orchestrator' || action === 'run_intelligence') {
+                      const target = href || `/api/research-jobs/${researchJobId}/brand-intelligence/orchestrate`;
+                      fetch(target, { method: 'POST' }).catch(() => {});
+                      return;
+                    }
+                    if (action === 'run_orchestration') {
+                      fetch(`/api/research-jobs/${researchJobId}/orchestration/run`, { method: 'POST' }).catch(() => {});
+                      return;
+                    }
+                    if (action === 'document_generate') {
+                      window.open(`/api/strategy/${researchJobId}/export`, '_blank');
+                      return;
+                    }
+                    if (href) window.open(href, href.startsWith('http') ? '_blank' : '_self');
+                  }}
+                />
               ))}
             </div>
           ) : null}
 
-          {/* ZONE C: Follow-up suggestions */}
+          {/* Follow-up chips — capped delay */}
           <motion.div
-            initial={{ opacity: 0, y: 5 }}
+            initial={{ opacity: 0, y: 4 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3, delay: 0.4 + activeBlocks.length * 0.1, ease: 'easeOut' }}
+            transition={{ duration: 0.25, delay: followUpDelay, ease: 'easeOut' }}
           >
             <FollowUpChips
               suggestions={followUp}
@@ -333,20 +312,24 @@ function ChatMessageItemImpl({
               isHidden={safeMessage.pending || hasInlineQuickReplyBar}
             />
           </motion.div>
+
+          {/* Inline message toolbar — opacity-only toggle to avoid layout shift */}
+          {!safeMessage.pending && (
+            <div
+              className={`transition-opacity duration-150 ${
+                hovered ? 'opacity-100' : 'opacity-0 pointer-events-none'
+              }`}
+            >
+              <MessageToolbar
+                message={safeMessage}
+                onRemix={handleRemix}
+                onExpand={handleExpand}
+                onTranslate={handleTranslate}
+              />
+            </div>
+          )}
         </div>
       </div>
-
-      {/* Hover toolbar */}
-      {hovered && !safeMessage.pending && (
-        <div className="absolute -top-5 right-3 z-20">
-          <MessageToolbar
-            message={safeMessage}
-            onRemix={handleRemix}
-            onExpand={handleExpand}
-            onTranslate={handleTranslate}
-          />
-        </div>
-      )}
     </motion.article>
   );
 }
