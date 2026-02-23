@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import fs from 'fs';
 import { openai } from '../ai/openai-client';
+import { resolveModelForTask } from '../ai/model-router';
 
 export type OcrResult = {
   ocrText: string | null;
@@ -12,7 +13,7 @@ export async function runScreenshotOcr(absPath: string): Promise<OcrResult> {
   try {
     const file = fs.readFileSync(absPath);
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: resolveModelForTask('vision_ocr'),
       messages: [
         {
           role: 'system',

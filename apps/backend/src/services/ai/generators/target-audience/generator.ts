@@ -23,7 +23,6 @@ export class TargetAudienceGenerator extends BaseGenerator {
         'content_preferences'
       ],
       wordCount: { min: 1500, max: 2500 },
-      model: 'gpt-4o',
       temperature: 0.7
     });
   }

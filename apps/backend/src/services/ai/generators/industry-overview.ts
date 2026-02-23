@@ -39,7 +39,6 @@ class IndustryOverviewGenerator extends BaseGenerator {
         'blue_ocean_opportunities'
       ],
       wordCount: { min: 1000, max: 1500 },
-      model: 'gpt-4o',
       temperature: 0.6
     });
   }

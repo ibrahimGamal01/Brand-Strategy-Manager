@@ -11,6 +11,7 @@ const TYPE_CONFIG: Record<string, { model: keyof typeof prisma, idField?: string
   'news': { model: 'ddgNewsResult' },
   'trends': { model: 'searchTrend' },
   'competitors': { model: 'discoveredCompetitor' },
+  'brand-mentions': { model: 'brandMention' },
   'community-insights': { model: 'communityInsight' },
   'ai-questions': { model: 'aiQuestion' },
   'media-assets': { model: 'mediaAsset' },
@@ -22,6 +23,17 @@ function getDelegate(type: string) {
   const config = TYPE_CONFIG[type];
   if (!config) return null;
   return (prisma as any)[config.model];
+}
+
+async function getJobClientId(jobId: string): Promise<string> {
+  const job = await prisma.researchJob.findUnique({
+    where: { id: jobId },
+    select: { clientId: true },
+  });
+  if (!job?.clientId) {
+    throw new Error('Research job not found');
+  }
+  return job.clientId;
 }
 
 /**
@@ -92,12 +104,10 @@ router.delete('/:jobId/:dataType', async (req: Request, res: Response, next: Nex
       return next();
     }
 
-    if (dataType === 'social-profiles') {
-      const job = await prisma.researchJob.findUnique({ where: { id: jobId }, select: { clientId: true } });
-      if (!job) throw new Error('Research job not found');
-
+    if (dataType === 'social-profiles' || dataType === 'brand-mentions') {
+      const clientId = await getJobClientId(jobId);
       const result = await delegate.deleteMany({
-        where: { clientId: job.clientId },
+        where: { clientId },
       });
       return res.json({ success: true, deletedCount: result.count });
     }
@@ -126,16 +136,13 @@ router.post('/:jobId/:dataType', async (req: Request, res: Response, next: NextF
        return next();
     }
 
-    // Most models need researchJobId, except ClientAccount (uses clientId)
+    // Most models need researchJobId, except client-linked models.
     const createData = { ...data };
-    
-    if (dataType === 'social-profiles') {
-        // ClientAccount needs clientId. We need to find the clientId from the researchJob
-        const job = await prisma.researchJob.findUnique({ where: { id: jobId }, select: { clientId: true } });
-        if (!job) throw new Error('Research job not found');
-        createData.clientId = job.clientId;
+
+    if (dataType === 'social-profiles' || dataType === 'brand-mentions') {
+      createData.clientId = await getJobClientId(jobId);
     } else {
-        createData.researchJobId = jobId;
+      createData.researchJobId = jobId;
     }
 
     const created = await delegate.create({
@@ -163,12 +170,11 @@ router.get('/:jobId/:dataType', async (req: Request, res: Response, next: NextFu
     }
 
     let items;
-    if (dataType === 'social-profiles') {
-        const job = await prisma.researchJob.findUnique({ where: { id: jobId }, select: { clientId: true } });
-         if (!job) throw new Error('Research job not found');
-        items = await delegate.findMany({ where: { clientId: job.clientId } });
+    if (dataType === 'social-profiles' || dataType === 'brand-mentions') {
+      const clientId = await getJobClientId(jobId);
+      items = await delegate.findMany({ where: { clientId } });
     } else {
-        items = await delegate.findMany({ where: { researchJobId: jobId } });
+      items = await delegate.findMany({ where: { researchJobId: jobId } });
     }
 
      res.json({ success: true, data: items });

@@ -47,68 +47,67 @@ export function ChatSessionList({
   }, [sessions, query]);
 
   return (
-    <section className="rounded-xl border border-border/70 bg-card/60 p-4 shadow-sm">
-      <div className="mb-4 flex items-center justify-between gap-2">
-        <div>
-          <h3 className="text-sm font-semibold">Chat Sessions</h3>
-          <p className="text-xs text-muted-foreground">
-            Curated threads grounded in this research workspace.
-          </p>
+    <div className="flex flex-col h-full">
+      <div className="mb-4 flex-shrink-0">
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Session Memory</p>
+            <h3 className="text-sm font-semibold">Chat Threads</h3>
+          </div>
+          <Button size="sm" variant="ghost" onClick={onNewSession} className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground">
+            + New
+          </Button>
         </div>
-        <Button size="sm" variant="outline" onClick={onNewSession} className="h-8 px-3 text-xs">
-          New chat
-        </Button>
+        <div className="relative">
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Filter sessions..."
+            aria-label="Filter sessions"
+            className="h-8 w-full rounded-md border border-border/50 bg-background/40 px-3 text-xs text-foreground outline-none placeholder:text-muted-foreground/50 focus:border-primary/40 focus:bg-background/80 transition-colors"
+          />
+        </div>
       </div>
 
-      <div className="mb-3 rounded-lg border border-border/60 bg-background/80 px-2 py-1">
-        <input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Filter sessions..."
-          aria-label="Filter sessions"
-          className="w-full bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground"
-        />
-      </div>
-
-      {isLoading ? (
-        <p className="text-xs text-muted-foreground">Loading sessions...</p>
-      ) : filteredSessions.length === 0 ? (
-        <div className="rounded-md border border-dashed border-border/60 bg-background/40 p-3 text-xs text-muted-foreground">
-          {query ? 'No sessions match that filter.' : 'No chat sessions yet. Start a new chat to begin.'}
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {filteredSessions.map((session) => {
+      <div className="flex-1 overflow-y-auto custom-scrollbar -mx-2 px-2 space-y-1">
+        {isLoading ? (
+          <p className="text-xs text-muted-foreground text-center py-4">Loading sessions...</p>
+        ) : filteredSessions.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-border/40 bg-background/20 p-4 text-center text-xs text-muted-foreground">
+            {query ? 'No sessions match.' : 'No chats yet. Start a new session.'}
+          </div>
+        ) : (
+          filteredSessions.map((session) => {
             const active = session.id === activeSessionId;
-            const lastMessage = session.lastMessage?.content?.slice(0, 80) || 'No messages yet.';
+            const lastMessage = session.lastMessage?.content?.slice(0, 60) || 'No messages yet';
             return (
               <button
                 key={session.id}
                 onClick={() => onSelect(session.id)}
-                className={`w-full rounded-lg border px-3 py-2 text-left text-xs transition ${
-                  active
-                    ? 'border-primary/40 bg-primary/10 text-foreground shadow-sm'
-                    : 'border-border/50 bg-background/60 text-muted-foreground hover:bg-background'
-                }`}
+                className={`w-full group relative flex flex-col items-start gap-1 rounded-lg px-3 py-2.5 text-left text-xs transition-all ${active
+                    ? 'bg-primary/10 text-primary-foreground'
+                    : 'text-muted-foreground hover:bg-muted/40'
+                  }`}
               >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium">{session.title || 'Untitled session'}</span>
-                  {active ? (
-                    <Badge variant="outline" className="text-[10px] uppercase">
-                      active
-                    </Badge>
-                  ) : null}
+                {active && (
+                  <div className="absolute left-0 top-2 bottom-2 w-0.5 rounded-r-full bg-primary" />
+                )}
+                <div className="flex w-full items-center justify-between gap-2">
+                  <span className={`font-medium line-clamp-1 ${active ? 'text-primary' : 'text-foreground group-hover:text-primary'}`}>
+                    {session.title || 'Untitled session'}
+                  </span>
                 </div>
-                <p className="mt-1 text-[11px] text-muted-foreground">{lastMessage}</p>
-                <div className="mt-2 flex items-center justify-between text-[10px] uppercase tracking-wide text-muted-foreground">
+                <p className={`line-clamp-2 text-[11px] leading-relaxed ${active ? 'text-primary/70' : 'text-muted-foreground/70'}`}>
+                  {lastMessage}
+                </p>
+                <div className="mt-1 flex w-full items-center justify-between text-[9px] font-medium uppercase tracking-wider text-muted-foreground/40">
                   <span>{formatDate(session.lastActiveAt || session.createdAt)}</span>
-                  <span>{formatTime(session.lastActiveAt || session.createdAt)}</span>
                 </div>
               </button>
             );
-          })}
-        </div>
-      )}
-    </section>
+          })
+        )}
+      </div>
+    </div>
   );
 }

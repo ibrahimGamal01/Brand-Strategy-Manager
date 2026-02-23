@@ -42,7 +42,6 @@ class ContentAnalysisGenerator extends BaseGenerator {
         'dos_and_donts'
       ],
       wordCount: { min: 2000, max: 3000 },
-      model: 'gpt-4o',
       temperature: 0.7,
       maxAttempts: 3
     });

@@ -1,5 +1,5 @@
 import { prisma } from '../../../lib/prisma';
-import { getFullResearchContext, formatContextForLLM, type ResearchContext } from '../rag';
+import { getFullResearchContext, type ResearchContext } from '../rag';
 import { findLatestDesignSelections } from '../../chat/chat-repository';
 import type { ChatBlock } from '../../chat/chat-types';
 
@@ -20,6 +20,7 @@ const MAX_HISTORY_POOL = 40;
 const MAX_PINNED = 12;
 const MAX_VIEWED = 16;
 const MAX_ATTACHMENTS = 12;
+const MAX_CONTEXT_CHARS = 7000;
 
 function buildSourceHandles(context: ResearchContext): string[] {
   const handles: string[] = ['business_profile', 'brain_profile', 'ai_insights', 'competitor_context'];
@@ -55,9 +56,97 @@ function summarizeBlock(block: ChatBlock): string {
   return `${block.type || 'block'}${title}`;
 }
 
+function compact(value: unknown, fallback = 'n/a'): string {
+  const text = String(value ?? '').trim();
+  if (!text) return fallback;
+  if (text.length <= 140) return text;
+  return `${text.slice(0, 137)}...`;
+}
+
+function formatCompetitorRows(context: ResearchContext): string {
+  const rows = (context.competitors?.all10 || []) as unknown as Array<Record<string, unknown>>;
+  if (!rows.length) return '- none';
+  return rows
+    .slice(0, 8)
+    .map((row, index) => {
+      const handle = row?.handle ? `@${row.handle}` : 'unknown';
+      const platform = compact(row?.platform, 'unknown');
+      const followers = row?.followers ? Number(row.followers).toLocaleString() : 'unknown';
+      const posts = compact(row?.postingFreq, 'unknown');
+      const engagement = compact(row?.engagement, 'unknown');
+      return `${index + 1}) ${handle} | ${platform} | followers=${followers} | posts/week=${posts} | engagement=${engagement}`;
+    })
+    .join('\n');
+}
+
+function formatTrends(context: ResearchContext): string {
+  const trends = (context.community?.searchTrends || []) as Array<Record<string, unknown>>;
+  if (!trends.length) return '- none';
+  return trends
+    .slice(0, 6)
+    .map((trend, index) => `${index + 1}) ${compact(trend?.keyword || trend?.query || trend?.name)}`)
+    .join('\n');
+}
+
+function formatCommunity(context: ResearchContext): string {
+  const insights = (context.community?.insights || []) as Array<Record<string, unknown>>;
+  if (!insights.length) return '- none';
+  return insights
+    .slice(0, 4)
+    .map((item, index) => `${index + 1}) ${compact(item?.title || item?.source || 'insight')}: ${compact(item?.summary || item?.content || '')}`)
+    .join('\n');
+}
+
+function formatWarnings(context: ResearchContext): string {
+  const warnings = context.warnings || [];
+  if (!warnings.length) return '- none';
+  return warnings.slice(0, 4).map((warning) => `- ${compact(warning, '')}`).join('\n');
+}
+
+function formatChatResearchContext(context: ResearchContext): string {
+  const businessName = compact(context.business?.name);
+  const businessHandle = compact(context.business?.handle);
+  const website = compact(context.business?.website || context.brainProfile?.websiteDomain);
+  const primaryGoal = compact(context.brainProfile?.primaryGoal);
+  const targetMarket = compact(context.brainProfile?.targetMarket);
+  const channels = Array.isArray(context.brainProfile?.channels)
+    ? context.brainProfile.channels
+      .slice(0, 4)
+      .map((entry) => `${compact(entry?.platform)}/${compact(entry?.handle)}`)
+      .join(', ')
+    : 'n/a';
+
+  let output = `# Research Snapshot
+Business: ${businessName}
+Handle: ${businessHandle}
+Website: ${website}
+Primary Goal: ${primaryGoal}
+Target Market: ${targetMarket}
+Channels: ${channels}
+
+Competitor Metrics (verified):
+${formatCompetitorRows(context)}
+
+Search Trends:
+${formatTrends(context)}
+
+Community Signals:
+${formatCommunity(context)}
+
+Data Quality: ${Number(context.overallQuality?.score || 0).toFixed(1)}/100
+Warnings:
+${formatWarnings(context)}
+`;
+
+  if (output.length > MAX_CONTEXT_CHARS) {
+    output = `${output.slice(0, MAX_CONTEXT_CHARS)}\n...`;
+  }
+  return output;
+}
+
 export async function buildChatRagContext(researchJobId: string, sessionId: string): Promise<ChatRagContext> {
   const researchContext = await getFullResearchContext(researchJobId);
-  const researchContextText = formatContextForLLM(researchContext);
+  const researchContextText = formatChatResearchContext(researchContext);
 
   const messages = await prisma.chatMessage.findMany({
     where: { sessionId },

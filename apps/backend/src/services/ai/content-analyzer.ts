@@ -3,8 +3,10 @@ import fs from 'fs';
 import { prisma } from '../../lib/prisma';
 
 import { openai } from './openai-client';
+import { resolveModelForTask } from './model-router';
 
 // const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const CONTENT_ANALYZER_MODEL = resolveModelForTask('analysis_quality');
 
 /**
  * Deep content analysis - NOT just validation
@@ -26,7 +28,7 @@ export async function analyzePost(
         data: {
           clientPostId: post.id,
           analysisType: 'CAPTION',
-          modelUsed: 'gpt-4o',
+          modelUsed: CONTENT_ANALYZER_MODEL,
           topic: captionAnalysis.topic,
           contentPillarDetected: captionAnalysis.content_pillar,
           keywordsHooks: JSON.stringify(captionAnalysis.keywords_hooks),
@@ -50,7 +52,7 @@ export async function analyzePost(
         data: {
           clientPostId: post.id,
           analysisType: 'VISUAL',
-          modelUsed: 'gpt-4o',
+          modelUsed: CONTENT_ANALYZER_MODEL,
           visualStyleNotes: JSON.stringify(visualAnalysis.visual_style),
           hookAnalysis: visualAnalysis.visual_hooks,
           fullResponse: visualAnalysis,
@@ -70,7 +72,7 @@ export async function analyzePost(
         data: {
           clientPostId: post.id,
           analysisType: 'OVERALL',
-          modelUsed: 'gpt-4o',
+          modelUsed: CONTENT_ANALYZER_MODEL,
           topic: overallAnalysis.main_topic,
           contentPillarDetected: overallAnalysis.content_pillar,
           fullResponse: overallAnalysis,
@@ -114,7 +116,7 @@ Provide detailed analysis in this EXACT JSON structure:
 Be specific and grounded in the actual caption text. Return ONLY valid JSON.`;
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: CONTENT_ANALYZER_MODEL,
     messages: [{ role: 'user', content: prompt }],
     response_format: { type: 'json_object' },
     temperature: 0.3,
@@ -153,7 +155,7 @@ Analyze this social media post visual. Return JSON with:
 - confidence_score: number 0-1.`;
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: CONTENT_ANALYZER_MODEL,
     messages: [
       {
         role: 'user',
@@ -206,7 +208,7 @@ Return JSON with:
 - confidence_score: number 0-1.`;
 
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: CONTENT_ANALYZER_MODEL,
       messages: [
         {
           role: 'user',
@@ -243,7 +245,7 @@ Return JSON with:
 - confidence_score: number 0-1.`;
 
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: CONTENT_ANALYZER_MODEL,
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
       temperature: 0.3,

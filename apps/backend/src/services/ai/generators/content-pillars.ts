@@ -36,7 +36,6 @@ class ContentPillarsGenerator extends BaseGenerator {
         'competitor_validation'
       ],
       wordCount: { min: 800, max: 1500 },
-      model: 'gpt-4o',
       temperature: 0.7
     });
   }

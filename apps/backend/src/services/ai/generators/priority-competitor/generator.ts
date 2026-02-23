@@ -24,7 +24,6 @@ export class PriorityCompetitorGenerator extends BaseGenerator {
         'competitive_gaps'
       ],
       wordCount: { min: 2500, max: 4000 },
-      model: 'gpt-4o',
       temperature: 0.7,
       maxAttempts: 3
     });

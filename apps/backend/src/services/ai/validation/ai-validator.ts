@@ -5,6 +5,7 @@
 import OpenAI from 'openai';
 import { ValidationImprovement } from '../types/templates';
 import { COST_PROTECTION, costTracker, getMockAIResponse, checkCostLimit } from './cost-protection';
+import { resolveModelForTask } from '../model-router';
 
 let openaiClient: OpenAI | null = null;
 function getOpenAiClient(): OpenAI | null {
@@ -14,6 +15,8 @@ function getOpenAiClient(): OpenAI | null {
   openaiClient = new OpenAI({ apiKey });
   return openaiClient;
 }
+
+const AI_VALIDATOR_MODEL = resolveModelForTask('validation_fast');
 
 /**
  * Use AI to validate quality (RESPECTS COST PROTECTION)
@@ -67,7 +70,7 @@ Return JSON:
       throw new Error('OPENAI_API_KEY not configured');
     }
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: AI_VALIDATOR_MODEL,
       messages: [
         { role: 'system', content: 'You are a helpful content quality advisor.' },
         { role: 'user', content: prompt }
@@ -80,7 +83,7 @@ Return JSON:
     // Track costs
     if (response.usage) {
       costTracker.addUsage(
-        'gpt-4o-mini',
+        AI_VALIDATOR_MODEL,
         response.usage.prompt_tokens,
         response.usage.completion_tokens
       );

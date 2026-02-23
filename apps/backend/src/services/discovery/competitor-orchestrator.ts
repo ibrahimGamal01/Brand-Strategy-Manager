@@ -7,6 +7,7 @@ import {
 import { prisma } from '../../lib/prisma';
 import { isOpenAiConfiguredForRealMode } from '../../lib/runtime-preflight';
 import { suggestCompetitorsMultiPlatform } from '../ai/competitor-discovery';
+import { resolveModelForTask } from '../ai/model-router';
 import {
   performDirectCompetitorSearch,
   performDirectCompetitorSearchForPlatform,
@@ -915,7 +916,7 @@ ${JSON.stringify(candidates, null, 2)}
 `;
 
     const completion = await openai.chat.completions.create({
-      model: process.env.OPENAI_COMPETITOR_MODEL || 'gpt-4o-mini',
+      model: resolveModelForTask('competitor_discovery'),
       messages: [
         { role: 'system', content: 'Return JSON only.' },
         { role: 'user', content: prompt },

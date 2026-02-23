@@ -1,6 +1,8 @@
 import { prisma } from '../../lib/prisma';
 import type { ChatBlock } from './chat-types';
 import { recordChatBlockEvent } from './chat-repository';
+import { extractUserContext } from './user-context-extractor';
+import { upsertUserContext } from './user-context-repository';
 
 function findBlockById(blocks: unknown, blockId: string): ChatBlock | null {
   if (!Array.isArray(blocks)) return null;
@@ -60,6 +62,31 @@ export async function handleChatBlockEvent(params: {
     await prisma.chatSavedBlock.deleteMany({
       where: { sessionId: params.sessionId, blockId: params.blockId },
     });
+  }
+
+  if (params.eventType === 'FORM_SUBMIT') {
+    const answer = String((params.payload as any)?.answer || '').trim();
+    if (answer) {
+      const session = await prisma.chatSession.findUnique({
+        where: { id: params.sessionId },
+        select: { researchJobId: true },
+      });
+      if (session?.researchJobId) {
+        const items = extractUserContext(answer);
+        await Promise.all(
+          items.map((item) =>
+            upsertUserContext(
+              session.researchJobId,
+              item.category,
+              item.key,
+              item.value,
+              item.label,
+              `form_submit:${answer}`
+            ).catch(() => {})
+          )
+        );
+      }
+    }
   }
 
   return event;

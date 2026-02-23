@@ -8,8 +8,10 @@ import { transcribeVideoOrAudio } from '../media/audio-transcription';
 import { extractOnScreenTextFromVideo, type OnScreenTextEntry } from '../media/video-text-extraction';
 import { isR2Configured } from '../storage/r2-client';
 import { downloadFromR2 } from '../storage/r2-storage';
+import { resolveModelForTask } from './model-router';
 
 let openaiClient: OpenAI | null = null;
+const MEDIA_ANALYZER_MODEL = resolveModelForTask('media_analysis');
 
 function getOpenAiClient(): OpenAI | null {
   if (openaiClient) return openaiClient;
@@ -143,7 +145,7 @@ export async function analyzeMediaAsset(
             mediaAssetId: asset.id,
             researchJobId,
             analysisType: 'VISUAL',
-            modelUsed: 'gpt-4o',
+            modelUsed: MEDIA_ANALYZER_MODEL,
             fullResponse: visual as any,
             confidenceScore: (visual as any).confidence_score ?? 0.8,
           },
@@ -157,7 +159,7 @@ export async function analyzeMediaAsset(
             mediaAssetId: asset.id,
             researchJobId,
             analysisType: 'OVERALL',
-            modelUsed: 'gpt-4o',
+            modelUsed: MEDIA_ANALYZER_MODEL,
             fullResponse: overall as any,
             confidenceScore: (overall as any).confidence_score ?? 0.8,
           },
@@ -199,7 +201,7 @@ export async function analyzeMediaAsset(
             mediaAssetId: asset.id,
             researchJobId,
             analysisType: 'AUDIO',
-            modelUsed: 'gpt-4o',
+            modelUsed: MEDIA_ANALYZER_MODEL,
             fullResponse: transcriptAnalysis as any,
             confidenceScore: (transcriptAnalysis as any).confidence_score ?? 0.8,
           },
@@ -215,7 +217,7 @@ export async function analyzeMediaAsset(
               mediaAssetId: asset.id,
               researchJobId,
               analysisType: 'VISUAL',
-              modelUsed: 'gpt-4o',
+              modelUsed: MEDIA_ANALYZER_MODEL,
               fullResponse: visual as any,
               confidenceScore: (visual as any).confidence_score ?? 0.8,
             },
@@ -236,7 +238,7 @@ export async function analyzeMediaAsset(
             mediaAssetId: asset.id,
             researchJobId,
             analysisType: 'OVERALL',
-            modelUsed: 'gpt-4o',
+            modelUsed: MEDIA_ANALYZER_MODEL,
             fullResponse: overall as any,
             confidenceScore: (overall as any).confidence_score ?? 0.8,
           },
@@ -294,7 +296,7 @@ Analyze this social media post visual. Return JSON with:
 - confidence_score: number 0-1.`;
 
     const response = await client.chat.completions.create({
-      model: 'gpt-4o',
+      model: MEDIA_ANALYZER_MODEL,
       messages: [
         {
           role: 'user',
@@ -342,7 +344,7 @@ Return JSON with:
 - confidence_score: number 0-1.`;
 
     const response = await client.chat.completions.create({
-      model: 'gpt-4o',
+      model: MEDIA_ANALYZER_MODEL,
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
       temperature: 0.3,
@@ -387,7 +389,7 @@ Return JSON with:
 - confidence_score: number 0-1.`;
 
     const response = await client.chat.completions.create({
-      model: 'gpt-4o',
+      model: MEDIA_ANALYZER_MODEL,
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
       temperature: 0.3,

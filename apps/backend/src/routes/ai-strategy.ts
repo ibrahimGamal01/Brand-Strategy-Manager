@@ -13,6 +13,7 @@ import {
   normalizeGroundingReport,
   toPrismaJson,
 } from '../services/ai/generators/grounding-report';
+import { resolveModelForTask } from '../services/ai/model-router';
 
 const router = Router();
 
@@ -49,8 +50,6 @@ const SECTION_ORDER = [
 
 const FINAL_DOCUMENT_STATUS = 'FINAL';
 const DRAFT_DOCUMENT_STATUS = 'DRAFT';
-const STRATEGY_CHAT_MODEL = process.env.STRATEGY_DOC_CHAT_MODEL || 'gpt-4o-mini';
-
 type StrategyDocChatScopeValue = 'ALL' | 'SECTION';
 
 function normalizeChatScope(value: unknown): StrategyDocChatScopeValue {
@@ -179,7 +178,7 @@ async function generateStrategyDocChatReply(params: {
 
   try {
     const completion = (await openaiClient.chat.completions.create({
-      model: STRATEGY_CHAT_MODEL,
+      model: resolveModelForTask('strategy_doc_chat'),
       temperature: 0.2,
       max_tokens: 700,
       messages: [
@@ -304,7 +303,7 @@ async function persistStrategySections(input: PersistStrategySectionsInput): Pro
         topic,
         fullResponse: markdownContent,
         analysisType: 'DOCUMENT' as const,
-        modelUsed: 'gpt-4o',
+        modelUsed: resolveModelForTask('content_generation'),
         tokensUsed: 0,
         documentStatus: input.documentStatus,
         groundingReport: input.groundingReport,

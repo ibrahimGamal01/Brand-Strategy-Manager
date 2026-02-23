@@ -36,16 +36,26 @@ const DEFAULT_STYLE = {
 
 export function InsightBlockView({ block }: InsightBlockViewProps) {
   const style = block.severity ? (SEVERITY_STYLES[block.severity] || DEFAULT_STYLE) : DEFAULT_STYLE;
+  const title = String(block.title || '').trim();
+  const body = String(block.body || '').trim();
+
+  if (!title && !body) {
+    return null;
+  }
 
   return (
-    <div className={`rounded-lg border border-l-4 p-3 ${style.border} ${style.bg}`}>
-      <div className="flex items-center gap-1.5 mb-2">
+    <div className={`rounded-xl border border-l-4 p-4 ${style.border} ${style.bg}`}>
+      <div className="mb-2 flex items-center gap-1.5">
         <span className="text-sm">{style.icon}</span>
-        <h4 className={`text-sm font-semibold ${style.header}`}>{block.title}</h4>
+        <h4 className={`text-sm font-semibold ${style.header}`}>{title || 'Insight'}</h4>
       </div>
-      <div className="prose prose-sm max-w-none text-foreground [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.body}</ReactMarkdown>
-      </div>
+      {body ? (
+        <div className="prose prose-sm max-w-none text-foreground [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">No narrative details provided yet.</p>
+      )}
     </div>
   );
 }

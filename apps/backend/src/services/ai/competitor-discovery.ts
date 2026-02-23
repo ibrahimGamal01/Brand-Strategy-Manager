@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { isOpenAiConfiguredForRealMode } from '../../lib/runtime-preflight';
+import { resolveModelForTask } from './model-router';
 
 let openaiClient: OpenAI | null = null;
 
@@ -124,7 +125,7 @@ async function requestPlatformCompetitors(
 
   const platformLabel = platform === 'instagram' ? 'Instagram' : 'TikTok';
   const handlePattern = platform === 'instagram' ? '[a-z0-9._]{3,30}' : '[a-z0-9._]{2,24}';
-  const model = process.env.OPENAI_COMPETITOR_MODEL || 'gpt-4o-mini';
+  const model = resolveModelForTask('competitor_discovery');
 
   const prompt = `
 You are a competitor finder for ${platformLabel} direct peers.

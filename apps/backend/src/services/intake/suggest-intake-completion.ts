@@ -8,6 +8,7 @@
 import OpenAI from 'openai';
 import { discoverClientSocialFromWebsite } from './discover-client-social.js';
 import { validateSuggestedProfileIsClient } from './validate-client-profile.js';
+import { resolveModelForTask } from '../ai/model-router';
 
 let openaiClient: OpenAI | null = null;
 function getOpenAiClient(): OpenAI | null {
@@ -168,7 +169,7 @@ Missing keys to suggest (return JSON only with these keys): ${missingKeys.join('
 Return a single JSON object. No explanation.`;
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
+    model: resolveModelForTask('intake_completion'),
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },

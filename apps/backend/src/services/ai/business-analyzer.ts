@@ -10,6 +10,7 @@
 
 import OpenAI from 'openai';
 import { PrismaClient } from '@prisma/client';
+import { resolveModelForTask } from './model-router';
 
 const prisma = new PrismaClient();
 
@@ -21,6 +22,8 @@ function getOpenAiClient(): OpenAI | null {
   openaiClient = new OpenAI({ apiKey });
   return openaiClient;
 }
+
+const BUSINESS_ANALYZER_MODEL = resolveModelForTask('analysis_fast');
 
 export interface BusinessAnalysisInput {
   researchJobId: string;
@@ -75,7 +78,7 @@ export async function analyzeBusinessWithAI(
       throw new Error('OPENAI_API_KEY not configured');
     }
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: BUSINESS_ANALYZER_MODEL,
       messages: [
         {
           role: 'system',
@@ -114,7 +117,7 @@ export async function analyzeBusinessWithAI(
         contentOpportunities: parsed.contentOpportunities || null,
         rawAiResponse: parsed as any,
         promptUsed: prompt,
-        modelUsed: 'gpt-4o-mini',
+        modelUsed: BUSINESS_ANALYZER_MODEL,
         tokensUsed,
       },
     });

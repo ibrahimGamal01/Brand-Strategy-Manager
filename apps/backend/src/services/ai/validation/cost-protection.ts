@@ -27,20 +27,47 @@ export const COST_PROTECTION: CostProtectionConfig = {
 class CostTracker {
   private totalTokens = 0;
   private estimatedCostUSD = 0;
-  
-  // OpenAI pricing (as of 2024)
-  private readonly COST_PER_1K_TOKENS = {
-    'gpt-4o': 0.005,          // Input
-    'gpt-4o-output': 0.015,   // Output
-    'gpt-4o-mini': 0.00015,   // Input
-    'gpt-4o-mini-output': 0.0006 // Output
-  };
+
+  // Fallback pricing map; can be overridden with AI_MODEL_PRICING_JSON.
+  // JSON shape: { "model-name": { "input": 0.001, "output": 0.004 } }
+  private readonly COST_PER_1K_TOKENS = this.buildPricingMap();
+
+  private buildPricingMap(): Record<string, { input: number; output: number }> {
+    const defaults: Record<string, { input: number; output: number }> = {
+      'gpt-4o': { input: 0.005, output: 0.015 },
+      'gpt-4o-mini': { input: 0.00015, output: 0.0006 },
+    };
+
+    const raw = process.env.AI_MODEL_PRICING_JSON;
+    if (!raw) return defaults;
+    try {
+      const parsed = JSON.parse(raw) as Record<string, { input?: unknown; output?: unknown }>;
+      for (const [model, value] of Object.entries(parsed || {})) {
+        const input = Number(value?.input);
+        const output = Number(value?.output);
+        if (Number.isFinite(input) && Number.isFinite(output) && input >= 0 && output >= 0) {
+          defaults[model] = { input, output };
+        }
+      }
+    } catch (error) {
+      console.warn('[Cost] Failed to parse AI_MODEL_PRICING_JSON, using defaults');
+    }
+    return defaults;
+  }
+
+  private getModelPricing(model: string): { input: number; output: number } {
+    const direct = this.COST_PER_1K_TOKENS[model];
+    if (direct) return direct;
+    if (model.includes('mini') && this.COST_PER_1K_TOKENS['gpt-4o-mini']) {
+      return this.COST_PER_1K_TOKENS['gpt-4o-mini'];
+    }
+    return this.COST_PER_1K_TOKENS['gpt-4o'] || { input: 0.005, output: 0.015 };
+  }
 
   addUsage(model: string, inputTokens: number, outputTokens: number) {
-    const baseCost = this.COST_PER_1K_TOKENS[model as keyof typeof this.COST_PER_1K_TOKENS] || 0.005;
-    const outputCost = this.COST_PER_1K_TOKENS[`${model}-output` as keyof typeof this.COST_PER_1K_TOKENS] || 0.015;
+    const pricing = this.getModelPricing(model);
     
-    const cost = (inputTokens / 1000 * baseCost) + (outputTokens / 1000 * outputCost);
+    const cost = (inputTokens / 1000 * pricing.input) + (outputTokens / 1000 * pricing.output);
     
     this.totalTokens += (inputTokens + outputTokens);
     this.estimatedCostUSD += cost;

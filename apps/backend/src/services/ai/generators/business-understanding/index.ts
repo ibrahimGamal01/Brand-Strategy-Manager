@@ -12,6 +12,7 @@ import { validateContent } from '../../validation';
 import { COST_PROTECTION, costTracker, checkCostLimit } from '../../validation/cost-protection';
 import { GenerationResult, GenerationAttempt } from './types';
 import { generateMockBusinessUnderstanding } from './mock';
+import { resolveModelForTask } from '../../model-router';
 
 let openaiClient: OpenAI | null = null;
 function getOpenAiClient(): OpenAI | null {
@@ -23,6 +24,7 @@ function getOpenAiClient(): OpenAI | null {
 }
 
 const MAX_ATTEMPTS = 3;
+const BUSINESS_UNDERSTANDING_MODEL = resolveModelForTask('content_generation');
 
 /**
  * Generate Business Understanding section with validation loop
@@ -199,7 +201,7 @@ async function callOpenAI(
   }
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: BUSINESS_UNDERSTANDING_MODEL,
     messages,
     temperature: 0.7,
     max_tokens: Math.min(4000, COST_PROTECTION.maxTokensPerCall)
@@ -208,7 +210,7 @@ async function callOpenAI(
   // Track costs
   if (response.usage) {
     costTracker.addUsage(
-      'gpt-4o',
+      BUSINESS_UNDERSTANDING_MODEL,
       response.usage.prompt_tokens,
       response.usage.completion_tokens
     );

@@ -11,6 +11,7 @@ import { ValidationResult } from '../types/templates';
 import { COST_PROTECTION, costTracker, checkCostLimit } from '../validation/cost-protection';
 import { detectIndustry, applyIndustryModifier, IndustryContext } from '../prompts/industry-modifiers';
 import { postProcessContent } from './post-processor';
+import { resolveModelForTask } from '../model-router';
 
 // const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -48,7 +49,7 @@ export class BaseGenerator {
   constructor(config: GeneratorConfig) {
     this.config = config;
     this.maxAttempts = config.maxAttempts || 3;
-    this.model = config.model || 'gpt-4o';
+    this.model = resolveModelForTask('content_generation', config.model);
     this.temperature = config.temperature || 0.7;
   }
 

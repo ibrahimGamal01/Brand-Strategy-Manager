@@ -35,7 +35,6 @@ class BuyerJourneyGenerator extends BaseGenerator {
         'strategic_response'
       ],
       wordCount: { min: 800, max: 1500 },
-      model: 'gpt-4o',
       temperature: 0.7
     });
   }

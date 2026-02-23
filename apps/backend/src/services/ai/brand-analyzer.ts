@@ -1,5 +1,6 @@
 import { OpenAI } from 'openai';
 import { prisma } from '../../lib/prisma';
+import { resolveModelForTask } from './model-router';
 
 let openaiClient: OpenAI | null = null;
 function getOpenAiClient(): OpenAI | null {
@@ -9,6 +10,9 @@ function getOpenAiClient(): OpenAI | null {
   openaiClient = new OpenAI({ apiKey });
   return openaiClient;
 }
+
+const BRAND_ANALYSIS_MODEL = resolveModelForTask('analysis_quality');
+const BRAND_MENTION_MODEL = resolveModelForTask('analysis_fast');
 
 interface BrandMention {
   id: string;
@@ -63,7 +67,7 @@ Return detailed JSON with all fields.`;
     const openai = getOpenAiClient();
     if (!openai) throw new Error('OPENAI_API_KEY not configured');
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: BRAND_ANALYSIS_MODEL,
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
       temperature: 0.3,
@@ -80,7 +84,7 @@ Return detailed JSON with all fields.`;
         data: {
           brandMentionId: mentions[0].id,
           analysisType: 'OVERALL',
-          modelUsed: 'gpt-4o',
+          modelUsed: BRAND_ANALYSIS_MODEL,
           topic: 'Brand Sentiment Analysis',
           fullResponse: analysis,
           confidenceScore: analysis.confidence_score || 0.8,
@@ -121,7 +125,7 @@ Return JSON.`;
     const openai = getOpenAiClient();
     if (!openai) throw new Error('OPENAI_API_KEY not configured');
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini', // Cheaper for individual mentions
+      model: BRAND_MENTION_MODEL,
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
       temperature: 0.2,
@@ -134,7 +138,7 @@ Return JSON.`;
       data: {
         brandMentionId: mention.id,
         analysisType: 'CONTENT',
-        modelUsed: 'gpt-4o-mini',
+        modelUsed: BRAND_MENTION_MODEL,
         topic: mention.title || 'Brand Mention',
         fullResponse: analysis,
         confidenceScore: 0.75,

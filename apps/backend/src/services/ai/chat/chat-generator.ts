@@ -3,10 +3,15 @@ import { COST_PROTECTION, costTracker, checkCostLimit } from '../validation/cost
 import { buildChatRagContext, formatChatContextForLLM } from './chat-rag-context';
 import { buildChatSystemPrompt, buildChatUserPrompt } from './chat-prompt';
 import type { ChatBlock, ChatDesignOption } from '../../chat/chat-types';
+import { normalizeChatComponentPayload } from './chat-component-policy';
+import { resolveModelForTask } from '../model-router';
 
-const CHAT_MODEL = process.env.WORKSPACE_CHAT_MODEL || 'gpt-4o-mini';
 const BLOCKS_START = '<chat_blocks>';
 const BLOCKS_END = '</chat_blocks>';
+
+function wantsDesignOptions(userMessage: string): boolean {
+  return /\b(design|layout|ui|ux|mockup|theme|visual|variant|option)\b/i.test(userMessage || '');
+}
 
 function stripStructuredPayload(raw: string): string {
   let text = raw;
@@ -35,7 +40,12 @@ export type ChatStreamCallbacks = {
   onDone?: () => void;
 };
 
-function parseBlocksPayload(raw: string): { blocks: ChatBlock[]; designOptions: ChatDesignOption[]; followUp: string[] } {
+function parseBlocksPayload(raw: string): {
+  blocks: ChatBlock[];
+  designOptions: ChatDesignOption[];
+  followUp: string[];
+  componentPlan?: unknown;
+} {
   if (!raw) return { blocks: [], designOptions: [], followUp: [] };
   const trimmed = raw.trim();
   if (!trimmed) return { blocks: [], designOptions: [], followUp: [] };
@@ -46,7 +56,8 @@ function parseBlocksPayload(raw: string): { blocks: ChatBlock[]; designOptions: 
     const followUp = Array.isArray(parsed?.follow_up)
       ? (parsed.follow_up as unknown[]).filter((s): s is string => typeof s === 'string')
       : [];
-    return { blocks, designOptions, followUp };
+    const componentPlan = parsed?.component_plan ?? parsed?.componentPlan;
+    return { blocks, designOptions, followUp, componentPlan };
   } catch (error) {
     console.warn('[Chat Generator] Failed to parse blocks payload:', (error as Error).message);
     return { blocks: [], designOptions: [], followUp: [] };
@@ -60,6 +71,7 @@ export async function streamChatCompletion(params: {
   userMessage: string;
   callbacks?: ChatStreamCallbacks;
 }): Promise<ChatGenerationResult> {
+  const chatModel = resolveModelForTask('workspace_chat');
   const costCheck = checkCostLimit();
   if (!costCheck.allowed) {
     throw new Error(`Cost limit reached: ${costCheck.reason}`);
@@ -69,18 +81,30 @@ export async function streamChatCompletion(params: {
   const contextText = formatChatContextForLLM(chatContext);
 
   if (COST_PROTECTION.mockMode) {
-    const content = 'AI fallback mode is enabled. Add a valid OpenAI key to enable full chat responses.';
-    const mockBlocks: ChatBlock[] = [
-      {
-        type: 'source_list',
-        blockId: 'sources-fallback',
-        sources: [{ handle: 'brain_profile', note: 'Fallback mode active' }],
-      },
-    ];
-    params.callbacks?.onDelta?.(content);
-    params.callbacks?.onBlocks?.(mockBlocks, []);
+    const normalized = normalizeChatComponentPayload({
+      content: 'Pick a direction below and I will adapt the response.',
+      blocks: [
+        {
+          type: 'guided_question_card',
+          blockId: 'guided-mock',
+          title: 'Choose next step',
+          question: 'What do you want to produce first?',
+          options: [
+            { id: 'ideas', label: 'Content ideas' },
+            { id: 'voice', label: 'Brand voice direction' },
+            { id: 'calendar', label: '7-day content calendar' },
+          ],
+          allowFreeText: true,
+        },
+      ],
+      designOptions: [],
+      followUp: ['Compare options', 'Refine audience', 'Generate a draft preview'],
+      userMessage: params.userMessage,
+    });
+    params.callbacks?.onDelta?.(normalized.content);
+    params.callbacks?.onBlocks?.(normalized.blocks, normalized.designOptions);
     params.callbacks?.onDone?.();
-    return { content, blocks: mockBlocks, designOptions: [], followUp: [] };
+    return normalized;
   }
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
@@ -89,10 +113,10 @@ export async function streamChatCompletion(params: {
   ];
 
   const response = (await openai.chat.completions.create({
-    model: CHAT_MODEL,
+    model: chatModel,
     messages,
-    temperature: 0.4,
-    max_tokens: Math.min(1500, COST_PROTECTION.maxTokensPerCall),
+    temperature: 0.25,
+    max_tokens: Math.min(900, COST_PROTECTION.maxTokensPerCall),
     stream: true,
     stream_options: { include_usage: true },
   })) as unknown as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>;
@@ -150,9 +174,12 @@ export async function streamChatCompletion(params: {
     payload = payload.slice(0, endIndex);
   }
 
-  const { blocks, designOptions, followUp } = parseBlocksPayload(payload);
-  let finalBlocks = blocks;
-  let finalDesigns = designOptions;
+  const parsedPayload = parseBlocksPayload(payload);
+  const allowDesignOptions = wantsDesignOptions(params.userMessage);
+  let finalBlocks = parsedPayload.blocks;
+  let finalDesigns = allowDesignOptions ? parsedPayload.designOptions : [];
+  let finalFollowUp = parsedPayload.followUp;
+  let finalComponentPlan = parsedPayload.componentPlan;
   if (finalBlocks.length === 0) {
     const fenceMatch = content.match(/```json\s*({[\s\S]*?})\s*```/);
     if (fenceMatch) {
@@ -160,18 +187,29 @@ export async function streamChatCompletion(params: {
         const parsed = JSON.parse(fenceMatch[1]);
         finalBlocks = Array.isArray(parsed?.blocks) ? parsed.blocks : [];
         finalDesigns = Array.isArray(parsed?.designOptions) ? parsed.designOptions : [];
+        finalFollowUp = Array.isArray(parsed?.follow_up)
+          ? parsed.follow_up.filter((entry: unknown): entry is string => typeof entry === 'string')
+          : finalFollowUp;
+        finalComponentPlan = parsed?.component_plan ?? parsed?.componentPlan;
       } catch {
         // ignore
       }
     }
   }
-  params.callbacks?.onBlocks?.(finalBlocks, finalDesigns);
+  const normalized = normalizeChatComponentPayload({
+    content: cleanedContent.trim(),
+    blocks: finalBlocks,
+    designOptions: finalDesigns,
+    followUp: finalFollowUp,
+    componentPlan: finalComponentPlan,
+    userMessage: params.userMessage,
+  });
+  params.callbacks?.onBlocks?.(normalized.blocks, normalized.designOptions);
   params.callbacks?.onDone?.();
 
   if (usage?.prompt_tokens && usage?.completion_tokens) {
-    costTracker.addUsage(CHAT_MODEL, usage.prompt_tokens, usage.completion_tokens);
+    costTracker.addUsage(chatModel, usage.prompt_tokens, usage.completion_tokens);
   }
 
-  return { content: cleanedContent.trim(), blocks: finalBlocks, designOptions: finalDesigns, followUp };
+  return normalized;
 }
-

@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import { resolveModelForTask } from './model-router';
 
 let openaiClient: OpenAI | null = null;
 function getOpenAiClient(): OpenAI | null {
@@ -8,6 +9,8 @@ function getOpenAiClient(): OpenAI | null {
   openaiClient = new OpenAI({ apiKey });
   return openaiClient;
 }
+
+const COMPETITOR_EVALUATION_MODEL = resolveModelForTask('analysis_quality');
 
 export interface CompetitorCandidate {
     handleOrUrl: string;
@@ -61,7 +64,7 @@ export async function evaluateCompetitorRelevance(
         }
         const completion = await openai.chat.completions.create({
             messages: [{ role: 'system', content: prompt }],
-            model: 'gpt-4o',
+            model: COMPETITOR_EVALUATION_MODEL,
             response_format: { type: "json_object" },
         });
 

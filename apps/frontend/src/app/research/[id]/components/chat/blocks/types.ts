@@ -53,9 +53,22 @@ export type ActionButtonsBlock = BaseBlock & {
     label: string;
     sublabel?: string;
     href?: string;
-    action?: 'open_url' | 'open_module' | 'run_intel' | 'run_orchestrator';
+    action?:
+      | 'open_url'
+      | 'open_module'
+      | 'run_intel'
+      | 'run_orchestrator'
+      | 'run_intelligence'
+      | 'intel_crud'
+      | 'intel_create'
+      | 'intel_read'
+      | 'intel_update'
+      | 'intel_delete'
+      | 'intel_clear';
     intent?: 'primary' | 'secondary' | 'ghost';
     icon?: string;
+    method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+    payload?: Record<string, unknown>;
   }>;
 };
 
@@ -121,6 +134,94 @@ export type BrandVoiceMeterBlock = BaseBlock & {
   summary?: string;
 };
 
+export type ProgressStepperBlock = BaseBlock & {
+  type: 'progress_stepper';
+  currentStep: number;
+  totalSteps: number;
+  phase?: string;
+  status?: string;
+};
+
+export type GuidedQuestionCardBlock = BaseBlock & {
+  type: 'guided_question_card';
+  question: string;
+  hint?: string;
+  options: Array<{ id: string; label: string; description?: string }>;
+  allowFreeText?: boolean;
+};
+
+export type ChoiceChipsBlock = BaseBlock & {
+  type: 'choice_chips';
+  prompt: string;
+  selectionMode?: 'single' | 'multiple';
+  choices: Array<{ id: string; label: string; description?: string }>;
+  allowSkip?: boolean;
+  allowUnsure?: boolean;
+};
+
+export type OptionCardsBlock = BaseBlock & {
+  type: 'option_cards';
+  prompt: string;
+  selectionMode?: 'single' | 'multiple';
+  cards: Array<{ id: string; title: string; summary?: string; tags?: string[] }>;
+};
+
+export type RecapEditorBlock = BaseBlock & {
+  type: 'recap_editor';
+  summary?: string;
+  items: Array<{ key: string; label: string; value: string; editable?: boolean }>;
+  ctaLabel?: string;
+};
+
+export type QuickReplyBarBlock = BaseBlock & {
+  type: 'quick_reply_bar';
+  suggestions: string[];
+};
+
+export type CompareModesBlock = BaseBlock & {
+  type: 'compare_modes';
+  modes: Array<{ id: string; title: string; summary: string; pros?: string[]; cons?: string[] }>;
+};
+
+export type ScenarioSimulatorBlock = BaseBlock & {
+  type: 'scenario_simulator';
+  scenarioPrompt?: string;
+  scenarios: Array<{ id: string; label: string; impact: string; risk?: string }>;
+};
+
+export type ConstraintBuilderBlock = BaseBlock & {
+  type: 'constraint_builder';
+  prompt?: string;
+  constraints: Array<{ id: string; label: string; description?: string; selected?: boolean }>;
+  allowCustom?: boolean;
+};
+
+export type ExamplesGalleryBlock = BaseBlock & {
+  type: 'examples_gallery';
+  examples: Array<{ id: string; title: string; summary?: string; source?: string }>;
+};
+
+export type TradeoffMatrixBlock = BaseBlock & {
+  type: 'tradeoff_matrix';
+  criteria: string[];
+  options: Array<{ id: string; label: string; scores: number[]; summary?: string }>;
+};
+
+export type DraftPreviewCardBlock = BaseBlock & {
+  type: 'draft_preview_card';
+  preview: string;
+  checks?: string[];
+  primaryActionLabel?: string;
+  secondaryActionLabel?: string;
+};
+
+export type ConfidenceCheckBlock = BaseBlock & {
+  type: 'confidence_check';
+  assumption: string;
+  confidence: number;
+  options?: string[];
+};
+
 export type ChatBlock =
   | TableBlock
   | MetricCardsBlock
@@ -137,6 +238,19 @@ export type ChatBlock =
   | MoodboardBlock
   | SwotBlock
   | BrandVoiceMeterBlock
+  | ProgressStepperBlock
+  | GuidedQuestionCardBlock
+  | ChoiceChipsBlock
+  | OptionCardsBlock
+  | RecapEditorBlock
+  | QuickReplyBarBlock
+  | CompareModesBlock
+  | ScenarioSimulatorBlock
+  | ConstraintBuilderBlock
+  | ExamplesGalleryBlock
+  | TradeoffMatrixBlock
+  | DraftPreviewCardBlock
+  | ConfidenceCheckBlock
   | BaseBlock;
 
 export type ChatDesignOption = {

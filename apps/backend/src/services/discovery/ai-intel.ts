@@ -10,6 +10,7 @@
  */
 
 import OpenAI from 'openai';
+import { resolveModelForTask } from '../ai/model-router';
 
 let openaiClient: OpenAI | null = null;
 function getOpenAiClient(): OpenAI | null {
@@ -19,6 +20,9 @@ function getOpenAiClient(): OpenAI | null {
   openaiClient = new OpenAI({ apiKey });
   return openaiClient;
 }
+
+const AI_INTEL_MODEL_QUALITY = resolveModelForTask('analysis_quality');
+const AI_INTEL_MODEL_FAST = resolveModelForTask('analysis_fast');
 
 export interface TargetIntel {
   handle: string;
@@ -90,7 +94,7 @@ Return JSON:
     const openai = getOpenAiClient();
     if (!openai) throw new Error('OPENAI_API_KEY not configured');
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: AI_INTEL_MODEL_QUALITY,
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
       temperature: 0.3, // Lower temperature for factual extraction
@@ -153,7 +157,7 @@ Be specific and insightful. Return ONLY valid JSON.`;
   const openai = getOpenAiClient();
   if (!openai) throw new Error('OPENAI_API_KEY not configured');
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: AI_INTEL_MODEL_QUALITY,
     messages: [{ role: 'user', content: prompt }],
     response_format: { type: 'json_object' },
     temperature: 0.5,
@@ -226,7 +230,7 @@ Return ONLY valid JSON.`;
   const openai = getOpenAiClient();
   if (!openai) throw new Error('OPENAI_API_KEY not configured');
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: AI_INTEL_MODEL_QUALITY,
     messages: [{ role: 'user', content: prompt }],
     response_format: { type: 'json_object' },
     temperature: 0.7,
@@ -245,7 +249,7 @@ Return ONLY valid JSON.`;
     console.log(`[AIIntel] Only got ${competitors.length}, need ${minCount}. Retrying...`);
     // Retry with more emphasis
     const retryResponse = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: AI_INTEL_MODEL_QUALITY,
       messages: [
         { role: 'user', content: prompt },
         { role: 'assistant', content: content },
@@ -289,7 +293,7 @@ Use REAL Instagram handles for top creators. Return ONLY valid JSON.`;
   const openai = getOpenAiClient();
   if (!openai) throw new Error('OPENAI_API_KEY not configured');
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
+    model: AI_INTEL_MODEL_FAST,
     messages: [{ role: 'user', content: prompt }],
     response_format: { type: 'json_object' },
     temperature: 0.5,

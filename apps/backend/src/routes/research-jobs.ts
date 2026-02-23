@@ -53,6 +53,7 @@ import {
 import { syncBrainGoals } from '../services/intake/brain-intake-utils';
 import { runAiAnalysisForJob } from '../services/orchestration/run-job-media-analysis';
 import { getLatestMediaAnalysisRunSummary } from '../services/orchestration/media-analysis-runs';
+import { resolveModelForTask } from '../services/ai/model-router';
 
 const router = Router();
 let openaiClient: OpenAI | null = null;
@@ -1102,7 +1103,7 @@ async function generateBrainCommandReply(instruction: string, commandType: strin
   if (!BRAIN_COMMAND_REPLY_ENABLED || !openai) return null;
   try {
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: resolveModelForTask('brain_command'),
       messages: [
         {
           role: 'system',

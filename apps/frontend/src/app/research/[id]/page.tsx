@@ -110,11 +110,9 @@ export default function ResearchPage() {
   const jobId = params.id as string;
   const moduleParam = searchParams.get('module');
 
-  const [activeModule, setActiveModule] = useState<BatWorkspaceModuleKey>(
-    isWorkspaceModule(moduleParam) ? moduleParam : 'brain'
-  );
   const [isContinuing, setIsContinuing] = useState(false);
   const [brainPayload, setBrainPayload] = useState<Record<string, unknown> | null>(null);
+  const activeModule: BatWorkspaceModuleKey = isWorkspaceModule(moduleParam) ? moduleParam : 'brain';
 
   const { events, connectionState, isSseHealthy } = useResearchJobEvents(jobId);
   const { data: job, isLoading, error, refetch } = useResearchJob(jobId, { sseHealthy: isSseHealthy });
@@ -133,16 +131,9 @@ export default function ResearchPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId]);
 
-  useEffect(() => {
-    if (isWorkspaceModule(moduleParam)) {
-      setActiveModule(moduleParam);
-    }
-  }, [moduleParam]);
-
   const setModule = useCallback(
     (nextModule: BatWorkspaceModuleKey) => {
       if (nextModule === activeModule) return;
-      setActiveModule(nextModule);
       const nextParams = new URLSearchParams(searchParamsString);
       if (nextParams.get('module') === nextModule) return;
       nextParams.set('module', nextModule);

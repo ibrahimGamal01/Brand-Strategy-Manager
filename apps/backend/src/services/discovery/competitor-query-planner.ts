@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { isOpenAiConfiguredForRealMode } from '../../lib/runtime-preflight';
+import { resolveModelForTask } from '../ai/model-router';
 
 type SupportedPlatform = 'instagram' | 'tiktok';
 
@@ -390,7 +391,7 @@ export async function buildCompetitorDiscoveryPlan(
   }
 
   try {
-    const model = process.env.OPENAI_COMPETITOR_PLANNER_MODEL || process.env.OPENAI_COMPETITOR_MODEL || 'gpt-4o-mini';
+    const model = resolveModelForTask('competitor_planner');
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const prompt = `
 You are an expert competitor discovery planner for social media research.

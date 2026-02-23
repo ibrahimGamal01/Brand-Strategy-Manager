@@ -24,12 +24,14 @@ import OpenAI from 'openai';
 import { Prisma, PrismaClient, AiQuestionType } from '@prisma/client';
 import { emitResearchJobEvent } from '../social/research-job-events';
 import { isAiFallbackEnabled, isOpenAiConfiguredForRealMode } from '../../lib/runtime-preflight';
+import { resolveModelForTask } from './model-router';
 
 const prisma = new PrismaClient();
 let openaiClient: OpenAI | null = null;
 let mockModeBannerLogged = false;
 const AI_AUTH_FAILED_PREFIX = 'AI_AUTH_FAILED';
 const AI_CONFIG_INVALID_PREFIX = 'AI_CONFIG_INVALID';
+const DEEP_QUESTION_MODEL = resolveModelForTask('analysis_quality');
 
 function getOpenAiClient(): OpenAI | null {
   if (openaiClient) return openaiClient;
@@ -737,7 +739,7 @@ ${context.rawSearchContext ? `\nWeb Research:\n${context.rawSearchContext}` : ''
       );
     }
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: DEEP_QUESTION_MODEL,
       messages: [
         { role: 'system', content: HARSH_SYSTEM_PREFIX + promptConfig.systemPrompt },
         { role: 'user', content: fullPrompt },
@@ -764,7 +766,7 @@ ${context.rawSearchContext ? `\nWeb Research:\n${context.rawSearchContext}` : ''
       answerJson,
       tokensUsed,
       durationMs,
-      'gpt-4o'
+      DEEP_QUESTION_MODEL
     );
     
     console.log(`[AIQuestions] ${questionType}: ${tokensUsed} tokens, ${durationMs}ms`);

@@ -3,6 +3,12 @@ import OpenAI from 'openai';
 import dotenv from 'dotenv';
 import { APIPromise } from 'openai/core';
 import { ChatCompletion, ChatCompletionCreateParams, ChatCompletionChunk } from 'openai/resources/chat/completions';
+import {
+  isAiModelTask,
+  resolveModelForTask,
+  resolveModelFromLegacy,
+  resolveProviderForTask,
+} from './model-router';
 
 // Ensure env vars are loaded
 dotenv.config();
@@ -80,16 +86,47 @@ class EnhancedOpenAIClient {
     }
   };
 
+  private readTaskHint(params: ChatCompletionCreateParams): string | null {
+    const direct = (params as any)?.batTask;
+    if (typeof direct === 'string' && direct.trim()) return direct.trim();
+    const metadataTask = (params as any)?.metadata?.batTask;
+    if (typeof metadataTask === 'string' && metadataTask.trim()) return metadataTask.trim();
+    return null;
+  }
+
+  private applyModelRouting(params: ChatCompletionCreateParams): ChatCompletionCreateParams {
+    const requestedModel = String((params as any)?.model || '');
+    const rawTask = this.readTaskHint(params);
+    const task = rawTask && isAiModelTask(rawTask) ? rawTask : null;
+
+    if (task) {
+      const provider = resolveProviderForTask(task);
+      if (provider !== 'openai') {
+        console.warn(`[OpenAI] Unsupported provider "${provider}" for task "${task}", defaulting to OpenAI`);
+      }
+    }
+
+    const model = task
+      ? resolveModelForTask(task, requestedModel || undefined)
+      : resolveModelFromLegacy(requestedModel);
+    const { batTask, ...rest } = params as any;
+    return {
+      ...rest,
+      model,
+    };
+  }
+
   private async createChatCompletion(params: ChatCompletionCreateParams): Promise<ChatCompletion | ChatCompletionChunk> {
+    const routedParams = this.applyModelRouting(params);
     const fallback = this.getFallbackClient();
     if (this.useFallback && fallback) {
-      return fallback.chat.completions.create(params) as any;
+      return fallback.chat.completions.create(routedParams) as any;
     }
 
     let lastError: any;
     for (let attempt = 0; attempt <= MAX_429_RETRIES_PRIMARY; attempt++) {
       try {
-        return await this.getPrimaryClient().chat.completions.create(params) as any;
+        return await this.getPrimaryClient().chat.completions.create(routedParams) as any;
       } catch (error: any) {
         lastError = error;
         const isRateLimit = error?.status === 429;
@@ -118,7 +155,7 @@ class EnhancedOpenAIClient {
         console.warn(`[OpenAI] Primary key failed (${lastError?.code || lastError?.status}). Switching to fallback...`);
       }
       this.useFallback = true;
-      return fallback.chat.completions.create(params) as any;
+      return fallback.chat.completions.create(routedParams) as any;
     }
 
     throw lastError;

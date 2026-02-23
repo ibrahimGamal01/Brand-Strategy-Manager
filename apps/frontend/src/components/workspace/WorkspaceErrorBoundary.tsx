@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 interface WorkspaceErrorBoundaryProps {
   children: React.ReactNode;
   title?: string;
+  resetKey?: string | number;
 }
 
 interface WorkspaceErrorBoundaryState {
@@ -30,8 +31,14 @@ export class WorkspaceErrorBoundary extends React.Component<WorkspaceErrorBounda
     };
   }
 
-  componentDidCatch(error: Error) {
-    console.error('[BAT Workspace] Module render failure:', error);
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('[BAT Workspace] Module render failure:', error, errorInfo.componentStack);
+  }
+
+  componentDidUpdate(prevProps: WorkspaceErrorBoundaryProps) {
+    if (this.state.hasError && prevProps.resetKey !== this.props.resetKey) {
+      this.setState({ hasError: false, errorMessage: null });
+    }
   }
 
   render() {

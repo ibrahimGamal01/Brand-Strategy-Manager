@@ -1,5 +1,6 @@
 import { OpenAI } from 'openai';
 import { prisma } from '../../lib/prisma';
+import { resolveModelForTask } from './model-router';
 
 let openaiClient: OpenAI | null = null;
 function getOpenAiClient(): OpenAI | null {
@@ -9,6 +10,8 @@ function getOpenAiClient(): OpenAI | null {
   openaiClient = new OpenAI({ apiKey });
   return openaiClient;
 }
+
+const COMPETITOR_ANALYZER_MODEL = resolveModelForTask('analysis_quality');
 
 /**
  * Competitor Gap Analysis
@@ -84,7 +87,7 @@ Return comprehensive JSON analysis.`;
       throw new Error('OPENAI_API_KEY not configured');
     }
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: COMPETITOR_ANALYZER_MODEL,
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
       temperature: 0.4,
@@ -171,7 +174,7 @@ Return JSON.`;
       throw new Error('OPENAI_API_KEY not configured');
     }
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: COMPETITOR_ANALYZER_MODEL,
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
       temperature: 0.3,

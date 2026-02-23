@@ -34,7 +34,6 @@ class PlatformStrategyGenerator extends BaseGenerator {
         'kpis'
       ],
       wordCount: { min: 800, max: 1500 },
-      model: 'gpt-4o',
       temperature: 0.7
     });
   }

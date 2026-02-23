@@ -1,6 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
-import { Badge } from '@/components/ui/badge';
+import { Badge, type BadgeProps } from '@/components/ui/badge';
 import type { ChatMessage } from './types';
 import type { ChatBlock } from './blocks/types';
 import { ChatMessageItem } from './ChatMessageItem';
@@ -18,8 +17,10 @@ interface ChatThreadProps {
   onBlockView: (message: ChatMessage, block: ChatBlock) => void;
   onBlockPin: (message: ChatMessage, block: ChatBlock) => void;
   onBlockUnpin: (message: ChatMessage, block: ChatBlock) => void;
+  onBlockFormSubmit?: (message: ChatMessage, block: ChatBlock, answer: string) => void;
   onSelectDesign: (message: ChatMessage, designId: string) => void;
   onAttachmentView?: (message: ChatMessage, attachmentId: string, meta?: Record<string, unknown>) => void;
+  onActionIntent?: (action?: string, href?: string, payload?: Record<string, unknown>) => void;
   isStreaming?: boolean;
   connectionStatus?: string;
   researchJobId: string;
@@ -37,8 +38,10 @@ export function ChatThread({
   onBlockView,
   onBlockPin,
   onBlockUnpin,
+  onBlockFormSubmit,
   onSelectDesign,
   onAttachmentView,
+  onActionIntent,
   isStreaming,
   connectionStatus,
   researchJobId,
@@ -56,15 +59,26 @@ export function ChatThread({
 
   const headerTime = sessionUpdatedAt ? new Date(sessionUpdatedAt).toLocaleString() : null;
   const connectionLabel = connectionStatus || 'idle';
+  const realtimeBadgeVariant: BadgeProps['variant'] =
+    connectionLabel === 'open'
+      ? 'success'
+      : connectionLabel === 'reconnecting' || connectionLabel === 'connecting'
+        ? 'warning'
+        : connectionLabel === 'error'
+          ? 'destructive'
+          : 'outline';
 
   return (
-    <section className="flex h-full flex-col gap-3">
-      <div className="rounded-xl border border-border/70 bg-card/60 shadow-sm flex flex-col overflow-hidden" style={{ minHeight: 0, flex: '1 1 auto' }}>
+    <section className="flex h-full flex-col">
+      <div
+        className="flex flex-col flex-1 overflow-hidden"
+        style={{ minHeight: 0 }}
+      >
         {/* Session header */}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3 flex-shrink-0">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/30 bg-background/60 backdrop-blur-md px-6 py-3 flex-shrink-0 z-10">
           <div>
-            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Active Thread</p>
-            <h3 className="text-sm font-semibold">{sessionTitle || 'Untitled session'}</h3>
+            <p className="text-[10px] uppercase tracking-widest font-medium text-emerald-500">Active Thread</p>
+            <h3 className="text-sm font-semibold mt-0.5">{sessionTitle || 'Untitled session'}</h3>
             {headerTime ? (
               <p className="text-[11px] text-muted-foreground">Last active: {headerTime}</p>
             ) : null}
@@ -79,7 +93,7 @@ export function ChatThread({
             >
               {isStreaming ? 'thinking' : 'idle'}
             </Badge>
-            <Badge variant="outline" className="text-[10px] uppercase">
+            <Badge variant={realtimeBadgeVariant} className="text-[10px] uppercase">
               {connectionLabel}
             </Badge>
           </div>
@@ -88,103 +102,86 @@ export function ChatThread({
         {/* Messages */}
         <div
           ref={containerRef}
-          className="flex-1 space-y-3 overflow-y-auto px-4 py-3 custom-scrollbar"
+          className="flex-1 space-y-6 overflow-y-auto bg-[linear-gradient(180deg,rgba(16,185,129,0.01)_0%,rgba(14,165,233,0.01)_100%)] px-6 py-6 custom-scrollbar relative"
           style={{ minHeight: 0 }}
         >
           {displayMessages.length === 0 ? (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="flex flex-col items-center justify-center py-8 text-center"
-            >
-              <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 text-[18px] font-bold text-white shadow-lg">
+            <div className="flex flex-col items-center justify-center py-10 lg:py-16 text-center h-full max-w-2xl mx-auto px-4">
+              <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 to-cyan-600 text-[16px] font-bold text-white shadow-xl ring-2 ring-emerald-500/20 ring-offset-4 ring-offset-background">
                 BAT
               </div>
-              <h4 className="text-sm font-semibold text-foreground">BAT Intelligence</h4>
-              <p className="mt-1 max-w-[240px] text-xs text-muted-foreground">
-                Your brand strategy co-pilot. Start with one of these or type anything below.
+              <h4 className="text-lg font-bold tracking-tight text-foreground">Intelligence Studio</h4>
+              <p className="mt-2 text-sm text-muted-foreground max-w-md">
+                Your AI co-pilot for brand strategy. Select a starting point below or type your own question.
               </p>
 
-              <div className="mt-5 w-full max-w-sm space-y-2">
+              <div className="mt-10 grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
                 {[
-                  { q: "What is my brand's biggest competitive gap?", icon: '🔭' },
-                  { q: 'Show me my top 3 competitor insights', icon: '⚔️' },
-                  { q: 'What content should I create this week?', icon: '✨' },
+                  { q: 'Identify my top 3 competitors based on recent performance.', icon: '🔭' },
+                  { q: 'Show me my brand’s biggest engagement gap vs competitors.', icon: '⚔️' },
+                  { q: 'What content themes should I prioritize this week?', icon: '✨' },
+                  { q: 'Draft a brand voice alignment guide.', icon: '✍️' },
                 ].map((card) => (
                   <button
                     key={card.q}
                     onClick={() => onDraftChange(card.q)}
-                    className="flex w-full items-center gap-3 rounded-xl border border-dashed border-border/60 bg-background/60 px-4 py-3 text-left text-xs text-foreground transition-all hover:border-primary/40 hover:bg-primary/5"
+                    className="group relative flex flex-col items-start gap-2 h-full rounded-2xl border border-border/50 bg-card/40 p-4 text-left transition-all hover:border-emerald-500/30 hover:bg-emerald-500/5 hover:shadow-md"
                   >
-                    <span className="text-base">{card.icon}</span>
-                    <span>{card.q}</span>
+                    <span className="text-xl bg-background rounded-full p-1.5 shadow-sm border border-border/40 group-hover:scale-110 transition-transform">{card.icon}</span>
+                    <span className="text-[13px] font-medium leading-relaxed text-foreground/90 group-hover:text-emerald-600 dark:group-hover:text-emerald-400">{card.q}</span>
                   </button>
                 ))}
               </div>
-
-              <p className="mt-5 text-[10px] text-muted-foreground/60">
-                Type / for commands · Ctrl+Enter to send
-              </p>
-            </motion.div>
+            </div>
           ) : (
-            <AnimatePresence initial={false}>
-              {displayMessages.map((message, index) => (
-                <motion.div
-                  key={message.id}
-                  layout
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 12 }}
-                  transition={{ duration: 0.2, delay: index === displayMessages.length - 1 ? 0 : 0 }}
-                >
+            <>
+              {displayMessages.map((message) => (
+                <div key={message.id}>
                   <ChatMessageItem
                     message={message}
                     pinnedBlockIds={pinnedBlockIds}
                     onBlockView={onBlockView}
                     onBlockPin={onBlockPin}
                     onBlockUnpin={onBlockUnpin}
+                    onBlockFormSubmit={onBlockFormSubmit}
                     onSelectDesign={onSelectDesign}
                     onAttachmentView={onAttachmentView}
                     onComposerFill={onDraftChange}
+                    onActionIntent={onActionIntent}
                     researchJobId={researchJobId}
                   />
-                </motion.div>
+                </div>
               ))}
-              {/* Streaming cursor indicator */}
-              {isStreaming && (
-                <motion.div
-                  key="streaming-cursor"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="flex items-center gap-2 px-4 py-2"
-                >
-                  <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 text-[10px] font-bold text-white">
-                    BAT
+              {isStreaming ? (
+                <div className="flex items-start gap-4 my-2 px-2">
+                  <div className="flex flex-shrink-0 flex-col items-center pt-0.5">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-cyan-600 text-[10px] font-bold tracking-wider text-white shadow-sm ring-1 ring-emerald-500/20">
+                      BAT
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1">
-                    {[0, 0.15, 0.3].map((delay, i) => (
-                      <motion.div
-                        key={i}
-                        className="h-2 w-2 rounded-full bg-emerald-500"
-                        animate={{ y: [0, -4, 0] }}
-                        transition={{ repeat: Infinity, duration: 0.6, delay }}
-                      />
-                    ))}
+                  <div className="flex flex-1 flex-col justify-center pt-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="h-2 w-2 animate-bounce rounded-full bg-emerald-500/60 [animation-delay:-0.3s]" />
+                      <span className="h-2 w-2 animate-bounce rounded-full bg-emerald-500/80 [animation-delay:-0.15s]" />
+                      <span className="h-2 w-2 animate-bounce rounded-full bg-emerald-500" />
+                    </div>
                   </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+                </div>
+              ) : null}
+            </>
           )}
         </div>
       </div>
 
-      <ChatComposer
-        value={draft}
-        onChange={onDraftChange}
-        onSend={onSend}
-        isStreaming={isStreaming}
-        researchJobId={researchJobId}
-      />
+      <div className="flex-shrink-0 border-t border-border/40 bg-background/80 backdrop-blur-sm p-4">
+        <ChatComposer
+          value={draft}
+          onChange={onDraftChange}
+          onSend={onSend}
+          isStreaming={isStreaming}
+          researchJobId={researchJobId}
+        />
+      </div>
     </section>
   );
 }

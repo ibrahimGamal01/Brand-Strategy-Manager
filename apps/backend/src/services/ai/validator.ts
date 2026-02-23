@@ -1,4 +1,5 @@
 import { openai } from './openai-client';
+import { resolveModelForTask } from './model-router';
 
 // const openai = new OpenAI({
 //   apiKey: process.env.OPENAI_API_KEY,
@@ -10,6 +11,9 @@ export interface ValidationResult {
   issues: string[];
   confidence: number;
 }
+
+const VALIDATION_MODEL_QUALITY = resolveModelForTask('analysis_quality');
+const VALIDATION_MODEL_FAST = resolveModelForTask('validation_fast');
 
 /**
  * AI Validation Layer
@@ -44,7 +48,7 @@ Return JSON:
 
   try {
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: VALIDATION_MODEL_QUALITY,
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
       temperature: 0.1, // Low temp for consistent validation
@@ -93,7 +97,7 @@ Return JSON with cleaned posts array and issues list.`;
 
   try {
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini', // Use mini for batch validation (cheaper)
+      model: VALIDATION_MODEL_FAST,
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
       temperature: 0,
@@ -140,7 +144,7 @@ Return JSON with cleaned suggestions array, marking invalid ones.`;
 
   try {
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: VALIDATION_MODEL_QUALITY,
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
       temperature: 0.2,
@@ -190,7 +194,7 @@ Return JSON validating each field.`;
 
   try {
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: VALIDATION_MODEL_FAST,
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
       temperature: 0,

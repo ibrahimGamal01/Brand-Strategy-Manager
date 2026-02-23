@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-type ChatSocketStatus = 'idle' | 'connecting' | 'open' | 'closed' | 'error';
+type ChatSocketStatus = 'idle' | 'connecting' | 'open' | 'reconnecting' | 'closed' | 'error';
 
 export type ChatSocketEvent = Record<string, unknown> & { type: string };
 
@@ -23,7 +23,8 @@ export function useChatSocket({ researchJobId, sessionId, onEvent }: UseChatSock
   const [status, setStatus] = useState<ChatSocketStatus>('idle');
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<number | null>(null);
-  const retryCountRef = useRef(0);
+  const reconnectAttemptRef = useRef(0);
+  const connectionIdRef = useRef(0);
   const mountedRef = useRef(false);
   const onEventRef = useRef(onEvent);
 
@@ -38,23 +39,37 @@ export function useChatSocket({ researchJobId, sessionId, onEvent }: UseChatSock
   }, []);
 
   const connect = useCallback(function connectSocket() {
-    if (!researchJobId) return;
+    if (!researchJobId || !mountedRef.current) return;
+    if (reconnectRef.current) {
+      window.clearTimeout(reconnectRef.current);
+      reconnectRef.current = null;
+    }
+    const connectionId = connectionIdRef.current + 1;
+    connectionIdRef.current = connectionId;
     if (socketRef.current) {
+      // Clear stale handlers before closing so session switches do not trigger reconnect loops.
+      socketRef.current.onopen = null;
+      socketRef.current.onmessage = null;
+      socketRef.current.onerror = null;
+      socketRef.current.onclose = null;
       socketRef.current.close();
+      socketRef.current = null;
     }
     const url = buildWsUrl(researchJobId);
     const socket = new WebSocket(url);
     socketRef.current = socket;
-    setStatus('connecting');
+    setStatus(reconnectAttemptRef.current > 0 ? 'reconnecting' : 'connecting');
 
     socket.onopen = () => {
-      retryCountRef.current = 0;
+      if (connectionIdRef.current !== connectionId || socketRef.current !== socket) return;
+      reconnectAttemptRef.current = 0;
       setStatus('open');
       // Only send the explicitly requested sessionId; avoid auto-switching to latest.
-      sendRaw({ type: 'AUTH', researchJobId, sessionId: sessionId || undefined });
+      socket.send(JSON.stringify({ type: 'AUTH', researchJobId, sessionId: sessionId || undefined }));
     };
 
     socket.onmessage = (event) => {
+      if (connectionIdRef.current !== connectionId || socketRef.current !== socket) return;
       try {
         const data = JSON.parse(event.data);
         onEventRef.current(data);
@@ -64,29 +79,47 @@ export function useChatSocket({ researchJobId, sessionId, onEvent }: UseChatSock
     };
 
     socket.onerror = () => {
+      if (connectionIdRef.current !== connectionId || socketRef.current !== socket) return;
       setStatus('error');
     };
 
     socket.onclose = () => {
-      setStatus('closed');
-      if (!mountedRef.current) return;
-      const retryCount = retryCountRef.current + 1;
-      retryCountRef.current = retryCount;
+      if (connectionIdRef.current !== connectionId || socketRef.current !== socket) return;
+      socketRef.current = null;
+      if (!mountedRef.current) {
+        setStatus('closed');
+        return;
+      }
+      const retryCount = reconnectAttemptRef.current + 1;
+      reconnectAttemptRef.current = retryCount;
       const delay = Math.min(5000, 500 + retryCount * 500);
-      if (reconnectRef.current) window.clearTimeout(reconnectRef.current);
+      setStatus('reconnecting');
+      if (reconnectRef.current) {
+        window.clearTimeout(reconnectRef.current);
+      }
       reconnectRef.current = window.setTimeout(() => {
         connectSocket();
       }, delay);
     };
-  }, [researchJobId, sessionId, sendRaw]);
+  }, [researchJobId, sessionId]);
 
   useEffect(() => {
     mountedRef.current = true;
     connect();
     return () => {
       mountedRef.current = false;
-      if (reconnectRef.current) window.clearTimeout(reconnectRef.current);
-      socketRef.current?.close();
+      if (reconnectRef.current) {
+        window.clearTimeout(reconnectRef.current);
+        reconnectRef.current = null;
+      }
+      if (socketRef.current) {
+        socketRef.current.onopen = null;
+        socketRef.current.onmessage = null;
+        socketRef.current.onerror = null;
+        socketRef.current.onclose = null;
+        socketRef.current.close();
+        socketRef.current = null;
+      }
     };
   }, [connect]);
 
