@@ -7,6 +7,7 @@ type RuntimePreflightReport = {
     openai: boolean;
     apifyApi: boolean;
     apifyMediaDownloader: boolean;
+    scraplingWorker: boolean;
   };
   warnings: string[];
 };
@@ -43,6 +44,7 @@ export function validateRuntimePreflight(): RuntimePreflightReport {
   const openAiValid = isOpenAiKeyValid(process.env.OPENAI_API_KEY || '');
   const apifyApiValid = isApifyTokenValid(process.env.APIFY_API_TOKEN || '');
   const apifyMediaValid = isApifyTokenValid(process.env.APIFY_MEDIA_DOWNLOADER_TOKEN || '');
+  const scraplingWorker = String(process.env.SCRAPLING_WORKER_URL || '').trim().length > 0;
 
   const warnings: string[] = [];
   const errors: string[] = [];
@@ -72,6 +74,10 @@ export function validateRuntimePreflight(): RuntimePreflightReport {
     else warnings.push(message);
   }
 
+  if (!scraplingWorker) {
+    warnings.push('SCRAPLING_WORKER_URL is not set. Web intelligence deep fetch/crawl tools will use lightweight fallback mode.');
+  }
+
   if (errors.length > 0) {
     throw new Error(`[Preflight] Runtime validation failed:\n- ${errors.join('\n- ')}`);
   }
@@ -83,6 +89,7 @@ export function validateRuntimePreflight(): RuntimePreflightReport {
       openai: openAiValid,
       apifyApi: apifyApiValid,
       apifyMediaDownloader: apifyMediaValid,
+      scraplingWorker,
     },
     warnings,
   };

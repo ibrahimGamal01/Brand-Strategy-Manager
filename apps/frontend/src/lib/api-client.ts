@@ -50,7 +50,11 @@ export type IntelligenceSectionKey =
   | 'media_assets'
   | 'search_trends'
   | 'community_insights'
-  | 'ai_questions';
+  | 'ai_questions'
+  | 'web_sources'
+  | 'web_snapshots'
+  | 'web_extraction_recipes'
+  | 'web_extraction_runs';
 
 const LEGACY_INTELLIGENCE_SECTION_MAP: Record<string, IntelligenceSectionKey> = {
   'social-profiles': 'client_profiles',
@@ -72,6 +76,15 @@ const LEGACY_INTELLIGENCE_SECTION_MAP: Record<string, IntelligenceSectionKey> = 
   community_insights: 'community_insights',
   'ai-questions': 'ai_questions',
   ai_questions: 'ai_questions',
+  'web-sources': 'web_sources',
+  web_sources: 'web_sources',
+  'web-snapshots': 'web_snapshots',
+  web_snapshots: 'web_snapshots',
+  'web-recipes': 'web_extraction_recipes',
+  web_recipes: 'web_extraction_recipes',
+  web_extraction_recipes: 'web_extraction_recipes',
+  'web-extraction-runs': 'web_extraction_runs',
+  web_extraction_runs: 'web_extraction_runs',
 };
 
 function normalizeSectionKey(value: string): string {
@@ -385,6 +398,63 @@ export const apiClient = {
 
   updateBrainProfile: (clientId: string, payload: Record<string, unknown>) =>
     patch<any>(`/clients/${clientId}/brain-profile`, payload),
+
+  getWebAllowedDomains: (jobId: string) =>
+    apiFetch<{ ok: boolean; domains: string[] }>(`/research-jobs/${jobId}/web/allowed-domains`),
+
+  fetchWebSnapshot: (
+    jobId: string,
+    payload: {
+      url: string;
+      mode?: 'AUTO' | 'HTTP' | 'DYNAMIC' | 'STEALTH';
+      sourceType?: string;
+      discoveredBy?: string;
+      allowExternal?: boolean;
+    }
+  ) => post<any>(`/research-jobs/${jobId}/web/fetch`, payload),
+
+  crawlWebSources: (
+    jobId: string,
+    payload: {
+      startUrls: string[];
+      maxPages?: number;
+      maxDepth?: number;
+      mode?: 'AUTO' | 'HTTP' | 'DYNAMIC' | 'STEALTH';
+      allowExternal?: boolean;
+    }
+  ) => post<any>(`/research-jobs/${jobId}/web/crawl`, payload),
+
+  extractWebSnapshot: (
+    jobId: string,
+    payload: {
+      snapshotId: string;
+      recipeId?: string;
+      recipeSchema?: Record<string, unknown>;
+      adaptiveNamespace?: string;
+    }
+  ) => post<any>(`/research-jobs/${jobId}/web/extract`, payload),
+
+  listWebSources: (jobId: string, options?: { limit?: number; includeInactive?: boolean }) => {
+    const params = new URLSearchParams();
+    if (typeof options?.limit === 'number') params.set('limit', String(options.limit));
+    if (options?.includeInactive) params.set('includeInactive', 'true');
+    const query = params.toString();
+    return apiFetch<{ ok: boolean; data: any[] }>(`/research-jobs/${jobId}/web/sources${query ? `?${query}` : ''}`);
+  },
+
+  listWebSnapshots: (
+    jobId: string,
+    options?: { sourceId?: string; limit?: number; includeInactive?: boolean }
+  ) => {
+    const params = new URLSearchParams();
+    if (options?.sourceId) params.set('sourceId', options.sourceId);
+    if (typeof options?.limit === 'number') params.set('limit', String(options.limit));
+    if (options?.includeInactive) params.set('includeInactive', 'true');
+    const query = params.toString();
+    return apiFetch<{ ok: boolean; data: any[] }>(
+      `/research-jobs/${jobId}/web/snapshots${query ? `?${query}` : ''}`
+    );
+  },
 
   listIntelligenceSection: (
     jobId: string,

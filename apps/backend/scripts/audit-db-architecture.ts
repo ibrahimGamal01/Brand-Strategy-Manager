@@ -275,6 +275,30 @@ async function run() {
     details: ['Expected zero active duplicates for community_insights(research_job_id, url)'],
   });
 
+  const duplicateWebSources = await countQuery(
+    "SELECT COUNT(*)::int AS count FROM (SELECT research_job_id, url, COUNT(*) AS cnt FROM web_sources GROUP BY research_job_id, url HAVING COUNT(*) > 1) d"
+  );
+  checks.push({
+    id: 'web_sources_uniqueness',
+    title: 'Web sources are unique by job + url',
+    severity: 'HIGH',
+    passed: duplicateWebSources === 0,
+    value: duplicateWebSources,
+    details: ['Expected zero duplicates for web_sources(research_job_id, url)'],
+  });
+
+  const extractionRunCrossJob = await countQuery(
+    'SELECT COUNT(*)::int AS count FROM web_extraction_runs wr JOIN web_page_snapshots ws ON ws.id = wr.snapshot_id JOIN web_extraction_recipes wre ON wre.id = wr.recipe_id WHERE wr.research_job_id <> ws.research_job_id OR wr.research_job_id <> wre.research_job_id'
+  );
+  checks.push({
+    id: 'web_extraction_job_scope',
+    title: 'Web extraction runs stay within a single research job scope',
+    severity: 'CRITICAL',
+    passed: extractionRunCrossJob === 0,
+    value: extractionRunCrossJob,
+    details: ['Expected zero cross-job links between extraction runs, recipes, and snapshots.'],
+  });
+
   const legacyMediaAssetColumns = await countQuery(
     "SELECT COUNT(*)::int AS count FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'media_assets' AND column_name IN ('analysis_overall','analysis_transcript','analysis_visual','extracted_on_screen_text','extracted_transcript')"
   );

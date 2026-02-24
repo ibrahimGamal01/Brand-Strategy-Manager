@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api/http';
+import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/hooks/use-toast';
 import { useChatSocket } from '@/lib/ws/useChatSocket';
 import {
@@ -83,11 +84,16 @@ const SECTION_MATCH_FIELDS: Record<IntelligenceSectionKey, string[]> = {
   search_trends: ['keyword', 'region', 'timeframe'],
   community_insights: ['source', 'url', 'metric', 'content', 'sourceQuery'],
   ai_questions: ['question', 'questionType', 'contextUsed', 'answer'],
+  web_sources: ['url', 'domain', 'sourceType', 'discoveredBy'],
+  web_snapshots: ['finalUrl', 'statusCode', 'fetcherUsed', 'contentHash', 'cleanText'],
+  web_extraction_recipes: ['name', 'targetDomain', 'createdBy'],
+  web_extraction_runs: ['recipeId', 'snapshotId', 'confidence'],
 };
 
 const IDENTIFIER_HINT_KEYS = [
   'handle', 'platform', 'profileUrl', 'title', 'query', 'url',
   'href', 'keyword', 'question', 'source', 'metric', 'sourceType',
+  'domain', 'fetcherUsed', 'contentHash', 'snapshotId', 'recipeId',
 ];
 
 const DESTRUCTIVE_CRUD_ACTIONS = new Set<IntelligenceCrudAction>(['delete', 'clear']);
@@ -743,6 +749,115 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
         title: 'Full orchestration started',
         description: 'Running cross-module orchestration cycle for this workspace.',
       });
+      return;
+    }
+
+    if (normalizedAction === 'run_competitor_discovery') {
+      await apiFetch(`/research-jobs/${jobId}/competitors/orchestrate`, { method: 'POST' });
+      await appendToolResultMessage('Competitor discovery orchestration started. I will update this thread when new candidates are ready.');
+      toast({
+        title: 'Competitor discovery started',
+        description: 'Running competitor discovery and shortlist refresh.',
+      });
+      openIntelligenceSection('competitors');
+      return;
+    }
+
+    if (normalizedAction === 'run_client_scraper') {
+      const hrefParams = parseHrefParams(href);
+      const handle = String(payload?.handle || hrefParams.handle || '').trim().replace(/^@+/, '');
+      const platformRaw = String(payload?.platform || hrefParams.platform || '').trim().toUpperCase();
+      const platform = platformRaw === 'TIKTOK' ? 'TIKTOK' : 'INSTAGRAM';
+      if (!handle) {
+        toast({
+          title: 'Missing client handle',
+          description: 'run_client_scraper requires payload.handle (or ?handle=).',
+          variant: 'destructive',
+        });
+        return;
+      }
+      await apiFetch(`/research-jobs/${jobId}/scrape-client-profile`, {
+        method: 'POST',
+        body: JSON.stringify({ platform, handle }),
+      });
+      await appendToolResultMessage(`Started ${platform} client scrape for @${handle}.`);
+      toast({
+        title: 'Client scraper started',
+        description: `Queued ${platform} scrape for @${handle}.`,
+      });
+      return;
+    }
+
+    if (normalizedAction === 'web_fetch') {
+      const url = String(payload?.url || '').trim();
+      if (!url) {
+        toast({
+          title: 'Missing URL',
+          description: 'web_fetch requires payload.url.',
+          variant: 'destructive',
+        });
+        return;
+      }
+      const result = await apiClient.fetchWebSnapshot(jobId, {
+        url,
+        mode: typeof payload?.mode === 'string' ? (payload.mode.toUpperCase() as any) : 'AUTO',
+        sourceType: typeof payload?.sourceType === 'string' ? payload.sourceType : undefined,
+        discoveredBy: 'CHAT_TOOL',
+      });
+      await appendToolResultMessage(`Fetched web snapshot for ${url} (status: ${result?.statusCode ?? 'unknown'}).`);
+      openIntelligenceSection('web_snapshots');
+      return;
+    }
+
+    if (normalizedAction === 'web_crawl') {
+      const startUrls = Array.isArray(payload?.startUrls)
+        ? payload.startUrls.map((item) => String(item || '').trim()).filter(Boolean)
+        : [];
+      if (!startUrls.length) {
+        toast({
+          title: 'Missing crawl URLs',
+          description: 'web_crawl requires payload.startUrls[]',
+          variant: 'destructive',
+        });
+        return;
+      }
+      const result = await apiClient.crawlWebSources(jobId, {
+        startUrls,
+        maxPages: Number.isFinite(Number(payload?.maxPages)) ? Number(payload?.maxPages) : undefined,
+        maxDepth: Number.isFinite(Number(payload?.maxDepth)) ? Number(payload?.maxDepth) : undefined,
+        mode: typeof payload?.mode === 'string' ? (payload.mode.toUpperCase() as any) : 'AUTO',
+      });
+      await appendToolResultMessage(
+        `Web crawl queued (${result?.persisted ?? 0} pages persisted, run ${result?.runId || 'pending'}).`
+      );
+      openIntelligenceSection('web_sources');
+      return;
+    }
+
+    if (normalizedAction === 'web_extract') {
+      const snapshotId = String(payload?.snapshotId || '').trim();
+      if (!snapshotId) {
+        toast({
+          title: 'Missing snapshot id',
+          description: 'web_extract requires payload.snapshotId.',
+          variant: 'destructive',
+        });
+        return;
+      }
+      const result = await apiClient.extractWebSnapshot(jobId, {
+        snapshotId,
+        recipeId: typeof payload?.recipeId === 'string' ? payload.recipeId : undefined,
+        recipeSchema:
+          payload?.recipeSchema && typeof payload.recipeSchema === 'object'
+            ? (payload.recipeSchema as Record<string, unknown>)
+            : undefined,
+        adaptiveNamespace:
+          typeof payload?.adaptiveNamespace === 'string' ? payload.adaptiveNamespace : undefined,
+      });
+      await appendToolResultMessage(
+        `Web extraction completed (confidence ${(Number(result?.confidence || 0) * 100).toFixed(0)}%).`
+      );
+      openIntelligenceSection('web_extraction_runs');
       return;
     }
 

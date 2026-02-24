@@ -24,6 +24,7 @@ import chatRouter from './routes/research-jobs-chat';
 import screenshotsRouter from './routes/research-jobs-screenshots';
 import questionsRouter from './routes/research-jobs-questions';
 import documentsRouter from './routes/research-jobs-documents';
+import webIntelligenceRouter from './routes/research-jobs-web-intelligence';
 import { STORAGE_ROOT } from './services/storage/storage-root';
 import { attachChatWebSocketServer } from './services/chat/chat-ws';
 
@@ -32,7 +33,7 @@ console.log('[DEBUG] DATABASE_URL loaded:', process.env.DATABASE_URL?.replace(/:
 
 const preflight = validateRuntimePreflight();
 console.log(
-  `[Preflight] profile=${preflight.profile} aiFallbackMode=${preflight.aiFallbackMode} providers(openai=${preflight.providers.openai}, apifyApi=${preflight.providers.apifyApi}, apifyMedia=${preflight.providers.apifyMediaDownloader}) shellOpenAiPreSet=${envLoad.hadPreexistingOpenAiKey} backendEnvOverride=${envLoad.backendEnvOverride}`
+  `[Preflight] profile=${preflight.profile} aiFallbackMode=${preflight.aiFallbackMode} providers(openai=${preflight.providers.openai}, apifyApi=${preflight.providers.apifyApi}, apifyMedia=${preflight.providers.apifyMediaDownloader}, scraplingWorker=${preflight.providers.scraplingWorker}) shellOpenAiPreSet=${envLoad.hadPreexistingOpenAiKey} backendEnvOverride=${envLoad.backendEnvOverride}`
 );
 for (const warning of preflight.warnings) {
   console.warn(`[Preflight] ${warning}`);
@@ -60,6 +61,7 @@ app.get('/api/health', (req, res) => {
       openai: preflight.providers.openai,
       apifyApi: preflight.providers.apifyApi,
       apifyMediaDownloader: preflight.providers.apifyMediaDownloader,
+      scraplingWorker: preflight.providers.scraplingWorker,
     },
     schema: schemaReport || {
       schemaReady: false,
@@ -90,6 +92,7 @@ app.use('/api/research-jobs', chatRouter);
 app.use('/api/research-jobs', screenshotsRouter);
 app.use('/api/research-jobs', questionsRouter);
 app.use('/api/research-jobs', documentsRouter);
+app.use('/api/research-jobs', webIntelligenceRouter);
 app.use('/api/media', mediaRouter);
 app.use('/api/competitors', competitorsRouter);
 app.use('/api/analytics', analyticsRouter);

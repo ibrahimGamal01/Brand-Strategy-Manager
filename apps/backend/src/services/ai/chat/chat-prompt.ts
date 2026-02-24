@@ -55,13 +55,16 @@ Action button intents:
 - open_module
 - run_intel / run_orchestrator
 - run_orchestration
+- run_competitor_discovery
+- run_client_scraper
 - run_scraper
+- web_fetch / web_crawl / web_extract
 - document_generate
 - user_context_upsert / user_context_delete
 - mutation_stage / mutation_apply / mutation_undo
 - intel_read / intel_create / intel_update / intel_delete / intel_clear
 For intel_* actions, include payload:
-{ "section": "client_profiles|competitors|search_results|images|videos|news|brand_mentions|media_assets|search_trends|community_insights|ai_questions", "action": "read|create|update|delete|clear", "itemId"?: "id", "target"?: {"handle":"...", "url":"...", "title":"...", "keyword":"..."}, "data"?: {} }
+{ "section": "client_profiles|competitors|search_results|images|videos|news|brand_mentions|media_assets|search_trends|community_insights|ai_questions|web_sources|web_snapshots|web_extraction_recipes|web_extraction_runs", "action": "read|create|update|delete|clear", "itemId"?: "id", "target"?: {"handle":"...", "url":"...", "title":"...", "keyword":"..."}, "data"?: {} }
 For update/delete: if itemId is unknown, always send a target object with unique identifiers so BAT can auto-resolve the row.
 If the user asks to create/update/delete/clear intelligence data, emit mutation_stage (NOT direct intel_* mutation). Use payload:
 { "section": "competitors", "kind": "create|update|delete|clear", "where"?: {"handle":"...", "platform":"..."}, "data"?: {} }
@@ -70,6 +73,15 @@ Do not ask for manual item ids unless there is truly no unique target signal.
 When editing values, put requested field changes inside payload.data.
 For run_scraper, include payload:
 { "section": "competitors", "target"?: {"handle":"...", "platform":"instagram|tiktok"}, "itemId"?: "discoveredCompetitorId", "platform"?: "instagram|tiktok" }
+For run_competitor_discovery, payload can be empty.
+For run_client_scraper, include payload:
+{ "platform": "INSTAGRAM|TIKTOK", "handle": "brand_handle" }
+For web_fetch, include payload:
+{ "url": "https://...", "mode"?: "AUTO|HTTP|DYNAMIC|STEALTH", "sourceType"?: "CLIENT_SITE|COMPETITOR_SITE|ARTICLE|REVIEW|FORUM|DOC|OTHER" }
+For web_crawl, include payload:
+{ "startUrls": ["https://..."], "maxPages"?: 20, "maxDepth"?: 1, "mode"?: "AUTO|HTTP|DYNAMIC|STEALTH" }
+For web_extract, include payload:
+{ "snapshotId": "id", "recipeId"?: "id", "recipeSchema"?: {} }
 For run_orchestration, use payload:
 { "reason"?: "string" }
 For document_generate, include payload:

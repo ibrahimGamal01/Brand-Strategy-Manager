@@ -104,6 +104,30 @@ const SECTION_LABELS: Record<IntelligenceSectionKey, SectionFieldLabels> = {
     details: 'Answer',
     url: 'Reference URL (optional)',
   },
+  web_sources: {
+    primary: 'Source type (CLIENT_SITE/COMPETITOR_SITE/ARTICLE)',
+    secondary: 'Discovery method (CHAT_TOOL/DDG/USER)',
+    details: 'Domain (optional)',
+    url: 'Source URL',
+  },
+  web_snapshots: {
+    primary: 'Fetcher mode (AUTO/HTTP/DYNAMIC/STEALTH)',
+    secondary: 'Web source id',
+    details: 'Clean text snippet (optional)',
+    url: 'Final URL (optional)',
+  },
+  web_extraction_recipes: {
+    primary: 'Recipe name',
+    secondary: 'Target domain (optional)',
+    details: 'JSON schema',
+    url: 'Created by (optional)',
+  },
+  web_extraction_runs: {
+    primary: 'Recipe id',
+    secondary: 'Snapshot id',
+    details: 'JSON extracted payload',
+    url: 'Confidence (0-1, optional)',
+  },
 };
 
 function emptyDraft(): CrudDraft {
@@ -238,6 +262,58 @@ function buildCreatePayload(section: IntelligenceSectionKey, draft: CrudDraft): 
         answer: details || null,
         contextUsed: url || null,
       };
+    case 'web_sources':
+      return {
+        sourceType: primary || 'OTHER',
+        discoveredBy: secondary || 'CHAT_TOOL',
+        domain: details || null,
+        url: url || `https://manual.local/web-source/${Date.now()}`,
+      };
+    case 'web_snapshots':
+      return {
+        fetcherUsed: primary || 'AUTO',
+        webSourceId: secondary || null,
+        cleanText: details || null,
+        finalUrl: url || null,
+      };
+    case 'web_extraction_recipes': {
+      let schema: Record<string, unknown> = { fields: { summary: { selector: 'title' } } };
+      if (details) {
+        try {
+          const parsed = JSON.parse(details);
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            schema = parsed as Record<string, unknown>;
+          }
+        } catch {
+          schema = { fields: { summary: { selector: details } } };
+        }
+      }
+      return {
+        name: primary || `recipe-${Date.now()}`,
+        targetDomain: secondary || null,
+        schema,
+        createdBy: url || 'chat-crud-panel',
+      };
+    }
+    case 'web_extraction_runs': {
+      let extracted: Record<string, unknown> = { note: details || 'Manual extraction output' };
+      if (details) {
+        try {
+          const parsed = JSON.parse(details);
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            extracted = parsed as Record<string, unknown>;
+          }
+        } catch {
+          extracted = { note: details };
+        }
+      }
+      return {
+        recipeId: primary || null,
+        snapshotId: secondary || null,
+        extracted,
+        confidence: url && Number.isFinite(Number(url)) ? Number(url) : null,
+      };
+    }
     default:
       return {};
   }

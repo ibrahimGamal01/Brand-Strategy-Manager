@@ -22,6 +22,9 @@ const COMPETITOR_SELECTION_STATE_VALUES = new Set(['FILTERED_OUT', 'SHORTLISTED'
 const COMPETITOR_TYPE_VALUES = new Set(['DIRECT', 'INDIRECT', 'ADJACENT', 'MARKETPLACE', 'MEDIA', 'INFLUENCER', 'COMMUNITY', 'UNKNOWN']);
 const MEDIA_TYPE_VALUES = new Set(['IMAGE', 'VIDEO', 'AUDIO']);
 const MEDIA_SOURCE_TYPE_VALUES = new Set(['CLIENT_POST_SNAPSHOT', 'COMPETITOR_POST_SNAPSHOT']);
+const WEB_SOURCE_TYPE_VALUES = new Set(['CLIENT_SITE', 'COMPETITOR_SITE', 'ARTICLE', 'REVIEW', 'FORUM', 'DOC', 'OTHER']);
+const WEB_DISCOVERY_VALUES = new Set(['DDG', 'USER', 'SCRAPLING_CRAWL', 'CHAT_TOOL', 'IMPORT']);
+const WEB_FETCH_MODE_VALUES = new Set(['AUTO', 'HTTP', 'DYNAMIC', 'STEALTH']);
 const AI_QUESTION_TYPE_VALUES = new Set([
   'VALUE_PROPOSITION',
   'TARGET_AUDIENCE',
@@ -167,6 +170,50 @@ export const SECTION_CONFIG: Record<string, SectionConfig> = {
     numberFields: ['tokensUsed', 'durationMs'],
     booleanFields: ['isAnswered'],
     dateFields: ['answeredAt'],
+    supportsCuration: true,
+  },
+  web_sources: {
+    model: 'webSource',
+    scope: 'researchJob',
+    orderBy: { field: 'updatedAt', direction: 'desc' },
+    allowedFields: ['url', 'domain', 'sourceType', 'discoveredBy'],
+    requiredOnCreate: ['url'],
+    immutableFields: ['url'],
+    identityFields: ['url'],
+    enumFields: { sourceType: WEB_SOURCE_TYPE_VALUES, discoveredBy: WEB_DISCOVERY_VALUES },
+    supportsCuration: true,
+  },
+  web_snapshots: {
+    model: 'webPageSnapshot',
+    scope: 'researchJob',
+    orderBy: { field: 'fetchedAt', direction: 'desc' },
+    allowedFields: ['webSourceId', 'fetcherUsed', 'finalUrl', 'statusCode', 'contentHash', 'htmlPath', 'textPath', 'cleanText', 'metadata', 'fetchedAt'],
+    requiredOnCreate: ['webSourceId'],
+    immutableFields: ['webSourceId'],
+    enumFields: { fetcherUsed: WEB_FETCH_MODE_VALUES },
+    numberFields: ['statusCode'],
+    dateFields: ['fetchedAt'],
+    supportsCuration: true,
+  },
+  web_extraction_recipes: {
+    model: 'webExtractionRecipe',
+    scope: 'researchJob',
+    orderBy: { field: 'updatedAt', direction: 'desc' },
+    allowedFields: ['name', 'targetDomain', 'schema', 'createdBy'],
+    requiredOnCreate: ['name', 'schema'],
+    immutableFields: ['name'],
+    identityFields: ['name', 'targetDomain'],
+    supportsCuration: true,
+  },
+  web_extraction_runs: {
+    model: 'webExtractionRun',
+    scope: 'researchJob',
+    orderBy: { field: 'createdAt', direction: 'desc' },
+    allowedFields: ['recipeId', 'snapshotId', 'extracted', 'confidence', 'warnings'],
+    requiredOnCreate: ['recipeId', 'snapshotId', 'extracted'],
+    immutableFields: ['recipeId', 'snapshotId'],
+    numberFields: ['confidence'],
+    jsonArrayFields: ['warnings'],
     supportsCuration: true,
   },
 };

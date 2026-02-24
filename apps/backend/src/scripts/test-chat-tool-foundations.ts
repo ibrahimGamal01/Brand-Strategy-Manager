@@ -24,5 +24,6 @@ assert.equal(context.links.jobBase, 'https://brand-strategy-manager-frontend.ver
 assert.equal(context.links.moduleLink('intelligence', { intelSection: 'competitors' }), 'https://brand-strategy-manager-frontend.vercel.app/research/job-123?module=intelligence&intelSection=competitors');
 assert.ok(Array.isArray(TOOL_REGISTRY));
 assert.ok(getTool('evidence.posts'));
+assert.ok(getTool('web.fetch'));
 
 console.log('Chat tool foundations compile test passed.');

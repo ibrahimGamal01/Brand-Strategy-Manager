@@ -12,6 +12,9 @@ export type ToolName =
   | 'evidence.posts'
   | 'evidence.videos'
   | 'evidence.news'
+  | 'web.fetch'
+  | 'web.crawl'
+  | 'web.extract'
   | 'document.plan'
   | 'document.generate'
   | 'document.status';

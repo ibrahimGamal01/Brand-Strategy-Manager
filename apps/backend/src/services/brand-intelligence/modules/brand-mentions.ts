@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../../lib/prisma';
 import { scrapeBrandMentions } from '../../discovery/brand-mentions';
+import { fetchAndPersistWebSnapshot } from '../../scraping/web-intelligence-service';
 import { BrandIntelligenceContext, BrandIntelligenceModuleResult, BrandMentionsDepth } from '../types';
 
 function normalizeDepth(value: unknown): BrandMentionsDepth {
@@ -33,6 +34,7 @@ export async function runBrandMentionsModule(input: {
   let updated = 0;
   let skipped = 0;
   let failed = 0;
+  let deepEnriched = 0;
 
   const rawMentions = await scrapeBrandMentions(input.context.brandName);
   const uniqueMentions = dedupeByUrl(rawMentions);
@@ -79,6 +81,40 @@ export async function runBrandMentionsModule(input: {
         } as Prisma.InputJsonValue,
       };
 
+      if (depth === 'deep') {
+        try {
+          const enrichment = await fetchAndPersistWebSnapshot({
+            researchJobId: input.context.researchJobId,
+            url,
+            sourceType: 'ARTICLE',
+            discoveredBy: 'DDG',
+            mode: 'AUTO',
+            allowExternal: true,
+          });
+          const existingEvidence =
+            payload.evidence && typeof payload.evidence === 'object'
+              ? (payload.evidence as Record<string, unknown>)
+              : {};
+          payload.evidence = {
+            ...existingEvidence,
+            deepEnrichment: {
+              snapshotId: enrichment.snapshotId,
+              sourceId: enrichment.sourceId,
+              fetcherUsed: enrichment.fetcherUsed,
+              statusCode: enrichment.statusCode,
+              blockedSuspected: enrichment.blockedSuspected,
+              fallbackReason: enrichment.fallbackReason || null,
+            },
+          } as Prisma.InputJsonValue;
+          if (!payload.fullText && enrichment.cleanTextSnippet) {
+            payload.fullText = enrichment.cleanTextSnippet;
+          }
+          deepEnriched += 1;
+        } catch (deepError: any) {
+          warnings.push(`Deep enrichment failed for ${url}: ${deepError?.message || deepError}`);
+        }
+      }
+
       if (existing) {
         await prisma.brandMention.update({
           where: { id: existing.id },
@@ -97,10 +133,6 @@ export async function runBrandMentionsModule(input: {
     }
   }
 
-  if (depth === 'deep') {
-    warnings.push('Deep brand mention enrichment is not enabled yet; ran standard collection.');
-  }
-
   return {
     module: 'brand_mentions',
     success: failed === 0,
@@ -115,6 +147,7 @@ export async function runBrandMentionsModule(input: {
       depth,
       uniqueMentions: uniqueMentions.length,
       totalMentions: rawMentions.length,
+      deepEnriched,
     },
   };
 }

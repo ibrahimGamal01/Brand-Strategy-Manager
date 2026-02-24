@@ -107,6 +107,11 @@ model ResearchJob {
   fileAttachments             FileAttachment[]
   chatMutations               ChatMutation[]
   userSuppliedContexts        UserSuppliedContext[]
+  webSources                  WebSource[]
+  webPageSnapshots            WebPageSnapshot[]
+  webExtractionRecipes        WebExtractionRecipe[]
+  webExtractionRuns           WebExtractionRun[]
+  adaptiveSelectorMemories    AdaptiveSelectorMemory[]
 
   @@map("research_jobs")
 }
@@ -162,6 +167,127 @@ model RawSearchResult {
   @@index([researchJobId])
   @@index([isProcessed])
   @@map("raw_search_results")
+}
+
+model WebSource {
+  id               String                   @id @default(uuid())
+  researchJobId    String                   @map("research_job_id")
+  url              String
+  domain           String
+  sourceType       WebSourceType            @default(OTHER) @map("source_type")
+  discoveredBy     WebSourceDiscoveryMethod @default(USER) @map("discovered_by")
+  isActive         Boolean                  @default(true) @map("is_active")
+  archivedAt       DateTime?                @map("archived_at")
+  archivedBy       String?                  @map("archived_by")
+  manuallyModified Boolean                  @default(false) @map("manually_modified")
+  lastModifiedAt   DateTime?                @map("last_modified_at")
+  lastModifiedBy   String?                  @map("last_modified_by")
+  createdAt        DateTime                 @default(now()) @map("created_at")
+  updatedAt        DateTime                 @updatedAt @map("updated_at")
+  researchJob      ResearchJob              @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  snapshots        WebPageSnapshot[]
+
+  @@index([researchJobId, domain])
+  @@index([isActive])
+  @@unique([researchJobId, url])
+  @@map("web_sources")
+}
+
+model WebPageSnapshot {
+  id               String         @id @default(uuid())
+  researchJobId    String         @map("research_job_id")
+  webSourceId      String         @map("web_source_id")
+  fetchedAt        DateTime       @default(now()) @map("fetched_at")
+  fetcherUsed      WebFetcherMode @default(AUTO) @map("fetcher_used")
+  finalUrl         String?        @map("final_url")
+  statusCode       Int?           @map("status_code")
+  contentHash      String?        @map("content_hash")
+  htmlPath         String?        @map("html_path")
+  textPath         String?        @map("text_path")
+  cleanText        String?        @map("clean_text")
+  metadata         Json?
+  isActive         Boolean        @default(true) @map("is_active")
+  archivedAt       DateTime?      @map("archived_at")
+  archivedBy       String?        @map("archived_by")
+  manuallyModified Boolean        @default(false) @map("manually_modified")
+  lastModifiedAt   DateTime?      @map("last_modified_at")
+  lastModifiedBy   String?        @map("last_modified_by")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+  webSource        WebSource      @relation(fields: [webSourceId], references: [id], onDelete: Cascade)
+  researchJob      ResearchJob    @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  extractionRuns   WebExtractionRun[]
+
+  @@index([researchJobId, fetchedAt])
+  @@index([webSourceId, fetchedAt])
+  @@index([contentHash])
+  @@index([isActive])
+  @@map("web_page_snapshots")
+}
+
+model WebExtractionRecipe {
+  id               String      @id @default(uuid())
+  researchJobId    String      @map("research_job_id")
+  name             String
+  targetDomain     String?     @map("target_domain")
+  schema           Json
+  createdBy        String?     @map("created_by")
+  isActive         Boolean     @default(true) @map("is_active")
+  archivedAt       DateTime?   @map("archived_at")
+  archivedBy       String?     @map("archived_by")
+  manuallyModified Boolean     @default(false) @map("manually_modified")
+  lastModifiedAt   DateTime?   @map("last_modified_at")
+  lastModifiedBy   String?     @map("last_modified_by")
+  createdAt        DateTime    @default(now()) @map("created_at")
+  updatedAt        DateTime    @updatedAt @map("updated_at")
+  researchJob      ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  runs             WebExtractionRun[]
+
+  @@index([researchJobId, name])
+  @@index([isActive])
+  @@map("web_extraction_recipes")
+}
+
+model WebExtractionRun {
+  id               String              @id @default(uuid())
+  researchJobId    String              @map("research_job_id")
+  recipeId         String              @map("recipe_id")
+  snapshotId       String              @map("snapshot_id")
+  extracted        Json
+  confidence       Float?              @default(0)
+  warnings         Json?
+  isActive         Boolean             @default(true) @map("is_active")
+  archivedAt       DateTime?           @map("archived_at")
+  archivedBy       String?             @map("archived_by")
+  manuallyModified Boolean             @default(false) @map("manually_modified")
+  lastModifiedAt   DateTime?           @map("last_modified_at")
+  lastModifiedBy   String?             @map("last_modified_by")
+  createdAt        DateTime            @default(now()) @map("created_at")
+  updatedAt        DateTime            @updatedAt @map("updated_at")
+  researchJob      ResearchJob         @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  recipe           WebExtractionRecipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  snapshot         WebPageSnapshot     @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@index([researchJobId, createdAt])
+  @@index([recipeId, createdAt])
+  @@index([snapshotId, createdAt])
+  @@index([isActive])
+  @@map("web_extraction_runs")
+}
+
+model AdaptiveSelectorMemory {
+  id            String      @id @default(uuid())
+  researchJobId String      @map("research_job_id")
+  namespace     String
+  key           String
+  elementJson   Json        @map("element_json")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+  researchJob   ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+
+  @@unique([researchJobId, namespace, key])
+  @@index([researchJobId, namespace])
+  @@map("adaptive_selector_memory")
 }
 
 model DdgNewsResult {
@@ -1188,6 +1314,31 @@ enum DocumentType {
   BRAND_GUIDELINES
   INTAKE_FORM
   OTHER
+}
+
+enum WebSourceType {
+  CLIENT_SITE
+  COMPETITOR_SITE
+  ARTICLE
+  REVIEW
+  FORUM
+  DOC
+  OTHER
+}
+
+enum WebSourceDiscoveryMethod {
+  DDG
+  USER
+  SCRAPLING_CRAWL
+  CHAT_TOOL
+  IMPORT
+}
+
+enum WebFetcherMode {
+  AUTO
+  HTTP
+  DYNAMIC
+  STEALTH
 }
 
 enum DiscoveredCompetitorStatus {

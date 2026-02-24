@@ -97,6 +97,15 @@ router.post('/:id/intelligence/:section', async (req, res) => {
     const actor = getActor(req);
     const rawData = (req.body?.data || req.body || {}) as Record<string, unknown>;
     const parsed = parsePayload(resolved.key, resolved.config, rawData);
+    if (resolved.key === 'web_sources' && !parsed.data.domain && parsed.data.url) {
+      try {
+        const normalizedUrl = String(parsed.data.url).trim();
+        const parsedUrl = new URL(/^https?:\/\//i.test(normalizedUrl) ? normalizedUrl : `https://${normalizedUrl}`);
+        parsed.data.domain = parsedUrl.hostname.replace(/^www\./i, '').toLowerCase();
+      } catch {
+        // Keep validation error path if URL is malformed.
+      }
+    }
     const requiredMissing = ensureRequired(resolved.config, parsed.data);
     if (parsed.errors.length || requiredMissing.length) return res.status(400).json({ error: 'Validation failed', details: [...parsed.errors, ...requiredMissing.map((f) => `Missing required field: ${f}`)] });
     const data = applyMutationMetadata(parsed.data, actor, true);
