@@ -441,6 +441,7 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
           break;
         }
         case 'ERROR': {
+          setStreamingMessage(null);
           toast({
             title: 'Chat error',
             description: String(event.details || event.error || 'Chat connection failed'),
@@ -709,6 +710,27 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
 
   async function handleActionIntent(action?: string, href?: string, payload?: Record<string, unknown>) {
     const normalizedAction = String(action || '').toLowerCase();
+
+    if (normalizedAction === 'retry_last_message') {
+      const lastUserText =
+        [...messages].reverse().find((message) => message.role === 'USER' && String(message.content || '').trim())
+          ?.content ||
+        lastUserCommandRef.current;
+      if (!String(lastUserText || '').trim()) {
+        toast({
+          title: 'Nothing to retry yet',
+          description: 'Send a message first, then you can use retry.',
+          variant: 'destructive',
+        });
+        return;
+      }
+      await submitMessage(String(lastUserText), []);
+      toast({
+        title: 'Retry sent',
+        description: 'Re-submitted your last message to the assistant.',
+      });
+      return;
+    }
 
     if (normalizedAction === 'open_module') {
       const hrefParams = parseHrefParams(href);
