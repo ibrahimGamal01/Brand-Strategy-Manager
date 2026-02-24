@@ -23,6 +23,7 @@ assert.equal(context.links.appOrigin, 'https://brand-strategy-manager-frontend.v
 assert.equal(context.links.jobBase, 'https://brand-strategy-manager-frontend.vercel.app/research/job-123');
 assert.equal(context.links.moduleLink('intelligence', { intelSection: 'competitors' }), 'https://brand-strategy-manager-frontend.vercel.app/research/job-123?module=intelligence&intelSection=competitors');
 assert.ok(Array.isArray(TOOL_REGISTRY));
+assert.ok(getTool('intel.list'));
 assert.ok(getTool('evidence.posts'));
 assert.ok(getTool('web.fetch'));
 
