@@ -374,9 +374,9 @@ export function enforceNarrativeContent(content: string, hasInteractive: boolean
     .trim();
   const compact = cleaned.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
   const sentences = compact.split(/(?<=[.!?])\s+/).filter(Boolean);
-  let short = sentences.slice(0, hasInteractive ? 1 : 2).join(' ').trim();
+  let short = sentences.slice(0, hasInteractive ? 2 : 4).join(' ').trim();
   if (!short) short = compact;
-  const maxLength = hasInteractive ? 180 : 240;
+  const maxLength = hasInteractive ? 420 : 700;
   if (short.length > maxLength) short = `${short.slice(0, maxLength - 3)}...`;
   return short;
 }

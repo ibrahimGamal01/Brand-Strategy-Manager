@@ -42,6 +42,14 @@ export function inferHeuristicToolCalls(input: {
   const asksLastWeek = includesAny(message, [/\blast week\b/i, /\bpast week\b/i, /\bthis week\b/i, /\bweekly\b/i]);
   const asksLastMonth = includesAny(message, [/\blast month\b/i, /\bpast month\b/i, /\bmonthly\b/i]);
   const asksRecent = includesAny(message, [/\brecent\b/i, /\blatest\b/i, /\bnewest\b/i]);
+  const asksListData = includesAny(message, [
+    /\blist\b/i,
+    /\bshow\b/i,
+    /\bread\b/i,
+    /\bwhat do we have\b/i,
+    /\bfetch\b/i,
+  ]);
+  const asksGetById = includesAny(message, [/\b(id|row|record)\b/i, /\bget\b/i]);
 
   if (asksPosts && !existingNames.has('evidence.posts')) {
     const competitorOnly = includesAny(message, [/\bcompetitors?\b/i, /\btheir\s+posts\b/i]);
@@ -83,6 +91,53 @@ export function inferHeuristicToolCalls(input: {
       },
       reason: 'Message requests news/press context; include stored news evidence links.',
     });
+  }
+
+  if (asksListData && !existingNames.has('intel.list')) {
+    const sectionPatterns: Array<{ section: string; patterns: RegExp[] }> = [
+      { section: 'competitors', patterns: [/\bcompetitors?\b/i] },
+      { section: 'client_profiles', patterns: [/\bclient profiles?\b/i, /\baccounts?\b/i, /\bhandles?\b/i] },
+      { section: 'news', patterns: [/\bnews\b/i, /\bpress\b/i, /\barticles?\b/i] },
+      { section: 'videos', patterns: [/\bvideos?\b/i, /\byoutube\b/i] },
+      { section: 'images', patterns: [/\bimages?\b/i, /\bphotos?\b/i] },
+      { section: 'search_results', patterns: [/\bsearch results?\b/i, /\bserp\b/i] },
+      { section: 'brand_mentions', patterns: [/\bbrand mentions?\b/i, /\bmentions?\b/i] },
+      { section: 'community_insights', patterns: [/\bcommunity\b/i, /\binsights?\b/i] },
+      { section: 'search_trends', patterns: [/\btrends?\b/i, /\bkeywords?\b/i] },
+      { section: 'media_assets', patterns: [/\bmedia assets?\b/i, /\bdownloads?\b/i] },
+      { section: 'ai_questions', patterns: [/\bquestions?\b/i, /\bai questions?\b/i] },
+      { section: 'web_sources', patterns: [/\bweb sources?\b/i, /\bsources?\b/i] },
+      { section: 'web_snapshots', patterns: [/\bweb snapshots?\b/i, /\bsnapshots?\b/i] },
+      { section: 'web_extraction_recipes', patterns: [/\brecipes?\b/i, /\bextraction recipes?\b/i] },
+      { section: 'web_extraction_runs', patterns: [/\bextraction runs?\b/i, /\bruns?\b/i] },
+    ];
+
+    const matched = sectionPatterns.find((entry) => includesAny(message, entry.patterns));
+    if (matched) {
+      calls.push({
+        name: 'intel.list',
+        args: {
+          section: matched.section,
+          limit: includesAny(message, [/\btop\b/i, /\bfew\b/i, /\bsummary\b/i]) ? 15 : 30,
+          includeInactive: includesAny(message, [/\barchived\b/i, /\binactive\b/i]),
+        },
+        reason: `Message asks to list/read intelligence data for ${matched.section}.`,
+      });
+    }
+  }
+
+  if (asksGetById && !existingNames.has('intel.get')) {
+    const idMatch = input.userMessage.match(/\b[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\b/i);
+    if (idMatch?.[0]) {
+      calls.push({
+        name: 'intel.get',
+        args: {
+          section: includesAny(message, [/\bcompetitors?\b/i]) ? 'competitors' : 'web_snapshots',
+          id: idMatch[0],
+        },
+        reason: 'Message includes a specific record id and asks for details.',
+      });
+    }
   }
 
   return calls;

@@ -14,7 +14,7 @@ import {
 import { attachScreenshotsToMessage } from './chat-attachments';
 import { handleChatBlockEvent } from './chat-events';
 import { streamChatCompletion } from '../ai/chat/chat-generator';
-import type { ChatBlock, ChatDesignOption } from './chat-types';
+import { createGenerationLifecycle } from './chat-ws-generation';
 import { extractUserContext } from './user-context-extractor';
 import { upsertUserContext } from './user-context-repository';
 
@@ -165,129 +165,30 @@ export function attachChatWebSocketServer(server: http.Server, isSchemaReady: Sc
           });
 
           state.isGenerating = true;
-          let fullContent = '';
-          let cachedBlocks: ChatBlock[] = [];
-          let cachedDesigns: ChatDesignOption[] = [];
-          let lastFlushAt = Date.now();
-          let lastFlushLength = 0;
-          let generationFinalized = false;
-          let watchdogTimer: NodeJS.Timeout | null = null;
+          const lifecycle = createGenerationLifecycle({
+            socket,
+            assistantMessageId: assistantMessage.id,
+            watchdogMs: GENERATION_WATCHDOG_MS,
+            onBusyChange: (isBusy) => {
+              state.isGenerating = isBusy;
+            },
+            onPersistPartial: (partialContent) => {
+              void updateChatMessage(assistantMessage.id, { content: partialContent });
+            },
+            onPersistFinal: async (finalPayload) => {
+              await updateChatMessage(assistantMessage.id, {
+                content: finalPayload.content,
+                blocks: finalPayload.blocks,
+                designOptions: finalPayload.designOptions,
+                followUp: finalPayload.followUp,
+              });
+            },
+            onSessionTouch: async () => {
+              await touchChatSession(state.sessionId!);
+            },
+          });
 
-          const flushContent = () => {
-            if (generationFinalized) return;
-            const now = Date.now();
-            const lengthDelta = fullContent.length - lastFlushLength;
-            if (lengthDelta >= 400 || now - lastFlushAt > 1000) {
-              lastFlushAt = now;
-              lastFlushLength = fullContent.length;
-              void updateChatMessage(assistantMessage.id, { content: fullContent });
-            }
-          };
-
-          const finalizeAsSuccess = async (result: {
-            content: string;
-            blocks: ChatBlock[];
-            designOptions: ChatDesignOption[];
-            followUp: string[];
-          }) => {
-            if (generationFinalized) return;
-            generationFinalized = true;
-            if (watchdogTimer) {
-              clearTimeout(watchdogTimer);
-              watchdogTimer = null;
-            }
-            state.isGenerating = false;
-
-            fullContent = result.content;
-            cachedBlocks = result.blocks;
-            cachedDesigns = result.designOptions;
-
-            safeSend(socket, {
-              type: 'ASSISTANT_BLOCKS',
-              messageId: assistantMessage.id,
-              blocks: cachedBlocks,
-              designOptions: cachedDesigns,
-              followUp: result.followUp,
-            });
-
-            await updateChatMessage(assistantMessage.id, {
-              content: fullContent,
-              blocks: cachedBlocks,
-              designOptions: cachedDesigns,
-              followUp: result.followUp,
-            });
-            await touchChatSession(state.sessionId!);
-            safeSend(socket, {
-              type: 'ASSISTANT_DONE',
-              messageId: assistantMessage.id,
-              followUp: result.followUp,
-            });
-          };
-
-          const finalizeAsFailure = async (errorCode: string, details: string) => {
-            if (generationFinalized) return;
-            generationFinalized = true;
-            if (watchdogTimer) {
-              clearTimeout(watchdogTimer);
-              watchdogTimer = null;
-            }
-            state.isGenerating = false;
-
-            const safeDetails = details?.trim() || 'The assistant failed while generating a response.';
-            const fallbackContent =
-              'I hit a runtime issue while generating this response. You can retry now or run orchestration to refresh data.';
-            const fallbackBlocks: ChatBlock[] = [
-              {
-                blockId: `error_actions_${assistantMessage.id}`,
-                type: 'action_buttons',
-                title: 'Choose next action',
-                buttons: [
-                  {
-                    label: 'Retry last message',
-                    action: 'retry_last_message',
-                  },
-                  {
-                    label: 'Run orchestration',
-                    action: 'run_orchestration',
-                  },
-                  {
-                    label: 'Open Intelligence',
-                    action: 'open_module',
-                    payload: { module: 'intelligence' },
-                  },
-                ],
-              },
-            ];
-
-            await updateChatMessage(assistantMessage.id, {
-              content: fallbackContent,
-              blocks: fallbackBlocks,
-              designOptions: [],
-              followUp: ['Retry the request', 'Run orchestration', 'Open intelligence'],
-            });
-            await touchChatSession(state.sessionId!);
-
-            safeSend(socket, {
-              type: 'ASSISTANT_BLOCKS',
-              messageId: assistantMessage.id,
-              blocks: fallbackBlocks,
-              designOptions: [],
-              followUp: ['Retry the request', 'Run orchestration', 'Open intelligence'],
-            });
-            safeSend(socket, { type: 'ERROR', error: errorCode, details: safeDetails });
-            safeSend(socket, {
-              type: 'ASSISTANT_DONE',
-              messageId: assistantMessage.id,
-              followUp: ['Retry the request', 'Run orchestration'],
-            });
-          };
-
-          watchdogTimer = setTimeout(() => {
-            void finalizeAsFailure(
-              'GENERATION_TIMEOUT',
-              `Assistant timed out after ${Math.round(GENERATION_WATCHDOG_MS / 1000)}s`,
-            );
-          }, GENERATION_WATCHDOG_MS);
+          lifecycle.startWatchdog();
 
           try {
             const result = await streamChatCompletion({
@@ -296,28 +197,17 @@ export function attachChatWebSocketServer(server: http.Server, isSchemaReady: Sc
               userMessage: content,
               callbacks: {
                 onDelta: (delta) => {
-                  if (generationFinalized) return;
-                  fullContent += delta;
-                  safeSend(socket, { type: 'ASSISTANT_DELTA', messageId: assistantMessage.id, delta });
-                  flushContent();
+                  lifecycle.onDelta(delta);
                 },
                 onBlocks: (blocks, designOptions) => {
-                  if (generationFinalized) return;
-                  cachedBlocks = blocks;
-                  cachedDesigns = designOptions;
-                  safeSend(socket, {
-                    type: 'ASSISTANT_BLOCKS',
-                    messageId: assistantMessage.id,
-                    blocks,
-                    designOptions,
-                  });
+                  lifecycle.onBlocks(blocks, designOptions);
                 },
               },
             });
-            await finalizeAsSuccess(result);
+            await lifecycle.finalizeAsSuccess(result);
           } catch (error: any) {
             console.error('[Chat WS] Failed to generate response:', error);
-            await finalizeAsFailure('GENERATION_FAILED', String(error?.message || 'Unknown generation failure'));
+            await lifecycle.finalizeAsFailure('GENERATION_FAILED', String(error?.message || 'Unknown generation failure'));
           }
 
           return;

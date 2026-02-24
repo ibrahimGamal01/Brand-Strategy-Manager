@@ -23,4 +23,17 @@ const noCalls = inferHeuristicToolCalls({
 });
 assert.equal(noCalls.length, 0, 'Expected no heuristic tool calls for generic smalltalk');
 
+const competitorListCalls = inferHeuristicToolCalls({
+  userMessage: 'List my competitors and show inactive ones too.',
+});
+const intelList = competitorListCalls.find((entry) => entry.name === 'intel.list');
+assert.ok(intelList, 'Expected intel.list call for competitor listing requests');
+assert.equal(intelList?.args.section, 'competitors');
+assert.equal(intelList?.args.includeInactive, true);
+
+const recordCall = inferHeuristicToolCalls({
+  userMessage: 'Get competitor row 58b36b53-0039-4d3a-9520-d5483035e81d',
+});
+assert.ok(recordCall.some((entry) => entry.name === 'intel.get'), 'Expected intel.get call for record id lookups');
+
 console.log('chat-tool-hints tests passed');
