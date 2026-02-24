@@ -115,10 +115,23 @@ def _scrapling_fetch(url: str, mode: str, timeout_ms: int) -> FetchResult:
 
     selected = _normalize_mode(mode)
     blockers = {"captcha", "access denied", "please verify", "cloudflare"}
+    timeout_seconds = max(1, timeout_ms // 1000)
+
+    def configure_fetcher_timeout(fetcher_cls: Any) -> None:
+        if fetcher_cls is None:
+            return
+        configure = getattr(fetcher_cls, "configure", None)
+        if callable(configure):
+            try:
+                configure(timeout=timeout_seconds)
+            except Exception:
+                # Keep compatibility with older/newer scrapling versions.
+                pass
 
     def run_http() -> FetchResult:
         start = time.time()
-        fetcher = Fetcher(timeout=max(1, timeout_ms // 1000))
+        configure_fetcher_timeout(Fetcher)
+        fetcher = Fetcher()
         response = fetcher.get(url)
         html = getattr(response, "html", "") or ""
         status = getattr(response, "status", None)
@@ -138,7 +151,8 @@ def _scrapling_fetch(url: str, mode: str, timeout_ms: int) -> FetchResult:
     def run_dynamic() -> FetchResult:
         if DynamicFetcher is None:
             return _basic_fetch(url, timeout_ms)
-        fetcher = DynamicFetcher(timeout=max(1, timeout_ms // 1000))
+        configure_fetcher_timeout(DynamicFetcher)
+        fetcher = DynamicFetcher()
         response = fetcher.get(url)
         html = getattr(response, "html", "") or ""
         status = getattr(response, "status", None)
