@@ -39,6 +39,61 @@ function del<T>(path: string): Promise<T> {
   return apiFetch<T>(path, { method: 'DELETE' });
 }
 
+export type IntelligenceSectionKey =
+  | 'client_profiles'
+  | 'competitors'
+  | 'search_results'
+  | 'images'
+  | 'videos'
+  | 'news'
+  | 'brand_mentions'
+  | 'media_assets'
+  | 'search_trends'
+  | 'community_insights'
+  | 'ai_questions';
+
+const LEGACY_INTELLIGENCE_SECTION_MAP: Record<string, IntelligenceSectionKey> = {
+  'social-profiles': 'client_profiles',
+  social_profiles: 'client_profiles',
+  client_profiles: 'client_profiles',
+  competitors: 'competitors',
+  'search-results': 'search_results',
+  search_results: 'search_results',
+  images: 'images',
+  videos: 'videos',
+  news: 'news',
+  'brand-mentions': 'brand_mentions',
+  brand_mentions: 'brand_mentions',
+  'media-assets': 'media_assets',
+  media_assets: 'media_assets',
+  trends: 'search_trends',
+  search_trends: 'search_trends',
+  'community-insights': 'community_insights',
+  community_insights: 'community_insights',
+  'ai-questions': 'ai_questions',
+  ai_questions: 'ai_questions',
+};
+
+function normalizeSectionKey(value: string): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '')
+    .replace(/-/g, '_');
+}
+
+function resolveIntelligenceSection(sectionOrLegacy: string): IntelligenceSectionKey {
+  const normalized = normalizeSectionKey(sectionOrLegacy);
+  const fromMap =
+    LEGACY_INTELLIGENCE_SECTION_MAP[sectionOrLegacy] ||
+    LEGACY_INTELLIGENCE_SECTION_MAP[normalized] ||
+    LEGACY_INTELLIGENCE_SECTION_MAP[normalized.replace(/_/g, '-')];
+  if (!fromMap) {
+    throw new Error(`Unknown intelligence section: ${sectionOrLegacy}`);
+  }
+  return fromMap;
+}
+
 export const apiClient = {
   getClients: () => apiFetch<any[]>('/clients'),
 
@@ -331,8 +386,53 @@ export const apiClient = {
   updateBrainProfile: (clientId: string, payload: Record<string, unknown>) =>
     patch<any>(`/clients/${clientId}/brain-profile`, payload),
 
+  listIntelligenceSection: (
+    jobId: string,
+    sectionOrLegacy: string,
+    options?: { limit?: number; includeInactive?: boolean }
+  ) => {
+    const section = resolveIntelligenceSection(sectionOrLegacy);
+    const params = new URLSearchParams();
+    if (typeof options?.limit === 'number') params.set('limit', String(options.limit));
+    if (options?.includeInactive) params.set('includeInactive', 'true');
+    const query = params.toString();
+    return apiFetch<{ success: boolean; section: string; includeInactive?: boolean; data: any[] }>(
+      `/research-jobs/${jobId}/intelligence/${section}${query ? `?${query}` : ''}`
+    );
+  },
+
+  createIntelligenceItem: (jobId: string, sectionOrLegacy: string, payload: Record<string, unknown>) => {
+    const section = resolveIntelligenceSection(sectionOrLegacy);
+    return post<any>(`/research-jobs/${jobId}/intelligence/${section}`, payload);
+  },
+
+  updateIntelligenceItem: (
+    jobId: string,
+    sectionOrLegacy: string,
+    itemId: string,
+    payload: Record<string, unknown>
+  ) => {
+    const section = resolveIntelligenceSection(sectionOrLegacy);
+    return patch<any>(`/research-jobs/${jobId}/intelligence/${section}/${itemId}`, payload);
+  },
+
+  archiveIntelligenceItem: (jobId: string, sectionOrLegacy: string, itemId: string) => {
+    const section = resolveIntelligenceSection(sectionOrLegacy);
+    return del<any>(`/research-jobs/${jobId}/intelligence/${section}/${itemId}`);
+  },
+
+  restoreIntelligenceItem: (jobId: string, sectionOrLegacy: string, itemId: string) => {
+    const section = resolveIntelligenceSection(sectionOrLegacy);
+    return post<any>(`/research-jobs/${jobId}/intelligence/${section}/${itemId}/restore`);
+  },
+
+  clearIntelligenceSection: (jobId: string, sectionOrLegacy: string) => {
+    const section = resolveIntelligenceSection(sectionOrLegacy);
+    return del<any>(`/research-jobs/${jobId}/intelligence/${section}`);
+  },
+
   updateDataItem: (jobId: string, dataType: string, itemId: string, payload: Record<string, unknown>) =>
-    put<any>(`/research-jobs/${jobId}/${dataType}/${itemId}`, payload),
+    apiClient.updateIntelligenceItem(jobId, dataType, itemId, payload),
 
   reRequestAssets: (payload: { targets: Array<{ kind: 'brand_mention' | 'client_post' | 'social_post'; id: string }> }) =>
     post<any>('/recovery/re-request', payload),

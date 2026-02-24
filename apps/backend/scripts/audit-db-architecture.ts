@@ -239,22 +239,40 @@ async function run() {
     details: ['Brain tab and orchestration rely on profile-backed context'],
   });
 
-  const legacyBrainSuggestionTable = await countQuery(
-    "SELECT CASE WHEN to_regclass('public.brain_profile_suggestions') IS NULL THEN 0 ELSE 1 END::int AS count"
+  const duplicateActiveNews = await countQuery(
+    "SELECT COUNT(*)::int AS count FROM (SELECT research_job_id, url, COUNT(*) AS cnt FROM ddg_news_results WHERE is_active = TRUE GROUP BY research_job_id, url HAVING COUNT(*) > 1) d"
   );
   checks.push({
-    id: 'legacy_brain_suggestion_table',
-    title: 'Legacy brain suggestion table remains as non-blocking schema drift',
-    severity: 'MEDIUM',
-    passed: legacyBrainSuggestionTable === 0,
-    value: legacyBrainSuggestionTable,
-    details: [
-      legacyBrainSuggestionTable
-        ? 'Table exists in DB but is not represented in Prisma schema.'
-        : 'No legacy suggestion table drift detected.',
-    ],
-    recommendation:
-      'Either reintroduce this model in schema and implement suggestion APIs, or add a cleanup migration once you confirm data is no longer needed.',
+    id: 'active_news_uniqueness',
+    title: 'Active DDG news rows are unique by job + url',
+    severity: 'HIGH',
+    passed: duplicateActiveNews === 0,
+    value: duplicateActiveNews,
+    details: ['Expected zero active duplicates for ddg_news_results(research_job_id, url)'],
+  });
+
+  const duplicateActiveVideos = await countQuery(
+    "SELECT COUNT(*)::int AS count FROM (SELECT research_job_id, url, COUNT(*) AS cnt FROM ddg_video_results WHERE is_active = TRUE GROUP BY research_job_id, url HAVING COUNT(*) > 1) d"
+  );
+  checks.push({
+    id: 'active_video_uniqueness',
+    title: 'Active DDG video rows are unique by job + url',
+    severity: 'HIGH',
+    passed: duplicateActiveVideos === 0,
+    value: duplicateActiveVideos,
+    details: ['Expected zero active duplicates for ddg_video_results(research_job_id, url)'],
+  });
+
+  const duplicateActiveInsights = await countQuery(
+    "SELECT COUNT(*)::int AS count FROM (SELECT research_job_id, url, COUNT(*) AS cnt FROM community_insights WHERE is_active = TRUE GROUP BY research_job_id, url HAVING COUNT(*) > 1) d"
+  );
+  checks.push({
+    id: 'active_community_insight_uniqueness',
+    title: 'Active community insights are unique by job + url',
+    severity: 'HIGH',
+    passed: duplicateActiveInsights === 0,
+    value: duplicateActiveInsights,
+    details: ['Expected zero active duplicates for community_insights(research_job_id, url)'],
   });
 
   const legacyMediaAssetColumns = await countQuery(

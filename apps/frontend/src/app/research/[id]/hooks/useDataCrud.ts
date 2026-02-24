@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
-import { apiFetch } from '@/lib/api/http';
 
 interface UseDataCrudOptions {
   jobId: string;
@@ -32,7 +31,7 @@ export function useDataCrud({ jobId, dataType, onSuccess }: UseDataCrudOptions) 
   const updateItem = async (itemId: string, updates: any) => {
     await withMutation(
       async () => {
-        await apiClient.updateDataItem(jobId, dataType, itemId, updates);
+        await apiClient.updateIntelligenceItem(jobId, dataType, itemId, updates);
       },
       'Data updated',
       'Failed to update item'
@@ -42,9 +41,9 @@ export function useDataCrud({ jobId, dataType, onSuccess }: UseDataCrudOptions) 
   const deleteItem = async (itemId: string) => {
     await withMutation(
       async () => {
-        await apiFetch(`/research-jobs/${jobId}/${dataType}/${itemId}`, { method: 'DELETE' });
+        await apiClient.archiveIntelligenceItem(jobId, dataType, itemId);
       },
-      'Item deleted',
+      'Item archived',
       'Failed to delete item'
     );
   };
@@ -52,10 +51,7 @@ export function useDataCrud({ jobId, dataType, onSuccess }: UseDataCrudOptions) 
   const createItem = async (data: any) => {
     await withMutation(
       async () => {
-        await apiFetch(`/research-jobs/${jobId}/${dataType}`, {
-          method: 'POST',
-          body: JSON.stringify(data),
-        });
+        await apiClient.createIntelligenceItem(jobId, dataType, data);
       },
       'Item created',
       'Failed to create item'

@@ -12,7 +12,6 @@ import mediaRouter from './routes/media';
 import competitorsRouter from './routes/competitors';
 import analyticsRouter from './routes/analytics';
 import aiStrategyRouter from './routes/ai-strategy';
-import dataManagementRouter from './routes/data-management';
 import intelligenceCrudRouter from './routes/research-jobs-intelligence-crud';
 import monitoringRouter from './routes/monitoring';
 import instagramDataRouter from './routes/instagram-data';
@@ -84,7 +83,6 @@ app.use((req, res, next) => {
 // API Routes
 app.use('/api/clients', clientsRouter);
 app.use('/api/research-jobs', intelligenceCrudRouter);
-app.use('/api/research-jobs', dataManagementRouter);
 app.use('/api/research-jobs', brandIntelligenceRouter);
 app.use('/api/research-jobs', contentCalendarRouter);
 app.use('/api/research-jobs', researchJobsRouter);

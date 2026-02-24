@@ -1,454 +1,89 @@
 import { Router } from 'express';
 import { prisma } from '../lib/prisma';
-
-type ScopeType = 'researchJob' | 'client';
-
-type SectionConfig = {
-  model: keyof typeof prisma;
-  scope: ScopeType;
-  orderBy?: { field: string; direction: 'asc' | 'desc' };
-  allowedFields: string[];
-  numberFields?: string[];
-  booleanFields?: string[];
-  dateFields?: string[];
-  jsonArrayFields?: string[];
-};
-
-const SECTION_CONFIG: Record<string, SectionConfig> = {
-  client_profiles: {
-    model: 'clientAccount',
-    scope: 'client',
-    orderBy: { field: 'createdAt', direction: 'desc' },
-    allowedFields: ['platform', 'handle', 'profileUrl', 'followerCount', 'followingCount', 'bio', 'profileImageUrl', 'lastScrapedAt'],
-    numberFields: ['followerCount', 'followingCount'],
-    dateFields: ['lastScrapedAt'],
-  },
-  competitors: {
-    model: 'discoveredCompetitor',
-    scope: 'researchJob',
-    orderBy: { field: 'discoveredAt', direction: 'desc' },
-    allowedFields: [
-      'handle',
-      'platform',
-      'profileUrl',
-      'discoveryReason',
-      'relevanceScore',
-      'status',
-      'postsScraped',
-      'selectionState',
-      'selectionReason',
-      'competitorType',
-      'typeConfidence',
-      'entityFlags',
-      'availabilityStatus',
-      'availabilityReason',
-      'displayOrder',
-      'evidence',
-      'scoreBreakdown',
-    ],
-    numberFields: ['relevanceScore', 'postsScraped', 'displayOrder', 'typeConfidence'],
-    jsonArrayFields: ['entityFlags'],
-  },
-  search_results: {
-    model: 'rawSearchResult',
-    scope: 'researchJob',
-    orderBy: { field: 'createdAt', direction: 'desc' },
-    allowedFields: ['query', 'source', 'title', 'href', 'body', 'isProcessed', 'extractedData', 'seenCount', 'lastSeenAt'],
-    numberFields: ['seenCount'],
-    booleanFields: ['isProcessed'],
-    dateFields: ['lastSeenAt'],
-  },
-  images: {
-    model: 'ddgImageResult',
-    scope: 'researchJob',
-    orderBy: { field: 'createdAt', direction: 'desc' },
-    allowedFields: ['query', 'title', 'imageUrl', 'thumbnailUrl', 'sourceUrl', 'width', 'height'],
-    numberFields: ['width', 'height'],
-  },
-  videos: {
-    model: 'ddgVideoResult',
-    scope: 'researchJob',
-    orderBy: { field: 'createdAt', direction: 'desc' },
-    allowedFields: [
-      'query',
-      'title',
-      'description',
-      'url',
-      'embedUrl',
-      'duration',
-      'publisher',
-      'uploader',
-      'viewCount',
-      'thumbnailUrl',
-      'publishedAt',
-    ],
-    numberFields: ['viewCount'],
-  },
-  news: {
-    model: 'ddgNewsResult',
-    scope: 'researchJob',
-    orderBy: { field: 'createdAt', direction: 'desc' },
-    allowedFields: ['query', 'title', 'body', 'url', 'source', 'imageUrl', 'publishedAt'],
-  },
-  brand_mentions: {
-    model: 'brandMention',
-    scope: 'client',
-    orderBy: { field: 'scrapedAt', direction: 'desc' },
-    allowedFields: [
-      'url',
-      'title',
-      'snippet',
-      'fullText',
-      'sourceType',
-      'availabilityStatus',
-      'availabilityReason',
-      'resolverConfidence',
-      'evidence',
-    ],
-    numberFields: ['resolverConfidence'],
-  },
-  media_assets: {
-    model: 'mediaAsset',
-    scope: 'researchJob',
-    orderBy: { field: 'downloadedAt', direction: 'desc' },
-    allowedFields: [
-      'mediaType',
-      'sourceType',
-      'sourceId',
-      'externalMediaId',
-      'originalUrl',
-      'blobStoragePath',
-      'fileSizeBytes',
-      'durationSeconds',
-      'width',
-      'height',
-      'thumbnailPath',
-      'isDownloaded',
-      'downloadedAt',
-      'downloadError',
-    ],
-    numberFields: ['fileSizeBytes', 'durationSeconds', 'width', 'height'],
-    booleanFields: ['isDownloaded'],
-    dateFields: ['downloadedAt'],
-  },
-  search_trends: {
-    model: 'searchTrend',
-    scope: 'researchJob',
-    orderBy: { field: 'createdAt', direction: 'desc' },
-    allowedFields: ['keyword', 'region', 'timeframe', 'interestOverTime', 'relatedQueries', 'relatedTopics'],
-    jsonArrayFields: ['relatedQueries', 'relatedTopics'],
-  },
-  community_insights: {
-    model: 'communityInsight',
-    scope: 'researchJob',
-    orderBy: { field: 'createdAt', direction: 'desc' },
-    allowedFields: [
-      'source',
-      'url',
-      'content',
-      'sentiment',
-      'painPoints',
-      'desires',
-      'marketingHooks',
-      'metric',
-      'metricValue',
-      'sourceQuery',
-      'evidence',
-    ],
-    numberFields: ['metricValue'],
-    jsonArrayFields: ['painPoints', 'desires', 'marketingHooks'],
-  },
-  ai_questions: {
-    model: 'aiQuestion',
-    scope: 'researchJob',
-    orderBy: { field: 'createdAt', direction: 'desc' },
-    allowedFields: [
-      'questionType',
-      'question',
-      'answer',
-      'answerJson',
-      'contextUsed',
-      'promptUsed',
-      'modelUsed',
-      'tokensUsed',
-      'durationMs',
-      'isAnswered',
-      'answeredAt',
-    ],
-    numberFields: ['tokensUsed', 'durationMs'],
-    booleanFields: ['isAnswered'],
-    dateFields: ['answeredAt'],
-  },
-};
-
-const MEDIA_TYPE_VALUES = new Set(['IMAGE', 'VIDEO', 'AUDIO']);
-const MEDIA_SOURCE_TYPE_VALUES = new Set(['CLIENT_POST_SNAPSHOT', 'COMPETITOR_POST_SNAPSHOT']);
-const AI_QUESTION_TYPE_VALUES = new Set([
-  'VALUE_PROPOSITION',
-  'TARGET_AUDIENCE',
-  'CONTENT_PILLARS',
-  'BRAND_VOICE',
-  'BRAND_PERSONALITY',
-  'COMPETITOR_ANALYSIS',
-  'NICHE_POSITION',
-  'UNIQUE_STRENGTHS',
-  'CONTENT_OPPORTUNITIES',
-  'GROWTH_STRATEGY',
-  'PAIN_POINTS',
-  'KEY_DIFFERENTIATORS',
-  'CUSTOM',
-  'COMPETITOR_DISCOVERY_METHOD',
-]);
-const COMPETITOR_SELECTION_STATE_VALUES = new Set([
-  'FILTERED_OUT',
-  'SHORTLISTED',
-  'TOP_PICK',
-  'APPROVED',
-  'REJECTED',
-]);
-const COMPETITOR_TYPE_VALUES = new Set([
-  'DIRECT',
-  'INDIRECT',
-  'ADJACENT',
-  'MARKETPLACE',
-  'MEDIA',
-  'INFLUENCER',
-  'COMMUNITY',
-  'UNKNOWN',
-]);
+import { SECTION_CONFIG, type SectionConfig } from './intelligence-crud-config';
 
 const router = Router();
 
-function parseBoolean(value: unknown): boolean | undefined {
-  if (typeof value === 'boolean') return value;
-  if (typeof value !== 'string') return undefined;
-  const raw = value.trim().toLowerCase();
-  if (raw === 'true' || raw === '1' || raw === 'yes') return true;
-  if (raw === 'false' || raw === '0' || raw === 'no') return false;
-  return undefined;
+const parseBoolean = (value: unknown) => (typeof value === 'boolean' ? value : typeof value === 'string' ? ({ true: true, false: false } as Record<string, boolean>)[value.toLowerCase()] : undefined);
+const parseNumber = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : typeof value === 'string' && value.trim() ? Number(value) : undefined);
+const parseDate = (value: unknown) => (value instanceof Date ? value : typeof value === 'string' ? new Date(value) : undefined);
+const parseJsonArray = (value: unknown) => (Array.isArray(value) ? value : typeof value === 'string' && value.trim().startsWith('[') ? JSON.parse(value) : typeof value === 'string' ? value.split(',').map((x) => x.trim()).filter(Boolean) : undefined);
+const normalize = (value: unknown) => String(value || '').trim().toLowerCase();
+const getActor = (req: any) => String(req.headers['x-bat-actor'] || req.headers['x-user-id'] || 'admin-ui');
+const getDelegate = (config: SectionConfig) => (prisma as any)[config.model];
+const resolveSection = (section: string) => SECTION_CONFIG[normalize(section)] ? { key: normalize(section), config: SECTION_CONFIG[normalize(section)] } : null;
+
+async function getJobOrThrow(jobId: string) {
+  const job = await prisma.researchJob.findUnique({ where: { id: jobId }, select: { id: true, clientId: true } });
+  if (!job) throw new Error('Research job not found');
+  return job;
 }
 
-function parseNumber(value: unknown): number | undefined {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value !== 'string') return undefined;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return undefined;
-  return parsed;
-}
-
-function parseDate(value: unknown): Date | undefined {
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
-  if (typeof value !== 'string') return undefined;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return undefined;
-  return parsed;
-}
-
-function parseJsonArray(value: unknown): unknown[] | undefined {
-  if (Array.isArray(value)) return value;
-  if (typeof value !== 'string') return undefined;
-  const raw = value.trim();
-  if (!raw) return undefined;
-  if (raw.startsWith('[')) {
-    try {
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : undefined;
-    } catch {
-      return undefined;
-    }
-  }
-  return raw.split(',').map((entry) => entry.trim()).filter(Boolean);
-}
-
-function cleanPayload(section: string, config: SectionConfig, raw: Record<string, unknown>): Record<string, unknown> {
+function parsePayload(section: string, config: SectionConfig, raw: Record<string, unknown>) {
   const out: Record<string, unknown> = {};
-
-  for (const key of config.allowedFields) {
-    if (!(key in raw)) continue;
-    const value = raw[key];
+  const errors: string[] = [];
+  for (const [key, value] of Object.entries(raw)) {
+    if (!config.allowedFields.includes(key)) {
+      errors.push(`Unknown or disallowed field: ${key}`);
+      continue;
+    }
     if (value === undefined) continue;
-    if (value === null) {
-      out[key] = null;
-      continue;
-    }
-    if (config.numberFields?.includes(key)) {
-      const parsed = parseNumber(value);
-      if (parsed !== undefined) out[key] = parsed;
-      continue;
-    }
-    if (config.booleanFields?.includes(key)) {
-      const parsed = parseBoolean(value);
-      if (parsed !== undefined) out[key] = parsed;
-      continue;
-    }
-    if (config.dateFields?.includes(key)) {
-      const parsed = parseDate(value);
-      if (parsed) out[key] = parsed;
-      continue;
-    }
-    if (config.jsonArrayFields?.includes(key)) {
-      const parsed = parseJsonArray(value);
-      if (parsed) out[key] = parsed;
+    if (value === null) { out[key] = null; continue; }
+    if (config.numberFields?.includes(key)) { const parsed = parseNumber(value); if (!Number.isFinite(parsed as number)) errors.push(`Invalid number for ${key}`); else out[key] = parsed; continue; }
+    if (config.booleanFields?.includes(key)) { const parsed = parseBoolean(value); if (parsed === undefined) errors.push(`Invalid boolean for ${key}`); else out[key] = parsed; continue; }
+    if (config.dateFields?.includes(key)) { const parsed = parseDate(value); if (!parsed || Number.isNaN(parsed.getTime())) errors.push(`Invalid date for ${key}`); else out[key] = parsed; continue; }
+    if (config.jsonArrayFields?.includes(key)) { try { const parsed = parseJsonArray(value); if (!Array.isArray(parsed)) throw new Error('bad array'); out[key] = parsed; } catch { errors.push(`Invalid array for ${key}`); } continue; }
+    if (config.enumFields?.[key]) {
+      const enumSet = config.enumFields[key];
+      const normalizedValue = String(value).toUpperCase();
+      if (!enumSet.has(normalizedValue)) errors.push(`Invalid value for ${key}: ${value}`);
+      else out[key] = normalizedValue;
       continue;
     }
     out[key] = value;
   }
-
-  if (section === 'media_assets') {
-    if (typeof out.mediaType === 'string') {
-      const upper = out.mediaType.toUpperCase();
-      out.mediaType = MEDIA_TYPE_VALUES.has(upper) ? upper : 'IMAGE';
-    }
-    if (typeof out.sourceType === 'string') {
-      const upper = out.sourceType.toUpperCase();
-      out.sourceType = MEDIA_SOURCE_TYPE_VALUES.has(upper) ? upper : null;
-    }
-  }
-
-  if (section === 'ai_questions' && typeof out.questionType === 'string') {
-    const upper = out.questionType.toUpperCase();
-    out.questionType = AI_QUESTION_TYPE_VALUES.has(upper) ? upper : 'CUSTOM';
-  }
-
-  if (section === 'competitors') {
-    if (typeof out.selectionState === 'string') {
-      const upper = out.selectionState.toUpperCase();
-      out.selectionState = COMPETITOR_SELECTION_STATE_VALUES.has(upper)
-        ? upper
-        : 'SHORTLISTED';
-    }
-    if (typeof out.competitorType === 'string') {
-      const upper = out.competitorType.toUpperCase();
-      out.competitorType = COMPETITOR_TYPE_VALUES.has(upper) ? upper : 'UNKNOWN';
-    }
-    if (typeof out.typeConfidence === 'number') {
-      out.typeConfidence = Math.max(0, Math.min(1, out.typeConfidence));
-    }
-  }
-
-  return out;
+  if (section === 'competitors' && typeof out.typeConfidence === 'number') out.typeConfidence = Math.max(0, Math.min(1, out.typeConfidence as number));
+  return { data: out, errors };
 }
 
-async function getJobOrThrow(jobId: string) {
-  const job = await prisma.researchJob.findUnique({
-    where: { id: jobId },
-    select: { id: true, clientId: true },
-  });
-  if (!job) {
-    throw new Error('Research job not found');
+function applyMutationMetadata(data: Record<string, unknown>, actor: string, unarchive = false) {
+  data.manuallyModified = true;
+  data.lastModifiedAt = new Date();
+  data.lastModifiedBy = actor;
+  if (unarchive) {
+    data.isActive = true;
+    data.archivedAt = null;
+    data.archivedBy = null;
   }
-  return job;
+  return data;
 }
 
-function resolveSection(section: string): { key: string; config: SectionConfig } | null {
-  const normalized = String(section || '').trim().toLowerCase();
-  const config = SECTION_CONFIG[normalized];
-  if (!config) return null;
-  return { key: normalized, config };
+function ensureRequired(config: SectionConfig, data: Record<string, unknown>) {
+  const missing = (config.requiredOnCreate || []).filter((field) => !(field in data) || data[field] == null || String(data[field]).trim() === '');
+  return missing;
 }
 
-function getDelegate(config: SectionConfig): any {
-  return (prisma as any)[config.model];
+function enforceImmutable(config: SectionConfig, data: Record<string, unknown>) {
+  return Object.keys(data).filter((field) => config.immutableFields?.includes(field));
 }
 
-async function scopeWhere(config: SectionConfig, jobId: string, clientId: string): Promise<Record<string, unknown>> {
-  if (config.scope === 'client') {
-    return { clientId };
-  }
-  return { researchJobId: jobId };
+async function scopedWhere(config: SectionConfig, job: { id: string; clientId: string }, includeInactive = false) {
+  const where: Record<string, unknown> = config.scope === 'client' ? { clientId: job.clientId } : { researchJobId: job.id };
+  if (config.supportsCuration && !includeInactive) where.isActive = true;
+  return where;
 }
-
-function ensureCreateFallbacks(section: string, payload: Record<string, unknown>) {
-  if (section === 'client_profiles') {
-    if (!payload.platform) payload.platform = 'instagram';
-    if (!payload.handle) payload.handle = `manual_${Date.now()}`;
-  }
-  if (section === 'competitors') {
-    if (!payload.platform) payload.platform = 'instagram';
-    if (!payload.handle) payload.handle = `competitor_${Date.now()}`;
-  }
-  if (section === 'search_results') {
-    if (!payload.query) payload.query = 'manual query';
-    if (!payload.title) payload.title = 'Manual result';
-    if (!payload.body) payload.body = 'Added from chat CRUD';
-    if (!payload.href) payload.href = `https://manual.local/search/${Date.now()}`;
-    if (!payload.source) payload.source = 'manual';
-  }
-  if (section === 'images') {
-    if (!payload.query) payload.query = 'manual image query';
-    if (!payload.title) payload.title = 'Manual image';
-    if (!payload.imageUrl) payload.imageUrl = `https://picsum.photos/seed/${Date.now()}/800/800`;
-    if (!payload.sourceUrl) payload.sourceUrl = payload.imageUrl;
-  }
-  if (section === 'videos') {
-    if (!payload.query) payload.query = 'manual video query';
-    if (!payload.title) payload.title = 'Manual video';
-    if (!payload.url) payload.url = `https://manual.local/video/${Date.now()}`;
-  }
-  if (section === 'news') {
-    if (!payload.query) payload.query = 'manual news query';
-    if (!payload.title) payload.title = 'Manual article';
-    if (!payload.url) payload.url = `https://manual.local/news/${Date.now()}`;
-  }
-  if (section === 'brand_mentions') {
-    if (!payload.url) payload.url = `https://manual.local/mention/${Date.now()}`;
-    if (!payload.sourceType) payload.sourceType = 'manual';
-  }
-  if (section === 'media_assets') {
-    if (!payload.mediaType) payload.mediaType = 'IMAGE';
-  }
-  if (section === 'search_trends') {
-    if (!payload.keyword) payload.keyword = `manual-trend-${Date.now()}`;
-    if (!payload.region) payload.region = 'US';
-    if (!payload.timeframe) payload.timeframe = 'today 12-m';
-  }
-  if (section === 'community_insights') {
-    if (!payload.source) payload.source = 'manual';
-    if (!payload.url) payload.url = `https://manual.local/community/${Date.now()}`;
-    if (!payload.content) payload.content = 'Manual community insight';
-  }
-  if (section === 'ai_questions') {
-    if (!payload.questionType) payload.questionType = 'CUSTOM';
-    if (!payload.question) payload.question = 'Manual strategic question';
-  }
-}
-
-router.get('/:id/intelligence', async (req, res) => {
-  try {
-    const { id: jobId } = req.params;
-    const job = await getJobOrThrow(jobId);
-    const sections = await Promise.all(
-      Object.entries(SECTION_CONFIG).map(async ([section, config]) => {
-        const delegate = getDelegate(config);
-        const where = await scopeWhere(config, job.id, job.clientId);
-        const count = await delegate.count({ where });
-        return { section, count };
-      })
-    );
-    return res.json({ success: true, sections });
-  } catch (error: any) {
-    return res.status(500).json({ error: 'Failed to list intelligence sections', details: error.message });
-  }
-});
 
 router.get('/:id/intelligence/:section', async (req, res) => {
   try {
-    const { id: jobId, section } = req.params;
-    const resolved = resolveSection(section);
+    const resolved = resolveSection(req.params.section);
     if (!resolved) return res.status(400).json({ error: 'Unknown section' });
-    const job = await getJobOrThrow(jobId);
-    const delegate = getDelegate(resolved.config);
-    const where = await scopeWhere(resolved.config, job.id, job.clientId);
+    const job = await getJobOrThrow(req.params.id);
+    const includeInactive = parseBoolean(req.query.includeInactive) === true;
     const limit = Math.max(1, Math.min(500, Number(req.query.limit || 200)));
-    const orderBy = resolved.config.orderBy
-      ? { [resolved.config.orderBy.field]: resolved.config.orderBy.direction }
-      : undefined;
-    const data = await delegate.findMany({
-      where,
-      take: limit,
-      ...(orderBy ? { orderBy } : {}),
-    });
-    return res.json({ success: true, section: resolved.key, data });
+    const where = await scopedWhere(resolved.config, job, includeInactive);
+    const orderBy = resolved.config.orderBy ? { [resolved.config.orderBy.field]: resolved.config.orderBy.direction } : undefined;
+    const data = await getDelegate(resolved.config).findMany({ where, take: limit, ...(orderBy ? { orderBy } : {}) });
+    return res.json({ success: true, section: resolved.key, includeInactive, data });
   } catch (error: any) {
     return res.status(500).json({ error: 'Failed to fetch section data', details: error.message });
   }
@@ -456,22 +91,37 @@ router.get('/:id/intelligence/:section', async (req, res) => {
 
 router.post('/:id/intelligence/:section', async (req, res) => {
   try {
-    const { id: jobId, section } = req.params;
-    const resolved = resolveSection(section);
+    const resolved = resolveSection(req.params.section);
     if (!resolved) return res.status(400).json({ error: 'Unknown section' });
-    const job = await getJobOrThrow(jobId);
-    const delegate = getDelegate(resolved.config);
+    const job = await getJobOrThrow(req.params.id);
+    const actor = getActor(req);
     const rawData = (req.body?.data || req.body || {}) as Record<string, unknown>;
-    const payload = cleanPayload(resolved.key, resolved.config, rawData);
-    ensureCreateFallbacks(resolved.key, payload);
+    const parsed = parsePayload(resolved.key, resolved.config, rawData);
+    const requiredMissing = ensureRequired(resolved.config, parsed.data);
+    if (parsed.errors.length || requiredMissing.length) return res.status(400).json({ error: 'Validation failed', details: [...parsed.errors, ...requiredMissing.map((f) => `Missing required field: ${f}`)] });
+    const data = applyMutationMetadata(parsed.data, actor, true);
+    if (resolved.config.scope === 'client') data.clientId = job.clientId; else data.researchJobId = job.id;
 
-    if (resolved.config.scope === 'client') {
-      payload.clientId = job.clientId;
-    } else {
-      payload.researchJobId = job.id;
+    if (resolved.key === 'competitors') {
+      data.handle = String(data.handle || '').replace(/^@+/, '').trim().toLowerCase();
+      data.platform = String(data.platform || '').trim().toLowerCase();
+      if (!data.handle || !data.platform) return res.status(400).json({ error: 'Validation failed', details: ['Competitor handle/platform are required'] });
+      const competitor = await prisma.competitor.upsert({ where: { clientId_platform_handle: { clientId: job.clientId, platform: data.platform as string, handle: data.handle as string } }, update: {}, create: { clientId: job.clientId, platform: data.platform as string, handle: data.handle as string } });
+      data.competitorId = competitor.id;
     }
 
-    const created = await delegate.create({ data: payload });
+    const identityWhere = resolved.config.identityFields?.every((field) => data[field] != null)
+      ? Object.fromEntries(resolved.config.identityFields!.map((field) => [field, data[field]]))
+      : null;
+    if (identityWhere) {
+      const existing = await getDelegate(resolved.config).findFirst({ where: { ...(await scopedWhere(resolved.config, job, true)), ...identityWhere } });
+      if (existing) {
+        const updated = await getDelegate(resolved.config).update({ where: { id: existing.id }, data });
+        return res.json({ success: true, section: resolved.key, data: updated, reactivated: true });
+      }
+    }
+
+    const created = await getDelegate(resolved.config).create({ data });
     return res.json({ success: true, section: resolved.key, data: created });
   } catch (error: any) {
     return res.status(500).json({ error: 'Failed to create data point', details: error.message });
@@ -480,59 +130,78 @@ router.post('/:id/intelligence/:section', async (req, res) => {
 
 router.patch('/:id/intelligence/:section/:itemId', async (req, res) => {
   try {
-    const { id: jobId, section, itemId } = req.params;
-    const resolved = resolveSection(section);
+    const resolved = resolveSection(req.params.section);
     if (!resolved) return res.status(400).json({ error: 'Unknown section' });
-    const job = await getJobOrThrow(jobId);
-    const delegate = getDelegate(resolved.config);
-    const where = await scopeWhere(resolved.config, job.id, job.clientId);
-    const existing = await delegate.findFirst({ where: { ...where, id: itemId } });
+    const job = await getJobOrThrow(req.params.id);
+    const where = await scopedWhere(resolved.config, job, true);
+    const existing = await getDelegate(resolved.config).findFirst({ where: { ...where, id: req.params.itemId } });
     if (!existing) return res.status(404).json({ error: 'Data point not found in this research job' });
-
+    const actor = getActor(req);
     const rawData = (req.body?.data || req.body || {}) as Record<string, unknown>;
-    const payload = cleanPayload(resolved.key, resolved.config, rawData);
-    if (Object.keys(payload).length === 0) {
-      return res.status(400).json({ error: 'No valid fields to update' });
-    }
-
-    const updated = await delegate.update({
-      where: { id: itemId },
-      data: payload,
-    });
+    const parsed = parsePayload(resolved.key, resolved.config, rawData);
+    const immutableTouched = enforceImmutable(resolved.config, parsed.data);
+    if (immutableTouched.length) parsed.errors.push(`Immutable fields cannot be edited directly: ${immutableTouched.join(', ')}`);
+    if (parsed.errors.length || Object.keys(parsed.data).length === 0) return res.status(400).json({ error: 'Validation failed', details: parsed.errors.length ? parsed.errors : ['No valid fields to update'] });
+    const data = applyMutationMetadata(parsed.data, actor);
+    const updated = await getDelegate(resolved.config).update({ where: { id: req.params.itemId }, data });
     return res.json({ success: true, section: resolved.key, data: updated });
   } catch (error: any) {
     return res.status(500).json({ error: 'Failed to update data point', details: error.message });
   }
 });
 
+router.post('/:id/intelligence/:section/:itemId/restore', async (req, res) => {
+  try {
+    const resolved = resolveSection(req.params.section);
+    if (!resolved) return res.status(400).json({ error: 'Unknown section' });
+    const job = await getJobOrThrow(req.params.id);
+    const actor = getActor(req);
+    const where = await scopedWhere(resolved.config, job, true);
+    const existing = await getDelegate(resolved.config).findFirst({ where: { ...where, id: req.params.itemId } });
+    if (!existing) return res.status(404).json({ error: 'Data point not found in this research job' });
+    const restored = await getDelegate(resolved.config).update({ where: { id: req.params.itemId }, data: applyMutationMetadata({ isActive: true, archivedAt: null, archivedBy: null }, actor, true) });
+    return res.json({ success: true, section: resolved.key, data: restored });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Failed to restore data point', details: error.message });
+  }
+});
+
 router.delete('/:id/intelligence/:section/:itemId', async (req, res) => {
   try {
-    const { id: jobId, section, itemId } = req.params;
-    const resolved = resolveSection(section);
+    const resolved = resolveSection(req.params.section);
     if (!resolved) return res.status(400).json({ error: 'Unknown section' });
-    const job = await getJobOrThrow(jobId);
-    const delegate = getDelegate(resolved.config);
-    const where = await scopeWhere(resolved.config, job.id, job.clientId);
-    const existing = await delegate.findFirst({ where: { ...where, id: itemId } });
+    const job = await getJobOrThrow(req.params.id);
+    const where = await scopedWhere(resolved.config, job, true);
+    const existing = await getDelegate(resolved.config).findFirst({ where: { ...where, id: req.params.itemId } });
     if (!existing) return res.status(404).json({ error: 'Data point not found in this research job' });
-
-    await delegate.delete({ where: { id: itemId } });
-    return res.json({ success: true, section: resolved.key, deletedId: itemId });
+    const hardDelete = parseBoolean(req.query.hard) === true && req.headers['x-admin-secret'] === process.env.ADMIN_SECRET;
+    if (hardDelete) {
+      await getDelegate(resolved.config).delete({ where: { id: req.params.itemId } });
+      return res.json({ success: true, section: resolved.key, deletedId: req.params.itemId, hard: true });
+    }
+    const archived = await getDelegate(resolved.config).update({ where: { id: req.params.itemId }, data: applyMutationMetadata({ isActive: false, archivedAt: new Date(), archivedBy: getActor(req) }, getActor(req)) });
+    return res.json({ success: true, section: resolved.key, archivedId: archived.id });
   } catch (error: any) {
-    return res.status(500).json({ error: 'Failed to delete data point', details: error.message });
+    return res.status(500).json({ error: 'Failed to archive data point', details: error.message });
   }
 });
 
 router.delete('/:id/intelligence/:section', async (req, res) => {
   try {
-    const { id: jobId, section } = req.params;
-    const resolved = resolveSection(section);
+    const resolved = resolveSection(req.params.section);
     if (!resolved) return res.status(400).json({ error: 'Unknown section' });
-    const job = await getJobOrThrow(jobId);
-    const delegate = getDelegate(resolved.config);
-    const where = await scopeWhere(resolved.config, job.id, job.clientId);
-    const result = await delegate.deleteMany({ where });
-    return res.json({ success: true, section: resolved.key, deletedCount: result.count });
+    const job = await getJobOrThrow(req.params.id);
+    const hardDelete = parseBoolean(req.query.hard) === true && req.headers['x-admin-secret'] === process.env.ADMIN_SECRET;
+    const where = await scopedWhere(resolved.config, job, false);
+    if (hardDelete) {
+      const deleted = await getDelegate(resolved.config).deleteMany({ where });
+      return res.json({ success: true, section: resolved.key, deletedCount: deleted.count, hard: true });
+    }
+    const archived = await getDelegate(resolved.config).updateMany({
+      where,
+      data: applyMutationMetadata({ isActive: false, archivedAt: new Date(), archivedBy: getActor(req) }, getActor(req)),
+    });
+    return res.json({ success: true, section: resolved.key, archivedCount: archived.count });
   } catch (error: any) {
     return res.status(500).json({ error: 'Failed to clear section', details: error.message });
   }
