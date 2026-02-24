@@ -5,6 +5,9 @@ import type {
   UndoMutationRequest,
 } from '../mutations/mutation-types';
 import type { ToolDefinition } from './tool-types';
+import { SECTION_CONFIG } from '../../../../routes/intelligence-crud-config';
+
+const MUTATION_SECTIONS = Object.keys(SECTION_CONFIG);
 
 export const intelTools: ToolDefinition<Record<string, unknown>, Record<string, unknown>>[] = [
   {
@@ -13,7 +16,7 @@ export const intelTools: ToolDefinition<Record<string, unknown>, Record<string, 
     argsSchema: {
       type: 'object',
       properties: {
-        section: { type: 'string', enum: ['competitors'] },
+        section: { type: 'string', enum: MUTATION_SECTIONS },
         kind: { type: 'string', enum: ['create', 'update', 'delete', 'clear'] },
         where: { type: 'object' },
         data: { type: 'object' },

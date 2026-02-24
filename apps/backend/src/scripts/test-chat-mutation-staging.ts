@@ -79,6 +79,19 @@ async function run(): Promise<void> {
     const warnings = Array.isArray(deletePreview.warnings) ? deletePreview.warnings.join(' ') : '';
     assert.ok(warnings.includes('No records matched'));
 
+    const webPreview = await stageTool!.execute(context, {
+      section: 'web_sources',
+      kind: 'create',
+      data: {
+        url: `https://example-${suffix}.com`,
+        sourceType: 'CLIENT_SITE',
+        discoveredBy: 'CHAT_TOOL',
+      },
+    });
+    assert.equal(webPreview.section, 'web_sources');
+    assert.equal(webPreview.kind, 'create');
+    assert.equal(webPreview.matchedCount, 0);
+
     console.log('Chat mutation staging tests passed.');
   } finally {
     await prisma.client.delete({ where: { id: client.id } }).catch(() => undefined);

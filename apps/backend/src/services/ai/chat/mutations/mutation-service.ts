@@ -1,5 +1,6 @@
 import { Prisma, type ChatMutationKind } from '@prisma/client';
 import type { AgentContext } from '../agent-context';
+import { SECTION_CONFIG } from '../../../../routes/intelligence-crud-config';
 import { prisma } from '../../../../lib/prisma';
 import type {
   ApplyMutationRequest,
@@ -15,104 +16,83 @@ import {
   assertToken,
   createConfirmToken,
   createUndoToken,
-  toCompetitorCreateData,
-  toCompetitorUpdateData,
   toJsonSafe,
 } from './mutation-utils';
-
+import {
+  ensureRequired,
+  getDelegate,
+  resolveScope,
+  resolveSection,
+  sanitizeData,
+  sanitizeWhere,
+  scopedWhere,
+  touchMutationMetadata,
+} from './mutation-section-utils';
 type MutationContext = Pick<AgentContext, 'researchJobId' | 'sessionId'>;
-
-const SUPPORTED_SECTION = 'competitors';
-const COMPETITOR_ALLOWED_FIELDS = new Set([
-  'handle',
-  'platform',
-  'profileUrl',
-  'discoveryReason',
-  'relevanceScore',
-  'status',
-  'postsScraped',
-  'selectionState',
-  'selectionReason',
-  'availabilityStatus',
-  'availabilityReason',
-  'displayOrder',
-  'evidence',
-  'scoreBreakdown',
-]);
-const COMPETITOR_NUMERIC_FIELDS = new Set(['relevanceScore', 'postsScraped', 'displayOrder']);
-
 function normalizeKind(kind: MutationKind): ChatMutationKind {
   if (kind === 'create') return 'CREATE';
   if (kind === 'update') return 'UPDATE';
   if (kind === 'delete') return 'DELETE';
   return 'CLEAR';
 }
-
 function parseKind(kind: ChatMutationKind): MutationKind {
   if (kind === 'CREATE') return 'create';
   if (kind === 'UPDATE') return 'update';
   if (kind === 'DELETE') return 'delete';
   return 'clear';
 }
-
-function sanitizeCompetitorData(data: Record<string, unknown> = {}): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(data)) {
-    if (!COMPETITOR_ALLOWED_FIELDS.has(key) || value === undefined) continue;
-    if (value === null) {
-      out[key] = null;
-      continue;
-    }
-    if (COMPETITOR_NUMERIC_FIELDS.has(key)) {
-      const parsed = Number(value);
-      if (Number.isFinite(parsed)) out[key] = parsed;
-      continue;
-    }
-    out[key] = value;
-  }
-  return out;
-}
-
-function buildCompetitorWhere(researchJobId: string, where?: Record<string, unknown>): Record<string, unknown> {
-  const scopedWhere: Record<string, unknown> = { researchJobId };
-  if (!where) return scopedWhere;
-
-  const scalarKeys = ['id', 'handle', 'platform', 'selectionState', 'status', 'availabilityStatus', 'competitorId'];
-  for (const key of scalarKeys) {
-    const value = where[key];
-    if (typeof value === 'string' && value.trim()) scopedWhere[key] = value.trim();
-  }
-  return scopedWhere;
-}
-
-function buildWarnings(kind: MutationKind, matchedCount: number): string[] {
-  const warnings: string[] = [];
-  if (kind === 'delete' || kind === 'clear') warnings.push('This operation is destructive and cannot be auto-applied.');
-  if (matchedCount === 0 && kind !== 'create') warnings.push('No records matched the mutation criteria.');
-  if (matchedCount > 20) warnings.push(`Large scope detected: ${matchedCount} rows matched.`);
-  return warnings;
-}
-
-function buildAfterSample(kind: MutationKind, beforeSample: Record<string, unknown>[], data: Record<string, unknown>): Record<string, unknown>[] {
-  if (kind === 'create') return [toJsonSafe(data)];
-  if (kind === 'update') return beforeSample.slice(0, 5).map((row) => ({ ...row, ...data }));
-  return [];
-}
-
 function parseStoredRequest(value: Prisma.JsonValue): MutationRequest {
   const request = (value || {}) as Record<string, unknown>;
   return {
     section: String(request.section || ''),
     kind: String(request.kind || 'update').toLowerCase() as MutationKind,
-    where: typeof request.where === 'object' && request.where && !Array.isArray(request.where)
-      ? (request.where as Record<string, unknown>)
-      : undefined,
-    data: typeof request.data === 'object' && request.data && !Array.isArray(request.data)
-      ? (request.data as Record<string, unknown>)
-      : undefined,
+    where:
+      typeof request.where === 'object' && request.where && !Array.isArray(request.where)
+        ? (request.where as Record<string, unknown>)
+        : undefined,
+    data:
+      typeof request.data === 'object' && request.data && !Array.isArray(request.data)
+        ? (request.data as Record<string, unknown>)
+        : undefined,
   };
 }
-
+function buildWarnings(params: {
+  kind: MutationKind;
+  matchedCount: number;
+  hasWhere: boolean;
+  dataCount: number;
+}): string[] {
+  const warnings: string[] = [];
+  if (params.kind === 'delete' || params.kind === 'clear') {
+    warnings.push('This operation is destructive and requires confirmation.');
+  }
+  if (params.kind !== 'create' && !params.hasWhere && params.kind !== 'clear') {
+    warnings.push('No where filter supplied. This may affect many rows.');
+  }
+  if (params.kind !== 'create' && params.matchedCount === 0) {
+    warnings.push('No records matched the mutation criteria.');
+  }
+  if (params.matchedCount > 20) {
+    warnings.push(`Large scope detected: ${params.matchedCount} rows matched.`);
+  }
+  if (params.kind === 'update' && params.dataCount === 0) {
+    warnings.push('No editable fields were provided for update.');
+  }
+  return warnings;
+}
+function buildAfterSample(
+  kind: MutationKind,
+  beforeSample: Record<string, unknown>[],
+  data: Record<string, unknown>,
+): Record<string, unknown>[] {
+  if (kind === 'create') return [toJsonSafe(data)];
+  if (kind === 'update') return beforeSample.slice(0, 5).map((row) => ({ ...row, ...data }));
+  return [];
+}
+function findSectionByModelName(modelName: string): string | null {
+  const entry = Object.entries(SECTION_CONFIG).find(([, config]) => String(config.model) === modelName);
+  return entry ? entry[0] : null;
+}
 async function getScopedMutation(context: MutationContext, mutationId: string) {
   const mutation = await prisma.chatMutation.findUnique({
     where: { id: mutationId },
@@ -124,39 +104,48 @@ async function getScopedMutation(context: MutationContext, mutationId: string) {
   }
   return mutation;
 }
-
 export async function stageMutation(context: MutationContext, request: MutationRequest): Promise<MutationPreview> {
-  const section = String(request.section || '').trim().toLowerCase();
-  if (section !== SUPPORTED_SECTION) {
-    throw new Error(`Unsupported mutation section: ${section}. Currently only "${SUPPORTED_SECTION}" is enabled.`);
-  }
-
+  const { key: section, config } = resolveSection(request.section);
+  const scope = await resolveScope(context.researchJobId);
   const kind = request.kind;
-  const safeData = sanitizeCompetitorData(request.data || {});
-  const where = buildCompetitorWhere(context.researchJobId, request.where);
-
-  const matchedRows = kind === 'create'
-    ? []
-    : await prisma.discoveredCompetitor.findMany({
-        where: kind === 'clear' ? { researchJobId: context.researchJobId } : where,
-        orderBy: { discoveredAt: 'desc' },
-      });
-
-  const beforeSample = toJsonSafe(matchedRows.slice(0, 5) as unknown as Record<string, unknown>[]);
-  const afterSample = buildAfterSample(kind, beforeSample, safeData);
-  const warnings = buildWarnings(kind, matchedRows.length);
-
+  const parsed = sanitizeData(section, config, request.data || {});
+  const requiredMissing = kind === 'create' ? ensureRequired(config, parsed.data) : [];
+  if (requiredMissing.length) {
+    parsed.errors.push(...requiredMissing.map((field) => `Missing required field: ${field}`));
+  }
+  if (parsed.errors.length) {
+    throw new Error(parsed.errors.join('; '));
+  }
+  const whereFilter = sanitizeWhere(config, request.where);
+  const baseWhere = scopedWhere(config, scope, true);
+  const queryWhere = kind === 'clear' ? baseWhere : { ...baseWhere, ...whereFilter };
+  const delegate = getDelegate(config);
+  const matchedRows =
+    kind === 'create'
+      ? []
+      : await delegate.findMany({
+          where: queryWhere,
+          orderBy: config.orderBy ? { [config.orderBy.field]: config.orderBy.direction } : { updatedAt: 'desc' },
+          take: 200,
+        });
+  const beforeSample = toJsonSafe(matchedRows.slice(0, 5) as Record<string, unknown>[]);
+  const afterSample = buildAfterSample(kind, beforeSample, parsed.data);
+  const warnings = buildWarnings({
+    kind,
+    matchedCount: matchedRows.length,
+    hasWhere: Object.keys(whereFilter).length > 0,
+    dataCount: Object.keys(parsed.data).length,
+  });
   const mutation = await prisma.chatMutation.create({
     data: {
       researchJobId: context.researchJobId,
       sessionId: context.sessionId,
       kind: normalizeKind(kind),
       section,
-      requestJson: toJsonSafe({ ...request, section, data: safeData }) as Prisma.InputJsonValue,
+      requestJson: toJsonSafe({ section, kind, where: whereFilter, data: parsed.data }) as Prisma.InputJsonValue,
       previewJson: toJsonSafe({ beforeSample, afterSample, warnings }) as Prisma.InputJsonValue,
     },
   });
-
   return {
     mutationId: mutation.id,
     kind,
@@ -169,131 +158,162 @@ export async function stageMutation(context: MutationContext, request: MutationR
     requiresConfirmation: true,
   };
 }
-
 export async function applyMutation(context: MutationContext, request: ApplyMutationRequest): Promise<ApplyMutationResult> {
   const mutation = await getScopedMutation(context, request.mutationId);
   assertToken(request.confirmToken, createConfirmToken(mutation), 'confirm token');
-
   const mutationRequest = parseStoredRequest(mutation.requestJson);
+  const { key: section, config } = resolveSection(mutationRequest.section);
+  const scope = await resolveScope(context.researchJobId);
   const kind = parseKind(mutation.kind);
-  const where = buildCompetitorWhere(context.researchJobId, mutationRequest.where);
-  const safeData = sanitizeCompetitorData(mutationRequest.data || {});
-
-  const matchedRows = kind === 'create'
-    ? []
-    : await prisma.discoveredCompetitor.findMany({
-        where: kind === 'clear' ? { researchJobId: context.researchJobId } : where,
-      });
-
+  const parsed = sanitizeData(section, config, mutationRequest.data || {});
+  if (parsed.errors.length) {
+    throw new Error(parsed.errors.join('; '));
+  }
+  const whereFilter = sanitizeWhere(config, mutationRequest.where);
+  const baseWhere = scopedWhere(config, scope, true);
+  const queryWhere = kind === 'clear' ? baseWhere : { ...baseWhere, ...whereFilter };
+  const delegate = getDelegate(config);
+  const matchedRows =
+    kind === 'create'
+      ? []
+      : await delegate.findMany({
+          where: queryWhere,
+          take: 200,
+        });
+  const actor = 'chat';
   const appliedAt = new Date();
   const changedCount = await prisma.$transaction(async (tx) => {
+    const txDelegate = (tx as Record<string, any>)[String(config.model)];
     if (kind === 'create') {
-      const handle = typeof safeData.handle === 'string' ? safeData.handle.trim() : '';
-      const platform = typeof safeData.platform === 'string' ? safeData.platform.trim() : '';
-      if (!handle || !platform) {
-        throw new Error('Create mutation requires data.handle and data.platform.');
+      const createData = touchMutationMetadata({ ...parsed.data }, actor);
+      if (config.scope === 'client') createData.clientId = scope.clientId;
+      else createData.researchJobId = scope.researchJobId;
+      if (section === 'competitors') {
+        createData.handle = String(createData.handle || '').replace(/^@+/, '').trim().toLowerCase();
+        createData.platform = String(createData.platform || '').trim().toLowerCase();
+        if (!createData.handle || !createData.platform) {
+          throw new Error('Competitor create requires handle + platform.');
+        }
+        const competitor = await tx.competitor.upsert({
+          where: {
+            clientId_platform_handle: {
+              clientId: scope.clientId,
+              platform: String(createData.platform),
+              handle: String(createData.handle),
+            },
+          },
+          update: {},
+          create: {
+            clientId: scope.clientId,
+            platform: String(createData.platform),
+            handle: String(createData.handle),
+          },
+        });
+        createData.competitorId = competitor.id;
       }
-
-      const created = await tx.discoveredCompetitor.create({
-        data: {
-          researchJobId: context.researchJobId,
-          handle,
-          platform,
-          ...safeData,
-        } as Prisma.DiscoveredCompetitorUncheckedCreateInput,
-      });
-
+      const created = await txDelegate.create({ data: createData });
       await tx.chatMutationUndoSnapshot.create({
         data: {
           mutationId: mutation.id,
-          modelName: 'discoveredCompetitor',
+          modelName: String(config.model),
           recordId: created.id,
           beforeJson: { [CREATED_MARKER]: true } as Prisma.InputJsonValue,
         },
       });
       return 1;
     }
-
     if (matchedRows.length) {
       await tx.chatMutationUndoSnapshot.createMany({
-        data: matchedRows.map((row) => ({
+        data: matchedRows.map((row: Record<string, unknown>) => ({
           mutationId: mutation.id,
-          modelName: 'discoveredCompetitor',
-          recordId: row.id,
+          modelName: String(config.model),
+          recordId: String(row.id),
           beforeJson: toJsonSafe(row) as Prisma.InputJsonValue,
         })),
       });
     }
-
     if (kind === 'update') {
-      const update = await tx.discoveredCompetitor.updateMany({
-        where,
-        data: safeData,
+      const updateData = touchMutationMetadata({ ...parsed.data }, actor);
+      const update = await txDelegate.updateMany({
+        where: queryWhere,
+        data: updateData,
       });
-      return update.count;
+      return Number(update.count || 0);
     }
-
-    const deleted = await tx.discoveredCompetitor.deleteMany({
-      where: kind === 'clear' ? { researchJobId: context.researchJobId } : where,
-    });
-    return deleted.count;
+    if (config.supportsCuration) {
+      const archiveData = touchMutationMetadata(
+        {
+          isActive: false,
+          archivedAt: new Date(),
+          archivedBy: actor,
+        },
+        actor,
+      );
+      const archived = await txDelegate.updateMany({
+        where: queryWhere,
+        data: archiveData,
+      });
+      return Number(archived.count || 0);
+    }
+    const deleted = await txDelegate.deleteMany({ where: queryWhere });
+    return Number(deleted.count || 0);
   });
-
   const updated = await prisma.chatMutation.update({
     where: { id: mutation.id },
     data: { appliedAt },
   });
-
   return {
     mutationId: mutation.id,
     kind,
-    section: mutation.section,
+    section,
     changedCount,
     undoToken: createUndoToken({ id: updated.id, sessionId: updated.sessionId, kind: updated.kind, appliedAt }),
     appliedAt: appliedAt.toISOString(),
   };
 }
-
 export async function undoMutation(context: MutationContext, request: UndoMutationRequest): Promise<UndoMutationResult> {
   const mutation = await getScopedMutation(context, request.mutationId);
   if (!mutation.appliedAt) throw new Error('Mutation has not been applied yet.');
   if (mutation.undoneAt) throw new Error('Mutation was already undone.');
-
   assertToken(
     request.undoToken,
     createUndoToken({ id: mutation.id, sessionId: mutation.sessionId, kind: mutation.kind, appliedAt: mutation.appliedAt }),
     'undo token',
   );
-
-  const snapshots = mutation.undoSnapshots;
+  const scope = await resolveScope(context.researchJobId);
   const restoredCount = await prisma.$transaction(async (tx) => {
     let restored = 0;
-    for (const snapshot of snapshots) {
-      if (snapshot.modelName !== 'discoveredCompetitor') continue;
+    for (const snapshot of mutation.undoSnapshots) {
+      const section = findSectionByModelName(snapshot.modelName);
+      if (!section) continue;
+      const config = SECTION_CONFIG[section];
+      const txDelegate = (tx as Record<string, any>)[String(config.model)];
+      if (!txDelegate) continue;
       const before = (snapshot.beforeJson || {}) as Record<string, unknown>;
       if (before[CREATED_MARKER]) {
-        await tx.discoveredCompetitor.deleteMany({ where: { id: snapshot.recordId, researchJobId: context.researchJobId } });
+        await txDelegate.deleteMany({ where: { id: snapshot.recordId } });
         restored += 1;
         continue;
       }
-
-      if (!before.id || !before.researchJobId) continue;
-      await tx.discoveredCompetitor.upsert({
-        where: { id: snapshot.recordId },
-        create: toCompetitorCreateData(before),
-        update: toCompetitorUpdateData(before),
+      if (before.researchJobId && before.researchJobId !== context.researchJobId) continue;
+      if (config.scope === 'client' && before.clientId && before.clientId !== scope.clientId) continue;
+      const rowId = String(before.id || snapshot.recordId || '').trim();
+      if (!rowId) continue;
+      const { id: _id, ...rest } = before;
+      await txDelegate.upsert({
+        where: { id: rowId },
+        create: toJsonSafe(before),
+        update: toJsonSafe(rest),
       });
       restored += 1;
     }
     return restored;
   });
-
   const undoneAt = new Date();
   await prisma.chatMutation.update({
     where: { id: mutation.id },
     data: { undoneAt },
   });
-
   return {
     mutationId: mutation.id,
     restoredCount,
