@@ -15,6 +15,7 @@ import {
   buildWriterUserPrompt,
   runPlannerToolLoop,
 } from './chat-tool-runtime';
+import { buildDeterministicEvidenceBlocks, mergeDeterministicBlocks } from './evidence-blocks';
 
 export type ChatGenerationResult = {
   content: string;
@@ -128,10 +129,12 @@ export async function streamChatCompletion(params: {
   if (parsedPayload.blocks.length === 0) {
     parsedPayload = parseFallbackJsonFromNarrative(rawContent, parsedPayload);
   }
+  const deterministicBlocks = buildDeterministicEvidenceBlocks(toolResults);
+  const mergedBlocks = mergeDeterministicBlocks(parsedPayload.blocks, deterministicBlocks);
 
   const normalized = normalizeChatComponentPayload({
     content: cleanedContent.trim(),
-    blocks: parsedPayload.blocks,
+    blocks: mergedBlocks,
     designOptions: wantsDesignOptions(params.userMessage) ? parsedPayload.designOptions : [],
     followUp: parsedPayload.followUp,
     componentPlan: parsedPayload.componentPlan,

@@ -16,6 +16,7 @@
         "check:runtime-config": "tsx src/scripts/check-runtime-config.ts",
         "test:chat-components": "tsx src/scripts/test-chat-component-policy.ts",
         "test:chat-tool-hints": "tsx src/scripts/test-chat-tool-hints.ts",
+        "test:chat-context-and-evidence": "tsx src/scripts/test-chat-context-and-evidence.ts",
         "test:model-router": "tsx src/scripts/test-model-router.ts",
         "test:chat-ws-contract": "tsx src/scripts/test-chat-ws-contract.ts",
         "test:competitor-scoring": "tsx src/scripts/test-competitor-scorer-utils.ts",
