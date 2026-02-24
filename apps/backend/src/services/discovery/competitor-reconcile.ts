@@ -91,3 +91,64 @@ export async function reconcileCandidateAfterScrape(input: {
     discoveredRowsUpdated: discoveredResult.count,
   };
 }
+
+export async function reconcileScrapedCandidatesForJob(input: {
+  researchJobId: string;
+  runId?: string;
+  source?: string;
+}): Promise<{
+  discoveredRowsChecked: number;
+  handlesReconciled: number;
+  candidateProfilesUpdated: number;
+  discoveredRowsUpdated: number;
+}> {
+  const rows = await prisma.discoveredCompetitor.findMany({
+    where: {
+      researchJobId: input.researchJobId,
+      orchestrationRunId: input.runId || undefined,
+      platform: { in: ['instagram', 'tiktok'] },
+      status: { in: ['SCRAPED', 'CONFIRMED'] },
+    },
+    select: {
+      id: true,
+      platform: true,
+      handle: true,
+    },
+  });
+
+  const uniqueHandles = new Map<string, { id: string; platform: ScrapePlatform; handle: string }>();
+  for (const row of rows) {
+    const platform = row.platform as ScrapePlatform;
+    const normalizedHandle = normalizeHandleFromUrlOrHandle(row.handle, platform);
+    if (!normalizedHandle) continue;
+    const key = `${platform}:${normalizedHandle}`;
+    if (!uniqueHandles.has(key)) {
+      uniqueHandles.set(key, {
+        id: row.id,
+        platform,
+        handle: normalizedHandle,
+      });
+    }
+  }
+
+  let candidateProfilesUpdated = 0;
+  let discoveredRowsUpdated = 0;
+  for (const row of uniqueHandles.values()) {
+    const result = await reconcileCandidateAfterScrape({
+      researchJobId: input.researchJobId,
+      competitorId: row.id,
+      platform: row.platform,
+      handle: row.handle,
+      source: input.source || 'repair_endpoint',
+    });
+    candidateProfilesUpdated += result.candidateProfilesUpdated;
+    discoveredRowsUpdated += result.discoveredRowsUpdated;
+  }
+
+  return {
+    discoveredRowsChecked: rows.length,
+    handlesReconciled: uniqueHandles.size,
+    candidateProfilesUpdated,
+    discoveredRowsUpdated,
+  };
+}

@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   Ban,
   Star,
+  Wrench,
 } from 'lucide-react';
 import {
   apiClient,
@@ -107,6 +108,12 @@ function blockerReasonLabel(value?: string | null): string {
   return labels[code] || code.replaceAll('_', ' ').toLowerCase();
 }
 
+function blockerReasonShortLabel(value?: string | null): string {
+  const label = blockerReasonLabel(value);
+  if (label.length <= 28) return label;
+  return `${label.slice(0, 27)}...`;
+}
+
 export function CompetitorOrchestrationPanel({
   jobId,
   className,
@@ -129,8 +136,10 @@ export function CompetitorOrchestrationPanel({
   const [addAndScrapeByProfile, setAddAndScrapeByProfile] = useState<Record<string, boolean>>({});
   const [queueingByProfile, setQueueingByProfile] = useState<Record<string, boolean>>({});
   const [recheckingByProfile, setRecheckingByProfile] = useState<Record<string, boolean>>({});
+  const [overridingByProfile, setOverridingByProfile] = useState<Record<string, boolean>>({});
   const [syncingClientInputs, setSyncingClientInputs] = useState(false);
   const [queueingClientInputs, setQueueingClientInputs] = useState(false);
+  const [repairingReadiness, setRepairingReadiness] = useState(false);
   const [typeFilter, setTypeFilter] = useState<'all' | CompetitorType>('all');
 
   const runId = data?.runId || null;
@@ -652,6 +661,63 @@ export function CompetitorOrchestrationPanel({
     }
   }
 
+  async function handleOverrideBlocker(profile: OrchestratedCompetitorProfile) {
+    try {
+      setOverridingByProfile((previous) => ({ ...previous, [profile.id]: true }));
+      const response = await apiClient.overrideCompetitorBlocker(jobId, {
+        candidateProfileId: profile.id,
+        reason: `Operator override from panel for ${profile.platform} @${profile.handle}`,
+      });
+      if (!response?.success) {
+        throw new Error(response?.error || 'Override failed');
+      }
+      toast({
+        title: 'Blocker overridden',
+        description: `@${profile.handle} is now marked verified for scraping.`,
+      });
+      await loadShortlist();
+      onRefresh?.();
+    } catch (error: any) {
+      toast({
+        title: 'Override failed',
+        description: error?.message || `Unable to override @${profile.handle}`,
+        variant: 'destructive',
+      });
+    } finally {
+      setOverridingByProfile((previous) => {
+        const next = { ...previous };
+        delete next[profile.id];
+        return next;
+      });
+    }
+  }
+
+  async function handleRepairReadiness() {
+    try {
+      setRepairingReadiness(true);
+      const response = await apiClient.repairCompetitorReadiness(jobId, runId ? { runId } : undefined);
+      if (!response?.success) {
+        throw new Error(response?.error || 'Repair failed');
+      }
+      const eligibility = response.eligibilityRepair;
+      const reconciliation = response.scrapedReconciliation;
+      toast({
+        title: 'Readiness repaired',
+        description: `Eligibility updated ${eligibility?.updated || 0}, reconciled ${reconciliation?.candidateProfilesUpdated || 0} candidate rows.`,
+      });
+      await loadShortlist();
+      onRefresh?.();
+    } catch (error: any) {
+      toast({
+        title: 'Repair failed',
+        description: error?.message || 'Unable to repair competitor readiness',
+        variant: 'destructive',
+      });
+    } finally {
+      setRepairingReadiness(false);
+    }
+  }
+
   function renderGroupCard(
     group: OrchestratedCompetitorIdentityGroup,
     section:
@@ -746,8 +812,15 @@ export function CompetitorOrchestrationPanel({
                       <Badge
                         variant={profile.readinessStatus === 'READY' ? 'default' : profile.readinessStatus === 'DEGRADED' ? 'secondary' : 'destructive'}
                         className="h-5 text-[10px] uppercase"
+                        title={
+                          profile.readinessStatus === 'BLOCKED' && profile.blockerReasonCode
+                            ? `Blocked: ${blockerReasonLabel(profile.blockerReasonCode)} (${profile.blockerReasonCode})`
+                            : undefined
+                        }
                       >
-                        readiness {profile.readinessStatus.toLowerCase()}
+                        {profile.readinessStatus === 'BLOCKED' && profile.blockerReasonCode
+                          ? `blocked: ${blockerReasonShortLabel(profile.blockerReasonCode)}`
+                          : `readiness ${profile.readinessStatus.toLowerCase()}`}
                       </Badge>
                     ) : null}
                     {profile.discoveredStatus ? (
@@ -780,7 +853,7 @@ export function CompetitorOrchestrationPanel({
                   ) : null}
                   {profile.blockerReasonCode ? (
                     <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
-                      Blocker: {blockerReasonLabel(profile.blockerReasonCode)}
+                      Blocker: {blockerReasonLabel(profile.blockerReasonCode)} ({profile.blockerReasonCode})
                     </p>
                   ) : null}
                   {profile.entityFlags?.length ? (
@@ -899,6 +972,23 @@ export function CompetitorOrchestrationPanel({
                           <RefreshCw className="mr-1 h-3.5 w-3.5" />
                         )}
                         Recheck Availability
+                      </Button>
+                    ) : null}
+                    {isScrapePlatform(profile.platform) && (profile.blockerReasonCode || profile.readinessStatus === 'BLOCKED') ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleOverrideBlocker(profile)}
+                        disabled={Boolean(overridingByProfile[profile.id])}
+                        className="h-7 text-[11px]"
+                        title="Override readiness blocker"
+                      >
+                        {overridingByProfile[profile.id] ? (
+                          <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <AlertTriangle className="mr-1 h-3.5 w-3.5" />
+                        )}
+                        Override Blocker
                       </Button>
                     ) : null}
                     {profile.discoveredCompetitorId && (
@@ -1096,6 +1186,21 @@ export function CompetitorOrchestrationPanel({
             <RefreshCw className="mr-1 h-3.5 w-3.5" />
           )}
           Continue Pending Scrape
+        </Button>
+
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={handleRepairReadiness}
+          disabled={repairingReadiness}
+          title="Reconcile stale candidate readiness and scraped verification flags"
+        >
+          {repairingReadiness ? (
+            <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Wrench className="mr-1 h-3.5 w-3.5" />
+          )}
+          Repair Readiness
         </Button>
       </div>
 

@@ -15,7 +15,13 @@ import {
   orchestrateCompetitorsForJob,
   recheckCompetitorAvailability,
 } from '../services/discovery/competitor-orchestrator-v2';
-import { materializeAndShortlistCandidate } from '../services/discovery/competitor-materializer';
+import {
+  materializeAndShortlistCandidate,
+  repairCandidateEligibilityForJob,
+} from '../services/discovery/competitor-materializer';
+import {
+  reconcileScrapedCandidatesForJob,
+} from '../services/discovery/competitor-reconcile';
 import {
   isModuleKey,
   ModuleAction,
@@ -2614,6 +2620,168 @@ router.post('/:id/competitors/recheck-availability', async (req: Request, res: R
       success: false,
       error: error?.message || 'Failed to recheck competitor availability',
       code: error?.code,
+    });
+  }
+});
+
+/**
+ * POST /api/research-jobs/:id/competitors/override-blocker
+ * Operator override for readiness blockers on a specific candidate profile.
+ */
+router.post('/:id/competitors/override-blocker', async (req: Request, res: Response) => {
+  try {
+    const { id: researchJobId } = req.params;
+    const candidateProfileId = String(req.body?.candidateProfileId || '').trim();
+    const reasonRaw = String(req.body?.reason || '').trim();
+    const reason = reasonRaw || 'Operator override from competitor panel';
+    if (!candidateProfileId) {
+      return res.status(400).json({ success: false, error: 'candidateProfileId is required' });
+    }
+
+    const candidate = await prisma.competitorCandidateProfile.findFirst({
+      where: {
+        id: candidateProfileId,
+        researchJobId,
+      },
+      select: {
+        id: true,
+        platform: true,
+        handle: true,
+        blockerReasonCode: true,
+        availabilityStatus: true,
+      },
+    });
+
+    if (!candidate) {
+      return res.status(404).json({ success: false, error: 'Candidate profile not found' });
+    }
+
+    const now = new Date();
+    const availabilityReason = `operator_override:${reason}`;
+    const updatedCandidate = await prisma.competitorCandidateProfile.update({
+      where: { id: candidateProfileId },
+      data: {
+        scrapeEligible: true,
+        blockerReasonCode: null,
+        availabilityStatus: 'VERIFIED',
+        availabilityReason,
+        lastVerifiedAt: now,
+        verificationSource: 'operator_override',
+        verificationAttempts: { increment: 1 },
+      },
+      select: {
+        id: true,
+        platform: true,
+        handle: true,
+        scrapeEligible: true,
+        blockerReasonCode: true,
+        availabilityStatus: true,
+        availabilityReason: true,
+      },
+    });
+
+    const discoveredUpdate = await prisma.discoveredCompetitor.updateMany({
+      where: {
+        researchJobId,
+        OR: [
+          { candidateProfileId },
+          { platform: candidate.platform, handle: candidate.handle },
+        ],
+      },
+      data: {
+        availabilityStatus: 'VERIFIED',
+        availabilityReason,
+        manuallyModified: true,
+        lastModifiedBy: 'user:override_blocker',
+        lastModifiedAt: now,
+      },
+    });
+
+    emitResearchJobEvent({
+      researchJobId,
+      source: 'competitor-orchestrator-v2',
+      code: 'competitor.candidate.override_blocker',
+      level: 'info',
+      message: `Operator override cleared blocker for ${candidate.platform} @${candidate.handle}`,
+      platform: candidate.platform,
+      handle: candidate.handle,
+      entityType: 'competitor_candidate_profile',
+      entityId: candidateProfileId,
+      metadata: {
+        previousBlocker: candidate.blockerReasonCode,
+        previousAvailabilityStatus: candidate.availabilityStatus,
+        reason,
+        discoveredUpdatedCount: discoveredUpdate.count,
+      },
+    });
+
+    return res.json({
+      success: true,
+      candidateProfile: updatedCandidate,
+      discoveredUpdatedCount: discoveredUpdate.count,
+    });
+  } catch (error: any) {
+    console.error('[API] Failed to override candidate blocker:', error);
+    return res.status(500).json({
+      success: false,
+      error: error?.message || 'Failed to override blocker',
+    });
+  }
+});
+
+/**
+ * POST /api/research-jobs/:id/competitors/repair
+ * Reconcile candidate eligibility/readiness drift for legacy rows.
+ */
+router.post('/:id/competitors/repair', async (req: Request, res: Response) => {
+  try {
+    const { id: researchJobId } = req.params;
+    const runIdRaw = req.body?.runId ?? req.query?.runId;
+    const runId = parseRunId(runIdRaw);
+
+    const eligibilityRepair = await repairCandidateEligibilityForJob({
+      researchJobId,
+      runId,
+    });
+    const scrapedReconciliation = await reconcileScrapedCandidatesForJob({
+      researchJobId,
+      runId,
+      source: 'repair_endpoint',
+    });
+
+    emitResearchJobEvent({
+      researchJobId,
+      source: 'competitor-orchestrator-v2',
+      code: 'competitor.repair.completed',
+      level: 'info',
+      message: 'Competitor readiness repair completed',
+      metrics: {
+        eligibilityRowsChecked: eligibilityRepair.checked,
+        eligibilityRowsUpdated: eligibilityRepair.updated,
+        scrapedRowsChecked: scrapedReconciliation.discoveredRowsChecked,
+        handlesReconciled: scrapedReconciliation.handlesReconciled,
+        candidateProfilesReconciled: scrapedReconciliation.candidateProfilesUpdated,
+        discoveredRowsReconciled: scrapedReconciliation.discoveredRowsUpdated,
+      },
+      metadata: {
+        runId: runId || null,
+      },
+    });
+
+    return res.json({
+      success: true,
+      runId: runId || null,
+      eligibilityRepair,
+      scrapedReconciliation,
+    });
+  } catch (error: any) {
+    console.error('[API] Failed to repair competitor readiness:', error);
+    if (error?.message?.includes('runId')) {
+      return res.status(400).json({ success: false, error: error.message });
+    }
+    return res.status(500).json({
+      success: false,
+      error: error?.message || 'Failed to repair competitor readiness',
     });
   }
 });

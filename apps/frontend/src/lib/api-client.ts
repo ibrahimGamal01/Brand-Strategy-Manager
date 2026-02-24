@@ -294,6 +294,44 @@ export const apiClient = {
       code?: string;
     }>(`/research-jobs/${jobId}/competitors/recheck-availability`, payload),
 
+  overrideCompetitorBlocker: (
+    jobId: string,
+    payload: { candidateProfileId: string; reason?: string }
+  ) =>
+    post<{
+      success: boolean;
+      candidateProfile?: {
+        id: string;
+        platform: string;
+        handle: string;
+        scrapeEligible: boolean;
+        blockerReasonCode: string | null;
+        availabilityStatus: string;
+        availabilityReason: string | null;
+      };
+      discoveredUpdatedCount?: number;
+      error?: string;
+    }>(`/research-jobs/${jobId}/competitors/override-blocker`, payload),
+
+  repairCompetitorReadiness: (jobId: string, payload?: { runId?: string }) =>
+    post<{
+      success: boolean;
+      runId?: string | null;
+      eligibilityRepair?: {
+        checked: number;
+        updated: number;
+        becameEligible: number;
+        lostEligibility: number;
+      };
+      scrapedReconciliation?: {
+        discoveredRowsChecked: number;
+        handlesReconciled: number;
+        candidateProfilesUpdated: number;
+        discoveredRowsUpdated: number;
+      };
+      error?: string;
+    }>(`/research-jobs/${jobId}/competitors/repair`, payload),
+
   updateCompetitorCandidateState: (
     jobId: string,
     payload: { candidateProfileId: string; state: string; reason?: string }
