@@ -1,6 +1,7 @@
 import { prisma } from '../../lib/prisma';
 import { scrapeProfileSafe } from '../social/scraper';
 import { emitResearchJobEvent } from '../social/research-job-events';
+import { reconcileCandidateAfterScrape } from './competitor-reconcile';
 
 interface CompetitorScrapingResult {
   competitorId: string;
@@ -119,12 +120,27 @@ export async function scrapeCompetitorIncremental(
     
     // 4. Update status to SCRAPED
     await updateCompetitorStatus(competitorId, 'SCRAPED');
-    
+
     // 5. Update posts count
     await prisma.discoveredCompetitor.update({
       where: { id: competitorId },
       data: { postsScraped }
     });
+
+    const reconciliation =
+      platform === 'instagram' || platform === 'tiktok'
+        ? await reconcileCandidateAfterScrape({
+            researchJobId: jobId,
+            competitorId,
+            platform,
+            handle,
+            source: options.source || 'competitor-scraper',
+          })
+        : {
+            normalizedHandle: '',
+            candidateProfilesUpdated: 0,
+            discoveredRowsUpdated: 0,
+          };
 
     emitResearchJobEvent({
       researchJobId: jobId,
@@ -139,6 +155,8 @@ export async function scrapeCompetitorIncremental(
       entityId: competitorId,
       metrics: {
         postsScraped,
+        candidateProfilesReconciled: reconciliation.candidateProfilesUpdated,
+        discoveredRowsReconciled: reconciliation.discoveredRowsUpdated,
       },
     });
     

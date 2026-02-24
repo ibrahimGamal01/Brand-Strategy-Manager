@@ -20,6 +20,10 @@ import { buildCompetitorDiscoveryPlan } from './competitor-query-planner';
 import { validateCompetitorBatch, ValidationResult } from './instagram-validator';
 import { emitResearchJobEvent } from '../social/research-job-events';
 import { scrapeCompetitorsIncremental } from './competitor-scraper';
+import {
+  normalizeHandleFromUrlOrHandle,
+  validateHandleForPlatform,
+} from '../handles/platform-handle';
 
 type SupportedPlatform = 'instagram' | 'tiktok';
 type CandidateSource = 'algorithmic' | 'direct' | 'ai';
@@ -253,38 +257,24 @@ function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
-function normalizeHandle(raw: string): string {
-  let value = String(raw || '').trim().toLowerCase();
-  if (!value) return '';
-
-  value = value.replace(/^https?:\/\//, '');
-  value = value.replace(/^www\./, '');
-
-  if (value.includes('instagram.com/')) {
-    value = value.split('instagram.com/')[1] || '';
-  } else if (value.includes('tiktok.com/@')) {
-    value = value.split('tiktok.com/@')[1] || '';
-  }
-
-  value = value.split('?')[0];
-  value = value.split('#')[0];
-  value = value.split('/')[0];
-  value = value.replace(/^@+/, '');
-  value = value.replace(/[^a-z0-9._]/g, '');
-  return value;
+function normalizeHandle(raw: string, platform?: SupportedPlatform): string {
+  return normalizeHandleFromUrlOrHandle(raw, platform);
 }
 
-function validateCandidateHandle(handle: string): { allowed: boolean; reason?: string } {
+function validateCandidateHandle(
+  handle: string,
+  platform: SupportedPlatform = 'instagram'
+): { allowed: boolean; reason?: string } {
   if (!handle) return { allowed: false, reason: 'empty' };
-  if (handle.length < 3 || handle.length > 30) return { allowed: false, reason: 'length' };
-  if (!/^[a-z0-9._]+$/.test(handle)) return { allowed: false, reason: 'charset' };
-  if (!/[a-z]/.test(handle)) return { allowed: false, reason: 'no_letters' };
-  if (/^\d{6,}$/.test(handle)) return { allowed: false, reason: 'numeric_id' };
-  if (handle.startsWith('.') || handle.endsWith('.') || handle.startsWith('_') || handle.endsWith('_')) {
-    return { allowed: false, reason: 'edge_punctuation' };
-  }
-  if (handle.includes('..') || handle.includes('__') || handle.includes('._') || handle.includes('_.')) {
-    return { allowed: false, reason: 'invalid_punctuation' };
+  const platformValidation = validateHandleForPlatform(platform, handle, {
+    requireLetters: true,
+    rejectNumericIds: true,
+  });
+  if (!platformValidation.allowed) {
+    return {
+      allowed: false,
+      reason: platformValidation.reason || 'invalid_platform_handle',
+    };
   }
   if (GENERIC_HANDLE_BLOCKLIST.has(handle)) return { allowed: false, reason: 'generic_handle' };
   const tokenized = handle.replace(/[._]+/g, ' ');
@@ -306,9 +296,9 @@ function normalizeCompetitorKey(
         : null;
   if (!platform) return null;
 
-  const handle = normalizeHandle(handleRaw);
+  const handle = normalizeHandle(handleRaw, platform);
   if (!handle) return null;
-  const validation = validateCandidateHandle(handle);
+  const validation = validateCandidateHandle(handle, platform);
   if (!validation.allowed) return null;
   return `${platform}:${handle}`;
 }
@@ -373,8 +363,8 @@ function extractHandlesFromSearchRows(
 
     for (const target of scanTargets) {
       for (const match of target.matchAll(urlRegex)) {
-        const handle = normalizeHandle(match[1] || '');
-        const validation = validateCandidateHandle(handle);
+        const handle = normalizeHandle(match[1] || '', platform);
+        const validation = validateCandidateHandle(handle, platform);
         if (!validation.allowed) continue;
         handles.add(handle);
         if (handles.size >= maxCount) return Array.from(handles);
@@ -388,8 +378,8 @@ function extractHandlesFromSearchRows(
     if (!platformSignal) continue;
 
     for (const match of text.matchAll(mentionRegex)) {
-      const handle = normalizeHandle(match[1] || '');
-      const validation = validateCandidateHandle(handle);
+      const handle = normalizeHandle(match[1] || '', platform);
+      const validation = validateCandidateHandle(handle, platform);
       if (!validation.allowed) continue;
       handles.add(handle);
       if (handles.size >= maxCount) return Array.from(handles);
@@ -695,7 +685,7 @@ function computeHardReject(
     );
   };
 
-  const handleQuality = validateCandidateHandle(candidate.handle);
+  const handleQuality = validateCandidateHandle(candidate.handle, candidate.platform);
   if (!handleQuality.allowed) {
     return { rejected: true, reason: `Low-quality handle (${handleQuality.reason})` };
   }
@@ -1418,9 +1408,9 @@ export async function orchestrateCompetitorsForJob(
   ) => {
     const platform = platformInput ?? inferPlatform(rawHandle);
     if (!platforms.includes(platform)) return;
-    const handle = normalizeHandle(rawHandle);
+    const handle = normalizeHandle(rawHandle, platform);
     if (!handle || handle.length < 2) return;
-    const handleValidation = validateCandidateHandle(handle);
+    const handleValidation = validateCandidateHandle(handle, platform);
     if (!handleValidation.allowed) {
       trackSkippedCandidate(handleValidation.reason || 'invalid_handle');
       return;

@@ -1,4 +1,8 @@
 import { prisma } from '../../lib/prisma';
+import {
+  normalizeHandleFromUrlOrHandle,
+  validateHandleForPlatform,
+} from '../handles/platform-handle';
 
 const COMPETITOR_INPUT_SOCIAL_TYPES = [
   'instagram',
@@ -30,16 +34,7 @@ export type ParsedCompetitorInput =
  * Supports: instagram.com/username, tiktok.com/@username, or plain @username / username.
  */
 export function normalizeHandle(value: unknown): string {
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-
-  const igMatch = raw.match(/instagram\.com\/([a-z0-9._]{2,30})/i);
-  if (igMatch) return igMatch[1].toLowerCase();
-
-  const ttMatch = raw.match(/tiktok\.com\/@?([a-z0-9._]{2,30})/i);
-  if (ttMatch) return ttMatch[1].toLowerCase();
-
-  return raw.replace(/^@+/, '').trim().toLowerCase();
+  return normalizeHandleFromUrlOrHandle(value);
 }
 
 export function buildPlatformHandles(payload: any): Record<string, string> {
@@ -145,11 +140,9 @@ function aliasToPlatform(alias: string): CompetitorInputSocialType | null {
 }
 
 function isValidHandleForPlatform(platform: CompetitorInputSocialType, handle: string): boolean {
-  if (platform === 'x') return /^[a-z0-9_]{1,15}$/i.test(handle);
-  if (platform === 'linkedin') return /^[a-z0-9-]{2,80}$/i.test(handle);
-  if (platform === 'facebook') return /^[a-z0-9.]{2,80}$/i.test(handle);
-  if (platform === 'youtube') return /^[a-z0-9._-]{2,60}$/i.test(handle);
-  return /^[a-z0-9._]{2,30}$/i.test(handle);
+  return validateHandleForPlatform(platform, handle, {
+    requireLetters: platform !== 'x',
+  }).allowed;
 }
 
 function parsePlatformTaggedHandleEntries(raw: string): Array<{ inputType: CompetitorInputSocialType; handle: string }> {

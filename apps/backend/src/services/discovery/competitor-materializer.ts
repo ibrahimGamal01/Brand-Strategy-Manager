@@ -603,17 +603,17 @@ function profileLookupKey(platform: string, normalizedHandle: string): string {
   return `${String(platform || '').toLowerCase()}:${String(normalizedHandle || '').toLowerCase()}`;
 }
 
-function classifyPipelineStage(profile: CandidateProfileView): CompetitorPipelineStage {
+export function classifyPipelineStage(profile: CandidateProfileView): CompetitorPipelineStage {
+  if (profile.discoveredStatus === 'SCRAPED' || profile.discoveredStatus === 'CONFIRMED') {
+    return 'SCRAPED_READY';
+  }
+
   if (profile.blockerReasonCode || profile.readinessStatus === 'BLOCKED') {
     return 'BLOCKED';
   }
 
   if (profile.sourceType === 'client_inspiration') {
     return 'CLIENT_INPUTS';
-  }
-
-  if (profile.discoveredStatus === 'SCRAPED' || profile.discoveredStatus === 'CONFIRMED') {
-    return 'SCRAPED_READY';
   }
 
   if (
