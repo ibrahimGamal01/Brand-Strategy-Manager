@@ -3,4 +3,4 @@ uvicorn[standard]>=0.30.0
 requests>=2.31.0
 beautifulsoup4>=4.12.3
 lxml>=5.2.2
-scrapling[fetchers]>=0.4.9
+scrapling[fetchers]>=0.4
