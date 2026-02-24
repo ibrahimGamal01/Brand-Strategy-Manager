@@ -22,6 +22,11 @@ except Exception:  # pragma: no cover - fallback mode when package unavailable
 app = FastAPI(title="BAT Scrapling Worker", version="1.0.0")
 
 
+@app.get("/")
+def root() -> dict[str, str]:
+    return {"status": "ok", "service": "scrapling-worker"}
+
+
 class WaitFor(BaseModel):
     type: str = Field(default="network_idle")
     value: Optional[str | int] = None
