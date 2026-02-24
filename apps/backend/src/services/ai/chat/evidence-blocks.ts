@@ -95,15 +95,20 @@ function collectEvidenceData(toolResults: ToolExecutionResult[]): {
 } {
   const evidenceNames = new Set(['evidence.posts', 'evidence.videos', 'evidence.news']);
   const itemMap = new Map<string, EvidenceItem>();
-  const sources: SourceEntry[] = [];
-  const noDataReasons: string[] = [];
+  const sourceMap = new Map<string, SourceEntry>();
+  const reasonSet = new Set<string>();
+
+  const addSource = (entry: SourceEntry) => {
+    const key = `${entry.handle}|${entry.note}`;
+    if (!sourceMap.has(key)) sourceMap.set(key, entry);
+  };
 
   for (const result of toolResults) {
     if (!evidenceNames.has(result.name)) continue;
     const label = sourceLabel(result.name);
 
     if (result.error) {
-      sources.push({ handle: label, note: `Tool error: ${compact(result.error, 140)}` });
+      addSource({ handle: label, note: `Tool error: ${compact(result.error, 140)}` });
       continue;
     }
 
@@ -112,15 +117,15 @@ function collectEvidenceData(toolResults: ToolExecutionResult[]): {
     const reason = compact(payload.reason, 180);
 
     if (!rows.length) {
-      if (reason) noDataReasons.push(`${label}: ${reason}`);
-      sources.push({
+      if (reason) reasonSet.add(`${label}: ${reason}`);
+      addSource({
         handle: label,
         note: reason || 'No matching evidence rows found.',
       });
       continue;
     }
 
-    sources.push({
+    addSource({
       handle: label,
       note: `${rows.length} evidence item(s) returned.`,
     });
@@ -135,8 +140,8 @@ function collectEvidenceData(toolResults: ToolExecutionResult[]): {
 
   return {
     items: Array.from(itemMap.values()).slice(0, MAX_EVIDENCE_ITEMS),
-    sources: sources.slice(0, 8),
-    noDataReasons: noDataReasons.slice(0, 3),
+    sources: Array.from(sourceMap.values()).slice(0, 8),
+    noDataReasons: Array.from(reasonSet).slice(0, 3),
   };
 }
 
