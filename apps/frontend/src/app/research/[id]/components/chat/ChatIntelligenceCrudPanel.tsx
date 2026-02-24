@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -49,6 +49,18 @@ const SECTION_LABELS: Record<IntelligenceSectionKey, SectionFieldLabels> = {
     secondary: 'Handle',
     details: 'Discovery reason',
     url: 'Profile URL',
+  },
+  competitor_entities: {
+    primary: 'Canonical brand name',
+    secondary: 'Website domain (optional)',
+    details: 'Business type / audience summary',
+    url: 'Audience summary override (optional)',
+  },
+  competitor_accounts: {
+    primary: 'Competitor type (optional)',
+    secondary: 'State (optional)',
+    details: 'JSON patch (or identityId UUID)',
+    url: 'Profile URL (optional)',
   },
   search_results: {
     primary: 'Query',
@@ -130,6 +142,12 @@ const SECTION_LABELS: Record<IntelligenceSectionKey, SectionFieldLabels> = {
   },
 };
 
+const DEFAULT_ACTIONS: IntelligenceCrudAction[] = ['read', 'create', 'update', 'delete', 'clear'];
+const SECTION_ACTIONS: Partial<Record<IntelligenceSectionKey, IntelligenceCrudAction[]>> = {
+  competitor_entities: ['read', 'create', 'update'],
+  competitor_accounts: ['read', 'update'],
+};
+
 function emptyDraft(): CrudDraft {
   return { primary: '', secondary: '', details: '', url: '' };
 }
@@ -196,6 +214,22 @@ function buildCreatePayload(section: IntelligenceSectionKey, draft: CrudDraft): 
         handle: secondary.replace(/^@+/, '') || `competitor_${Date.now()}`,
         discoveryReason: details || 'Added from chat control panel',
         profileUrl: url || null,
+      };
+    case 'competitor_entities':
+      return {
+        canonicalName: primary || `competitor-brand-${Date.now()}`,
+        websiteDomain: secondary || null,
+        businessType: details || null,
+        audienceSummary: url || null,
+      };
+    case 'competitor_accounts':
+      return {
+        orchestrationRunId: details || null,
+        platform: primary || 'instagram',
+        handle: secondary.replace(/^@+/, '') || `competitor_account_${Date.now()}`,
+        normalizedHandle: secondary.replace(/^@+/, '').toLowerCase() || null,
+        profileUrl: url || null,
+        source: 'manual',
       };
     case 'search_results':
       return {
@@ -320,6 +354,37 @@ function buildCreatePayload(section: IntelligenceSectionKey, draft: CrudDraft): 
 }
 
 function buildUpdatePayload(section: IntelligenceSectionKey, draft: CrudDraft): Record<string, unknown> {
+  if (section === 'competitor_entities') {
+    const patch: Record<string, unknown> = {};
+    if (draft.primary.trim()) patch.canonicalName = draft.primary.trim();
+    if (draft.secondary.trim()) patch.websiteDomain = draft.secondary.trim();
+    if (draft.details.trim()) patch.businessType = draft.details.trim();
+    if (draft.url.trim()) patch.audienceSummary = draft.url.trim();
+    return patch;
+  }
+
+  if (section === 'competitor_accounts') {
+    const raw = draft.details.trim();
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          return parsed as Record<string, unknown>;
+        }
+      } catch {
+        // Fall through to simple coercion.
+      }
+    }
+    const patch: Record<string, unknown> = {};
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(raw)) {
+      patch.identityId = raw;
+    }
+    if (draft.url.trim()) patch.profileUrl = draft.url.trim();
+    if (draft.primary.trim()) patch.competitorType = draft.primary.trim().toUpperCase();
+    if (draft.secondary.trim()) patch.state = draft.secondary.trim().toUpperCase();
+    return patch;
+  }
+
   const payload = buildCreatePayload(section, draft);
   return Object.fromEntries(
     Object.entries(payload).filter(([, value]) => {
@@ -336,6 +401,7 @@ function summarizeRow(row: Record<string, unknown>): string {
     row.title,
     row.question,
     row.handle,
+    row.canonicalName,
     row.keyword,
     row.source,
     row.platform,
@@ -358,10 +424,17 @@ export function ChatIntelligenceCrudPanel({ onRunCrud, onOpenSection }: ChatInte
 
   const labels = SECTION_LABELS[section];
   const sectionConfig = INTELLIGENCE_SECTION_BY_KEY[section];
+  const availableActions = SECTION_ACTIONS[section] || DEFAULT_ACTIONS;
   const actionRequiresPayload = action === 'create' || action === 'update';
   const actionSupportsItem = action === 'update' || action === 'delete';
 
   const sortedRows = useMemo(() => rows.slice(0, 20), [rows]);
+
+  useEffect(() => {
+    if (!availableActions.includes(action)) {
+      setAction(availableActions[0] || 'read');
+    }
+  }, [action, availableActions]);
 
   async function runAction() {
     if (running) return;
@@ -451,7 +524,7 @@ export function ChatIntelligenceCrudPanel({ onRunCrud, onOpenSection }: ChatInte
       </div>
 
       <div className="mb-3 flex flex-wrap gap-1">
-        {(['read', 'create', 'update', 'delete', 'clear'] as IntelligenceCrudAction[]).map((entry) => (
+        {availableActions.map((entry) => (
           <Button
             key={entry}
             size="sm"

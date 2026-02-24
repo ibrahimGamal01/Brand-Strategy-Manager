@@ -1,6 +1,8 @@
 export type IntelligenceSectionKey =
   | 'client_profiles'
   | 'competitors'
+  | 'competitor_entities'
+  | 'competitor_accounts'
   | 'search_results'
   | 'images'
   | 'videos'
@@ -39,6 +41,20 @@ export const INTELLIGENCE_SECTIONS: IntelligenceSectionConfig[] = [
     dataType: 'competitors',
     moduleKey: 'competitors',
     summary: 'Discovered and shortlisted competitor entities.',
+  },
+  {
+    key: 'competitor_entities',
+    label: 'Competitor Entities',
+    dataType: 'competitor-entities',
+    moduleKey: 'competitor_entities',
+    summary: 'Canonical competitor brands/entities grouped across platforms.',
+  },
+  {
+    key: 'competitor_accounts',
+    label: 'Competitor Accounts',
+    dataType: 'competitor-accounts',
+    moduleKey: 'competitor_accounts',
+    summary: 'Platform-specific competitor accounts linked to entities.',
   },
   {
     key: 'search_results',
@@ -141,6 +157,10 @@ const SECTION_ALIASES: Record<string, IntelligenceSectionKey> = {
   client_profiles: 'client_profiles',
   clientprofilesnode: 'client_profiles',
   competitors: 'competitors',
+  competitorentities: 'competitor_entities',
+  competitor_entities: 'competitor_entities',
+  competitoraccounts: 'competitor_accounts',
+  competitor_accounts: 'competitor_accounts',
   searchresults: 'search_results',
   search_results: 'search_results',
   images: 'images',

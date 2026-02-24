@@ -56,6 +56,7 @@ export type ActionButtonsBlock = BaseBlock & {
     action?:
       | 'open_url'
       | 'open_module'
+      | 'retry_last_message'
       | 'run_intel'
       | 'run_orchestrator'
       | 'run_intelligence'
@@ -72,6 +73,8 @@ export type ActionButtonsBlock = BaseBlock & {
       | 'mutation_stage'
       | 'mutation_apply'
       | 'mutation_undo'
+      | 'confirm_tool_action'
+      | 'cancel_tool_action'
       | 'intel_crud'
       | 'intel_create'
       | 'intel_read'
@@ -217,6 +220,14 @@ export type MutationPreviewBlock = BaseBlock & {
   requiresConfirmation?: boolean;
 };
 
+export type ToolConfirmationBlock = BaseBlock & {
+  type: 'tool_confirmation';
+  action: string;
+  summary: string;
+  riskLevel?: 'low' | 'medium' | 'high';
+  details?: string[];
+};
+
 export type DocumentRequestBlock = BaseBlock & {
   type: 'document_request';
   question?: string;
@@ -300,6 +311,7 @@ export type ChatBlock =
   | QuickReplyBarBlock
   | EvidenceListBlock
   | MutationPreviewBlock
+  | ToolConfirmationBlock
   | DocumentRequestBlock
   | DocumentReadyBlock
   | CompareModesBlock

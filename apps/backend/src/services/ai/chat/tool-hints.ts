@@ -96,6 +96,14 @@ export function inferHeuristicToolCalls(input: {
   if (asksListData && !existingNames.has('intel.list')) {
     const sectionPatterns: Array<{ section: string; patterns: RegExp[] }> = [
       { section: 'competitors', patterns: [/\bcompetitors?\b/i] },
+      {
+        section: 'competitor_entities',
+        patterns: [/\bcompetitor (brands|entities|companies)\b/i, /\bbrand-level competitors?\b/i],
+      },
+      {
+        section: 'competitor_accounts',
+        patterns: [/\bcompetitor accounts?\b/i, /\bcompetitor handles?\b/i, /\bplatform competitors?\b/i],
+      },
       { section: 'client_profiles', patterns: [/\bclient profiles?\b/i, /\baccounts?\b/i, /\bhandles?\b/i] },
       { section: 'news', patterns: [/\bnews\b/i, /\bpress\b/i, /\barticles?\b/i] },
       { section: 'videos', patterns: [/\bvideos?\b/i, /\byoutube\b/i] },

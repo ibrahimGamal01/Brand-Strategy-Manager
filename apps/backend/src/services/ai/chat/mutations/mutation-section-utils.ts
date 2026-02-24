@@ -158,7 +158,12 @@ export function ensureRequired(config: SectionConfig, data: Record<string, unkno
   });
 }
 
-export function touchMutationMetadata(data: Record<string, unknown>, actor: string): Record<string, unknown> {
+export function touchMutationMetadata(
+  data: Record<string, unknown>,
+  actor: string,
+  supportsCuration: boolean,
+): Record<string, unknown> {
+  if (!supportsCuration) return data;
   return {
     ...data,
     manuallyModified: true,
@@ -166,4 +171,3 @@ export function touchMutationMetadata(data: Record<string, unknown>, actor: stri
     lastModifiedBy: actor,
   };
 }
-

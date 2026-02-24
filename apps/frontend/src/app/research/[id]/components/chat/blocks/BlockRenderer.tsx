@@ -25,6 +25,7 @@ import type {
   QuickReplyBarBlock,
   EvidenceListBlock,
   MutationPreviewBlock,
+  ToolConfirmationBlock,
   DocumentRequestBlock,
   DocumentReadyBlock,
   CompareModesBlock,
@@ -59,6 +60,7 @@ import { RecapEditorBlockView } from './renderers/RecapEditorBlockView';
 import { QuickReplyBarBlockView } from './renderers/QuickReplyBarBlockView';
 import { EvidenceListBlockView } from './renderers/EvidenceListBlockView';
 import { MutationPreviewBlockView } from './renderers/MutationPreviewBlockView';
+import { ToolConfirmationBlockView } from './renderers/ToolConfirmationBlockView';
 import { DocumentRequestBlockView } from './renderers/DocumentRequestBlockView';
 import { DocumentReadyBlockView } from './renderers/DocumentReadyBlockView';
 import { CompareModesBlockView } from './renderers/CompareModesBlockView';
@@ -93,6 +95,7 @@ const isRecapEditorBlock = (b: ChatBlock): b is RecapEditorBlock => b.type === '
 const isQuickReplyBarBlock = (b: ChatBlock): b is QuickReplyBarBlock => b.type === 'quick_reply_bar';
 const isEvidenceListBlock = (b: ChatBlock): b is EvidenceListBlock => b.type === 'evidence_list';
 const isMutationPreviewBlock = (b: ChatBlock): b is MutationPreviewBlock => b.type === 'mutation_preview';
+const isToolConfirmationBlock = (b: ChatBlock): b is ToolConfirmationBlock => b.type === 'tool_confirmation';
 const isDocumentRequestBlock = (b: ChatBlock): b is DocumentRequestBlock => b.type === 'document_request';
 const isDocumentReadyBlock = (b: ChatBlock): b is DocumentReadyBlock => b.type === 'document_ready';
 const isCompareModesBlock = (b: ChatBlock): b is CompareModesBlock => b.type === 'compare_modes';
@@ -213,6 +216,9 @@ function normalizeBlock(block: ChatBlock): ChatBlock {
       out.beforeSample = asArray<Record<string, unknown>>(out.beforeSample);
       out.afterSample = asArray<Record<string, unknown>>(out.afterSample);
       break;
+    case 'tool_confirmation':
+      out.details = asArray<string>(out.details);
+      break;
     case 'document_request':
       out.options = asArray<Record<string, unknown>>(out.options);
       break;
@@ -308,6 +314,8 @@ function hasRenderableContent(block: ChatBlock): boolean {
       return asArray((block as EvidenceListBlock).items).length > 0;
     case 'mutation_preview':
       return typeof (block as MutationPreviewBlock).matchedCount === 'number';
+    case 'tool_confirmation':
+      return hasText((block as ToolConfirmationBlock).summary);
     case 'document_request':
       return asArray((block as DocumentRequestBlock).options).length > 0 || hasText((block as DocumentRequestBlock).question);
     case 'document_ready':
@@ -458,6 +466,7 @@ export function BlockRenderer({
       {isQuickReplyBarBlock(safeBlock) && <QuickReplyBarBlockView block={safeBlock} onSelect={handleStructuredAnswer} />}
       {isEvidenceListBlock(safeBlock) && <EvidenceListBlockView block={safeBlock} />}
       {isMutationPreviewBlock(safeBlock) && <MutationPreviewBlockView block={safeBlock} />}
+      {isToolConfirmationBlock(safeBlock) && <ToolConfirmationBlockView block={safeBlock} />}
       {isDocumentRequestBlock(safeBlock) && <DocumentRequestBlockView block={safeBlock} onSelect={handleStructuredAnswer} />}
       {isDocumentReadyBlock(safeBlock) && <DocumentReadyBlockView block={safeBlock} />}
       {isCompareModesBlock(safeBlock) && <CompareModesBlockView block={safeBlock} onSelect={handleStructuredAnswer} />}
@@ -491,6 +500,7 @@ export function BlockRenderer({
         !isQuickReplyBarBlock(safeBlock) &&
         !isEvidenceListBlock(safeBlock) &&
         !isMutationPreviewBlock(safeBlock) &&
+        !isToolConfirmationBlock(safeBlock) &&
         !isDocumentRequestBlock(safeBlock) &&
         !isDocumentReadyBlock(safeBlock) &&
         !isCompareModesBlock(safeBlock) &&

@@ -46,7 +46,13 @@ function parsePayload(section: string, config: SectionConfig, raw: Record<string
   return { data: out, errors };
 }
 
-function applyMutationMetadata(data: Record<string, unknown>, actor: string, unarchive = false) {
+function applyMutationMetadata(
+  data: Record<string, unknown>,
+  actor: string,
+  config: SectionConfig,
+  unarchive = false
+) {
+  if (!config.supportsCuration) return data;
   data.manuallyModified = true;
   data.lastModifiedAt = new Date();
   data.lastModifiedBy = actor;
@@ -93,6 +99,11 @@ router.post('/:id/intelligence/:section', async (req, res) => {
   try {
     const resolved = resolveSection(req.params.section);
     if (!resolved) return res.status(400).json({ error: 'Unknown section' });
+    if (resolved.key === 'competitor_accounts') {
+      return res.status(400).json({
+        error: 'Create is not supported for competitor_accounts. Use competitor discovery orchestration.',
+      });
+    }
     const job = await getJobOrThrow(req.params.id);
     const actor = getActor(req);
     const rawData = (req.body?.data || req.body || {}) as Record<string, unknown>;
@@ -108,7 +119,7 @@ router.post('/:id/intelligence/:section', async (req, res) => {
     }
     const requiredMissing = ensureRequired(resolved.config, parsed.data);
     if (parsed.errors.length || requiredMissing.length) return res.status(400).json({ error: 'Validation failed', details: [...parsed.errors, ...requiredMissing.map((f) => `Missing required field: ${f}`)] });
-    const data = applyMutationMetadata(parsed.data, actor, true);
+    const data = applyMutationMetadata(parsed.data, actor, resolved.config, true);
     if (resolved.config.scope === 'client') data.clientId = job.clientId; else data.researchJobId = job.id;
 
     if (resolved.key === 'competitors') {
@@ -151,7 +162,7 @@ router.patch('/:id/intelligence/:section/:itemId', async (req, res) => {
     const immutableTouched = enforceImmutable(resolved.config, parsed.data);
     if (immutableTouched.length) parsed.errors.push(`Immutable fields cannot be edited directly: ${immutableTouched.join(', ')}`);
     if (parsed.errors.length || Object.keys(parsed.data).length === 0) return res.status(400).json({ error: 'Validation failed', details: parsed.errors.length ? parsed.errors : ['No valid fields to update'] });
-    const data = applyMutationMetadata(parsed.data, actor);
+    const data = applyMutationMetadata(parsed.data, actor, resolved.config);
     const updated = await getDelegate(resolved.config).update({ where: { id: req.params.itemId }, data });
     return res.json({ success: true, section: resolved.key, data: updated });
   } catch (error: any) {
@@ -163,12 +174,23 @@ router.post('/:id/intelligence/:section/:itemId/restore', async (req, res) => {
   try {
     const resolved = resolveSection(req.params.section);
     if (!resolved) return res.status(400).json({ error: 'Unknown section' });
+    if (!resolved.config.supportsCuration) {
+      return res.status(400).json({ error: 'Restore is not supported for this section' });
+    }
     const job = await getJobOrThrow(req.params.id);
     const actor = getActor(req);
     const where = await scopedWhere(resolved.config, job, true);
     const existing = await getDelegate(resolved.config).findFirst({ where: { ...where, id: req.params.itemId } });
     if (!existing) return res.status(404).json({ error: 'Data point not found in this research job' });
-    const restored = await getDelegate(resolved.config).update({ where: { id: req.params.itemId }, data: applyMutationMetadata({ isActive: true, archivedAt: null, archivedBy: null }, actor, true) });
+    const restored = await getDelegate(resolved.config).update({
+      where: { id: req.params.itemId },
+      data: applyMutationMetadata(
+        { isActive: true, archivedAt: null, archivedBy: null },
+        actor,
+        resolved.config,
+        true
+      ),
+    });
     return res.json({ success: true, section: resolved.key, data: restored });
   } catch (error: any) {
     return res.status(500).json({ error: 'Failed to restore data point', details: error.message });
@@ -188,7 +210,17 @@ router.delete('/:id/intelligence/:section/:itemId', async (req, res) => {
       await getDelegate(resolved.config).delete({ where: { id: req.params.itemId } });
       return res.json({ success: true, section: resolved.key, deletedId: req.params.itemId, hard: true });
     }
-    const archived = await getDelegate(resolved.config).update({ where: { id: req.params.itemId }, data: applyMutationMetadata({ isActive: false, archivedAt: new Date(), archivedBy: getActor(req) }, getActor(req)) });
+    if (!resolved.config.supportsCuration) {
+      return res.status(400).json({ error: 'Section does not support archive delete. Use hard=true with admin secret.' });
+    }
+    const archived = await getDelegate(resolved.config).update({
+      where: { id: req.params.itemId },
+      data: applyMutationMetadata(
+        { isActive: false, archivedAt: new Date(), archivedBy: getActor(req) },
+        getActor(req),
+        resolved.config
+      ),
+    });
     return res.json({ success: true, section: resolved.key, archivedId: archived.id });
   } catch (error: any) {
     return res.status(500).json({ error: 'Failed to archive data point', details: error.message });
@@ -206,9 +238,16 @@ router.delete('/:id/intelligence/:section', async (req, res) => {
       const deleted = await getDelegate(resolved.config).deleteMany({ where });
       return res.json({ success: true, section: resolved.key, deletedCount: deleted.count, hard: true });
     }
+    if (!resolved.config.supportsCuration) {
+      return res.status(400).json({ error: 'Section does not support archive clear. Use hard=true with admin secret.' });
+    }
     const archived = await getDelegate(resolved.config).updateMany({
       where,
-      data: applyMutationMetadata({ isActive: false, archivedAt: new Date(), archivedBy: getActor(req) }, getActor(req)),
+      data: applyMutationMetadata(
+        { isActive: false, archivedAt: new Date(), archivedBy: getActor(req) },
+        getActor(req),
+        resolved.config
+      ),
     });
     return res.json({ success: true, section: resolved.key, archivedCount: archived.count });
   } catch (error: any) {

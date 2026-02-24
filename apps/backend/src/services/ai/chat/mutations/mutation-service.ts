@@ -108,6 +108,12 @@ export async function stageMutation(context: MutationContext, request: MutationR
   const { key: section, config } = resolveSection(request.section);
   const scope = await resolveScope(context.researchJobId);
   const kind = request.kind;
+  if (section === 'competitor_accounts' && kind === 'create') {
+    throw new Error('Create is not supported for competitor_accounts. Run competitor discovery first.');
+  }
+  if ((kind === 'delete' || kind === 'clear') && !config.supportsCuration) {
+    throw new Error(`Section "${section}" does not support destructive mutations via chat.`);
+  }
   const parsed = sanitizeData(section, config, request.data || {});
   const requiredMissing = kind === 'create' ? ensureRequired(config, parsed.data) : [];
   if (requiredMissing.length) {
@@ -165,6 +171,9 @@ export async function applyMutation(context: MutationContext, request: ApplyMuta
   const { key: section, config } = resolveSection(mutationRequest.section);
   const scope = await resolveScope(context.researchJobId);
   const kind = parseKind(mutation.kind);
+  if ((kind === 'delete' || kind === 'clear') && !config.supportsCuration) {
+    throw new Error(`Section "${section}" does not support destructive mutations via chat.`);
+  }
   const parsed = sanitizeData(section, config, mutationRequest.data || {});
   if (parsed.errors.length) {
     throw new Error(parsed.errors.join('; '));
@@ -185,7 +194,7 @@ export async function applyMutation(context: MutationContext, request: ApplyMuta
   const changedCount = await prisma.$transaction(async (tx) => {
     const txDelegate = (tx as Record<string, any>)[String(config.model)];
     if (kind === 'create') {
-      const createData = touchMutationMetadata({ ...parsed.data }, actor);
+      const createData = touchMutationMetadata({ ...parsed.data }, actor, config.supportsCuration);
       if (config.scope === 'client') createData.clientId = scope.clientId;
       else createData.researchJobId = scope.researchJobId;
       if (section === 'competitors') {
@@ -233,7 +242,7 @@ export async function applyMutation(context: MutationContext, request: ApplyMuta
       });
     }
     if (kind === 'update') {
-      const updateData = touchMutationMetadata({ ...parsed.data }, actor);
+      const updateData = touchMutationMetadata({ ...parsed.data }, actor, config.supportsCuration);
       const update = await txDelegate.updateMany({
         where: queryWhere,
         data: updateData,
@@ -248,6 +257,7 @@ export async function applyMutation(context: MutationContext, request: ApplyMuta
           archivedBy: actor,
         },
         actor,
+        config.supportsCuration,
       );
       const archived = await txDelegate.updateMany({
         where: queryWhere,

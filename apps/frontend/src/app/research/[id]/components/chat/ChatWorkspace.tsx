@@ -75,6 +75,8 @@ interface PendingCrudConfirmation {
 const SECTION_MATCH_FIELDS: Record<IntelligenceSectionKey, string[]> = {
   client_profiles: ['handle', 'platform', 'profileUrl', 'bio'],
   competitors: ['handle', 'platform', 'profileUrl', 'discoveryReason', 'selectionState'],
+  competitor_entities: ['canonicalName', 'websiteDomain', 'businessType', 'audienceSummary'],
+  competitor_accounts: ['handle', 'platform', 'profileUrl', 'state', 'competitorType', 'identityId'],
   search_results: ['title', 'href', 'query', 'source', 'body'],
   images: ['title', 'imageUrl', 'sourceUrl', 'query'],
   videos: ['title', 'url', 'query', 'publisher', 'uploader'],
@@ -97,6 +99,26 @@ const IDENTIFIER_HINT_KEYS = [
 ];
 
 const DESTRUCTIVE_CRUD_ACTIONS = new Set<IntelligenceCrudAction>(['delete', 'clear']);
+const MUTATING_TOOL_ACTIONS = new Set<string>([
+  'run_intel',
+  'run_orchestrator',
+  'run_intelligence',
+  'run_orchestration',
+  'run_competitor_discovery',
+  'run_client_scraper',
+  'run_scraper',
+  'web_fetch',
+  'web_crawl',
+  'web_extract',
+  'document_generate',
+  'user_context_upsert',
+  'user_context_delete',
+  'intel_create',
+  'intel_update',
+  'intel_delete',
+  'intel_clear',
+]);
+const TOOL_CONFIRM_BYPASS_KEY = '__toolConfirmed';
 const MODULE_ALIASES: Record<string, WorkspaceModuleKey> = {
   home: 'brain',
   brain: 'brain',
@@ -207,6 +229,102 @@ function normalizeScraperPlatform(value: unknown): 'INSTAGRAM' | 'TIKTOK' | null
   if (raw === 'instagram' || raw === 'ig') return 'INSTAGRAM';
   if (raw === 'tiktok' || raw === 'tt') return 'TIKTOK';
   return null;
+}
+
+function buildToolConfirmationCopy(
+  action: string,
+  payload?: Record<string, unknown>
+): {
+  summary: string;
+  riskLevel: 'low' | 'medium' | 'high';
+  details: string[];
+} {
+  const sectionHint = resolveIntelligenceSection(payload?.section || payload?.sectionKey || payload?.targetSection);
+  switch (action) {
+    case 'run_orchestration':
+      return {
+        summary: 'This runs a full orchestration cycle and can update multiple intelligence sections.',
+        riskLevel: 'high',
+        details: ['Writes new outputs into the workspace.', 'May take a few minutes to complete.'],
+      };
+    case 'run_competitor_discovery':
+      return {
+        summary: 'This launches competitor discovery and can refresh shortlist scoring.',
+        riskLevel: 'high',
+        details: ['Existing shortlist ordering may change.', 'New candidates can be added.'],
+      };
+    case 'run_client_scraper':
+      return {
+        summary: 'This queues a client social scrape and writes refreshed profile/post data.',
+        riskLevel: 'medium',
+        details: ['Best used when profile data is stale.', 'Platform limits can delay completion.'],
+      };
+    case 'run_scraper':
+      return {
+        summary: 'This queues competitor scraping and writes refreshed competitor post intelligence.',
+        riskLevel: 'medium',
+        details: ['Availability checks may mark handles as unavailable.', 'Content metrics can shift after refresh.'],
+      };
+    case 'web_crawl':
+      return {
+        summary: 'This starts a multi-page crawl and stores new web sources and snapshots.',
+        riskLevel: 'high',
+        details: ['Can create many records quickly.', 'Use bounded page/depth settings when possible.'],
+      };
+    case 'web_fetch':
+    case 'web_extract':
+      return {
+        summary: 'This runs a web intelligence operation and stores results in this workspace.',
+        riskLevel: 'medium',
+        details: ['Adds new snapshot/extraction rows.', 'Use when you want grounded evidence in chat/documents.'],
+      };
+    case 'document_generate':
+      return {
+        summary: 'This generates and stores a PDF document attached to chat.',
+        riskLevel: 'medium',
+        details: ['Document generation consumes compute budget.', 'You can regenerate with new options later.'],
+      };
+    case 'user_context_upsert':
+      return {
+        summary: 'This saves a new persistent memory item for this workspace.',
+        riskLevel: 'low',
+        details: ['Saved context influences future answers.', 'You can remove it later from chat actions.'],
+      };
+    case 'user_context_delete':
+      return {
+        summary: 'This removes a saved memory item from persistent workspace context.',
+        riskLevel: 'medium',
+        details: ['Removed memory will no longer guide future answers.'],
+      };
+    case 'run_intel':
+    case 'run_orchestrator':
+    case 'run_intelligence':
+      return {
+        summary: 'This starts intelligence orchestration for brand mentions and community insights.',
+        riskLevel: 'medium',
+        details: ['New rows may be created in intelligence sections.', 'Processing is asynchronous.'],
+      };
+    case 'intel_create':
+    case 'intel_update':
+    case 'intel_delete':
+    case 'intel_clear':
+      return {
+        summary: `This performs a direct intelligence ${action.replace('intel_', '').toUpperCase()} operation.`,
+        riskLevel: action === 'intel_clear' || action === 'intel_delete' ? 'high' : 'medium',
+        details: [
+          sectionHint
+            ? `Target section: ${sectionHint.replace(/_/g, ' ')}`
+            : 'Target section is inferred from the button payload.',
+          'Prefer staged mutations for safer previews when available.',
+        ],
+      };
+    default:
+      return {
+        summary: 'This action changes workspace state.',
+        riskLevel: 'medium',
+        details: ['Confirm to continue, or cancel to keep data unchanged.'],
+      };
+  }
 }
 
 export default function ChatWorkspace({ jobId }: { jobId: string }) {
@@ -677,6 +795,70 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
     router.push(`${pathname}?${nextParams.toString()}`);
   }
 
+  function isToolActionConfirmed(payload?: Record<string, unknown>): boolean {
+    return Boolean(payload?.[TOOL_CONFIRM_BYPASS_KEY]);
+  }
+
+  function shouldRequireToolConfirmation(action: string, payload?: Record<string, unknown>): boolean {
+    if (!action) return false;
+    if (isToolActionConfirmed(payload)) return false;
+    if (action === 'mutation_stage' || action === 'mutation_apply' || action === 'mutation_undo') return false;
+    if (action === 'intel_read' || action === 'intel_get' || action === 'intel_list') return false;
+    if (action === 'intel_crud') {
+      const op = resolveIntelligenceCrudAction(payload?.operation || payload?.action);
+      return Boolean(op && op !== 'read');
+    }
+    return MUTATING_TOOL_ACTIONS.has(action);
+  }
+
+  async function presentToolConfirmationCard(
+    action: string,
+    href?: string,
+    payload?: Record<string, unknown>
+  ) {
+    const copy = buildToolConfirmationCopy(action, payload);
+    await appendToolResultMessage(
+      `Before I run **${action}**, please confirm this workspace mutation.`,
+      {
+        role: 'SYSTEM',
+        blocks: [
+          {
+            type: 'tool_confirmation',
+            blockId: `tool-confirmation-${Date.now()}`,
+            title: 'Tool confirmation',
+            action,
+            summary: copy.summary,
+            riskLevel: copy.riskLevel,
+            details: copy.details,
+          } as ChatBlock,
+          {
+            type: 'action_buttons',
+            blockId: `tool-confirmation-actions-${Date.now()}`,
+            title: 'Run this tool?',
+            buttons: [
+              {
+                label: 'Confirm and run',
+                action: 'confirm_tool_action',
+                intent: 'primary',
+                payload: {
+                  action,
+                  href: href || null,
+                  payload: payload || {},
+                },
+              },
+              {
+                label: 'Cancel',
+                action: 'cancel_tool_action',
+                intent: 'secondary',
+                payload: { action },
+              },
+            ],
+          } as ChatBlock,
+        ],
+      }
+    );
+  }
+
   async function appendToolResultMessage(
     content: string,
     options?: {
@@ -710,6 +892,38 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
 
   async function handleActionIntent(action?: string, href?: string, payload?: Record<string, unknown>) {
     const normalizedAction = String(action || '').toLowerCase();
+
+    if (normalizedAction === 'confirm_tool_action') {
+      const forwardedAction = String(payload?.action || payload?.toolAction || '').trim().toLowerCase();
+      const forwardedHref = typeof payload?.href === 'string' ? payload.href : undefined;
+      const forwardedPayload = asRecord(payload?.payload) || {};
+      if (!forwardedAction) {
+        toast({
+          title: 'Missing confirmation payload',
+          description: 'Could not resolve the tool action to execute.',
+          variant: 'destructive',
+        });
+        return;
+      }
+      await handleActionIntent(forwardedAction, forwardedHref, {
+        ...forwardedPayload,
+        [TOOL_CONFIRM_BYPASS_KEY]: true,
+      });
+      return;
+    }
+
+    if (normalizedAction === 'cancel_tool_action') {
+      toast({
+        title: 'Action cancelled',
+        description: 'No workspace changes were made.',
+      });
+      return;
+    }
+
+    if (shouldRequireToolConfirmation(normalizedAction, payload)) {
+      await presentToolConfirmationCard(normalizedAction, href, payload);
+      return;
+    }
 
     if (normalizedAction === 'retry_last_message') {
       const lastUserText =
@@ -974,9 +1188,6 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
           description: 'user_context_delete requires payload.contextId',
           variant: 'destructive',
         });
-        return;
-      }
-      if (typeof window !== 'undefined' && !window.confirm('Remove this saved chat context item?')) {
         return;
       }
       await apiFetch(`/research-jobs/${jobId}/chat/user-context/${contextId}`, { method: 'DELETE' });

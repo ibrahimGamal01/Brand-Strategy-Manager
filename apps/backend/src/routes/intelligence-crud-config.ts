@@ -19,6 +19,8 @@ export type SectionConfig = {
 };
 
 const COMPETITOR_SELECTION_STATE_VALUES = new Set(['FILTERED_OUT', 'SHORTLISTED', 'TOP_PICK', 'APPROVED', 'REJECTED']);
+const COMPETITOR_CANDIDATE_STATE_VALUES = new Set(['DISCOVERED', 'FILTERED_OUT', 'SHORTLISTED', 'TOP_PICK', 'APPROVED', 'REJECTED']);
+const COMPETITOR_AVAILABILITY_VALUES = new Set(['UNVERIFIED', 'VERIFIED', 'PROFILE_UNAVAILABLE', 'INVALID_HANDLE', 'RATE_LIMITED', 'CONNECTOR_ERROR']);
 const COMPETITOR_TYPE_VALUES = new Set(['DIRECT', 'INDIRECT', 'ADJACENT', 'MARKETPLACE', 'MEDIA', 'INFLUENCER', 'COMMUNITY', 'UNKNOWN']);
 const MEDIA_TYPE_VALUES = new Set(['IMAGE', 'VIDEO', 'AUDIO']);
 const MEDIA_SOURCE_TYPE_VALUES = new Set(['CLIENT_POST_SNAPSHOT', 'COMPETITOR_POST_SNAPSHOT']);
@@ -63,10 +65,68 @@ export const SECTION_CONFIG: Record<string, SectionConfig> = {
     requiredOnCreate: ['handle', 'platform'],
     immutableFields: ['handle', 'platform'],
     identityFields: ['platform', 'handle'],
-    enumFields: { selectionState: COMPETITOR_SELECTION_STATE_VALUES, competitorType: COMPETITOR_TYPE_VALUES },
+    enumFields: {
+      selectionState: COMPETITOR_SELECTION_STATE_VALUES,
+      competitorType: COMPETITOR_TYPE_VALUES,
+      availabilityStatus: COMPETITOR_AVAILABILITY_VALUES,
+    },
     numberFields: ['relevanceScore', 'postsScraped', 'displayOrder', 'typeConfidence'],
     jsonArrayFields: ['entityFlags'],
     supportsCuration: true,
+  },
+  competitor_entities: {
+    model: 'competitorIdentity',
+    scope: 'researchJob',
+    orderBy: { field: 'updatedAt', direction: 'desc' },
+    allowedFields: ['canonicalName', 'websiteDomain', 'businessType', 'audienceSummary'],
+    requiredOnCreate: ['canonicalName'],
+    identityFields: ['canonicalName', 'websiteDomain'],
+    supportsCuration: false,
+  },
+  competitor_accounts: {
+    model: 'competitorCandidateProfile',
+    scope: 'researchJob',
+    orderBy: { field: 'updatedAt', direction: 'desc' },
+    allowedFields: [
+      'orchestrationRunId',
+      'identityId',
+      'platform',
+      'handle',
+      'normalizedHandle',
+      'profileUrl',
+      'source',
+      'inputType',
+      'scrapeEligible',
+      'blockerReasonCode',
+      'availabilityStatus',
+      'availabilityReason',
+      'resolverConfidence',
+      'state',
+      'stateReason',
+      'competitorType',
+      'typeConfidence',
+      'entityFlags',
+      'relevanceScore',
+      'scoreBreakdown',
+      'evidence',
+      'lastVerifiedAt',
+      'verificationAttempts',
+      'verificationSource',
+      'displayOrder',
+    ],
+    requiredOnCreate: ['orchestrationRunId', 'platform', 'handle', 'source'],
+    immutableFields: ['orchestrationRunId', 'platform', 'handle', 'normalizedHandle', 'source'],
+    identityFields: ['orchestrationRunId', 'platform', 'normalizedHandle'],
+    enumFields: {
+      availabilityStatus: COMPETITOR_AVAILABILITY_VALUES,
+      state: COMPETITOR_CANDIDATE_STATE_VALUES,
+      competitorType: COMPETITOR_TYPE_VALUES,
+    },
+    numberFields: ['resolverConfidence', 'typeConfidence', 'relevanceScore', 'verificationAttempts', 'displayOrder'],
+    booleanFields: ['scrapeEligible'],
+    dateFields: ['lastVerifiedAt'],
+    jsonArrayFields: ['entityFlags'],
+    supportsCuration: false,
   },
   search_results: {
     model: 'rawSearchResult',
