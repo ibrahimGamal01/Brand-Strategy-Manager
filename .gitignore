@@ -28,3 +28,6 @@ apps/backend/sessions/
 logs.txt
 server.log
 .vercel
+
+# Next.js build output
+apps/client-portal/.next/
