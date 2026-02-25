@@ -94,6 +94,7 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
   const [channelsConfirmed, setChannelsConfirmed] = useState(false);
   const [scanMode, setScanMode] = useState<WorkspaceIntakeScanMode>("quick");
   const [scanStatus, setScanStatus] = useState<ScanStatus>("idle");
+  const [liveFeedUnavailable, setLiveFeedUnavailable] = useState(false);
   const [liveEvents, setLiveEvents] = useState<WorkspaceIntakeLiveEvent[]>([]);
 
   const lastEventIdRef = useRef(0);
@@ -119,11 +120,14 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
     if (phase !== "wizard") return;
 
     const source = createWorkspaceIntakeEventsSource(workspaceId, lastEventIdRef.current || undefined);
+    let receivedAnyEvent = false;
+    setLiveFeedUnavailable(false);
 
     const handleEvent = (event: MessageEvent<string>) => {
       try {
         const parsed = JSON.parse(String(event.data || "{}")) as WorkspaceIntakeLiveEvent;
         if (!parsed || typeof parsed.id !== "number") return;
+        receivedAnyEvent = true;
 
         lastEventIdRef.current = Math.max(lastEventIdRef.current, parsed.id);
         setLiveEvents((previous) => {
@@ -147,7 +151,10 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
 
     source.addEventListener("intake_event", handleEvent as EventListener);
     source.onerror = () => {
-      // EventSource handles reconnect automatically. Keep the feed resilient without surfacing noisy errors.
+      if (!receivedAnyEvent) {
+        setLiveFeedUnavailable(true);
+        source.close();
+      }
     };
 
     return () => {
@@ -185,16 +192,20 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
     try {
       const suggestion = await suggestWorkspaceIntakeCompletion(workspaceId, toSuggestPayloadV2(state));
       let next = state;
+      let updatedFieldCount = 0;
+      let updatedHandleCount = 0;
 
       if (suggestion?.success && suggestion.suggested) {
         const suggestedResult = applySuggestedToState(next, suggestion.suggested, step);
         next = suggestedResult.next;
+        updatedFieldCount = suggestedResult.suggestedKeys.size;
         setSuggestedFields((previous) => new Set([...Array.from(previous), ...Array.from(suggestedResult.suggestedKeys)]));
       }
 
       if (suggestion?.success && suggestion.suggestedHandles) {
         const handleResult = applySuggestedHandles(next, suggestion.suggestedHandles);
         next = handleResult.next;
+        updatedHandleCount = handleResult.suggestedPlatforms.size;
         setSuggestedHandlePlatforms((previous) =>
           new Set([...Array.from(previous), ...Array.from(handleResult.suggestedPlatforms)])
         );
@@ -214,7 +225,14 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
       setConfirmationRequired(needsConfirmation);
       setConfirmationReasons(reasonCodes);
       setChannelsConfirmed(!needsConfirmation);
-      setNotice("Step suggestions applied.");
+
+      if (updatedFieldCount > 0 || updatedHandleCount > 0) {
+        setNotice("Step suggestions applied.");
+      } else if (reasonCodes.includes("AI_UNAVAILABLE") || reasonCodes.includes("AI_NOT_CONFIGURED")) {
+        setNotice("Autofill service is temporarily unavailable. You can continue manually.");
+      } else {
+        setNotice("No strong suggestions found for this step yet.");
+      }
     } catch (suggestError: unknown) {
       setError(String((suggestError as Error)?.message || "Suggestion failed"));
     } finally {
@@ -263,8 +281,17 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
       }
       setNotice(`Website scan started (${scanMode}). BAT is enriching your workspace now.`);
     } catch (scanError: unknown) {
+      const message = String((scanError as Error)?.message || "Failed to start website scan");
+      if (message.includes("404")) {
+        setScanStatus("idle");
+        setLiveFeedUnavailable(true);
+        setNotice(
+          "Live website scan is not available on the current backend deployment yet. Sites will still be scanned automatically after intake submission."
+        );
+        return;
+      }
       setScanStatus("error");
-      setError(String((scanError as Error)?.message || "Failed to start website scan"));
+      setError(message);
     }
   }
 
@@ -471,7 +498,9 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
               <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
                 {feedEvents.length === 0 ? (
                   <p className="text-xs" style={{ color: "var(--bat-text-muted)" }}>
-                    No live events yet. Start a website scan to see BAT extracting data in real time.
+                    {liveFeedUnavailable
+                      ? "Live feed endpoint is unavailable on this backend deployment. Deploy the latest backend build to enable real-time enrichment events."
+                      : "No live events yet. Start a website scan to see BAT extracting data in real time."}
                   </p>
                 ) : (
                   feedEvents.map((event) => {

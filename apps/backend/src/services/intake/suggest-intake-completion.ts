@@ -112,18 +112,75 @@ function hasWebsiteProvided(partialPayload: Record<string, unknown>): boolean {
   return false;
 }
 
+function titleCase(value: string): string {
+  return value
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((token) => token[0]?.toUpperCase() + token.slice(1))
+    .join(' ');
+}
+
+function deriveBrandNameFromWebsite(website: string): string {
+  const source = String(website || '').trim();
+  if (!source) return '';
+  try {
+    const parsed = new URL(source.startsWith('http') ? source : `https://${source}`);
+    const host = parsed.hostname.replace(/^www\./i, '');
+    const root = host.split('.')[0] || '';
+    if (!root) return '';
+    return titleCase(root.replace(/[-_]+/g, ' ').trim());
+  } catch {
+    return '';
+  }
+}
+
+function buildFallbackSuggestions(
+  partialPayload: Record<string, unknown>,
+  missingKeys: IntakeKey[],
+  website: string
+): Record<string, unknown> {
+  const fallback: Record<string, unknown> = {};
+  const missing = new Set<string>(missingKeys);
+  const normalizedWebsite = website.trim();
+  const brandName = String(partialPayload.name || '').trim() || deriveBrandNameFromWebsite(normalizedWebsite);
+  const mainOffer = String(partialPayload.mainOffer || '').trim();
+  const primaryGoal = String(partialPayload.primaryGoal || '').trim();
+
+  if (normalizedWebsite) {
+    if (missing.has('website')) fallback.website = normalizedWebsite;
+    if (missing.has('websites')) fallback.websites = [normalizedWebsite];
+  }
+
+  if (brandName && missing.has('name')) {
+    fallback.name = brandName;
+  }
+
+  if (missing.has('oneSentenceDescription') && brandName && (mainOffer || primaryGoal)) {
+    fallback.oneSentenceDescription = mainOffer
+      ? `${brandName} offers ${mainOffer}.`
+      : `${brandName} focuses on ${primaryGoal}.`;
+  }
+
+  return fallback;
+}
+
+function keepOnlyMissingKeys(
+  suggested: Record<string, unknown>,
+  missingKeys: IntakeKey[]
+): Record<string, unknown> {
+  const allowed = new Set<string>(missingKeys);
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(suggested || {})) {
+    if (!allowed.has(key)) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
 export async function suggestIntakeCompletion(
   partialPayload: Record<string, unknown>
 ): Promise<SuggestIntakeCompletionResult> {
   const openai = getOpenAiClient();
-  if (!openai) {
-    return {
-      suggested: {},
-      filledByUser: [],
-      confirmationRequired: true,
-      confirmationReasons: ['AI_NOT_CONFIGURED'],
-    };
-  }
 
   const filledByUser: string[] = [];
   const contextParts: string[] = [];
@@ -174,7 +231,10 @@ export async function suggestIntakeCompletion(
     };
   }
 
-  const systemPrompt = `You are a brand strategy assistant. Given partial business intake form data, suggest plausible values ONLY for the missing fields. Return a JSON object with exactly the keys listed in the "Missing keys" section. Rules:
+  let suggested: Record<string, unknown> = buildFallbackSuggestions(partialPayload, missingKeys, website);
+
+  if (openai && contextParts.length > 0) {
+    const systemPrompt = `You are a brand strategy assistant. Given partial business intake form data, suggest plausible values ONLY for the missing fields. Return a JSON object with exactly the keys listed in the "Missing keys" section. Rules:
 - Do not suggest values for fields the user already provided.
 - For list fields (websites, servicesList, topProblems, resultsIn90Days, questionsBeforeBuying, secondaryGoals, excludedCategories, competitorInspirationLinks) return an array of strings.
 - For single-line fields return a string. Keep suggestions concise and consistent with the provided context.
@@ -182,30 +242,37 @@ export async function suggestIntakeCompletion(
 - brandVoiceWords: 3-5 words only. topicsToAvoid: short list or comma-separated.
 - Be professional and aligned with the business context.`;
 
-  const userPrompt = `Context (fields the user already filled):
+    const userPrompt = `Context (fields the user already filled):
 ${contextStr}
 
 Missing keys to suggest (return JSON only with these keys): ${missingKeys.join(', ')}
 
 Return a single JSON object. No explanation.`;
 
-  const response = await openai.chat.completions.create({
-    model: resolveModelForTask('intake_completion'),
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
-    ],
-    response_format: { type: 'json_object' },
-    temperature: 0.5,
-    max_tokens: 1500,
-  });
+    try {
+      const response = await openai.chat.completions.create({
+        model: resolveModelForTask('intake_completion'),
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.5,
+        max_tokens: 1500,
+      });
 
-  const raw = response.choices[0]?.message?.content || '{}';
-  let suggested: Record<string, unknown>;
-  try {
-    suggested = JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    suggested = {};
+      const raw = response.choices[0]?.message?.content || '{}';
+      const aiSuggested = keepOnlyMissingKeys(JSON.parse(raw) as Record<string, unknown>, missingKeys);
+      suggested = {
+        ...suggested,
+        ...aiSuggested,
+      };
+    } catch (error: unknown) {
+      console.warn('[SuggestIntake] AI completion fallback:', (error as Error)?.message || String(error));
+      suggested = keepOnlyMissingKeys(suggested, missingKeys);
+    }
+  } else {
+    suggested = keepOnlyMissingKeys(suggested, missingKeys);
   }
 
   const suggestedHandles: Record<string, string> = {};
