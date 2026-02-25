@@ -476,8 +476,48 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
     if (!exists) calls.push({ tool, args });
   };
 
-  if (/competitor|rival|alternative/.test(normalized)) {
+  const hasCompetitorSignals = /\b(competitor|rival|alternative|inspiration|accounts?|handles?)\b/.test(normalized);
+  const hasAddIntent = /\b(add|include|save|insert|append|import|update)\b/.test(normalized);
+  const hasCompetitorLinks = /(instagram\.com|tiktok\.com|youtube\.com|x\.com|twitter\.com|@[a-z0-9._-]+)/i.test(
+    message
+  );
+  const hasIntakeHeadings =
+    /what services do you offer|what do you do in one sentence|what are the top 3 problems|who is the ideal audience|what results should content drive|what do people usually ask/i.test(
+      message
+    );
+  const hasIntakeUpdateIntent =
+    /\b(update|replace|refresh|apply|rewrite|save)\b/.test(normalized) &&
+    /\b(form|intake|onboarding|onboard|original form content)\b/.test(normalized);
+  const hasRunIntent = /\b(run|start|continue|resume|expand|investigat(?:e|ing)|analy[sz]e)\b/.test(normalized);
+  const hasCompetitorDiscoveryIntent =
+    /\b(competitor discovery|discover competitors|competitor investigation|competitor set)\b/.test(normalized) ||
+    (/\bcompetitor\b/.test(normalized) && /\b(discovery|discover|investigat|analy[sz]e)\b/.test(normalized));
+  const hasCompetitorStatusIntent =
+    /\b(status|progress|started|update)\b/.test(normalized) && /\bcompetitor\b/.test(normalized);
+
+  if (hasCompetitorSignals) {
     pushIfMissing('intel.list', { section: 'competitors', limit: 12 });
+  }
+
+  if (
+    ((hasAddIntent && hasCompetitorSignals) ||
+      /competitors?\s*(?:\/|or)\s*inspiration/i.test(message) ||
+      /\bcompetitor(?:s)?\b/.test(normalized)) &&
+    hasCompetitorLinks
+  ) {
+    pushIfMissing('competitors.add_links', { text: message });
+  }
+
+  if (hasIntakeUpdateIntent || hasIntakeHeadings) {
+    pushIfMissing('intake.update_from_text', { text: message });
+  }
+
+  if (hasRunIntent && hasCompetitorDiscoveryIntent) {
+    pushIfMissing('orchestration.run', { targetCount: 12, mode: 'append' });
+  }
+
+  if (hasCompetitorStatusIntent) {
+    pushIfMissing('orchestration.status', {});
   }
 
   if (/web|site|website|source|snapshot|page/.test(normalized)) {
@@ -639,6 +679,36 @@ export class RuntimeRunEngine {
     return event;
   }
 
+  private async handleRunFailure(input: {
+    runId: string;
+    branchId: string;
+    message: string;
+    error: unknown;
+  }) {
+    const details = String((input.error as { message?: unknown })?.message || input.error || 'Unknown error');
+
+    try {
+      await updateAgentRun(input.runId, {
+        status: AgentRunStatus.FAILED,
+        endedAt: new Date(),
+        error: details,
+      });
+    } catch (updateError) {
+      console.error('[RuntimeRunEngine] Failed to mark run as FAILED:', updateError);
+    }
+
+    await this.emitEvent({
+      branchId: input.branchId,
+      agentRunId: input.runId,
+      type: ProcessEventType.FAILED,
+      level: ProcessEventLevel.ERROR,
+      message: input.message,
+      payload: {
+        error: details,
+      },
+    });
+  }
+
   private async dispatchNextQueuedMessage(input: {
     researchJobId: string;
     branchId: string;
@@ -772,6 +842,12 @@ export class RuntimeRunEngine {
 
     void this.executeRun(run.id).catch((error) => {
       console.error('[RuntimeRunEngine] executeRun failed:', error);
+      void this.handleRunFailure({
+        runId: run.id,
+        branchId: input.branchId,
+        message: 'Run failed unexpectedly while processing a user message.',
+        error,
+      });
     });
 
     return {
@@ -1310,6 +1386,12 @@ export class RuntimeRunEngine {
 
     void this.executeRun(run.id).catch((error) => {
       console.error('[RuntimeRunEngine] bootstrap executeRun failed:', error);
+      void this.handleRunFailure({
+        runId: run.id,
+        branchId: input.branchId,
+        message: 'Workspace kickoff run failed unexpectedly.',
+        error,
+      });
     });
 
     return { started: true, runId: run.id };

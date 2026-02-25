@@ -17,6 +17,33 @@ function testPlannerHeuristics() {
 
   const plan = buildPlanFromMessage('Generate a short response with no tool usage hints.');
   assert.ok(Array.isArray(plan.plan), 'Plan steps should exist.');
+
+  const multilineCompetitorMessage = [
+    'please add these (I have already told you before)',
+    '',
+    '**Competitors or inspiration accounts (3 links)**',
+    'https://www.instagram.com/giuliadallacostaa',
+    'https://www.instagram.com/quantum__manifestation',
+  ].join('\n');
+  const competitorCalls = inferToolCallsFromMessage(multilineCompetitorMessage);
+  const competitorToolNames = competitorCalls.map((entry) => entry.tool);
+  assert.ok(
+    competitorToolNames.includes('competitors.add_links'),
+    'Expected multiline competitor add request to trigger competitors.add_links.'
+  );
+
+  const intakeUpdateMessage = [
+    'Can you please update the original form content',
+    '**What services do you offer? (list)**',
+    '- Offer one',
+    '- Offer two',
+  ].join('\n');
+  const intakeCalls = inferToolCallsFromMessage(intakeUpdateMessage);
+  const intakeToolNames = intakeCalls.map((entry) => entry.tool);
+  assert.ok(
+    intakeToolNames.includes('intake.update_from_text'),
+    'Expected intake form update request to trigger intake.update_from_text.'
+  );
 }
 
 function testContinuationCollection() {

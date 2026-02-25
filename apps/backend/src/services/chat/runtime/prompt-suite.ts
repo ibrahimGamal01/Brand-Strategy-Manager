@@ -228,23 +228,44 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
     if (!exists) calls.push({ tool, args });
   };
 
-  if (/competitor|rival|alternative/.test(normalized)) {
+  const hasCompetitorSignals = /\b(competitor|rival|alternative|inspiration|accounts?|handles?)\b/.test(normalized);
+  const hasAddIntent = /\b(add|include|save|insert|append|import|update)\b/.test(normalized);
+  const hasCompetitorLinks = /(instagram\.com|tiktok\.com|youtube\.com|x\.com|twitter\.com|@[a-z0-9._-]+)/i.test(
+    message
+  );
+  const hasIntakeHeadings =
+    /what services do you offer|what do you do in one sentence|what are the top 3 problems|who is the ideal audience|what results should content drive|what do people usually ask/i.test(
+      message
+    );
+  const hasIntakeUpdateIntent =
+    /\b(update|replace|refresh|apply|rewrite|save)\b/.test(normalized) &&
+    /\b(form|intake|onboarding|onboard|original form content)\b/.test(normalized);
+  const hasRunIntent = /\b(run|start|continue|resume|expand|investigat(?:e|ing)|analy[sz]e)\b/.test(normalized);
+  const hasCompetitorDiscoveryIntent =
+    /\b(competitor discovery|discover competitors|competitor investigation|competitor set)\b/.test(normalized) ||
+    (/\bcompetitor\b/.test(normalized) && /\b(discovery|discover|investigat|analy[sz]e)\b/.test(normalized));
+  const hasCompetitorStatusIntent =
+    /\b(status|progress|started|update)\b/.test(normalized) && /\bcompetitor\b/.test(normalized);
+
+  if (hasCompetitorSignals) {
     pushIfMissing('intel.list', { section: 'competitors', limit: 12 });
   }
   if (
-    /(add|include|save|insert|update).*(competitor|inspiration|accounts?|handles?)/.test(normalized) &&
-    /(instagram\.com|tiktok\.com|youtube\.com|x\.com|twitter\.com|@[a-z0-9._-]+)/.test(normalized)
+    ((hasAddIntent && hasCompetitorSignals) ||
+      /competitors?\s*(?:\/|or)\s*inspiration/i.test(message) ||
+      /\bcompetitor(?:s)?\b/.test(normalized)) &&
+    hasCompetitorLinks
   ) {
     pushIfMissing('competitors.add_links', { text: message });
   }
-  if (
-    /(update|replace|refresh|apply).*(form|intake|onboarding|original form content)/.test(normalized) ||
-    /what services do you offer|what do you do in one sentence|what are the top 3 problems/i.test(message)
-  ) {
+  if (hasIntakeUpdateIntent || hasIntakeHeadings) {
     pushIfMissing('intake.update_from_text', { text: message });
   }
-  if (/run competitor discovery|discover competitors|expand competitor set/.test(normalized)) {
+  if (hasRunIntent && hasCompetitorDiscoveryIntent) {
     pushIfMissing('orchestration.run', { targetCount: 12, mode: 'append' });
+  }
+  if (hasCompetitorStatusIntent) {
+    pushIfMissing('orchestration.status', {});
   }
   if (/intake|onboard|kickoff|audit|workspace|strategy|investigat|analy[sz]e/.test(normalized)) {
     pushIfMissing('intel.list', { section: 'web_snapshots', limit: 20 });
@@ -323,10 +344,16 @@ function fallbackWriter(input: WriterInput): WriterOutput {
 
   const toolSummaries = input.toolResults.map((result) => result.summary).filter(Boolean).slice(0, 6);
   const userIntent = input.userMessage.toLowerCase();
+  const hasCompetitorIntent =
+    /\b(add|include|save|insert|append|update)\b/.test(userIntent) &&
+    /\b(competitor|inspiration|accounts?|handles?)\b/.test(userIntent);
+  const hasIntakeIntent =
+    /\b(update|replace|apply|rewrite|save)\b/.test(userIntent) &&
+    /\b(intake|form|onboard|onboarding)\b/.test(userIntent);
   const intentLead =
-    /(add|include|save).*(competitor|inspiration)/.test(userIntent)
+    hasCompetitorIntent
       ? 'I processed your competitor update request directly from your message.'
-      : /(update|replace|apply).*(intake|form|onboard)/.test(userIntent)
+      : hasIntakeIntent
         ? 'I updated the workspace intake context from your provided text.'
         : 'I processed your request using the latest workspace data and tools.';
 

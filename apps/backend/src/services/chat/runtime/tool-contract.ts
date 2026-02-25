@@ -172,6 +172,20 @@ function summarize(raw: Record<string, unknown>): string {
     return raw.summary.trim();
   }
 
+  if (typeof raw.summaryText === 'string' && raw.summaryText.trim()) {
+    return raw.summaryText.trim();
+  }
+
+  if (isRecord(raw.summary)) {
+    const shortlisted = Number(raw.summary.shortlisted);
+    const topPicks = Number(raw.summary.topPicks);
+    if (Number.isFinite(shortlisted) || Number.isFinite(topPicks)) {
+      const shortlistText = Number.isFinite(shortlisted) ? `${Math.max(0, Math.floor(shortlisted))} shortlisted` : '';
+      const topPickText = Number.isFinite(topPicks) ? `${Math.max(0, Math.floor(topPicks))} top picks` : '';
+      return `Tool completed competitor discovery${[shortlistText, topPickText].filter(Boolean).length ? ` (${[shortlistText, topPickText].filter(Boolean).join(', ')})` : ''}.`;
+    }
+  }
+
   if (typeof raw.reason === 'string' && raw.reason.trim()) {
     return raw.reason.trim();
   }
