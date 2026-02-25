@@ -106,6 +106,17 @@ export type WorkspaceIntakeSuggestion = {
   confirmationReasons?: string[];
 };
 
+export type WorkspaceIntakeScanMode = "quick" | "standard" | "deep";
+
+export type WorkspaceIntakeLiveEvent = {
+  id: number;
+  workspaceId: string;
+  type: string;
+  message: string;
+  payload?: Record<string, unknown>;
+  createdAt: string;
+};
+
 export async function fetchWorkspaceIntakeStatus(workspaceId: string) {
   const response = await fetch(`/api/portal/workspaces/${workspaceId}/intake`, {
     method: "GET",
@@ -158,6 +169,35 @@ export async function saveWorkspaceIntakeDraft(
     credentials: "include",
   });
   return parseJson<{ ok: boolean; workspaceId: string }>(response);
+}
+
+export async function scanWorkspaceIntakeWebsites(
+  workspaceId: string,
+  payload: {
+    website?: string;
+    websites?: string[];
+    mode?: WorkspaceIntakeScanMode;
+  }
+) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/intake/websites/scan`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+    credentials: "include",
+  });
+  return parseJson<{
+    ok: boolean;
+    workspaceId: string;
+    mode: WorkspaceIntakeScanMode;
+    websites: string[];
+  }>(response);
+}
+
+export function createWorkspaceIntakeEventsSource(workspaceId: string, afterId?: number) {
+  const suffix = typeof afterId === "number" ? `?afterId=${encodeURIComponent(String(afterId))}` : "";
+  return new EventSource(`/api/portal/workspaces/${workspaceId}/intake/events${suffix}`, {
+    withCredentials: true,
+  });
 }
 
 export async function listRuntimeThreads(workspaceId: string): Promise<Array<RuntimeThread & { branches?: RuntimeBranch[] }>> {

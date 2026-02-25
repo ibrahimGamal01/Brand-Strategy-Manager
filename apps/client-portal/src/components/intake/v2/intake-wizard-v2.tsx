@@ -47,7 +47,7 @@ const STEPS: WizardStep[] = [
   {
     id: "channels",
     title: "Channels",
-    description: "Confirm your active channels so discovery can start with confidence.",
+    description: "Add channels when available. BAT can also start from websites and enrich socials later.",
     optional: false,
   },
   {
@@ -111,13 +111,16 @@ export function IntakeWizardV2({
 
   const hasName = state.name.trim().length > 0;
   const hasChannel = normalizedChannels.length > 0;
+  const hasWebsite =
+    state.website.trim().length > 0 || state.websites.some((item) => String(item || "").trim().length > 0);
   const hasOfferOrGoal = state.mainOffer.trim().length > 0 || state.primaryGoal.trim().length > 0;
+  const requireChannelConfirmation = confirmationRequired && hasChannel;
 
   const disableContinue =
     loading ||
     (step.id === "brand" && !hasName) ||
-    (step.id === "channels" && !hasChannel) ||
-    (step.id === "voice" && (!hasOfferOrGoal || (confirmationRequired && !channelsConfirmed)));
+    (step.id === "channels" && !hasChannel && !hasWebsite) ||
+    (step.id === "voice" && (!hasOfferOrGoal || (requireChannelConfirmation && !channelsConfirmed)));
 
   function updateField<K extends keyof IntakeStateV2>(field: K, value: IntakeStateV2[K]) {
     onChange({ ...state, [field]: value });
@@ -311,7 +314,9 @@ export function IntakeWizardV2({
             <div className="flex flex-wrap gap-2">
               {normalizedChannels.length === 0 ? (
                 <p className="text-sm" style={{ color: "var(--bat-text-muted)" }}>
-                  Add at least one channel below.
+                  {hasWebsite
+                    ? "No channels added yet. You can continue in website-first mode."
+                    : "Add at least one channel below, or add a website in Brand basics."}
                 </p>
               ) : (
                 normalizedChannels.map((channel) => (
@@ -344,6 +349,7 @@ export function IntakeWizardV2({
 
           <p className="text-xs" style={{ color: "var(--bat-text-muted)" }}>
             {filledCount} channel{filledCount === 1 ? "" : "s"} selected.
+            {!hasChannel && hasWebsite ? " Website-first mode is enabled." : ""}
           </p>
         </div>
       ) : null}
@@ -508,7 +514,7 @@ export function IntakeWizardV2({
             />
           </QuestionCard>
 
-          {confirmationRequired ? (
+          {requireChannelConfirmation ? (
             <div
               className="rounded-xl border px-4 py-3"
               style={{

@@ -28,6 +28,16 @@ import {
   suggestPortalWorkspaceIntakeCompletion,
 } from '../services/portal/portal-intake';
 import { savePortalWorkspaceIntakeDraft } from '../services/portal/portal-intake-draft';
+import {
+  listPortalIntakeEvents,
+  PortalIntakeEvent,
+  subscribePortalIntakeEvents,
+} from '../services/portal/portal-intake-events';
+import {
+  parseWebsiteList,
+  PortalIntakeScanMode,
+  scanPortalIntakeWebsites,
+} from '../services/portal/portal-intake-websites';
 
 const router = Router();
 
@@ -44,6 +54,16 @@ function getRequestIp(req: Request): string | null {
 
 function safeString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function parseIntakeScanMode(value: unknown): PortalIntakeScanMode {
+  const mode = String(value || '').trim().toLowerCase();
+  if (mode === 'standard' || mode === 'deep') return mode;
+  return 'quick';
+}
+
+function serializePortalIntakeEventSse(event: PortalIntakeEvent): string {
+  return `id: ${event.id}\nevent: intake_event\ndata: ${JSON.stringify(event)}\n\n`;
 }
 
 router.post('/auth/signup', async (req, res) => {
@@ -323,6 +343,100 @@ router.post('/workspaces/:workspaceId/intake/draft', requirePortalAuth, requireW
     return res.status(status).json({ ok: false, error: message || 'Failed to save workspace intake draft' });
   }
 });
+
+router.post(
+  '/workspaces/:workspaceId/intake/websites/scan',
+  requirePortalAuth,
+  requireWorkspaceMembership,
+  async (req, res) => {
+    try {
+      const workspaceId = safeString(req.params.workspaceId);
+      if (!workspaceId) {
+        return res.status(400).json({ error: 'workspaceId is required' });
+      }
+
+      const payload =
+        req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+          ? (req.body as Record<string, unknown>)
+          : {};
+      const mode = parseIntakeScanMode(payload.mode);
+      const websites = parseWebsiteList([payload.websites, payload.website], 5);
+      if (!websites.length) {
+        return res.status(400).json({ ok: false, error: 'At least one valid website is required to scan' });
+      }
+
+      void scanPortalIntakeWebsites(workspaceId, websites, {
+        mode,
+        initiatedBy: 'USER',
+      }).catch((error) => {
+        console.error(`[PortalIntake] Website scan failed for ${workspaceId}:`, error);
+      });
+
+      return res.status(202).json({
+        ok: true,
+        workspaceId,
+        mode,
+        websites,
+      });
+    } catch (error: any) {
+      const message = String(error?.message || '');
+      return res.status(500).json({ ok: false, error: message || 'Failed to start website scan' });
+    }
+  }
+);
+
+router.get(
+  '/workspaces/:workspaceId/intake/events',
+  requirePortalAuth,
+  requireWorkspaceMembership,
+  async (req, res) => {
+    try {
+      const workspaceId = safeString(req.params.workspaceId);
+      if (!workspaceId) {
+        return res.status(400).json({ error: 'workspaceId is required' });
+      }
+
+      const afterIdRaw =
+        (Array.isArray(req.query.afterId) ? req.query.afterId[0] : req.query.afterId) ||
+        req.header('last-event-id') ||
+        undefined;
+      const afterIdParsed = afterIdRaw ? Number.parseInt(String(afterIdRaw), 10) : undefined;
+      const afterId = Number.isFinite(afterIdParsed as number) ? (afterIdParsed as number) : undefined;
+
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.flushHeaders?.();
+      res.write('retry: 3000\n\n');
+
+      const backlog = listPortalIntakeEvents(workspaceId, {
+        afterId,
+        limit: 200,
+      });
+      for (const event of backlog) {
+        res.write(serializePortalIntakeEventSse(event));
+      }
+
+      const unsubscribe = subscribePortalIntakeEvents(workspaceId, (event) => {
+        res.write(serializePortalIntakeEventSse(event));
+      });
+
+      const heartbeat = setInterval(() => {
+        res.write(`event: ping\ndata: {"time":"${new Date().toISOString()}"}\n\n`);
+      }, 25000);
+
+      req.on('close', () => {
+        clearInterval(heartbeat);
+        unsubscribe();
+        res.end();
+      });
+    } catch (error: any) {
+      const message = String(error?.message || '');
+      return res.status(500).json({ error: message || 'Failed to open intake events stream' });
+    }
+  }
+);
 
 router.post('/workspaces/:workspaceId/intake', requirePortalAuth, requireWorkspaceMembership, async (req, res) => {
   try {

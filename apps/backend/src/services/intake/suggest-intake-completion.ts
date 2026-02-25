@@ -100,6 +100,18 @@ function hasPrimaryHandle(handles: Record<string, unknown>): boolean {
   return PRIMARY_CHANNELS.some((platform) => normalizeHandle(handles[platform]).length > 0);
 }
 
+function hasWebsiteProvided(partialPayload: Record<string, unknown>): boolean {
+  const website = String(partialPayload.website || '').trim();
+  if (website.length > 0) return true;
+  if (Array.isArray(partialPayload.websites)) {
+    return partialPayload.websites.some((entry) => String(entry || '').trim().length > 0);
+  }
+  if (typeof partialPayload.websites === 'string') {
+    return partialPayload.websites.trim().length > 0;
+  }
+  return false;
+}
+
 export async function suggestIntakeCompletion(
   partialPayload: Record<string, unknown>
 ): Promise<SuggestIntakeCompletionResult> {
@@ -141,6 +153,7 @@ export async function suggestIntakeCompletion(
     partialPayload.handles && typeof partialPayload.handles === 'object'
       ? (partialPayload.handles as Record<string, unknown>)
       : {};
+  const hasWebsite = hasWebsiteProvided(partialPayload);
   const websiteCandidates = Array.isArray(partialPayload.websites)
     ? partialPayload.websites
     : typeof partialPayload.websites === 'string'
@@ -151,7 +164,8 @@ export async function suggestIntakeCompletion(
   const name = String(partialPayload.name || '').trim();
 
   if (missingKeys.length === 0) {
-    const confirmationReasons = hasPrimaryHandle(handles) ? [] : ['MISSING_PRIMARY_CHANNEL'];
+    const confirmationReasons =
+      hasPrimaryHandle(handles) || hasWebsite ? [] : ['MISSING_PRIMARY_CHANNEL'];
     return {
       suggested: {},
       filledByUser: [...INTAKE_KEYS],
@@ -279,7 +293,7 @@ Return a single JSON object. No explanation.`;
   });
 
   const confirmationReasons: string[] = [];
-  if (!hasUserPrimaryHandle && !hasHighConfidenceSuggestedPrimary) {
+  if (!hasUserPrimaryHandle && !hasHighConfidenceSuggestedPrimary && !hasWebsite) {
     confirmationReasons.push('MISSING_PRIMARY_CHANNEL');
   }
   if (hasLowConfidenceSuggestion || hasUnvalidatedSuggestedPrimary) {

@@ -124,6 +124,12 @@ export async function savePortalWorkspaceIntakeDraft(
   const questionsBeforeBuying = parseList(nextPayload.questionsBeforeBuying, 3);
   const competitorInspirationLinks = parseList(nextPayload.competitorInspirationLinks, 5);
   const { websites, primaryWebsite } = resolveIntakeWebsites(nextPayload);
+  const surfaces =
+    channels.length > 0
+      ? channels.map((item) => item.platform)
+      : websites.length > 0
+        ? ['web']
+        : undefined;
   const topicsToAvoid = parseList(nextPayload.topicsToAvoid, 20);
   const excludedCategories = parseStringList(nextPayload.excludedCategories);
   const secondaryGoals = parseStringList(nextPayload.secondaryGoals);
@@ -171,7 +177,7 @@ export async function savePortalWorkspaceIntakeDraft(
     channels: channels.length ? channels : undefined,
     platform: primaryChannel?.platform,
     handle: primaryChannel?.handle,
-    surfaces: channels.length ? channels.map((item) => item.platform) : undefined,
+    surfaces,
   });
 
   await prisma.researchJob.update({

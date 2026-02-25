@@ -218,7 +218,9 @@ function collectHandles(job: WorkspaceWithClient): IntakeHandles {
 function hasRequiredIntakeData(prefill: PortalWorkspaceIntakePrefill): boolean {
   const hasName = stringify(prefill.name).length > 0;
   const hasChannel = Object.values(prefill.handles).some((handle) => normalizeHandle(handle).length > 0);
-  return hasName && hasChannel;
+  const hasWebsite =
+    stringify(prefill.website).length > 0 || parseWebsiteList(prefill.websites, 1).length > 0;
+  return hasName && (hasChannel || hasWebsite);
 }
 
 function buildConstraintObject(
@@ -405,8 +407,11 @@ export async function submitPortalWorkspaceIntake(
     platformHandles[normalizedPlatform] = normalizedHandle;
   }
 
-  if (!Object.keys(platformHandles).length) {
-    throw new Error('At least one social handle/channel is required');
+  const { websites, primaryWebsite } = resolveIntakeWebsites(nextPayload);
+  const website = primaryWebsite || stringify(nextPayload.website) || stringify(nextPayload.websiteDomain);
+  const hasWebsite = websites.length > 0 || website.length > 0;
+  if (!Object.keys(platformHandles).length && !hasWebsite) {
+    throw new Error('Provide at least one social handle/channel or a website');
   }
 
   const existingConstraints = asRecord(workspace.client.brainProfile?.constraints);
@@ -417,9 +422,6 @@ export async function submitPortalWorkspaceIntake(
     platform,
     handle,
   }));
-
-  const { websites, primaryWebsite } = resolveIntakeWebsites(nextPayload);
-  const website = primaryWebsite || stringify(nextPayload.website) || stringify(nextPayload.websiteDomain);
   const oneSentenceDescription =
     stringify(nextPayload.oneSentenceDescription) ||
     stringify(nextPayload.description) ||
@@ -494,8 +496,14 @@ export async function submitPortalWorkspaceIntake(
 
   await syncBrainGoals(brainProfile.id, primaryGoal || null, secondaryGoals);
 
-  const primaryPlatform = Object.keys(platformHandles)[0] || 'instagram';
-  const primaryHandle = platformHandles[primaryPlatform];
+  const primaryPlatform = channels[0]?.platform || undefined;
+  const primaryHandle = channels[0]?.handle || undefined;
+  const surfaces =
+    channels.length > 0
+      ? channels.map((row) => row.platform)
+      : websites.length > 0
+        ? ['web']
+        : undefined;
   const updatedInputData = stripUndefinedFromJson({
     ...inputData,
     source: 'portal_intro_form',
@@ -536,7 +544,7 @@ export async function submitPortalWorkspaceIntake(
     channels,
     platform: primaryPlatform,
     handle: primaryHandle,
-    surfaces: channels.map((row) => row.platform),
+    surfaces,
     engineGoal: stringify(nextPayload.engineGoal),
   });
 

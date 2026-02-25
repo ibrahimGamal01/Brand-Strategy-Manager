@@ -172,7 +172,7 @@ export function SocialHandlesFields({
       </div>
 
       <p className="text-xs" style={{ color: "var(--bat-text-muted)" }}>
-        Add at least one handle to start discovery and evidence-based recommendations.
+        Add handles to expand social discovery. BAT can still start from website evidence when no handles are available.
       </p>
     </section>
   );
