@@ -115,6 +115,7 @@ export async function fetchAndPersistWebSnapshot(input: {
 export async function crawlAndPersistWebSources(input: {
   researchJobId: string;
   startUrls: string[];
+  allowedDomains?: string[];
   maxPages?: number;
   maxDepth?: number;
   mode?: ScraplingMode;
@@ -123,7 +124,22 @@ export async function crawlAndPersistWebSources(input: {
   const normalizedStartUrls = Array.from(new Set(input.startUrls.map((url) => normalizeUrl(url)).filter(Boolean)));
   if (!normalizedStartUrls.length) throw new Error('At least one start URL is required for crawl');
 
-  const allowedDomains = input.allowExternal ? undefined : await getJobDomains(input.researchJobId);
+  const explicitAllowedDomains = Array.isArray(input.allowedDomains)
+    ? Array.from(
+        new Set(
+          input.allowedDomains
+            .map((domain) => String(domain || '').trim().toLowerCase().replace(/^https?:\/\//i, '').replace(/^www\./i, ''))
+            .map((domain) => domain.split('/')[0] || '')
+            .filter(Boolean),
+        ),
+      )
+    : [];
+  const allowedDomains =
+    explicitAllowedDomains.length > 0
+      ? explicitAllowedDomains
+      : input.allowExternal
+        ? undefined
+        : await getJobDomains(input.researchJobId);
   const guardedUrls = normalizedStartUrls
     .map((url) => ({ url, guard: validateScrapeUrl(url, allowedDomains) }))
     .filter((entry) => entry.guard.allowed && entry.guard.normalizedUrl)

@@ -178,6 +178,83 @@ function inferNicheFromEvidence(websiteEvidence: string): string {
   return '';
 }
 
+function uniqueList(values: string[], maxItems: number): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of values) {
+    const item = sanitizeSentence(raw);
+    if (!item) continue;
+    const key = item.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+    if (out.length >= maxItems) break;
+  }
+  return out;
+}
+
+function extractUrlsFromEvidence(websiteEvidence: string): string[] {
+  const text = String(websiteEvidence || '');
+  const matches = text.match(/https?:\/\/[^\s)]+/gi) || [];
+  return uniqueList(matches, 30);
+}
+
+function slugToTitle(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const segment = parsed.pathname
+      .split('/')
+      .filter(Boolean)
+      .pop();
+    if (!segment) return '';
+    return segment
+      .replace(/[-_]+/g, ' ')
+      .replace(/\b\w/g, (s) => s.toUpperCase())
+      .trim();
+  } catch {
+    return '';
+  }
+}
+
+function extractServiceCandidates(websiteEvidence: string): string[] {
+  const text = String(websiteEvidence || '');
+  if (!text) return [];
+  const candidates: string[] = [];
+
+  const namedPatterns = [
+    /\bBioHealing Stream\b/gi,
+    /\bELUUMIS SKY\b/gi,
+    /\bELUUMIS MATTER\b/gi,
+    /\bSelf[- ]Healing\b/gi,
+    /\bPRO program\b/gi,
+  ];
+  for (const pattern of namedPatterns) {
+    const matches = text.match(pattern) || [];
+    candidates.push(...matches);
+  }
+
+  const genericMatches =
+    text.match(
+      /\b[A-Z][A-Za-z0-9&+\-]{2,}(?:\s+[A-Z][A-Za-z0-9&+\-]{2,}){0,4}\s+(?:program|subscription|service|services|device|devices|class|classes|community)\b/g
+    ) || [];
+  candidates.push(...genericMatches);
+
+  for (const url of extractUrlsFromEvidence(text)) {
+    const title = slugToTitle(url);
+    if (!title) continue;
+    if (!/(program|service|product|subscription|healing|stream|matter|sky|professional|self)/i.test(title)) continue;
+    candidates.push(title);
+  }
+
+  return uniqueList(candidates, 20);
+}
+
+function hasWellnessSignals(websiteEvidence: string): boolean {
+  return /(wellness|wellbeing|healing|nervous system|sleep|biohacking|biophoton|coherence|stress|calm|energy)/i.test(
+    String(websiteEvidence || '')
+  );
+}
+
 function titleCase(value: string): string {
   return value
     .split(/\s+/)
@@ -209,6 +286,8 @@ function buildFallbackSuggestions(
   const missing = new Set<string>(missingKeys);
   const normalizedWebsite = website.trim();
   const websiteEvidence = String(partialPayload._websiteEvidence || partialPayload.websiteEvidence || '').trim();
+  const serviceCandidates = extractServiceCandidates(websiteEvidence);
+  const wellnessSignals = hasWellnessSignals(websiteEvidence);
   const brandName = String(partialPayload.name || '').trim() || deriveBrandNameFromWebsite(normalizedWebsite);
   const mainOffer = String(partialPayload.mainOffer || '').trim();
   const primaryGoal = String(partialPayload.primaryGoal || '').trim();
@@ -248,6 +327,60 @@ function buildFallbackSuggestions(
     } else if (/agency|consulting|services/i.test(websiteEvidence)) {
       fallback.businessType = 'Service business';
     }
+  }
+
+  if (missing.has('servicesList') && serviceCandidates.length > 0) {
+    fallback.servicesList = serviceCandidates.slice(0, 20);
+  }
+
+  if (missing.has('mainOffer')) {
+    const preferred =
+      serviceCandidates.find((entry) => /(stream|subscription|program|service)/i.test(entry)) || serviceCandidates[0];
+    if (preferred) fallback.mainOffer = preferred;
+  }
+
+  if (missing.has('primaryGoal')) {
+    if (/subscription|membership|stream/i.test(websiteEvidence)) {
+      fallback.primaryGoal = 'Grow qualified subscription signups from content and website traffic.';
+    } else if (wellnessSignals) {
+      fallback.primaryGoal = 'Increase qualified leads and booked sessions from educational wellness content.';
+    }
+  }
+
+  if (missing.has('idealAudience') && wellnessSignals) {
+    fallback.idealAudience =
+      'Wellness-focused adults seeking stress relief, better sleep, and consistent at-home routines.';
+  }
+
+  if (missing.has('topProblems') && wellnessSignals) {
+    fallback.topProblems = [
+      'Stress and nervous-system overload',
+      'Poor sleep and low recovery',
+      'Low energy and inconsistent daily wellbeing routines',
+    ];
+  }
+
+  if (missing.has('resultsIn90Days')) {
+    fallback.resultsIn90Days = [
+      'Increase qualified lead volume from content',
+      'Improve conversion from website visitors into trials, bookings, or subscriptions',
+    ];
+  }
+
+  if (missing.has('questionsBeforeBuying')) {
+    fallback.questionsBeforeBuying = [
+      'How does this work and what should I expect from the experience?',
+      'How quickly do people typically see meaningful results?',
+      'What setup, pricing, and support are included?',
+    ];
+  }
+
+  if (missing.has('brandVoiceWords') && wellnessSignals) {
+    fallback.brandVoiceWords = ['Calm', 'Grounded', 'Empowering', 'Evidence-led'];
+  }
+
+  if (missing.has('topicsToAvoid') && wellnessSignals) {
+    fallback.topicsToAvoid = ['Medical cure claims', 'Fear-based messaging', 'Political or religious debates'];
   }
 
   return fallback;

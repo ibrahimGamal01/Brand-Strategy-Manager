@@ -223,8 +223,13 @@ export const scraplingClient = {
     }
 
     try {
+      const crawlTimeoutMs = Math.max(
+        DEFAULT_TIMEOUT_MS,
+        60_000,
+        Math.min(600_000, (payload.maxPages || 20) * 4_000),
+      );
       const response = await axios.post(`${WORKER_URL}/v1/crawl`, payload, {
-        timeout: Math.max(DEFAULT_TIMEOUT_MS, 60_000),
+        timeout: crawlTimeoutMs,
         headers: { 'Content-Type': 'application/json' },
       });
       const data = (response.data || {}) as Record<string, any>;

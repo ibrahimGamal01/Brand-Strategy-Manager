@@ -32,6 +32,15 @@ function isSocialHost(hostname: string): boolean {
   return SOCIAL_HOST_MARKERS.some((marker) => host.includes(marker));
 }
 
+function toHostname(url: string): string {
+  try {
+    const parsed = new URL(url.startsWith('http') ? url : `https://${url}`);
+    return parsed.hostname.replace(/^www\./i, '').toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
 function normalizeWebsiteCandidate(rawValue: string): string {
   let candidate = String(rawValue || '').trim();
   if (!candidate) return '';
@@ -184,6 +193,13 @@ export async function scanPortalIntakeWebsites(
 
   activeScans.add(workspaceId);
   const crawlSettings = resolveCrawlSettings(mode);
+  const allowedDomains = Array.from(
+    new Set(
+      targets
+        .map((target) => toHostname(target))
+        .filter(Boolean),
+    ),
+  );
 
   let targetsCompleted = 0;
   let snapshotsSaved = 0;
@@ -231,6 +247,7 @@ export async function scanPortalIntakeWebsites(
         const crawl = await crawlAndPersistWebSources({
           researchJobId: workspaceId,
           startUrls: [target],
+          allowedDomains,
           maxPages: crawlSettings.maxPages,
           maxDepth: crawlSettings.maxDepth,
           mode: 'AUTO',
