@@ -101,6 +101,7 @@ model ResearchJob {
   contentCalendarRuns         ContentCalendarRun[]
   calendarChatSessions        CalendarChatSession[]
   chatSessions                ChatSession[]
+  chatThreads                 ChatThread[]
   strategyDocChatSessions     StrategyDocChatSession[]
   clientIntakeAnswers         ClientIntakeAnswer[]
   screenshotAttachments       ScreenshotAttachment[]
@@ -112,8 +113,85 @@ model ResearchJob {
   webExtractionRecipes        WebExtractionRecipe[]
   webExtractionRuns           WebExtractionRun[]
   adaptiveSelectorMemories    AdaptiveSelectorMemory[]
+  portalMemberships           PortalWorkspaceMembership[]
 
   @@map("research_jobs")
+}
+
+enum PortalUserRole {
+  ADMIN
+  CLIENT
+}
+
+enum PortalEmailTokenType {
+  VERIFY_EMAIL
+  PASSWORD_RESET
+}
+
+model PortalUser {
+  id              String                     @id @default(uuid())
+  email           String                     @unique
+  passwordHash    String                     @map("password_hash")
+  fullName        String?                    @map("full_name")
+  companyName     String?                    @map("company_name")
+  emailVerifiedAt DateTime?                  @map("email_verified_at")
+  isAdmin         Boolean                    @default(false) @map("is_admin")
+  createdAt       DateTime                   @default(now()) @map("created_at")
+  updatedAt       DateTime                   @updatedAt @map("updated_at")
+  memberships     PortalWorkspaceMembership[]
+  sessions        PortalSession[]
+  emailTokens     PortalEmailToken[]
+
+  @@map("portal_users")
+}
+
+model PortalWorkspaceMembership {
+  id            String         @id @default(uuid())
+  userId        String         @map("user_id")
+  researchJobId String         @map("research_job_id")
+  role          PortalUserRole @default(CLIENT)
+  createdAt     DateTime       @default(now()) @map("created_at")
+
+  user        PortalUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  researchJob ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, researchJobId])
+  @@index([researchJobId, role])
+  @@map("portal_workspace_memberships")
+}
+
+model PortalSession {
+  id         String     @id @default(uuid())
+  userId     String     @map("user_id")
+  tokenHash  String     @unique @map("token_hash")
+  expiresAt  DateTime   @map("expires_at")
+  revokedAt  DateTime?  @map("revoked_at")
+  lastSeenAt DateTime?  @map("last_seen_at")
+  userAgent  String?    @map("user_agent")
+  ipAddress  String?    @map("ip_address")
+  createdAt  DateTime   @default(now()) @map("created_at")
+
+  user PortalUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([expiresAt, revokedAt])
+  @@map("portal_sessions")
+}
+
+model PortalEmailToken {
+  id        String             @id @default(uuid())
+  userId    String             @map("user_id")
+  type      PortalEmailTokenType
+  tokenHash String             @unique @map("token_hash")
+  expiresAt DateTime           @map("expires_at")
+  usedAt    DateTime?          @map("used_at")
+  createdAt DateTime           @default(now()) @map("created_at")
+
+  user PortalUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type, createdAt(sort: Desc)])
+  @@index([expiresAt, usedAt])
+  @@map("portal_email_tokens")
 }
 
 model ResearchJobEvent {
@@ -1671,6 +1749,219 @@ model ChatSession {
 
   @@index([researchJobId, lastActiveAt(sort: Desc)])
   @@map("chat_sessions")
+}
+
+model ChatThread {
+  id             String     @id @default(uuid())
+  researchJobId  String     @map("research_job_id")
+  title          String
+  pinnedBranchId String?    @map("pinned_branch_id")
+  archivedAt     DateTime?  @map("archived_at")
+  createdAt      DateTime   @default(now()) @map("created_at")
+  updatedAt      DateTime   @updatedAt @map("updated_at")
+
+  researchJob   ResearchJob        @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  pinnedBranch  ChatBranch?        @relation("ChatThreadPinnedBranch", fields: [pinnedBranchId], references: [id], onDelete: SetNull)
+  branches      ChatBranch[]
+
+  @@index([researchJobId, updatedAt(sort: Desc)])
+  @@index([pinnedBranchId])
+  @@map("chat_threads")
+}
+
+enum ChatBranchStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+model ChatBranch {
+  id                  String           @id @default(uuid())
+  threadId            String           @map("thread_id")
+  name                String
+  createdBy           String           @map("created_by")
+  forkedFromMessageId String?          @map("forked_from_message_id")
+  forkedFromBranchId  String?          @map("forked_from_branch_id")
+  status              ChatBranchStatus @default(ACTIVE)
+  createdAt           DateTime         @default(now()) @map("created_at")
+
+  thread             ChatThread          @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  forkedFromMessage  ChatBranchMessage?  @relation("ChatBranchForkedMessage", fields: [forkedFromMessageId], references: [id], onDelete: SetNull)
+  forkedFromBranch   ChatBranch?         @relation("ChatBranchForkSource", fields: [forkedFromBranchId], references: [id], onDelete: SetNull)
+  forkChildren       ChatBranch[]        @relation("ChatBranchForkSource")
+  pinnedByThreads    ChatThread[]        @relation("ChatThreadPinnedBranch")
+  messages           ChatBranchMessage[]
+  runs               AgentRun[]
+  processEvents      ProcessEvent[]
+  queueItems         MessageQueueItem[]
+
+  @@index([threadId, createdAt(sort: Desc)])
+  @@index([threadId, status, createdAt(sort: Desc)])
+  @@index([forkedFromMessageId])
+  @@index([forkedFromBranchId])
+  @@map("chat_branches")
+}
+
+enum ChatBranchMessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+  TOOL
+}
+
+model ChatBranchMessage {
+  id              String                @id @default(uuid())
+  branchId        String                @map("branch_id")
+  role            ChatBranchMessageRole
+  content         String
+  blocksJson      Json?                 @map("blocks_json")
+  citationsJson   Json?                 @map("citations_json")
+  reasoningJson   Json?                 @map("reasoning_json")
+  parentMessageId String?               @map("parent_message_id")
+  clientVisible   Boolean               @default(true) @map("client_visible")
+  createdAt       DateTime              @default(now()) @map("created_at")
+
+  branch         ChatBranch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  parentMessage  ChatBranchMessage?  @relation("ChatBranchMessageParent", fields: [parentMessageId], references: [id], onDelete: SetNull)
+  childMessages  ChatBranchMessage[] @relation("ChatBranchMessageParent")
+  forkedBranches ChatBranch[]        @relation("ChatBranchForkedMessage")
+  triggerRuns    AgentRun[]          @relation("AgentRunTriggerMessage")
+
+  @@index([branchId, createdAt])
+  @@index([branchId, role, createdAt(sort: Desc)])
+  @@index([parentMessageId])
+  @@map("chat_branch_messages")
+}
+
+enum AgentRunTriggerType {
+  USER_MESSAGE
+  TOOL_RESULT
+  SCHEDULED_LOOP
+  MUTATION_APPLIED
+  MANUAL_RETRY
+}
+
+enum AgentRunStatus {
+  QUEUED
+  RUNNING
+  WAITING_TOOLS
+  WAITING_USER
+  DONE
+  FAILED
+  CANCELLED
+}
+
+model AgentRun {
+  id               String              @id @default(uuid())
+  branchId         String              @map("branch_id")
+  triggerType      AgentRunTriggerType @map("trigger_type")
+  triggerMessageId String?             @map("trigger_message_id")
+  status           AgentRunStatus      @default(QUEUED)
+  policyJson       Json?               @map("policy_json")
+  planJson         Json?               @map("plan_json")
+  startedAt        DateTime?           @map("started_at")
+  endedAt          DateTime?           @map("ended_at")
+  error            String?
+  createdAt        DateTime            @default(now()) @map("created_at")
+
+  branch         ChatBranch         @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  triggerMessage ChatBranchMessage? @relation("AgentRunTriggerMessage", fields: [triggerMessageId], references: [id], onDelete: SetNull)
+  toolRuns       ToolRun[]
+  processEvents  ProcessEvent[]
+
+  @@index([branchId, createdAt(sort: Desc)])
+  @@index([branchId, status, createdAt(sort: Desc)])
+  @@index([triggerMessageId])
+  @@map("agent_runs")
+}
+
+enum ToolRunStatus {
+  QUEUED
+  RUNNING
+  DONE
+  FAILED
+  CANCELLED
+}
+
+model ToolRun {
+  id                   String        @id @default(uuid())
+  agentRunId           String        @map("agent_run_id")
+  toolName             String        @map("tool_name")
+  argsJson             Json          @map("args_json")
+  status               ToolRunStatus @default(QUEUED)
+  resultJson           Json?         @map("result_json")
+  startedAt            DateTime?     @map("started_at")
+  endedAt              DateTime?     @map("ended_at")
+  costJson             Json?         @map("cost_json")
+  producedArtifactsJson Json?        @map("produced_artifacts_json")
+  createdAt            DateTime      @default(now()) @map("created_at")
+
+  agentRun      AgentRun       @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+  processEvents ProcessEvent[]
+
+  @@index([agentRunId, createdAt])
+  @@index([agentRunId, status, createdAt(sort: Desc)])
+  @@map("tool_runs")
+}
+
+enum ProcessEventLevel {
+  INFO
+  WARN
+  ERROR
+}
+
+enum ProcessEventType {
+  PROCESS_STARTED
+  PROCESS_PROGRESS
+  PROCESS_LOG
+  PROCESS_RESULT
+  DECISION_REQUIRED
+  WAITING_FOR_INPUT
+  DONE
+  FAILED
+  PROCESS_CANCELLED
+}
+
+model ProcessEvent {
+  id         String            @id @default(uuid())
+  agentRunId String?           @map("agent_run_id")
+  toolRunId  String?           @map("tool_run_id")
+  branchId   String            @map("branch_id")
+  level      ProcessEventLevel @default(INFO)
+  type       ProcessEventType
+  message    String
+  payloadJson Json?            @map("payload_json")
+  createdAt  DateTime          @default(now()) @map("created_at")
+
+  branch   ChatBranch  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  agentRun AgentRun?   @relation(fields: [agentRunId], references: [id], onDelete: SetNull)
+  toolRun  ToolRun?    @relation(fields: [toolRunId], references: [id], onDelete: SetNull)
+
+  @@index([branchId, createdAt])
+  @@index([agentRunId, createdAt])
+  @@index([toolRunId, createdAt])
+  @@map("process_events")
+}
+
+enum MessageQueueItemStatus {
+  QUEUED
+  SENT
+  CANCELLED
+}
+
+model MessageQueueItem {
+  id        String                 @id @default(uuid())
+  branchId  String                 @map("branch_id")
+  userId    String                 @map("user_id")
+  content   String
+  position  Int
+  status    MessageQueueItemStatus @default(QUEUED)
+  createdAt DateTime               @default(now()) @map("created_at")
+
+  branch ChatBranch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([branchId, status, position])
+  @@index([branchId, createdAt])
+  @@map("message_queue_items")
 }
 
 enum ChatMessageRole {

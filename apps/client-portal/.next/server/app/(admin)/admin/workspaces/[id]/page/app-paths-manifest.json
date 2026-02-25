@@ -1,0 +1,3 @@
+{
+  "/(admin)/admin/workspaces/[id]/page": "app/(admin)/admin/workspaces/[id]/page.js"
+}

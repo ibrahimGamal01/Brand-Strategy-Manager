@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Chat Workspace — Redesign Wireframe</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Comic Sans MS', 'Chalkboard SE', cursive;
+    background: #f0f0f0;
+    color: #222;
+    font-size: 13px;
+  }
+  .page-header {
+    background: #fff;
+    border-bottom: 2px solid #333;
+    padding: 16px 24px;
+  }
+  .page-header h1 { font-size: 18px; font-weight: bold; }
+  .page-header p { color: #666; margin-top: 4px; font-size: 12px; }
+  .badge-legend {
+    display: flex; gap: 12px; margin-top: 10px; flex-wrap: wrap;
+  }
+  .badge-legend span {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 11px;
+  }
+  .badge-reuse { background: #4CAF50; color: #fff; padding: 2px 7px; border-radius: 3px; font-weight: bold; font-size: 10px; font-family: Arial, sans-serif; }
+  .badge-new { background: #FF9800; color: #fff; padding: 2px 7px; border-radius: 3px; font-weight: bold; font-size: 10px; font-family: Arial, sans-serif; }
+
+  /* Annotation callouts */
+  .annotation {
+    background: #fffde7;
+    border: 1px dashed #aaa;
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 11px;
+    color: #555;
+    position: absolute;
+    z-index: 100;
+    max-width: 180px;
+    line-height: 1.4;
+    pointer-events: none;
+  }
+
+  /* ============================================================
+     WORKSPACE SHELL
+  ============================================================ */
+  .workspace {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 120px);
+    border: 2px solid #333;
+    background: #fafafa;
+    margin: 16px;
+    border-radius: 8px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  /* ── TOP BAR (single, slim) ── */
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 16px;
+    height: 44px;
+    border-bottom: 2px solid #333;
+    background: #fff;
+    flex-shrink: 0;
+  }
+  .topbar-brand {
+    display: flex; align-items: center; gap: 8px; font-weight: bold; font-size: 13px;
+  }
+  .avatar-box {
+    width: 26px; height: 26px;
+    border: 2px solid #333;
+    border-radius: 5px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9px; font-weight: bold; background: #ddd;
+  }
+  .topbar-session {
+    flex: 1;
+    font-size: 12px;
+    color: #555;
+    border-left: 1px solid #ccc;
+    padding-left: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .topbar-session strong { color: #222; font-size: 13px; }
+  .topbar-actions {
+    display: flex; gap: 6px; align-items: center;
+  }
+  .chip {
+    border: 1px solid #999;
+    border-radius: 12px;
+    padding: 2px 9px;
+    font-size: 10px;
+    background: #f5f5f5;
+    white-space: nowrap;
+  }
+  .chip.green { border-color: #666; background: #eee; }
+  .icon-btn {
+    width: 28px; height: 28px;
+    border: 1px solid #999;
+    border-radius: 5px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px;
+    background: #f5f5f5;
+    cursor: pointer;
+  }
+
+  /* ── BODY: left sidebar + main + right panel ── */
+  .body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── LEFT SIDEBAR ── */
+  .left-sidebar {
+    width: 220px;
+    flex-shrink: 0;
+    border-right: 2px solid #333;
+    display: flex;
+    flex-direction: column;
+    background: #f5f5f5;
+    overflow: hidden;
+  }
+  .sidebar-header {
+    padding: 10px 12px 8px;
+    border-bottom: 1px solid #ccc;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .sidebar-header-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: #888; }
+  .sidebar-header-title { font-size: 13px; font-weight: bold; margin-top: 2px; }
+  .new-btn {
+    border: 1px solid #999;
+    border-radius: 5px;
+    padding: 3px 9px;
+    font-size: 11px;
+    font-family: inherit;
+    background: #fff;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .search-box {
+    margin: 8px 12px;
+    border: 1px solid #bbb;
+    border-radius: 5px;
+    padding: 5px 8px;
+    font-size: 11px;
+    font-family: inherit;
+    background: #fff;
+    width: calc(100% - 24px);
+    color: #888;
+  }
+  .session-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 8px;
+  }
+  .session-item {
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-bottom: 3px;
+    cursor: pointer;
+    border-left: 3px solid transparent;
+  }
+  .session-item.active {
+    background: #e8e8e8;
+    border-left-color: #333;
+  }
+  .session-item:not(.active):hover { background: #ebebeb; }
+  .session-title { font-size: 12px; font-weight: bold; color: #222; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .session-snippet { font-size: 10px; color: #777; margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.4; }
+  .session-meta { font-size: 9px; color: #aaa; margin-top: 4px; }
+
+  /* context mini-panel at bottom of sidebar */
+  .sidebar-footer {
+    border-top: 1px solid #ccc;
+    padding: 8px 12px;
+    flex-shrink: 0;
+    background: #efefef;
+  }
+  .mini-tabs { display: flex; gap: 3px; margin-bottom: 8px; }
+  .mini-tab {
+    flex: 1; text-align: center; padding: 4px 0; font-size: 10px;
+    border: 1px solid #bbb; border-radius: 4px; background: #f5f5f5; cursor: pointer;
+  }
+  .mini-tab.active { background: #ddd; border-color: #888; font-weight: bold; }
+  .mini-panel-content { font-size: 10px; color: #666; }
+  .pinned-item {
+    display: flex; align-items: center; gap: 5px;
+    padding: 4px 0; border-bottom: 1px dashed #ccc; color: #444;
+  }
+  .pinned-item:last-child { border-bottom: none; }
+
+  /* ── MAIN THREAD ── */
+  .main-thread {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    background: #fafafa;
+    overflow: hidden;
+  }
+
+  /* Messages area */
+  .messages-area {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  /* User bubble */
+  .msg-user {
+    align-self: flex-end;
+    max-width: 68%;
+    background: #e8e8e8;
+    border: 1px solid #bbb;
+    border-radius: 14px 14px 4px 14px;
+    padding: 10px 14px;
+  }
+  .msg-user-text { font-size: 13px; line-height: 1.5; }
+  .msg-user-meta { font-size: 9px; color: #aaa; margin-top: 5px; text-align: right; text-transform: uppercase; letter-spacing: 0.08em; }
+
+  /* Assistant message */
+  .msg-assistant {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .msg-avatar {
+    width: 30px; height: 30px;
+    border: 2px solid #333;
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 8px; font-weight: bold; background: #ddd;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .msg-body { flex: 1; min-width: 0; }
+  .msg-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .msg-sender { font-size: 11px; font-weight: bold; }
+  .msg-time { font-size: 9px; color: #aaa; text-transform: uppercase; letter-spacing: 0.08em; }
+  .msg-text { font-size: 13px; line-height: 1.6; color: #333; }
+
+  /* Block: Metric cards */
+  .block-metrics {
+    display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap;
+  }
+  .metric-card {
+    border: 1px solid #bbb; border-radius: 6px; padding: 8px 12px;
+    background: #fff; min-width: 100px; flex: 1;
+  }
+  .metric-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: #888; }
+  .metric-value { font-size: 20px; font-weight: bold; margin-top: 2px; }
+  .metric-change { font-size: 10px; color: #555; margin-top: 2px; }
+
+  /* Block: Action buttons */
+  .block-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .action-btn-primary {
+    border: 2px solid #333; border-radius: 6px;
+    padding: 6px 14px; font-size: 11px; font-family: inherit;
+    background: #333; color: #fff; cursor: pointer;
+  }
+  .action-btn-secondary {
+    border: 1px solid #999; border-radius: 6px;
+    padding: 6px 14px; font-size: 11px; font-family: inherit;
+    background: #f5f5f5; cursor: pointer;
+  }
+
+  /* Inline toolbar (visible on hover row, always shown in wireframe) */
+  .msg-toolbar {
+    display: flex; gap: 2px; align-items: center;
+    margin-top: 8px;
+  }
+  .tool-btn {
+    border: 1px solid #ccc; border-radius: 5px;
+    padding: 3px 7px; font-size: 10px;
+    background: #f5f5f5; cursor: pointer; display: flex; align-items: center; gap: 3px;
+  }
+
+  /* Follow-up chips */
+  .follow-up-row {
+    display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; align-items: center;
+  }
+  .fu-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: #888; }
+  .fu-chip {
+    border: 1px solid #bbb; border-radius: 20px;
+    padding: 4px 12px; font-size: 11px;
+    background: #fff; cursor: pointer;
+  }
+
+  /* Empty state */
+  .empty-state {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    flex: 1; padding: 32px; text-align: center;
+  }
+  .empty-logo {
+    width: 56px; height: 56px; border: 2px solid #333; border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: bold; background: #ddd; margin-bottom: 14px;
+  }
+  .empty-title { font-size: 16px; font-weight: bold; }
+  .empty-desc { font-size: 12px; color: #777; margin-top: 6px; max-width: 320px; }
+  .starter-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 20px; width: 100%; max-width: 500px; }
+  .starter-card {
+    border: 1px solid #bbb; border-radius: 8px; padding: 10px 12px;
+    background: #fff; text-align: left; font-size: 11px; cursor: pointer;
+    line-height: 1.4;
+  }
+  .starter-icon { font-size: 16px; margin-bottom: 5px; display: block; }
+
+  /* ── COMPOSER FOOTER ── */
+  .composer-footer {
+    border-top: 2px solid #333;
+    padding: 10px 16px;
+    background: #fff;
+    flex-shrink: 0;
+  }
+  .prompt-chips-row {
+    display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 8px;
+  }
+  .prompt-chip {
+    border: 1px solid #bbb; border-radius: 20px;
+    padding: 3px 10px; font-size: 10px; background: #f5f5f5; cursor: pointer;
+  }
+  .composer-box {
+    border: 2px solid #999; border-radius: 10px;
+    display: flex; align-items: flex-end; gap: 8px;
+    padding: 10px 12px; background: #fafafa;
+  }
+  .composer-textarea {
+    flex: 1; border: none; background: transparent; resize: none;
+    font-family: inherit; font-size: 13px; color: #333; outline: none;
+    min-height: 40px; line-height: 1.5;
+  }
+  .composer-meta { font-size: 9px; color: #aaa; text-align: right; padding-right: 2px; }
+  .send-btn {
+    width: 34px; height: 34px; border: 2px solid #333; border-radius: 50%;
+    background: #333; color: #fff; display: flex; align-items: center;
+    justify-content: center; font-size: 14px; cursor: pointer; flex-shrink: 0;
+  }
+
+  /* ── CRUD SLIDE-OVER (shown as overlay for wireframe) ── */
+  .crud-overlay {
+    position: absolute;
+    top: 44px; right: 0; bottom: 0;
+    width: 340px;
+    border-left: 2px solid #333;
+    background: #fafafa;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .crud-header {
+    padding: 10px 14px;
+    border-bottom: 1px solid #ccc;
+    display: flex; align-items: center; justify-content: space-between;
+    background: #fff;
+    flex-shrink: 0;
+  }
+  .crud-title { font-size: 13px; font-weight: bold; }
+  .crud-subtitle { font-size: 10px; color: #888; }
+  .close-btn {
+    border: 1px solid #999; border-radius: 5px;
+    width: 24px; height: 24px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; background: #f5f5f5; cursor: pointer;
+  }
+  .crud-body { padding: 12px; flex: 1; overflow-y: auto; }
+  .section-pills { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; }
+  .s-pill {
+    border: 1px solid #bbb; border-radius: 20px;
+    padding: 2px 8px; font-size: 9px; text-transform: uppercase;
+    background: #f0f0f0; cursor: pointer;
+  }
+  .s-pill.active { background: #ddd; border-color: #555; font-weight: bold; }
+  .action-tabs { display: flex; gap: 3px; margin-bottom: 10px; }
+  .a-tab {
+    flex: 1; text-align: center; padding: 4px 0; font-size: 10px; text-transform: uppercase;
+    border: 1px solid #bbb; border-radius: 4px; background: #f5f5f5; cursor: pointer;
+  }
+  .a-tab.active { background: #333; color: #fff; border-color: #333; }
+  .form-field { margin-bottom: 8px; }
+  .form-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: #888; margin-bottom: 3px; }
+  .form-input {
+    width: 100%; border: 1px solid #bbb; border-radius: 4px;
+    padding: 5px 8px; font-size: 11px; font-family: inherit;
+    background: #fff;
+  }
+  .run-btn {
+    border: 2px solid #333; border-radius: 6px;
+    padding: 7px 16px; font-size: 11px; font-family: inherit;
+    background: #333; color: #fff; cursor: pointer; width: 100%;
+  }
+  .data-preview {
+    border: 1px solid #ccc; border-radius: 6px;
+    padding: 8px; margin-top: 10px; background: #fff;
+    font-size: 10px; color: #666;
+  }
+  .data-row {
+    padding: 4px 6px; border-bottom: 1px solid #eee;
+    cursor: pointer;
+  }
+  .data-row:last-child { border-bottom: none; }
+  .data-row:hover { background: #f5f5f5; }
+
+  /* ── SECTION LABELS ── */
+  .section-label {
+    font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em;
+    color: #888; margin-bottom: 6px; font-weight: bold;
+  }
+
+  /* Wireframe annotation arrows */
+  .change-note {
+    background: #fff9c4;
+    border: 1px solid #f0c040;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 10px;
+    color: #555;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    line-height: 1.3;
+  }
+  .changes-panel {
+    margin: 0 16px 8px;
+    background: #fff9c4;
+    border: 1px solid #f0c040;
+    border-radius: 6px;
+    padding: 10px 14px;
+  }
+  .changes-panel h3 { font-size: 12px; font-weight: bold; margin-bottom: 6px; }
+  .changes-panel ul { list-style: disc; padding-left: 16px; }
+  .changes-panel li { font-size: 11px; color: #555; margin-bottom: 3px; line-height: 1.4; }
+
+  .view-toggle {
+    display: flex; gap: 6px; margin-bottom: 10px;
+  }
+  .view-btn {
+    border: 1px solid #bbb; border-radius: 5px;
+    padding: 4px 12px; font-size: 11px; cursor: pointer;
+    background: #f5f5f5;
+  }
+  .view-btn.active { background: #333; color: #fff; border-color: #333; }
+
+  .rel-wrapper { position: relative; }
+</style>
+</head>
+<body>
+
+<!-- ───────────────── PAGE HEADER ───────────────── -->
+<div class="page-header">
+  <h1>Chat Workspace — Redesign Wireframe</h1>
+  <p>Route: /research/[id]?module=chat &nbsp;·&nbsp; Focus: Space efficiency, UX/Usability, Visual Design</p>
+  <div class="badge-legend">
+    <span><span class="badge-reuse">[REUSE]</span> Existing component reused</span>
+    <span><span class="badge-new">[NEW]</span> New component to create</span>
+    <span style="font-size:11px; color:#888;">Reference benchmarks: Linear.app, Claude.ai</span>
+  </div>
+</div>
+
+<!-- Changes Summary -->
+<div class="changes-panel">
+  <h3>🔑 Key Changes from Current Implementation</h3>
+  <ul>
+    <li><strong>Removed double header</strong> — Merged workspace-level + thread-level headers into one slim 44px topbar (saves ~120px vertical space)</li>
+    <li><strong>Left sidebar narrowed</strong> from 288px → 220px; context panel (Pinned/Stats/Export) moved to sidebar footer — no separate 340px right panel</li>
+    <li><strong>CRUD Control Deck</strong> moved to a slide-over drawer triggered by ⚙ icon in topbar — no longer always-on in the main layout</li>
+    <li><strong>Composer is full-width</strong> — removed max-w-4xl constraint, uses full message area width</li>
+    <li><strong>Message toolbar inline</strong> (below message, visible on hover) instead of floating above with potential clipping</li>
+    <li><strong>Lucide icons</strong> replace emoji in MessageToolbar (Copy, Download, Shuffle, Expand, Palette, ThumbsUp, ThumbsDown)</li>
+    <li><strong>Session list</strong> shows relative timestamps ("2h ago") and is more compact per item</li>
+  </ul>
+</div>
+
+<!-- View toggle (conceptual — wireframe shows two states) -->
+<div style="padding: 0 16px 8px; display: flex; align-items: center; gap: 10px;">
+  <span style="font-size: 12px; font-weight: bold;">Show state:</span>
+  <div class="view-toggle">
+    <button class="view-btn active" onclick="showMain()">Normal (no CRUD drawer)</button>
+    <button class="view-btn" onclick="showCrud()">CRUD drawer open</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     WORKSPACE
+════════════════════════════════════════════════════ -->
+<div class="workspace rel-wrapper">
+
+  <!-- ── SINGLE SLIM TOPBAR ── -->
+  <!-- REUSE: Badge from @/components/ui/badge -->
+  <!-- NEW: CompactChatTopbar component -->
+  <div class="topbar" style="position:relative;">
+    <div style="position:absolute; top:-2px; left:140px;">
+      <span class="badge-new" style="font-family:Arial,sans-serif;">[NEW] CompactChatTopbar</span>
+    </div>
+
+    <div class="topbar-brand">
+      <div class="avatar-box">BAT</div>
+      <span>Intelligence Studio</span>
+    </div>
+
+    <!-- Session title inline — replaces ChatThread's session header -->
+    <div class="topbar-session">
+      <strong>"Brand Gap Analysis — Week 3"</strong>
+      &nbsp;·&nbsp; Last active 2h ago
+    </div>
+
+    <div class="topbar-actions">
+      <!-- Connection status -->
+      <!-- REUSE: Badge from @/components/ui/badge -->
+      <span class="chip green">● connected</span>
+      <span class="chip">12 msgs</span>
+
+      <!-- Pinned indicator / quick access -->
+      <span class="chip">📌 3 pinned</span>
+
+      <!-- CRUD toggle button — NEW KEY CHANGE -->
+      <div class="icon-btn" title="Open CRUD Control Deck (currently hidden in layout)" style="border:2px solid #333; font-size:11px;">⚙</div>
+
+      <!-- Spacer -->
+      <div style="width:1px; height:20px; background:#ccc;"></div>
+    </div>
+  </div>
+
+  <!-- ── BODY ── -->
+  <div class="body">
+
+    <!-- ══ LEFT SIDEBAR (220px) ══ -->
+    <div class="left-sidebar">
+      <div style="position:relative;">
+        <div style="position:absolute; top:4px; right:4px; z-index:10;">
+          <span class="badge-reuse" style="font-family:Arial,sans-serif;">[REUSE] ChatSessionList</span>
+        </div>
+      </div>
+
+      <!-- Sidebar header -->
+      <div class="sidebar-header">
+        <div>
+          <div class="sidebar-header-label">Session Memory</div>
+          <div class="sidebar-header-title">Chat Threads</div>
+        </div>
+        <!-- REUSE: Button from @/components/ui/button -->
+        <button class="new-btn">+ New</button>
+      </div>
+
+      <!-- Search -->
+      <input class="search-box" placeholder="Filter sessions..." />
+
+      <!-- Session list -->
+      <div class="session-list">
+
+        <div class="session-item active">
+          <div class="session-title">Brand Gap Analysis</div>
+          <div class="session-snippet">Identify my top 3 competitors based on recent...</div>
+          <div class="session-meta">2h ago</div>
+        </div>
+
+        <div class="session-item">
+          <div class="session-title">Content Strategy Week 2</div>
+          <div class="session-snippet">What content themes should I prioritize...</div>
+          <div class="session-meta">1d ago</div>
+        </div>
+
+        <div class="session-item">
+          <div class="session-title">Brand Voice Alignment</div>
+          <div class="session-snippet">Draft a brand voice alignment guide...</div>
+          <div class="session-meta">3d ago</div>
+        </div>
+
+        <div class="session-item">
+          <div class="session-title">Competitor Deep-Dive</div>
+          <div class="session-snippet">Show me the engagement gap vs. top rivals</div>
+          <div class="session-meta">5d ago</div>
+        </div>
+
+      </div>
+
+      <!-- ── Sidebar Footer: Context Panel (Pinned/Stats/Export) ── -->
+      <!-- NEW: SidebarContextPanel — replaces standalone ChatSavedPanel in right sidebar -->
+      <div class="sidebar-footer" style="position:relative;">
+        <div style="position:absolute; top:4px; right:6px; z-index:10;">
+          <span class="badge-new" style="font-family:Arial,sans-serif;">[NEW] SidebarContextPanel</span>
+        </div>
+        <div class="mini-tabs">
+          <button class="mini-tab active">📌 Pinned</button>
+          <button class="mini-tab">📊 Stats</button>
+          <button class="mini-tab">⬇ Export</button>
+        </div>
+        <div class="mini-panel-content">
+          <div class="pinned-item">💡 insight - Top competitor gap</div>
+          <div class="pinned-item">📋 table - Engagement comparison</div>
+          <div class="pinned-item">📊 metric_cards - Follower delta</div>
+          <div style="margin-top: 8px; font-size:10px; color:#aaa; text-align:center;">
+            3 blocks pinned
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ MAIN THREAD ══ -->
+    <div class="main-thread">
+
+      <!-- Messages area -->
+      <div class="messages-area" id="messages-area">
+
+        <!-- USER MESSAGE -->
+        <div class="msg-user" style="position:relative;">
+          <div style="position:absolute; top:-2px; right:-2px; z-index:10;">
+            <span class="badge-reuse" style="font-family:Arial,sans-serif;">[REUSE] ChatMessageItem</span>
+          </div>
+          <div class="msg-user-text">Identify my top 3 competitors based on recent performance.</div>
+          <div class="msg-user-meta">10:24 AM</div>
+        </div>
+
+        <!-- ASSISTANT MESSAGE -->
+        <div class="msg-assistant">
+          <div class="msg-avatar">BAT</div>
+          <div class="msg-body">
+            <div class="msg-header">
+              <span class="msg-sender">BAT Intelligence</span>
+              <span class="msg-time">10:25 AM</span>
+            </div>
+            <div class="msg-text">
+              Based on your recent data, here are the top 3 competitors driving the biggest engagement gaps in your niche. I've ranked them by relevance score and follower momentum.
+            </div>
+
+            <!-- Block: Metric cards -->
+            <!-- REUSE: BlockRenderer (MetricCardsBlock) -->
+            <div class="block-metrics" style="position:relative;">
+              <div style="position:absolute; top:-8px; right:0; z-index:10;">
+                <span class="badge-reuse" style="font-family:Arial,sans-serif;">[REUSE] BlockRenderer → MetricCards</span>
+              </div>
+              <div class="metric-card">
+                <div class="metric-label">@rival_brand</div>
+                <div class="metric-value">4.2x</div>
+                <div class="metric-change">eng. rate gap</div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-label">@competitor2</div>
+                <div class="metric-value">2.8x</div>
+                <div class="metric-change">follower growth</div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-label">@brand_xyz</div>
+                <div class="metric-value">1.6x</div>
+                <div class="metric-change">content volume</div>
+              </div>
+            </div>
+
+            <!-- Block: Action buttons -->
+            <!-- REUSE: BlockRenderer (ActionButtonsBlock) -->
+            <div class="block-actions">
+              <button class="action-btn-primary">View Full Breakdown</button>
+              <button class="action-btn-secondary">Add to Intelligence</button>
+              <button class="action-btn-secondary">Deep-Dive @rival_brand</button>
+            </div>
+
+            <!-- Inline toolbar (below message, visible on hover) -->
+            <!-- NEW: InlineMessageToolbar — uses Lucide icons instead of emoji -->
+            <div class="msg-toolbar" style="position:relative;">
+              <div style="position:absolute; top:-14px; left:0; z-index:10;">
+                <span class="badge-new" style="font-family:Arial,sans-serif;">[NEW] InlineMessageToolbar (Lucide icons)</span>
+              </div>
+              <button class="tool-btn">⎘ Copy</button>
+              <button class="tool-btn">↓ Save</button>
+              <button class="tool-btn">↺ Remix</button>
+              <button class="tool-btn">⤢ Expand</button>
+              <button class="tool-btn">▤ Tone</button>
+              <div style="width:1px;height:14px;background:#ccc;margin:0 3px;"></div>
+              <button class="tool-btn">▲ Helpful</button>
+              <button class="tool-btn">▽ Not helpful</button>
+            </div>
+
+            <!-- Follow-up chips -->
+            <!-- REUSE: FollowUpChips -->
+            <div class="follow-up-row" style="position:relative;">
+              <div style="position:absolute; top:-12px; left:0; z-index:10;">
+                <span class="badge-reuse" style="font-family:Arial,sans-serif;">[REUSE] FollowUpChips</span>
+              </div>
+              <span class="fu-label">Suggested</span>
+              <button class="fu-chip">What's their content strategy?</button>
+              <button class="fu-chip">Show engagement breakdown</button>
+              <button class="fu-chip">Draft a counter-strategy</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- USER MESSAGE 2 -->
+        <div class="msg-user">
+          <div class="msg-user-text">Show me my brand's biggest engagement gap vs competitors.</div>
+          <div class="msg-user-meta">10:27 AM</div>
+        </div>
+
+        <!-- STREAMING INDICATOR (shown while AI is typing) -->
+        <!-- REUSE: Part of ChatThread streaming indicator -->
+        <div class="msg-assistant">
+          <div class="msg-avatar">BAT</div>
+          <div class="msg-body">
+            <div class="msg-header">
+              <span class="msg-sender">BAT Intelligence</span>
+              <span class="msg-time" style="color:#888;">thinking...</span>
+            </div>
+            <div style="display:flex; gap:4px; align-items:center; padding-top:4px;">
+              <div style="width:7px;height:7px;border-radius:50%;background:#888;"></div>
+              <div style="width:7px;height:7px;border-radius:50%;background:#aaa;"></div>
+              <div style="width:7px;height:7px;border-radius:50%;background:#ccc;"></div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /messages-area -->
+
+      <!-- ── COMPOSER FOOTER ── -->
+      <!-- REUSE: ChatComposer -->
+      <div class="composer-footer" style="position:relative;">
+        <div style="position:absolute; top:4px; right:8px; z-index:10;">
+          <span class="badge-reuse" style="font-family:Arial,sans-serif;">[REUSE] ChatComposer</span>
+        </div>
+
+        <!-- Prompt chips (more contextually relevant) -->
+        <!-- REUSE: PromptChips -->
+        <div class="prompt-chips-row">
+          <button class="prompt-chip">🔭 Competitor intel</button>
+          <button class="prompt-chip">✨ Content ideas</button>
+          <button class="prompt-chip">✍️ Brand voice</button>
+          <button class="prompt-chip">📊 Performance check</button>
+        </div>
+
+        <!-- Composer box — full width, no max-width cap -->
+        <div class="composer-box">
+          <textarea class="composer-textarea" placeholder="Ask BAT anything, or type / for commands…" rows="2"></textarea>
+          <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
+            <div class="composer-meta">Ctrl+Enter to send</div>
+            <div class="send-btn">→</div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /main-thread -->
+  </div><!-- /body -->
+
+  <!-- ══ CRUD SLIDE-OVER DRAWER (shown in second state) ══ -->
+  <!-- NEW: CrudDrawer — triggered by ⚙ button in topbar -->
+  <div class="crud-overlay" id="crud-drawer" style="display:none; position:absolute;">
+    <div style="position:absolute; top:6px; left:8px; z-index:10;">
+      <span class="badge-new" style="font-family:Arial,sans-serif;">[NEW] CrudSlideOverDrawer</span>
+    </div>
+    <div class="crud-header">
+      <div>
+        <div class="crud-title">CRUD Control Deck</div>
+        <div class="crud-subtitle">Intelligence Bridge — direct data operations</div>
+      </div>
+      <div class="close-btn" onclick="showMain()">✕</div>
+    </div>
+    <div class="crud-body">
+      <!-- Section selector -->
+      <div class="section-label">Intelligence Section</div>
+      <!-- REUSE: ChatIntelligenceCrudPanel (refactored into drawer) -->
+      <div class="section-pills">
+        <span class="s-pill active">Search Results</span>
+        <span class="s-pill">Competitors</span>
+        <span class="s-pill">Profiles</span>
+        <span class="s-pill">Images</span>
+        <span class="s-pill">Videos</span>
+        <span class="s-pill">News</span>
+        <span class="s-pill">Mentions</span>
+        <span class="s-pill">Trends</span>
+        <span class="s-pill">Community</span>
+        <span class="s-pill">AI Q&amp;A</span>
+        <span class="s-pill">Media</span>
+      </div>
+
+      <!-- Action tabs -->
+      <div class="section-label" style="margin-top:10px;">Operation</div>
+      <div class="action-tabs">
+        <button class="a-tab active">READ</button>
+        <button class="a-tab">CREATE</button>
+        <button class="a-tab">UPDATE</button>
+        <button class="a-tab">DELETE</button>
+        <button class="a-tab">CLEAR</button>
+      </div>
+
+      <!-- Form fields (conditional) -->
+      <div class="form-field">
+        <div class="form-label">Query / Keyword</div>
+        <input class="form-input" placeholder="e.g. brand strategy" />
+      </div>
+      <div class="form-field">
+        <div class="form-label">Title</div>
+        <input class="form-input" placeholder="Result title" />
+      </div>
+      <div class="form-field">
+        <div class="form-label">URL</div>
+        <input class="form-input" placeholder="https://..." />
+      </div>
+
+      <!-- Run button -->
+      <button class="run-btn">▶ Run READ</button>
+
+      <!-- Data preview -->
+      <div class="data-preview">
+        <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+          <span style="font-size:10px; text-transform:uppercase; letter-spacing:0.1em; color:#888;">Section Preview</span>
+          <span style="font-size:10px; color:#888;">24 rows</span>
+        </div>
+        <div class="data-row">a1b2 · brand strategy 2025 · nytimes.com</div>
+        <div class="data-row">c3d4 · competitor content report · forbes.com</div>
+        <div class="data-row">e5f6 · social media benchmarks · sprout.com</div>
+        <div style="font-size:10px; color:#aaa; text-align:center; padding-top:6px;">
+          + 21 more rows · scroll to see all
+        </div>
+      </div>
+
+      <!-- Quick-open -->
+      <button class="action-btn-secondary" style="width:100%; margin-top:10px; font-family:inherit; padding:7px;">
+        ↗ Open in Intelligence Module
+      </button>
+    </div>
+  </div>
+
+</div><!-- /workspace -->
+
+<!-- ═══════════════════════════════════════════════════
+     EMPTY STATE VARIANT
+════════════════════════════════════════════════════ -->
+<div style="padding: 16px 16px 0; font-size:13px; font-weight:bold; font-family:'Comic Sans MS',cursive; color:#333;">
+  Empty State (no messages yet):
+</div>
+<div class="workspace" style="height: 400px; margin-top: 8px;">
+  <div class="topbar">
+    <div class="topbar-brand"><div class="avatar-box">BAT</div><span>Intelligence Studio</span></div>
+    <div class="topbar-session"><strong>New Session</strong></div>
+    <div class="topbar-actions">
+      <span class="chip green">● connected</span>
+      <div class="icon-btn">⚙</div>
+    </div>
+  </div>
+  <div class="body">
+    <div class="left-sidebar">
+      <div class="sidebar-header">
+        <div><div class="sidebar-header-label">Session Memory</div><div class="sidebar-header-title">Chat Threads</div></div>
+        <button class="new-btn">+ New</button>
+      </div>
+      <input class="search-box" placeholder="Filter sessions..." />
+      <div class="session-list">
+        <div class="section-label" style="padding:4px 10px;">No sessions yet</div>
+        <div style="border:1px dashed #ccc; border-radius:6px; padding:14px; text-align:center; margin:4px; font-size:11px; color:#aaa;">
+          Start a new session to begin
+        </div>
+      </div>
+    </div>
+    <div class="main-thread">
+      <div class="messages-area" style="display:flex; flex-direction:column; align-items:center; justify-content:center;">
+        <div class="empty-state">
+          <div class="empty-logo">BAT</div>
+          <div class="empty-title">Intelligence Studio</div>
+          <div class="empty-desc">Your AI co-pilot for brand strategy. Pick a starting point or type your own question.</div>
+          <div class="starter-grid">
+            <div class="starter-card"><span class="starter-icon">🔭</span>Identify my top 3 competitors based on recent performance.</div>
+            <div class="starter-card"><span class="starter-icon">⚔️</span>Show me my brand's biggest engagement gap vs competitors.</div>
+            <div class="starter-card"><span class="starter-icon">✨</span>What content themes should I prioritize this week?</div>
+            <div class="starter-card"><span class="starter-icon">✍️</span>Draft a brand voice alignment guide.</div>
+          </div>
+        </div>
+      </div>
+      <div class="composer-footer">
+        <div class="prompt-chips-row">
+          <button class="prompt-chip">🔭 Competitor intel</button>
+          <button class="prompt-chip">✨ Content ideas</button>
+          <button class="prompt-chip">✍️ Brand voice</button>
+        </div>
+        <div class="composer-box">
+          <textarea class="composer-textarea" placeholder="Ask BAT anything, or type / for commands…" rows="2"></textarea>
+          <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
+            <div class="composer-meta">Ctrl+Enter to send</div>
+            <div class="send-btn">→</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function showMain() {
+    document.getElementById('crud-drawer').style.display = 'none';
+    document.querySelectorAll('.view-btn')[0].classList.add('active');
+    document.querySelectorAll('.view-btn')[1].classList.remove('active');
+  }
+  function showCrud() {
+    document.getElementById('crud-drawer').style.display = 'flex';
+    document.querySelectorAll('.view-btn')[1].classList.add('active');
+    document.querySelectorAll('.view-btn')[0].classList.remove('active');
+  }
+</script>
+</body>
+</html>

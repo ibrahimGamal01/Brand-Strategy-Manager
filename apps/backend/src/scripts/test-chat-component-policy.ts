@@ -65,9 +65,7 @@ function run() {
   testCreatesInteractiveFallback();
   testAppliesComponentPlan();
   testSanitizesUnknownBlocks();
-  // eslint-disable-next-line no-console
   console.log('chat-component-policy tests passed');
 }
 
 run();
-

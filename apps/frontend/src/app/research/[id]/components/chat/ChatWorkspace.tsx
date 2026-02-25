@@ -1653,9 +1653,7 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
         if (!open && pendingCrudConfirmation) resolveCrudConfirmation(false);
       }}
     >
-      <div className="relative flex flex-col h-[calc(100vh-12rem)] min-h-[600px] overflow-hidden rounded-2xl border border-primary/20 bg-background/40 shadow-2xl backdrop-blur-md">
-      {/* Ambient glow — uses theme primary */}
-      <div className="pointer-events-none absolute inset-0 -z-10 bg-linear-to-b from-primary/6 to-transparent" />
+      <div className="admin-chat-theme relative flex h-[calc(100vh-12rem)] min-h-[600px] flex-col overflow-hidden rounded-2xl bat-surface">
 
       {/* ── Single slim topbar (replaces double-header) ── */}
       <CompactChatTopbar
@@ -1679,7 +1677,7 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
       <div className="flex flex-1 overflow-hidden">
 
         {/* Left sidebar — narrowed to 220px, contains sessions + context panel */}
-        <div className="shrink-0 w-[220px] border-r border-border/40 bg-card/30 flex flex-col overflow-hidden">
+        <div className="bat-surface-muted flex w-[240px] shrink-0 flex-col overflow-hidden rounded-none border-y-0 border-l-0">
           <div className="flex-1 overflow-hidden flex flex-col">
             <ChatSessionList
               sessions={sessions}
@@ -1700,7 +1698,7 @@ export default function ChatWorkspace({ jobId }: { jobId: string }) {
         </div>
 
         {/* Main thread — fills remaining space */}
-        <div className="flex-1 min-w-0 bg-background/20 relative overflow-hidden">
+        <div className="relative min-w-0 flex-1 overflow-hidden">
           <ChatThread
             messages={messages}
             streamingMessage={streamingMessage}

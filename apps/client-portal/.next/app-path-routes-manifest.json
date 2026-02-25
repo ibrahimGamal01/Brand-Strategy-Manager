@@ -1,0 +1,19 @@
+{
+  "/(admin)/admin/page": "/admin",
+  "/(admin)/admin/workspaces/[id]/page": "/admin/workspaces/[id]",
+  "/(admin)/admin/workspaces/page": "/admin/workspaces",
+  "/(app)/app/page": "/app",
+  "/(app)/app/w/[workspaceId]/billing/page": "/app/w/[workspaceId]/billing",
+  "/(app)/app/w/[workspaceId]/library/page": "/app/w/[workspaceId]/library",
+  "/(app)/app/w/[workspaceId]/page": "/app/w/[workspaceId]",
+  "/(app)/app/w/[workspaceId]/settings/page": "/app/w/[workspaceId]/settings",
+  "/(marketing)/about/page": "/about",
+  "/(marketing)/login/page": "/login",
+  "/(marketing)/page": "/",
+  "/(marketing)/pricing/page": "/pricing",
+  "/(marketing)/security/page": "/security",
+  "/(marketing)/signup/page": "/signup",
+  "/(marketing)/verify-email/page": "/verify-email",
+  "/_global-error/page": "/_global-error",
+  "/_not-found/page": "/_not-found"
+}

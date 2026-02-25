@@ -1,0 +1,1107 @@
+import {
+  AgentRunStatus,
+  AgentRunTriggerType,
+  ChatBranchMessageRole,
+  MessageQueueItemStatus,
+  ProcessEventLevel,
+  ProcessEventType,
+  ToolRunStatus,
+} from '@prisma/client';
+import { publishProcessEvent } from './process-event-bus';
+import {
+  cancelActiveRuns,
+  cancelActiveToolRuns,
+  createAgentRun,
+  createBranchMessage,
+  createProcessEvent,
+  createToolRun,
+  enqueueMessage,
+  getAgentRun,
+  getBranch,
+  listBranchMessages,
+  listActiveRuns,
+  listToolRuns,
+  popNextQueuedMessage,
+  runtimeEnums,
+  updateAgentRun,
+  updateToolRun,
+} from './repository';
+import { executeToolWithContract } from './tool-contract';
+import {
+  generatePlannerPlan,
+  summarizeToolResults,
+  validateClientResponse,
+  writeClientResponse,
+} from './prompt-suite';
+import type { RunPolicy, RuntimeDecision, RuntimePlan, RuntimeToolCall, RuntimeToolResult, SendMessageMode } from './types';
+import { TOOL_REGISTRY } from '../../ai/chat/tools/tool-registry';
+
+type SendMessageInput = {
+  researchJobId: string;
+  branchId: string;
+  userId: string;
+  content: string;
+  mode?: SendMessageMode;
+  policy?: Partial<RunPolicy>;
+};
+
+type SendMessageResult = {
+  branchId: string;
+  queued: boolean;
+  queueItemId?: string;
+  runId?: string;
+  userMessageId?: string;
+};
+
+const DEFAULT_POLICY: RunPolicy = {
+  autoContinue: true,
+  maxAutoContinuations: 1,
+  maxToolRuns: 4,
+  toolConcurrency: 3,
+  allowMutationTools: false,
+  maxToolMs: 30_000,
+};
+
+const SUPPORTED_TOOL_NAMES = new Set(TOOL_REGISTRY.map((tool) => tool.name));
+
+const TOOL_NAME_ALIASES: Record<string, { tool: string; args: Record<string, unknown> }> = {
+  competitoranalysis: { tool: 'intel.list', args: { section: 'competitors', limit: 12 } },
+  competitoranalysistool: { tool: 'intel.list', args: { section: 'competitors', limit: 12 } },
+  competitoraudit: { tool: 'intel.list', args: { section: 'competitors', limit: 12 } },
+  newssearch: { tool: 'evidence.news', args: { limit: 8 } },
+  newsaggregator: { tool: 'evidence.news', args: { limit: 8 } },
+  newsaggregatortool: { tool: 'evidence.news', args: { limit: 8 } },
+  webcrawler: { tool: 'web.crawl', args: { maxPages: 8, maxDepth: 1 } },
+  websitecrawler: { tool: 'web.crawl', args: { maxPages: 8, maxDepth: 1 } },
+  pageextractor: { tool: 'web.fetch', args: {} },
+  opportunitysummarizer: {
+    tool: 'document.plan',
+    args: {
+      docType: 'STRATEGY_BRIEF',
+      depth: 'standard',
+      includeCompetitors: true,
+      includeEvidenceLinks: true,
+    },
+  },
+};
+
+const INTEL_LIST_SECTIONS = new Set([
+  'client_profiles',
+  'competitors',
+  'competitor_entities',
+  'competitor_accounts',
+  'search_results',
+  'images',
+  'videos',
+  'news',
+  'brand_mentions',
+  'media_assets',
+  'search_trends',
+  'community_insights',
+  'ai_questions',
+  'web_sources',
+  'web_snapshots',
+  'web_extraction_recipes',
+  'web_extraction_runs',
+]);
+
+export function normalizePolicy(raw?: Partial<RunPolicy> | null): RunPolicy {
+  const policy = {
+    ...DEFAULT_POLICY,
+    ...(raw || {}),
+  };
+
+  const maxAutoContinuationsRaw = Number(policy.maxAutoContinuations);
+  const maxToolRunsRaw = Number(policy.maxToolRuns);
+  const toolConcurrencyRaw = Number(policy.toolConcurrency);
+  const maxToolMsRaw = Number(policy.maxToolMs);
+
+  return {
+    autoContinue: Boolean(policy.autoContinue),
+    maxAutoContinuations: Number.isFinite(maxAutoContinuationsRaw)
+      ? Math.max(0, Math.min(4, Math.floor(maxAutoContinuationsRaw)))
+      : DEFAULT_POLICY.maxAutoContinuations,
+    maxToolRuns: Number.isFinite(maxToolRunsRaw)
+      ? Math.max(1, Math.min(8, Math.floor(maxToolRunsRaw)))
+      : DEFAULT_POLICY.maxToolRuns,
+    toolConcurrency: Number.isFinite(toolConcurrencyRaw)
+      ? Math.max(1, Math.min(3, Math.floor(toolConcurrencyRaw)))
+      : DEFAULT_POLICY.toolConcurrency,
+    allowMutationTools: Boolean(policy.allowMutationTools),
+    maxToolMs: Number.isFinite(maxToolMsRaw)
+      ? Math.max(1_000, Math.min(180_000, Math.floor(maxToolMsRaw)))
+      : DEFAULT_POLICY.maxToolMs,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeToolAliasKey(value: string): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function findFirstUrl(message: string): string | null {
+  const raw = String(message || '');
+  const fullUrl = raw.match(/https?:\/\/[^\s)]+/i);
+  if (fullUrl?.[0]) return fullUrl[0];
+
+  const bareDomain = raw.match(/\b([a-z0-9.-]+\.[a-z]{2,}(?:\/[^\s)]*)?)\b/i);
+  if (!bareDomain?.[1]) return null;
+  return `https://${bareDomain[1]}`;
+}
+
+function normalizeIntelListSection(sectionRaw: unknown, userMessage: string): string {
+  const candidate = String(sectionRaw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/-/g, '_');
+  if (INTEL_LIST_SECTIONS.has(candidate)) return candidate;
+
+  const normalizedMessage = userMessage.toLowerCase();
+  if (/web|site|snapshot|page/.test(normalizedMessage)) return 'web_sources';
+  if (/community|reddit|forum|insight/.test(normalizedMessage)) return 'community_insights';
+  if (/news|press|mention/.test(normalizedMessage)) return 'news';
+  if (/competitor|rival|alternative/.test(normalizedMessage)) return 'competitors';
+  return 'competitors';
+}
+
+function normalizeToolArgs(tool: string, args: Record<string, unknown>, userMessage: string): Record<string, unknown> | null {
+  const normalized = { ...args };
+
+  if (tool === 'intel.list') {
+    normalized.section = normalizeIntelListSection(normalized.section, userMessage);
+    const limit = Number(normalized.limit);
+    normalized.limit = Number.isFinite(limit) ? Math.max(1, Math.min(100, Math.floor(limit))) : 12;
+    return normalized;
+  }
+
+  if (tool === 'evidence.news' || tool === 'evidence.videos') {
+    const limit = Number(normalized.limit);
+    normalized.limit = Number.isFinite(limit) ? Math.max(1, Math.min(20, Math.floor(limit))) : 8;
+    return normalized;
+  }
+
+  if (tool === 'evidence.posts') {
+    const limit = Number(normalized.limit);
+    normalized.limit = Number.isFinite(limit) ? Math.max(1, Math.min(20, Math.floor(limit))) : 8;
+    if (!['instagram', 'tiktok', 'any'].includes(String(normalized.platform || ''))) {
+      normalized.platform = 'any';
+    }
+    if (!['engagement', 'recent'].includes(String(normalized.sort || ''))) {
+      normalized.sort = 'engagement';
+    }
+    return normalized;
+  }
+
+  if (tool === 'web.fetch') {
+    const url = String(normalized.url || '').trim() || findFirstUrl(userMessage) || '';
+    if (!url) return null;
+    normalized.url = url;
+    if (!String(normalized.sourceType || '').trim()) normalized.sourceType = 'ARTICLE';
+    if (!String(normalized.discoveredBy || '').trim()) normalized.discoveredBy = 'CHAT_TOOL';
+    if (typeof normalized.allowExternal !== 'boolean') normalized.allowExternal = true;
+    return normalized;
+  }
+
+  if (tool === 'web.crawl') {
+    const startUrls = Array.isArray(normalized.startUrls)
+      ? normalized.startUrls.map((entry) => String(entry || '').trim()).filter(Boolean)
+      : [];
+    if (!startUrls.length) {
+      const fallbackUrl = String(normalized.url || '').trim() || findFirstUrl(userMessage) || '';
+      if (fallbackUrl) startUrls.push(fallbackUrl);
+    }
+    if (!startUrls.length) return null;
+    normalized.startUrls = startUrls.slice(0, 5);
+    const maxPages = Number(normalized.maxPages);
+    const maxDepth = Number(normalized.maxDepth);
+    normalized.maxPages = Number.isFinite(maxPages) ? Math.max(1, Math.min(200, Math.floor(maxPages))) : 8;
+    normalized.maxDepth = Number.isFinite(maxDepth) ? Math.max(0, Math.min(5, Math.floor(maxDepth))) : 1;
+    if (typeof normalized.allowExternal !== 'boolean') normalized.allowExternal = true;
+    return normalized;
+  }
+
+  if (tool === 'web.extract') {
+    const snapshotId = String(normalized.snapshotId || '').trim();
+    if (!snapshotId) return null;
+    normalized.snapshotId = snapshotId;
+    return normalized;
+  }
+
+  if (tool === 'document.plan') {
+    if (!String(normalized.docType || '').trim()) normalized.docType = 'STRATEGY_BRIEF';
+    if (!String(normalized.depth || '').trim()) normalized.depth = 'standard';
+    if (typeof normalized.includeCompetitors !== 'boolean') normalized.includeCompetitors = true;
+    if (typeof normalized.includeEvidenceLinks !== 'boolean') normalized.includeEvidenceLinks = true;
+    return normalized;
+  }
+
+  return normalized;
+}
+
+function sanitizeToolCalls(toolCalls: RuntimeToolCall[], userMessage: string, maxToolRuns: number): RuntimeToolCall[] {
+  const sanitized: RuntimeToolCall[] = [];
+  const seen = new Set<string>();
+
+  for (const call of toolCalls) {
+    if (!call || !String(call.tool || '').trim()) continue;
+
+    const alias = TOOL_NAME_ALIASES[normalizeToolAliasKey(call.tool)];
+    const toolName = alias?.tool || String(call.tool).trim();
+    if (!SUPPORTED_TOOL_NAMES.has(toolName as (typeof TOOL_REGISTRY)[number]['name'])) continue;
+
+    const mergedArgs = {
+      ...(isRecord(call.args) ? call.args : {}),
+      ...(alias?.args || {}),
+    };
+    const normalizedArgs = normalizeToolArgs(toolName, mergedArgs, userMessage);
+    if (!normalizedArgs) continue;
+
+    const key = `${toolName}:${JSON.stringify(normalizedArgs)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    sanitized.push({
+      tool: toolName,
+      args: normalizedArgs,
+      ...(Array.isArray(call.dependsOn) && call.dependsOn.length ? { dependsOn: call.dependsOn } : {}),
+    });
+
+    if (sanitized.length >= maxToolRuns) break;
+  }
+
+  const inferred = inferToolCallsFromMessage(userMessage);
+  for (const call of inferred) {
+    if (sanitized.length >= maxToolRuns) break;
+    if (!SUPPORTED_TOOL_NAMES.has(call.tool as (typeof TOOL_REGISTRY)[number]['name'])) continue;
+    const normalizedArgs = normalizeToolArgs(call.tool, isRecord(call.args) ? call.args : {}, userMessage);
+    if (!normalizedArgs) continue;
+    const key = `${call.tool}:${JSON.stringify(normalizedArgs)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    sanitized.push({ tool: call.tool, args: normalizedArgs });
+  }
+
+  return sanitized;
+}
+
+function normalizeRunPlan(value: unknown): RuntimePlan | null {
+  if (!isRecord(value)) return null;
+  if (!Array.isArray(value.plan) || !Array.isArray(value.toolCalls)) return null;
+
+  const responseStyle = isRecord(value.responseStyle)
+    ? value.responseStyle
+    : { depth: 'normal', tone: 'direct' };
+
+  const depth = responseStyle.depth === 'deep' || responseStyle.depth === 'fast' ? responseStyle.depth : 'normal';
+  const tone = responseStyle.tone === 'friendly' ? 'friendly' : 'direct';
+
+  const toolCalls: RuntimeToolCall[] = [];
+  for (const entry of value.toolCalls) {
+    if (!isRecord(entry)) continue;
+    const tool = String(entry.tool || '').trim();
+    if (!tool) continue;
+    const args = isRecord(entry.args) ? entry.args : {};
+    const dependsOn = Array.isArray(entry.dependsOn)
+      ? entry.dependsOn.map((dep) => String(dep || '').trim()).filter(Boolean)
+      : undefined;
+    toolCalls.push({ tool, args, dependsOn });
+  }
+
+  return {
+    goal: String(value.goal || 'Respond to the user request'),
+    plan: value.plan.map((step) => String(step || '').trim()).filter(Boolean),
+    toolCalls,
+    needUserInput: Boolean(value.needUserInput),
+    decisionRequests: Array.isArray(value.decisionRequests)
+      ? value.decisionRequests.filter((item): item is RuntimeDecision => isRecord(item) && typeof item.id === 'string' && typeof item.title === 'string') as RuntimeDecision[]
+      : [],
+    responseStyle: {
+      depth,
+      tone,
+    },
+    runtime: isRecord(value.runtime) && typeof value.runtime.continuationDepth === 'number'
+      ? {
+          continuationDepth: Math.max(0, Math.floor(value.runtime.continuationDepth)),
+        }
+      : { continuationDepth: 0 },
+  };
+}
+
+export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
+  const normalized = message.toLowerCase();
+  const calls: RuntimeToolCall[] = [];
+  const firstUrl = findFirstUrl(message);
+
+  const pushIfMissing = (tool: string, args: Record<string, unknown>) => {
+    const key = `${tool}:${JSON.stringify(args)}`;
+    const exists = calls.some((entry) => `${entry.tool}:${JSON.stringify(entry.args)}` === key);
+    if (!exists) calls.push({ tool, args });
+  };
+
+  if (/competitor|rival|alternative/.test(normalized)) {
+    pushIfMissing('intel.list', { section: 'competitors', limit: 12 });
+  }
+
+  if (/web|site|website|source|snapshot|page/.test(normalized)) {
+    pushIfMissing('intel.list', { section: 'web_sources', limit: 10 });
+  }
+
+  if (/crawl|spider/.test(normalized) && firstUrl) {
+    pushIfMissing('web.crawl', { startUrls: [firstUrl], maxPages: 8, maxDepth: 1 });
+  }
+
+  if (/(fetch|scrape|extract).*(web|site|page|url)|\bfetch\b/.test(normalized) && firstUrl) {
+    pushIfMissing('web.fetch', { url: firstUrl, sourceType: 'ARTICLE', discoveredBy: 'CHAT_TOOL' });
+  }
+
+  if (/community|reddit|forum|insight/.test(normalized)) {
+    pushIfMissing('intel.list', { section: 'community_insights', limit: 10 });
+  }
+
+  if (/news|press|mention/.test(normalized)) {
+    pushIfMissing('evidence.news', { limit: 8 });
+  }
+
+  if (/video|youtube/.test(normalized)) {
+    pushIfMissing('evidence.videos', { limit: 8 });
+  }
+
+  if (/post|example|tiktok|instagram|social/.test(normalized)) {
+    pushIfMissing('evidence.posts', { platform: 'any', sort: 'engagement', limit: 8 });
+  }
+
+  if (/report|pdf|brief|document/.test(normalized)) {
+    pushIfMissing('document.plan', {
+      docType: 'STRATEGY_BRIEF',
+      depth: 'standard',
+      includeCompetitors: true,
+      includeEvidenceLinks: true,
+    });
+  }
+
+  return calls;
+}
+
+export function buildPlanFromMessage(message: string): RuntimePlan {
+  const toolCalls = inferToolCallsFromMessage(message);
+
+  const plan: RuntimePlan = {
+    goal: 'Generate an evidence-grounded response for the active branch',
+    plan: toolCalls.length
+      ? [
+          'Collect relevant evidence and intelligence signals',
+          'Synthesize findings with assumptions and next steps',
+          'Ask for approvals when required before mutations',
+        ]
+      : ['Respond directly with available context and suggest next actions'],
+    toolCalls,
+    needUserInput: false,
+    decisionRequests: [],
+    responseStyle: {
+      depth: toolCalls.length ? 'normal' : 'fast',
+      tone: 'friendly',
+    },
+    runtime: {
+      continuationDepth: 0,
+    },
+  };
+
+  return plan;
+}
+
+function summarizeToolBatch(results: RuntimeToolResult[]): string {
+  if (!results.length) {
+    return 'No tools were required for this step.';
+  }
+
+  return results
+    .map((result, idx) => `${idx + 1}. ${result.summary}`)
+    .join('\n');
+}
+
+function flattenEvidence(results: RuntimeToolResult[]) {
+  return results.flatMap((result) => result.evidence).slice(0, 20);
+}
+
+function collectBlockingDecisions(results: RuntimeToolResult[]): RuntimeDecision[] {
+  const deduped = new Map<string, RuntimeDecision>();
+
+  for (const decision of results.flatMap((result) => result.decisions)) {
+    if (!decision?.blocking) continue;
+    const key = String(decision.id || '').trim();
+    if (!key) continue;
+    if (!deduped.has(key)) {
+      deduped.set(key, decision);
+    }
+  }
+
+  return Array.from(deduped.values());
+}
+
+function mergeBlockingDecisions(groups: RuntimeDecision[][]): RuntimeDecision[] {
+  const merged = new Map<string, RuntimeDecision>();
+
+  for (const group of groups) {
+    for (const decision of group) {
+      if (!decision?.blocking) continue;
+      const key = String(decision.id || '').trim();
+      if (!key) continue;
+      if (!merged.has(key)) {
+        merged.set(key, decision);
+      }
+    }
+  }
+
+  return Array.from(merged.values());
+}
+
+export function collectContinuationTools(results: RuntimeToolResult[]): string[] {
+  const next = results
+    .flatMap((result) => result.continuations)
+    .filter((item) => item.type === 'auto_continue')
+    .flatMap((item) => item.suggestedNextTools || []);
+
+  return Array.from(new Set(next.map((tool) => tool.trim()).filter(Boolean)));
+}
+
+export class RuntimeRunEngine {
+  private readonly branchLocks = new Map<string, Promise<void>>();
+
+  private async withBranchLock<T>(branchId: string, work: () => Promise<T>): Promise<T> {
+    const previous = this.branchLocks.get(branchId) || Promise.resolve();
+    let releaseCurrent: () => void = () => {};
+    const current = new Promise<void>((resolve) => {
+      releaseCurrent = resolve;
+    });
+
+    this.branchLocks.set(branchId, previous.then(() => current));
+
+    await previous;
+    try {
+      return await work();
+    } finally {
+      releaseCurrent();
+      if (this.branchLocks.get(branchId) === current) {
+        this.branchLocks.delete(branchId);
+      }
+    }
+  }
+
+  private async emitEvent(input: {
+    branchId: string;
+    type: ProcessEventType;
+    message: string;
+    level?: ProcessEventLevel;
+    agentRunId?: string | null;
+    toolRunId?: string | null;
+    payload?: unknown;
+  }) {
+    const event = await createProcessEvent(input);
+    publishProcessEvent(event);
+    return event;
+  }
+
+  private async dispatchNextQueuedMessage(input: {
+    researchJobId: string;
+    branchId: string;
+    policy: RunPolicy;
+    mode?: SendMessageMode;
+  }) {
+    const nextQueued = await popNextQueuedMessage(input.branchId);
+    if (!nextQueued || nextQueued.status !== MessageQueueItemStatus.SENT) {
+      return false;
+    }
+
+    queueMicrotask(() => {
+      void this.sendMessage({
+        researchJobId: input.researchJobId,
+        branchId: input.branchId,
+        userId: nextQueued.userId,
+        content: nextQueued.content,
+        mode: input.mode || 'send',
+        policy: input.policy,
+      }).catch((error) => {
+        console.error('[RuntimeRunEngine] Failed to process next queued message:', error);
+      });
+    });
+
+    return true;
+  }
+
+  async sendMessage(input: SendMessageInput): Promise<SendMessageResult> {
+    const branch = await getBranch(input.branchId, input.researchJobId);
+    if (!branch) {
+      throw new Error('Branch not found for this research job');
+    }
+
+    const mode = input.mode || 'send';
+    const content = String(input.content || '').trim();
+    if (!content) {
+      throw new Error('Message content is required');
+    }
+
+    const activeRuns = await listActiveRuns(input.branchId);
+    if (mode === 'send' && activeRuns.length > 0) {
+      const allWaitingForInput = activeRuns.every((run) => run.status === AgentRunStatus.WAITING_USER);
+      if (allWaitingForInput) {
+        await this.cancelBranchRuns({
+          researchJobId: input.researchJobId,
+          branchId: input.branchId,
+          reason: 'Superseded by a new user message while waiting for input.',
+        });
+      } else {
+        const queueItem = await enqueueMessage({
+          branchId: input.branchId,
+          userId: input.userId,
+          content,
+        });
+
+        await this.emitEvent({
+          branchId: input.branchId,
+          type: ProcessEventType.PROCESS_LOG,
+          message: 'Message queued because a run is already in progress.',
+          payload: {
+            queueItemId: queueItem.id,
+            position: queueItem.position,
+            reason: 'active_run',
+          },
+        });
+
+        return {
+          branchId: input.branchId,
+          queued: true,
+          queueItemId: queueItem.id,
+        };
+      }
+    }
+
+    if (mode === 'queue') {
+      const queueItem = await enqueueMessage({
+        branchId: input.branchId,
+        userId: input.userId,
+        content,
+      });
+
+      await this.emitEvent({
+        branchId: input.branchId,
+        type: ProcessEventType.PROCESS_LOG,
+        message: 'Message queued for later execution.',
+        payload: {
+          queueItemId: queueItem.id,
+          position: queueItem.position,
+        },
+      });
+
+      return {
+        branchId: input.branchId,
+        queued: true,
+        queueItemId: queueItem.id,
+      };
+    }
+
+    if (mode === 'interrupt') {
+      await this.cancelBranchRuns({
+        researchJobId: input.researchJobId,
+        branchId: input.branchId,
+        reason: 'Interrupted by user message',
+      });
+    }
+
+    const userMessage = await createBranchMessage({
+      branchId: input.branchId,
+      role: ChatBranchMessageRole.USER,
+      content,
+      clientVisible: true,
+    });
+
+    const run = await createAgentRun({
+      branchId: input.branchId,
+      triggerType: AgentRunTriggerType.USER_MESSAGE,
+      triggerMessageId: userMessage.id,
+      policy: normalizePolicy(input.policy),
+    });
+
+    await this.emitEvent({
+      branchId: input.branchId,
+      type: ProcessEventType.PROCESS_STARTED,
+      agentRunId: run.id,
+      message: 'Agent run started from user message.',
+      payload: {
+        triggerType: run.triggerType,
+        triggerMessageId: userMessage.id,
+      },
+    });
+
+    void this.executeRun(run.id).catch((error) => {
+      console.error('[RuntimeRunEngine] executeRun failed:', error);
+    });
+
+    return {
+      branchId: input.branchId,
+      queued: false,
+      runId: run.id,
+      userMessageId: userMessage.id,
+    };
+  }
+
+  async cancelBranchRuns(input: { researchJobId: string; branchId: string; reason?: string }) {
+    const branch = await getBranch(input.branchId, input.researchJobId);
+    if (!branch) {
+      throw new Error('Branch not found for this research job');
+    }
+
+    await cancelActiveToolRuns(input.branchId);
+    await cancelActiveRuns(input.branchId);
+
+    await this.emitEvent({
+      branchId: input.branchId,
+      type: ProcessEventType.PROCESS_CANCELLED,
+      level: ProcessEventLevel.WARN,
+      message: input.reason || 'Cancelled by user.',
+    });
+
+    return { ok: true };
+  }
+
+  private async ensureToolRuns(runId: string, toolCalls: RuntimeToolCall[], maxToolRuns: number) {
+    const existing = await listToolRuns(runId);
+    const existingKeys = new Set(
+      existing.map((toolRun) => `${toolRun.toolName}:${JSON.stringify(toolRun.argsJson || {})}`)
+    );
+
+    const capped = toolCalls.slice(0, maxToolRuns);
+    for (const call of capped) {
+      const key = `${call.tool}:${JSON.stringify(call.args || {})}`;
+      if (existingKeys.has(key)) continue;
+      await createToolRun({
+        agentRunId: runId,
+        toolName: call.tool,
+        args: call.args || {},
+      });
+      existingKeys.add(key);
+    }
+  }
+
+  private async executeToolRun(runId: string, toolRunId: string, policy: RunPolicy) {
+    const run = await getAgentRun(runId);
+    if (!run) return;
+
+    const toolRun = run.toolRuns.find((item) => item.id === toolRunId);
+    if (!toolRun) return;
+
+    if (toolRun.status !== ToolRunStatus.QUEUED && toolRun.status !== ToolRunStatus.RUNNING) {
+      return;
+    }
+
+    await updateToolRun(toolRunId, {
+      status: ToolRunStatus.RUNNING,
+      startedAt: new Date(),
+    });
+
+    await this.emitEvent({
+      branchId: run.branchId,
+      agentRunId: runId,
+      toolRunId,
+      type: ProcessEventType.PROCESS_PROGRESS,
+      message: `Running tool ${toolRun.toolName}`,
+      payload: {
+        toolName: toolRun.toolName,
+      },
+    });
+
+    const args = isRecord(toolRun.argsJson) ? toolRun.argsJson : {};
+    const userMessage = run.triggerMessage?.content || '';
+
+    const contract = await executeToolWithContract({
+      researchJobId: run.branch.thread.researchJobId,
+      syntheticSessionId: `runtime-${run.branchId}`,
+      userMessage,
+      toolName: toolRun.toolName,
+      args,
+      policy,
+    });
+
+    await updateToolRun(toolRunId, {
+      status: contract.ok ? ToolRunStatus.DONE : ToolRunStatus.FAILED,
+      result: contract,
+      endedAt: new Date(),
+      producedArtifacts: contract.artifacts,
+    });
+
+    await createBranchMessage({
+      branchId: run.branchId,
+      role: ChatBranchMessageRole.TOOL,
+      content: `${toolRun.toolName}: ${contract.summary}`,
+      citationsJson: contract.evidence,
+      clientVisible: false,
+    });
+
+    await this.emitEvent({
+      branchId: run.branchId,
+      agentRunId: runId,
+      toolRunId,
+      type: contract.ok ? ProcessEventType.PROCESS_RESULT : ProcessEventType.FAILED,
+      level: contract.ok ? ProcessEventLevel.INFO : ProcessEventLevel.WARN,
+      message: contract.summary,
+      payload: {
+        toolName: toolRun.toolName,
+        warnings: contract.warnings,
+        decisions: contract.decisions,
+      },
+    });
+
+    for (const warning of contract.warnings) {
+      await this.emitEvent({
+        branchId: run.branchId,
+        agentRunId: runId,
+        toolRunId,
+        type: ProcessEventType.PROCESS_LOG,
+        level: ProcessEventLevel.WARN,
+        message: warning,
+      });
+    }
+  }
+
+  private async executePendingToolRuns(runId: string, policy: RunPolicy) {
+    const toolRuns = (await listToolRuns(runId)).filter((run) => run.status === ToolRunStatus.QUEUED);
+    if (!toolRuns.length) return;
+
+    const concurrency = Math.max(1, Math.min(policy.toolConcurrency, toolRuns.length));
+    let cursor = 0;
+
+    const workers = Array.from({ length: concurrency }, async () => {
+      while (true) {
+        const current = toolRuns[cursor];
+        cursor += 1;
+        if (!current) return;
+        await this.executeToolRun(runId, current.id, policy);
+      }
+    });
+
+    await Promise.all(workers);
+  }
+
+  private async finalizeRun(runId: string, policy: RunPolicy) {
+    const run = await getAgentRun(runId);
+    if (!run) return;
+
+    const triggerMessage = run.triggerMessage?.content || 'Continue with available results.';
+    const plan = normalizeRunPlan(run.planJson) || buildPlanFromMessage(triggerMessage);
+    const toolRuns = await listToolRuns(run.id);
+    const toolResults = toolRuns
+      .map((item) => (isRecord(item.resultJson) ? (item.resultJson as RuntimeToolResult) : null))
+      .filter((item): item is RuntimeToolResult => Boolean(item));
+
+    const blockingDecisions = collectBlockingDecisions(toolResults);
+    if (blockingDecisions.length > 0) {
+      await createBranchMessage({
+        branchId: run.branchId,
+        role: ChatBranchMessageRole.ASSISTANT,
+        content:
+          'I reached a decision checkpoint before continuing. Please choose one option to proceed with the branch execution.',
+        blocksJson: {
+          type: 'decision_requests',
+          items: blockingDecisions,
+        },
+        reasoningJson: {
+          plan: plan.plan,
+          tools: toolRuns.map((item) => item.toolName),
+          assumptions: ['Mutation-like steps require explicit user approval.'],
+          nextSteps: ['Provide approval decision', 'Continue run once approved'],
+          evidence: flattenEvidence(toolResults).map((item, idx) => ({
+            id: `e-${idx + 1}`,
+            label: item.label,
+            url: item.url,
+          })),
+        },
+        citationsJson: flattenEvidence(toolResults),
+        clientVisible: true,
+      });
+
+      await updateAgentRun(run.id, {
+        status: AgentRunStatus.WAITING_USER,
+      });
+
+      await this.emitEvent({
+        branchId: run.branchId,
+        agentRunId: run.id,
+        type: ProcessEventType.DECISION_REQUIRED,
+        level: ProcessEventLevel.WARN,
+        message: 'Run is waiting for approval before continuing.',
+        payload: { decisions: blockingDecisions },
+      });
+
+      await this.emitEvent({
+        branchId: run.branchId,
+        agentRunId: run.id,
+        type: ProcessEventType.WAITING_FOR_INPUT,
+        message: 'Waiting for user input.',
+      });
+
+      await this.dispatchNextQueuedMessage({
+        researchJobId: run.branch.thread.researchJobId,
+        branchId: run.branchId,
+        policy,
+        mode: 'interrupt',
+      });
+      return;
+    }
+
+    const toolSummary = await summarizeToolResults({
+      userMessage: triggerMessage,
+      plan,
+      toolResults,
+    });
+
+    const continuationDepth = plan.runtime?.continuationDepth ?? 0;
+    const continuationTools = collectContinuationTools(toolResults);
+    const continuationFromSummary = toolSummary.recommendedContinuations
+      .map((tool) => tool.trim())
+      .filter((tool) => /^[a-z_]+\.[a-z_]+$/i.test(tool));
+    const nextToolSuggestions = Array.from(new Set([...continuationTools, ...continuationFromSummary]));
+    const continuationCalls = sanitizeToolCalls(
+      nextToolSuggestions.slice(0, policy.maxToolRuns).map((tool) => ({
+        tool,
+        args: {},
+      })),
+      triggerMessage,
+      policy.maxToolRuns
+    );
+
+    if (
+      policy.autoContinue &&
+      continuationCalls.length > 0 &&
+      continuationDepth < policy.maxAutoContinuations
+    ) {
+      const nextPlan: RuntimePlan = {
+        ...plan,
+        runtime: {
+          continuationDepth: continuationDepth + 1,
+        },
+        toolCalls: continuationCalls,
+      };
+
+      await updateAgentRun(run.id, {
+        plan: nextPlan,
+        status: AgentRunStatus.RUNNING,
+      });
+
+      await this.emitEvent({
+        branchId: run.branchId,
+        agentRunId: run.id,
+        type: ProcessEventType.PROCESS_LOG,
+        message: 'Auto-continuing based on tool suggestions.',
+        payload: {
+          continuationDepth: nextPlan.runtime?.continuationDepth,
+          tools: continuationCalls.map((call) => call.tool),
+        },
+      });
+
+      await this.ensureToolRuns(run.id, nextPlan.toolCalls, policy.maxToolRuns);
+      await updateAgentRun(run.id, { status: AgentRunStatus.WAITING_TOOLS });
+      await this.executePendingToolRuns(run.id, policy);
+      await this.finalizeRun(run.id, policy);
+      return;
+    }
+
+    const writerOutput = await writeClientResponse({
+      userMessage: triggerMessage,
+      plan,
+      toolSummary,
+      toolResults,
+    });
+
+    const validatorOutput = await validateClientResponse({
+      userMessage: triggerMessage,
+      plan,
+      writerOutput,
+      toolResults,
+    });
+
+    const hasHighIssue = validatorOutput.issues.some((issue) => issue.severity === 'high');
+    const validatorNote = hasHighIssue
+      ? `\n\nValidation note: ${validatorOutput.issues.map((issue) => issue.message).join(' | ')}`
+      : '';
+
+    const plannerBlockingDecisions = plan.decisionRequests.filter((decision) => decision.blocking);
+    const writerBlockingDecisions = writerOutput.decisions.filter((decision) => decision.blocking);
+    const plannerDecisionIds = new Set(plannerBlockingDecisions.map((decision) => decision.id));
+    const writerAlignedBlockingDecisions = writerBlockingDecisions.filter((decision) =>
+      plannerDecisionIds.has(decision.id)
+    );
+    const finalDecisions =
+      plan.needUserInput || plannerBlockingDecisions.length > 0
+        ? mergeBlockingDecisions([plannerBlockingDecisions, writerAlignedBlockingDecisions])
+        : [];
+
+    await createBranchMessage({
+      branchId: run.branchId,
+      role: ChatBranchMessageRole.ASSISTANT,
+      content: `${writerOutput.response}${validatorNote}`,
+      blocksJson:
+        writerOutput.actions.length || finalDecisions.length
+          ? {
+              type: 'action_buttons',
+              actions: writerOutput.actions,
+              decisions: finalDecisions,
+            }
+          : undefined,
+      reasoningJson: writerOutput.reasoning,
+      citationsJson: writerOutput.reasoning.evidence,
+      clientVisible: true,
+    });
+
+    if (finalDecisions.length > 0) {
+      await updateAgentRun(run.id, {
+        status: AgentRunStatus.WAITING_USER,
+      });
+
+      await this.emitEvent({
+        branchId: run.branchId,
+        agentRunId: run.id,
+        type: ProcessEventType.DECISION_REQUIRED,
+        level: ProcessEventLevel.WARN,
+        message: 'Run produced decisions that require user input.',
+        payload: { decisions: finalDecisions },
+      });
+
+      await this.emitEvent({
+        branchId: run.branchId,
+        agentRunId: run.id,
+        type: ProcessEventType.WAITING_FOR_INPUT,
+        message: 'Waiting for user input.',
+      });
+
+      await this.dispatchNextQueuedMessage({
+        researchJobId: run.branch.thread.researchJobId,
+        branchId: run.branchId,
+        policy,
+        mode: 'interrupt',
+      });
+      return;
+    }
+
+    await updateAgentRun(run.id, {
+      status: AgentRunStatus.DONE,
+      endedAt: new Date(),
+      error: null,
+    });
+
+    await this.emitEvent({
+      branchId: run.branchId,
+      agentRunId: run.id,
+      type: ProcessEventType.DONE,
+      message: 'Run completed.',
+      payload: {
+        toolRuns: toolRuns.map((item) => ({ id: item.id, toolName: item.toolName, status: item.status })),
+        validation: validatorOutput,
+      },
+    });
+
+    await this.dispatchNextQueuedMessage({
+      researchJobId: run.branch.thread.researchJobId,
+      branchId: run.branchId,
+      policy,
+      mode: 'send',
+    });
+  }
+
+  async executeRun(runId: string) {
+    const run = await getAgentRun(runId);
+    if (!run) return;
+
+    await this.withBranchLock(run.branchId, async () => {
+      const fresh = await getAgentRun(runId);
+      if (!fresh) return;
+      if (fresh.status === AgentRunStatus.CANCELLED || fresh.status === AgentRunStatus.DONE) return;
+
+      const policy = normalizePolicy(isRecord(fresh.policyJson) ? (fresh.policyJson as Partial<RunPolicy>) : undefined);
+
+      if (!fresh.startedAt) {
+        await updateAgentRun(fresh.id, {
+          startedAt: new Date(),
+        });
+      }
+
+      let plan = normalizeRunPlan(fresh.planJson);
+      if (!plan) {
+        const previousMessages = await listBranchMessages(fresh.branchId, 40);
+        plan = await generatePlannerPlan({
+          researchJobId: fresh.branch.thread.researchJobId,
+          branchId: fresh.branchId,
+          userMessage: fresh.triggerMessage?.content || 'Continue workflow',
+          policy: {
+            allowMutationTools: policy.allowMutationTools,
+            maxToolRuns: policy.maxToolRuns,
+            maxAutoContinuations: policy.maxAutoContinuations,
+          },
+          previousMessages: previousMessages.map((message) => ({
+            role: message.role,
+            content: message.content,
+          })),
+        });
+        await updateAgentRun(fresh.id, { plan });
+      }
+
+      const triggerContent = fresh.triggerMessage?.content || 'Continue workflow';
+      const sanitizedToolCalls = sanitizeToolCalls(plan.toolCalls, triggerContent, policy.maxToolRuns);
+      if (JSON.stringify(plan.toolCalls) !== JSON.stringify(sanitizedToolCalls)) {
+        plan = {
+          ...plan,
+          toolCalls: sanitizedToolCalls,
+        };
+        await updateAgentRun(fresh.id, { plan });
+      }
+
+      await updateAgentRun(fresh.id, {
+        status: AgentRunStatus.RUNNING,
+      });
+
+      await this.emitEvent({
+        branchId: fresh.branchId,
+        agentRunId: fresh.id,
+        type: ProcessEventType.PROCESS_LOG,
+        message: 'Planning complete. Executing tool runs.',
+        payload: {
+          goal: plan.goal,
+          plan: plan.plan,
+          toolCalls: plan.toolCalls,
+        },
+      });
+
+      await this.ensureToolRuns(fresh.id, plan.toolCalls, policy.maxToolRuns);
+
+      const pending = (await listToolRuns(fresh.id)).filter((item) => item.status === ToolRunStatus.QUEUED);
+      if (pending.length === 0) {
+        await this.finalizeRun(fresh.id, policy);
+        return;
+      }
+
+      await updateAgentRun(fresh.id, {
+        status: AgentRunStatus.WAITING_TOOLS,
+      });
+
+      await this.executePendingToolRuns(fresh.id, policy);
+      await this.finalizeRun(fresh.id, policy);
+    });
+  }
+
+  async getBranchState(input: { researchJobId: string; branchId: string }) {
+    const branch = await getBranch(input.branchId, input.researchJobId);
+    if (!branch) throw new Error('Branch not found for this research job');
+    const activeRuns = await listActiveRuns(input.branchId);
+    return {
+      branch,
+      activeRunStatuses: runtimeEnums.ACTIVE_RUN_STATUSES,
+      activeRuns,
+    };
+  }
+}
+
+export const runtimeRunEngine = new RuntimeRunEngine();

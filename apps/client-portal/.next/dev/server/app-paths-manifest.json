@@ -1,0 +1,7 @@
+{
+  "/(marketing)/login/page": "app/(marketing)/login/page.js",
+  "/(marketing)/signup/page": "app/(marketing)/signup/page.js",
+  "/(app)/app/page": "app/(app)/app/page.js",
+  "/(marketing)/verify-email/page": "app/(marketing)/verify-email/page.js",
+  "/(app)/app/w/[workspaceId]/page": "app/(app)/app/w/[workspaceId]/page.js"
+}

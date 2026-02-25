@@ -27,3 +27,4 @@ apps/backend/storage/
 apps/backend/sessions/
 logs.txt
 server.log
+.vercel

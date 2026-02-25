@@ -1,0 +1,46 @@
+:root {
+  --font-body: "Avenir Next", "Nunito Sans", "Segoe UI", sans-serif;
+  --font-display: "Iowan Old Style", "Baskerville", "Times New Roman", serif;
+
+  --bat-bg: #f7f5f0;
+  --bat-bg-soft: #fdfbf7;
+  --bat-surface: #ffffff;
+  --bat-surface-muted: #f2efe8;
+  --bat-border: #d8d0c2;
+  --bat-text: #1e1f1f;
+  --bat-text-muted: #5e625f;
+  --bat-accent: #0f766e;
+  --bat-accent-soft: #d6f2ef;
+  --bat-success: #2e7d32;
+  --bat-warning: #c47d2c;
+
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 2.5rem;
+  --space-8: 3rem;
+
+  --shadow-card: 0 10px 30px rgba(27, 38, 35, 0.08);
+}
+
+[data-theme="dark"] {
+  --bat-bg: #101716;
+  --bat-bg-soft: #15211f;
+  --bat-surface: #1c2a28;
+  --bat-surface-muted: #1f3331;
+  --bat-border: #2f4b48;
+  --bat-text: #e8f2f0;
+  --bat-text-muted: #a6bcba;
+  --bat-accent: #43b8ad;
+  --bat-accent-soft: #1d4b46;
+  --bat-success: #78c27d;
+  --bat-warning: #e9ad68;
+  --shadow-card: 0 16px 28px rgba(0, 0, 0, 0.3);
+}

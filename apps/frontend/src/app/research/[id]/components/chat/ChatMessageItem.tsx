@@ -162,9 +162,12 @@ function ChatMessageItemImpl({
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.25, ease: 'easeOut' }}
-        className="flex justify-end my-1.5"
+        className="bat-message-card my-1.5 flex justify-end"
       >
-        <div className="max-w-[82%] rounded-2xl rounded-tr-md bg-primary/10 px-4 py-3 text-[14px] text-foreground shadow-sm backdrop-blur-sm">
+        <div
+          className="max-w-[82%] rounded-2xl rounded-tr-md px-4 py-3 text-[14px] shadow-sm"
+          style={{ background: 'var(--chat-shell-accent-soft)', color: 'var(--chat-shell-text)' }}
+        >
           <p className="whitespace-pre-wrap leading-relaxed">{safeMessage.content}</p>
           <div className="mt-1.5 flex items-center justify-end gap-2">
             <span className="text-[9px] font-medium text-muted-foreground/50 uppercase tracking-widest">
@@ -182,13 +185,16 @@ function ChatMessageItemImpl({
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: 'easeOut' }}
-      className="group my-3"
+      className="bat-message-card group my-3"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
       <div className="flex items-start gap-3">
         {/* BAT avatar */}
-        <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-accent text-[9px] font-bold tracking-wider text-primary-foreground shadow-sm ring-1 ring-primary/20 mt-0.5">
+        <div
+          className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[9px] font-bold tracking-wider text-white shadow-sm"
+          style={{ background: 'var(--chat-shell-accent)' }}
+        >
           BAT
         </div>
 
@@ -196,26 +202,29 @@ function ChatMessageItemImpl({
         <div className="min-w-0 flex-1 space-y-3">
           {/* Header */}
           <div className="flex items-center gap-2.5">
-            <span className="text-[12px] font-semibold tracking-tight text-foreground">
+            <span className="text-[12px] font-semibold tracking-tight">
               BAT Intelligence
             </span>
-            <span className="text-[9px] font-medium uppercase tracking-widest text-muted-foreground/40">
+            <span className="text-[9px] font-medium uppercase tracking-widest" style={{ color: 'var(--chat-shell-text-muted)' }}>
               {formatTimestamp(safeMessage.createdAt)}
             </span>
           </div>
 
           {/* Narrative text */}
           {narrativeContent ? (
-            <p className="whitespace-pre-wrap text-[14px] leading-relaxed text-foreground/90">
+            <p className="whitespace-pre-wrap text-[14px] leading-relaxed" style={{ color: 'var(--chat-shell-text)' }}>
               {narrativeContent}
             </p>
           ) : null}
 
           {/* Design options selector */}
           {designOptions.length > 0 ? (
-            <div className="rounded-xl border border-border/40 bg-card/30 p-3 backdrop-blur-sm">
+            <div
+              className="rounded-xl border p-3"
+              style={{ borderColor: 'var(--chat-shell-border)', background: 'var(--chat-shell-muted)' }}
+            >
               <div className="mb-2 flex items-center justify-between">
-                <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                <span className="text-[9px] font-semibold uppercase tracking-[0.14em]" style={{ color: 'var(--chat-shell-text-muted)' }}>
                   Design Options
                 </span>
                 {selectedDesign && (

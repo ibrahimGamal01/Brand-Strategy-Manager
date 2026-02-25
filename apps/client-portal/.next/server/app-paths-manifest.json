@@ -1,0 +1,19 @@
+{
+  "/(admin)/admin/page": "app/(admin)/admin/page.js",
+  "/(admin)/admin/workspaces/[id]/page": "app/(admin)/admin/workspaces/[id]/page.js",
+  "/(admin)/admin/workspaces/page": "app/(admin)/admin/workspaces/page.js",
+  "/(app)/app/page": "app/(app)/app/page.js",
+  "/(app)/app/w/[workspaceId]/billing/page": "app/(app)/app/w/[workspaceId]/billing/page.js",
+  "/(app)/app/w/[workspaceId]/library/page": "app/(app)/app/w/[workspaceId]/library/page.js",
+  "/(app)/app/w/[workspaceId]/page": "app/(app)/app/w/[workspaceId]/page.js",
+  "/(app)/app/w/[workspaceId]/settings/page": "app/(app)/app/w/[workspaceId]/settings/page.js",
+  "/(marketing)/about/page": "app/(marketing)/about/page.js",
+  "/(marketing)/login/page": "app/(marketing)/login/page.js",
+  "/(marketing)/page": "app/(marketing)/page.js",
+  "/(marketing)/pricing/page": "app/(marketing)/pricing/page.js",
+  "/(marketing)/security/page": "app/(marketing)/security/page.js",
+  "/(marketing)/signup/page": "app/(marketing)/signup/page.js",
+  "/(marketing)/verify-email/page": "app/(marketing)/verify-email/page.js",
+  "/_global-error/page": "app/_global-error/page.js",
+  "/_not-found/page": "app/_not-found/page.js"
+}

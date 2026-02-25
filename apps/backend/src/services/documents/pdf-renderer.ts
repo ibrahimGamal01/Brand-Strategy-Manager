@@ -1,6 +1,5 @@
 export async function renderPdfFromHtml(html: string): Promise<Buffer> {
   // Lazy-load puppeteer to keep startup light in API workers.
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
   const puppeteer = require('puppeteer');
 
   const browser = await puppeteer.launch({

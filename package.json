@@ -8,6 +8,7 @@
     "scripts": {
         "dev": "npm run dev --workspace=apps/frontend & npm run dev --workspace=apps/backend",
         "dev:frontend": "npm run dev --workspace=apps/frontend",
+        "dev:client-portal": "npm run dev --workspace=apps/client-portal",
         "dev:backend": "npm run dev --workspace=apps/backend",
         "build": "npm run build --workspaces",
         "lint": "npm run lint --workspaces",

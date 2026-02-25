@@ -16,7 +16,6 @@ function run() {
   assert.equal(isBlockedHandle('123456789'), true);
   assert.equal(isBlockedHandle('___'), true);
 
-  // eslint-disable-next-line no-console
   console.log('competitor-scorer-utils tests passed');
 }
 

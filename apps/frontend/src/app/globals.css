@@ -316,3 +316,66 @@ body {
 .stagger-5 {
   animation-delay: 250ms;
 }
+
+/* Client portal-inspired chat surface for admin workspace */
+.admin-chat-theme {
+  --chat-shell-bg: #f7f5f0;
+  --chat-shell-bg-soft: #fdfbf7;
+  --chat-shell-surface: #ffffff;
+  --chat-shell-muted: #f2efe8;
+  --chat-shell-border: #d8d0c2;
+  --chat-shell-text: #1e1f1f;
+  --chat-shell-text-muted: #5e625f;
+  --chat-shell-accent: #0f766e;
+  --chat-shell-accent-soft: #d6f2ef;
+  --chat-shell-shadow: 0 10px 30px rgba(27, 38, 35, 0.08);
+  background:
+    radial-gradient(circle at 15% 10%, rgba(15, 118, 110, 0.15), transparent 32%),
+    radial-gradient(circle at 80% 15%, rgba(196, 125, 44, 0.13), transparent 40%),
+    linear-gradient(180deg, var(--chat-shell-bg-soft) 0%, var(--chat-shell-bg) 42%, #f4f1ea 100%);
+  color: var(--chat-shell-text);
+  font-family: "Avenir Next", "Nunito Sans", "Segoe UI", sans-serif;
+}
+
+[data-theme='dark'] .admin-chat-theme {
+  --chat-shell-bg: #101716;
+  --chat-shell-bg-soft: #15211f;
+  --chat-shell-surface: #1c2a28;
+  --chat-shell-muted: #1f3331;
+  --chat-shell-border: #2f4b48;
+  --chat-shell-text: #e8f2f0;
+  --chat-shell-text-muted: #a6bcba;
+  --chat-shell-accent: #43b8ad;
+  --chat-shell-accent-soft: #1d4b46;
+  --chat-shell-shadow: 0 16px 28px rgba(0, 0, 0, 0.3);
+}
+
+.admin-chat-theme .bat-surface {
+  background: var(--chat-shell-surface);
+  border: 1px solid var(--chat-shell-border);
+  border-radius: 16px;
+  box-shadow: var(--chat-shell-shadow);
+}
+
+.admin-chat-theme .bat-surface-muted {
+  background: var(--chat-shell-muted);
+  border: 1px solid var(--chat-shell-border);
+  border-radius: 12px;
+}
+
+.admin-chat-theme .bat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--chat-shell-border);
+  background: var(--chat-shell-muted);
+  color: var(--chat-shell-text-muted);
+  font-size: 0.78rem;
+  padding: 0.2rem 0.7rem;
+}
+
+.admin-chat-theme .bat-message-card {
+  content-visibility: auto;
+  contain-intrinsic-size: 220px;
+}

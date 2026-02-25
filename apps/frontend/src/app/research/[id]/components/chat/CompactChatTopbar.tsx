@@ -49,55 +49,49 @@ export function CompactChatTopbar({
   const relativeTime = sessionUpdatedAt ? formatRelativeTime(sessionUpdatedAt) : null;
 
   return (
-    <div className="flex h-11 flex-shrink-0 items-center gap-3 border-b border-border/40 bg-card/60 px-4 backdrop-blur-md z-10">
-      {/* Brand mark */}
-      <div className="flex items-center gap-2 flex-shrink-0">
-        <div className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-primary to-accent text-[9px] font-bold text-primary-foreground shadow-sm">
+    <div
+      className="z-10 flex h-12 flex-shrink-0 items-center gap-3 border-b px-4"
+      style={{ borderColor: 'var(--chat-shell-border)' }}
+    >
+      <div className="flex items-center gap-2">
+        <div
+          className="flex h-6 w-6 items-center justify-center rounded-md text-[9px] font-bold text-white"
+          style={{ background: 'var(--chat-shell-accent)' }}
+        >
           BAT
         </div>
-        <span className="text-sm font-semibold tracking-tight hidden sm:block">Intelligence Studio</span>
+        <span className="hidden text-sm font-semibold tracking-tight sm:block">Intelligence Studio</span>
       </div>
 
-      <div className="h-4 w-px bg-border/50 flex-shrink-0" />
+      <div className="h-4 w-px" style={{ background: 'color-mix(in srgb, var(--chat-shell-border) 80%, transparent)' }} />
 
-      {/* Session title — takes remaining space */}
-      <div className="flex-1 min-w-0 flex items-center gap-2">
-        <span className="text-[9px] uppercase tracking-widest font-medium text-primary flex-shrink-0 hidden md:block">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <span
+          className="hidden text-[9px] font-medium uppercase tracking-[0.12em] md:block"
+          style={{ color: 'var(--chat-shell-text-muted)' }}
+        >
           Thread
         </span>
-        <h2 className="text-[13px] font-medium truncate text-foreground">
-          {sessionTitle || 'Untitled session'}
-        </h2>
-        {relativeTime && (
-          <span className="text-[10px] text-muted-foreground/60 flex-shrink-0 hidden lg:block">
+        <h2 className="truncate text-[13px] font-medium">{sessionTitle || 'Untitled session'}</h2>
+        {relativeTime ? (
+          <span className="hidden text-[10px] lg:block" style={{ color: 'var(--chat-shell-text-muted)' }}>
             · {relativeTime}
           </span>
-        )}
+        ) : null}
       </div>
 
-      {/* Right: status indicators + CRUD toggle */}
-      <div className="flex items-center gap-2 flex-shrink-0">
-        {isStreaming && (
-          <Badge variant="warning" className="text-[10px] uppercase animate-pulse hidden sm:flex">
-            thinking
-          </Badge>
-        )}
+      <div className="flex items-center gap-2">
+        {isStreaming ? <span className="bat-chip hidden sm:inline-flex">Running</span> : null}
         <Badge variant={connectionBadgeVariant} className="text-[10px] uppercase">
           {connectionStatus === 'open' ? 'live' : connectionStatus || 'offline'}
         </Badge>
-        <span className="text-[11px] text-muted-foreground tabular-nums hidden sm:block">
-          {messageCount} msgs
-        </span>
-        {pinnedCount > 0 && (
-          <span className="text-[11px] text-muted-foreground tabular-nums hidden md:block">
-            {pinnedCount} pinned
-          </span>
-        )}
-        <div className="h-4 w-px bg-border/50" />
+        <span className="bat-chip hidden sm:inline-flex">{messageCount} msgs</span>
+        {pinnedCount > 0 ? <span className="bat-chip hidden md:inline-flex">{pinnedCount} pinned</span> : null}
         <Button
           size="icon"
           variant="ghost"
-          className="h-7 w-7 text-muted-foreground hover:text-foreground"
+          className="h-7 w-7 hover:bg-black/5 dark:hover:bg-white/5"
+          style={{ color: 'var(--chat-shell-text-muted)' }}
           onClick={onOpenCrud}
           title="Open Intelligence CRUD Control Deck"
         >

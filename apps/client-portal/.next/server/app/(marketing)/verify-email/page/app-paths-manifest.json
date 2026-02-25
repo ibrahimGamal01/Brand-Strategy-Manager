@@ -1,0 +1,3 @@
+{
+  "/(marketing)/verify-email/page": "app/(marketing)/verify-email/page.js"
+}
