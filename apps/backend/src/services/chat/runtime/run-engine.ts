@@ -72,9 +72,12 @@ const BOOTSTRAP_PROMPT =
 const SUPPORTED_TOOL_NAMES = new Set(TOOL_REGISTRY.map((tool) => tool.name));
 
 const TOOL_NAME_ALIASES: Record<string, { tool: string; args: Record<string, unknown> }> = {
-  competitoranalysis: { tool: 'intel.list', args: { section: 'competitors', limit: 12 } },
-  competitoranalysistool: { tool: 'intel.list', args: { section: 'competitors', limit: 12 } },
-  competitoraudit: { tool: 'intel.list', args: { section: 'competitors', limit: 12 } },
+  competitoranalysis: { tool: 'orchestration.run', args: { targetCount: 12, mode: 'append' } },
+  competitoranalysistool: { tool: 'orchestration.run', args: { targetCount: 12, mode: 'append' } },
+  competitoraudit: { tool: 'orchestration.run', args: { targetCount: 12, mode: 'append' } },
+  runcompetitordiscovery: { tool: 'orchestration.run', args: { targetCount: 12, mode: 'append' } },
+  addcompetitorlinks: { tool: 'competitors.add_links', args: {} },
+  updateintake: { tool: 'intake.update_from_text', args: {} },
   newssearch: { tool: 'evidence.news', args: { limit: 8 } },
   newsaggregator: { tool: 'evidence.news', args: { limit: 8 } },
   newsaggregatortool: { tool: 'evidence.news', args: { limit: 8 } },
@@ -234,6 +237,7 @@ function buildFallbackDiscoveryToolCalls(userMessage: string, maxToolRuns: numbe
   if (primaryUrl) {
     push('web.crawl', { startUrls: [primaryUrl], maxPages: 20, maxDepth: 2, allowExternal: false });
   }
+  push('orchestration.run', { targetCount: 12, mode: 'append' });
   push('intel.list', { section: 'web_snapshots', limit: 20 });
   push('intel.list', { section: 'competitors', limit: 12 });
   push('intel.list', { section: 'community_insights', limit: 10 });
@@ -326,6 +330,46 @@ function normalizeToolArgs(tool: string, args: Record<string, unknown>, userMess
     if (!String(normalized.depth || '').trim()) normalized.depth = 'standard';
     if (typeof normalized.includeCompetitors !== 'boolean') normalized.includeCompetitors = true;
     if (typeof normalized.includeEvidenceLinks !== 'boolean') normalized.includeEvidenceLinks = true;
+    return normalized;
+  }
+
+  if (tool === 'competitors.add_links') {
+    const links = Array.isArray(normalized.links)
+      ? normalized.links.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 10)
+      : [];
+    if (links.length) {
+      normalized.links = links;
+    } else {
+      normalized.text = String(normalized.text || userMessage || '').trim();
+    }
+    return normalized;
+  }
+
+  if (tool === 'intake.update_from_text') {
+    normalized.text = String(normalized.text || userMessage || '').trim();
+    if (!normalized.text) return null;
+    if (normalized.fields && !isRecord(normalized.fields)) {
+      delete normalized.fields;
+    }
+    return normalized;
+  }
+
+  if (tool === 'orchestration.run') {
+    const targetCount = Number(normalized.targetCount);
+    normalized.targetCount = Number.isFinite(targetCount) ? Math.max(3, Math.min(30, Math.floor(targetCount))) : 12;
+    normalized.mode = String(normalized.mode || '').toLowerCase() === 'replace' ? 'replace' : 'append';
+    if (!['high', 'balanced'].includes(String(normalized.precision || '').toLowerCase())) {
+      normalized.precision = 'balanced';
+    }
+    if (Array.isArray(normalized.surfaces)) {
+      normalized.surfaces = normalized.surfaces
+        .map((entry) => String(entry || '').trim().toLowerCase())
+        .filter((entry) => ['instagram', 'tiktok', 'youtube', 'x', 'web'].includes(entry))
+        .slice(0, 5);
+      if (!(normalized.surfaces as string[]).length) {
+        delete normalized.surfaces;
+      }
+    }
     return normalized;
   }
 

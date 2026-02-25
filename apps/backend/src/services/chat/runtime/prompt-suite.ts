@@ -231,6 +231,21 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   if (/competitor|rival|alternative/.test(normalized)) {
     pushIfMissing('intel.list', { section: 'competitors', limit: 12 });
   }
+  if (
+    /(add|include|save|insert|update).*(competitor|inspiration|accounts?|handles?)/.test(normalized) &&
+    /(instagram\.com|tiktok\.com|youtube\.com|x\.com|twitter\.com|@[a-z0-9._-]+)/.test(normalized)
+  ) {
+    pushIfMissing('competitors.add_links', { text: message });
+  }
+  if (
+    /(update|replace|refresh|apply).*(form|intake|onboarding|original form content)/.test(normalized) ||
+    /what services do you offer|what do you do in one sentence|what are the top 3 problems/i.test(message)
+  ) {
+    pushIfMissing('intake.update_from_text', { text: message });
+  }
+  if (/run competitor discovery|discover competitors|expand competitor set/.test(normalized)) {
+    pushIfMissing('orchestration.run', { targetCount: 12, mode: 'append' });
+  }
   if (/intake|onboard|kickoff|audit|workspace|strategy|investigat|analy[sz]e/.test(normalized)) {
     pushIfMissing('intel.list', { section: 'web_snapshots', limit: 20 });
     pushIfMissing('intel.list', { section: 'competitors', limit: 12 });
@@ -306,12 +321,23 @@ function fallbackWriter(input: WriterInput): WriterOutput {
       ...(item.url ? { url: item.url } : {}),
     }));
 
+  const toolSummaries = input.toolResults.map((result) => result.summary).filter(Boolean).slice(0, 6);
+  const userIntent = input.userMessage.toLowerCase();
+  const intentLead =
+    /(add|include|save).*(competitor|inspiration)/.test(userIntent)
+      ? 'I processed your competitor update request directly from your message.'
+      : /(update|replace|apply).*(intake|form|onboard)/.test(userIntent)
+        ? 'I updated the workspace intake context from your provided text.'
+        : 'I processed your request using the latest workspace data and tools.';
+
   return {
     response: [
-      'I completed the requested workflow and grounded the result in the latest branch evidence.',
-      input.toolSummary.highlights.length
-        ? `Highlights:\n${input.toolSummary.highlights.map((item, idx) => `${idx + 1}. ${item}`).join('\n')}`
-        : 'No additional evidence was required for this answer.',
+      intentLead,
+      toolSummaries.length
+        ? `What changed:\n${toolSummaries.map((item, idx) => `${idx + 1}. ${item}`).join('\n')}`
+        : input.toolSummary.highlights.length
+          ? `Highlights:\n${input.toolSummary.highlights.map((item, idx) => `${idx + 1}. ${item}`).join('\n')}`
+          : 'No additional evidence was required for this answer.',
     ].join('\n\n'),
     reasoning: {
       plan: input.plan.plan,

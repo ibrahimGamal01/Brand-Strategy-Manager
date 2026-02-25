@@ -6,6 +6,8 @@ export type ToolName =
   | 'intel.stageMutation'
   | 'intel.applyMutation'
   | 'intel.undoMutation'
+  | 'intake.update_from_text'
+  | 'competitors.add_links'
   | 'scrape.competitor'
   | 'orchestration.run'
   | 'orchestration.status'
