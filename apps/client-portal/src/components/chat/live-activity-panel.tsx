@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Clock3, Loader2, PauseCircle, XCircle } from "lucide-react";
 import { DecisionItem, ProcessFeedItem, ProcessRun } from "@/types/chat";
 
@@ -22,7 +22,45 @@ function StatusIcon({ status }: { status: ProcessRun["status"] }) {
   return <Clock3 className="h-4 w-4" style={{ color: "var(--bat-text-muted)" }} />;
 }
 
-function RunningTab({ runs, onRunAudit }: { runs: ProcessRun[]; onRunAudit?: () => void }) {
+function TypingDots() {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full" style={{ background: "var(--bat-accent)", animationDelay: "0ms" }} />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full" style={{ background: "var(--bat-accent)", animationDelay: "140ms" }} />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full" style={{ background: "var(--bat-accent)", animationDelay: "280ms" }} />
+    </span>
+  );
+}
+
+function RunningTab({
+  runs,
+  feedItems,
+  onRunAudit,
+  onSteer,
+}: {
+  runs: ProcessRun[];
+  feedItems: ProcessFeedItem[];
+  onRunAudit?: () => void;
+  onSteer?: (instruction: string) => void;
+}) {
+  const [manualSteer, setManualSteer] = useState("");
+  const [insightIndex, setInsightIndex] = useState(0);
+
+  const insightLines = useMemo(() => {
+    const fromFeed = feedItems.map((item) => item.message).filter(Boolean).slice(0, 8);
+    const fromRuns = runs.map((run) => `${run.label}: ${run.stage}`);
+    const combined = [...fromFeed, ...fromRuns];
+    return combined.length ? combined : ["BAT is reviewing workspace intelligence and preparing the next response."];
+  }, [feedItems, runs]);
+
+  useEffect(() => {
+    if (insightLines.length <= 1) return;
+    const timer = setInterval(() => {
+      setInsightIndex((current) => (current + 1) % insightLines.length);
+    }, 2600);
+    return () => clearInterval(timer);
+  }, [insightLines.length]);
+
   if (!runs.length) {
     return (
       <div className="rounded-xl border p-4" style={{ borderColor: "var(--bat-border)" }}>
@@ -44,8 +82,65 @@ function RunningTab({ runs, onRunAudit }: { runs: ProcessRun[]; onRunAudit?: () 
     );
   }
 
+  const currentInsight = insightLines[insightIndex % insightLines.length];
+  const steerPresets = [
+    "Use my latest message as top priority.",
+    "Show evidence first, then recommendation.",
+    "Keep it concise and action-oriented.",
+  ];
+
   return (
     <div className="space-y-3">
+      <article className="rounded-xl border p-3" style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm font-semibold">BAT is actively working</p>
+          <TypingDots />
+        </div>
+        <p className="mt-2 rounded-xl border px-3 py-2 text-sm" style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}>
+          {currentInsight}
+        </p>
+        {onSteer ? (
+          <div className="mt-3 space-y-2">
+            <div className="flex flex-wrap gap-2">
+              {steerPresets.map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => onSteer(preset)}
+                  className="rounded-full border px-2 py-1 text-xs"
+                  style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}
+                >
+                  Steer: {preset.slice(0, 28)}{preset.length > 28 ? "..." : ""}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <input
+                value={manualSteer}
+                onChange={(event) => setManualSteer(event.target.value)}
+                placeholder="Type a quick steer note"
+                className="w-full rounded-xl border px-3 py-2 text-xs outline-none"
+                style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}
+              />
+              <button
+                type="button"
+                disabled={!manualSteer.trim()}
+                onClick={() => {
+                  const value = manualSteer.trim();
+                  if (!value) return;
+                  onSteer(value);
+                  setManualSteer("");
+                }}
+                className="rounded-full border px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
+                style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}
+              >
+                Steer run
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </article>
+
       {runs.map((run) => (
         <article key={run.id} className="rounded-xl border p-3" style={{ borderColor: "var(--bat-border)" }}>
           <div className="flex items-center justify-between gap-2">
@@ -64,9 +159,6 @@ function RunningTab({ runs, onRunAudit }: { runs: ProcessRun[]; onRunAudit?: () 
               }}
             />
           </div>
-          <p className="mt-1 text-xs" style={{ color: "var(--bat-text-muted)" }}>
-            {run.progress}%
-          </p>
         </article>
       ))}
     </div>
@@ -143,13 +235,15 @@ export function LiveActivityPanel({
   feedItems,
   decisions,
   onResolve,
-  onRunAudit
+  onRunAudit,
+  onSteer
 }: {
   runs: ProcessRun[];
   feedItems: ProcessFeedItem[];
   decisions: DecisionItem[];
   onResolve: (id: string, option: string) => void;
   onRunAudit?: () => void;
+  onSteer?: (instruction: string) => void;
 }) {
   const [tab, setTab] = useState<Tab>("running");
   const tabs = useMemo(
@@ -185,7 +279,9 @@ export function LiveActivityPanel({
       </div>
 
       <div className="max-h-[62vh] overflow-y-auto pr-1">
-        {tab === "running" ? <RunningTab runs={runs} onRunAudit={onRunAudit} /> : null}
+        {tab === "running" ? (
+          <RunningTab runs={runs} feedItems={feedItems} onRunAudit={onRunAudit} onSteer={onSteer} />
+        ) : null}
         {tab === "feed" ? <FeedTab feedItems={feedItems} /> : null}
         {tab === "decisions" ? <DecisionsTab decisions={decisions} onResolve={onResolve} /> : null}
       </div>

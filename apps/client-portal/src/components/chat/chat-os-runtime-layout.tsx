@@ -149,6 +149,12 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     );
   };
 
+  const onLiveSteer = (instruction: string) => {
+    const text = instruction.trim();
+    if (!text) return;
+    runAsync(sendMessage(`Steer run: ${text}`, "send"));
+  };
+
   if (loading) {
     return (
       <section className="bat-surface p-6">
@@ -300,6 +306,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
             decisions={decisions}
             onResolve={(decisionId, option) => runAsync(resolveDecision(decisionId, option))}
             onRunAudit={onRunAudit}
+            onSteer={onLiveSteer}
           />
         ) : null}
       </div>
