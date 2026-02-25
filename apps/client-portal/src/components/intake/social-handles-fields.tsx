@@ -17,14 +17,14 @@ interface SocialHandlesFieldsProps {
   };
 }
 
-function normalizeHandle(value: string): string {
+export function normalizeHandle(value: string): string {
   return String(value || "")
     .trim()
     .replace(/^@+/, "")
     .toLowerCase();
 }
 
-function extractHandleFromUrlOrRaw(platform: PlatformId, value: string): string {
+export function extractHandleFromUrlOrRaw(platform: PlatformId, value: string): string {
   const raw = String(value || "").trim();
   if (!raw) return "";
 
@@ -35,6 +35,22 @@ function extractHandleFromUrlOrRaw(platform: PlatformId, value: string): string 
 
   if (platform === "tiktok") {
     const match = raw.match(/tiktok\.com\/@?([a-z0-9._]{2,30})/i);
+    if (match) return normalizeHandle(match[1]);
+  }
+
+  if (platform === "youtube") {
+    const atHandle = raw.match(/(?:youtube\.com\/@)([a-z0-9._-]{2,40})/i);
+    if (atHandle) return normalizeHandle(atHandle[1]);
+
+    const channelPath = raw.match(/(?:youtube\.com\/(?:c|user|channel)\/)([a-z0-9._-]{2,80})/i);
+    if (channelPath) return normalizeHandle(channelPath[1]);
+
+    const shortUrl = raw.match(/(?:youtu\.be\/)([a-z0-9._-]{2,80})/i);
+    if (shortUrl) return normalizeHandle(shortUrl[1]);
+  }
+
+  if (platform === "twitter") {
+    const match = raw.match(/(?:x\.com|twitter\.com)\/([a-z0-9_]{1,15})(?:$|[/?#])/i);
     if (match) return normalizeHandle(match[1]);
   }
 
@@ -53,13 +69,15 @@ export function buildChannelsFromHandles(
 }
 
 export function getFilledHandlesCount(handles: Record<PlatformId, string>): number {
-  return Object.values(handles).filter((value) => normalizeHandle(value).length > 0).length;
+  return Object.entries(handles).filter(([platform, value]) => {
+    return extractHandleFromUrlOrRaw(platform as PlatformId, value).length > 0;
+  }).length;
 }
 
 export function getFilledHandlesList(handles: Record<PlatformId, string>): string[] {
-  return Object.values(handles)
-    .map((value) => normalizeHandle(value))
-    .filter(Boolean)
+  return Object.entries(handles)
+    .map(([platform, value]) => extractHandleFromUrlOrRaw(platform as PlatformId, value))
+    .filter((value) => value.length > 0)
     .map((value) => `@${value}`);
 }
 

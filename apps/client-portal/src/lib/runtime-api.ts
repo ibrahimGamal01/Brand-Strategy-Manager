@@ -43,25 +43,25 @@ export type WorkspaceIntakeFormData = {
   idealAudience: string;
   targetAudience: string;
   geoScope: string;
-  servicesList: string;
+  servicesList: string | string[];
   mainOffer: string;
   primaryGoal: string;
-  secondaryGoals: string;
+  secondaryGoals: string | string[];
   futureGoal: string;
   engineGoal: string;
-  topProblems: string;
-  resultsIn90Days: string;
-  questionsBeforeBuying: string;
-  brandVoiceWords: string;
+  topProblems: string | string[];
+  resultsIn90Days: string | string[];
+  questionsBeforeBuying: string | string[];
+  brandVoiceWords: string | string[];
   brandTone: string;
-  topicsToAvoid: string;
+  topicsToAvoid: string | string[];
   constraints: string;
-  excludedCategories: string;
+  excludedCategories: string | string[];
   language: string;
   planningHorizon: string;
   autonomyLevel: "assist" | "auto";
   budgetSensitivity: string;
-  competitorInspirationLinks: string;
+  competitorInspirationLinks: string | string[];
   handles: {
     instagram: string;
     tiktok: string;
@@ -144,6 +144,19 @@ export async function submitWorkspaceIntake(
     message: string;
     pendingQuestionSets: WorkspaceIntakeStatus["pendingQuestionSets"];
   }>(response);
+}
+
+export async function saveWorkspaceIntakeDraft(
+  workspaceId: string,
+  payload: Record<string, unknown>
+) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/intake/draft`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+    credentials: "include",
+  });
+  return parseJson<{ ok: boolean; workspaceId: string }>(response);
 }
 
 export async function listRuntimeThreads(workspaceId: string): Promise<Array<RuntimeThread & { branches?: RuntimeBranch[] }>> {

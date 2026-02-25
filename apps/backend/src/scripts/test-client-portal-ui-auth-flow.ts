@@ -35,6 +35,18 @@ async function main() {
     const page = await browser.newPage();
     page.setDefaultTimeout(30_000);
 
+    const clickButtonByText = async (text: string) => {
+      await page.evaluate((label) => {
+        const button = Array.from(document.querySelectorAll('button')).find((entry) =>
+          (entry.textContent || '').trim() === label
+        ) as HTMLButtonElement | undefined;
+        if (!button) {
+          throw new Error(`Button not found: ${label}`);
+        }
+        button.click();
+      }, text);
+    };
+
     await page.goto(`${baseUrl}/signup`, { waitUntil: 'networkidle0' });
     await page.waitForSelector('form');
     await page.type('input[autocomplete="name"]', 'Portal UI E2E');
@@ -58,25 +70,33 @@ async function main() {
       { timeout: 30_000 }
     );
 
-    await page.click('input[required]');
+    await page.click('input[placeholder="e.g. Bright Growth Studio"]');
     await page.keyboard.type('Portal UI E2E Brand');
+    await clickButtonByText('Save and continue');
+
+    await page.waitForFunction(
+      () => document.body.innerText.includes('Add channels'),
+      { timeout: 30_000 }
+    );
     await page.click('input[placeholder="@username"]');
     await page.keyboard.type('portaluie2e');
-    await page.click('button[type="submit"]');
+    await clickButtonByText('Save and continue');
+
+    await page.waitForSelector('input[placeholder="Primary offer to push through content"]');
+    await page.type('input[placeholder="Primary offer to push through content"]', 'Growth Audit Sprint');
+    await clickButtonByText('Save and continue');
+
+    await page.waitForFunction(
+      () => document.body.innerText.includes('Primary audience (next 90 days)'),
+      { timeout: 30_000 }
+    );
+    await clickButtonByText('Skip (do later in chat)');
 
     await page.waitForFunction(
       () => document.body.innerText.includes('Confirm and start BAT'),
       { timeout: 30_000 }
     );
-    await page.evaluate(() => {
-      const button = Array.from(document.querySelectorAll('button')).find((entry) =>
-        (entry.textContent || '').includes('Confirm and start BAT')
-      ) as HTMLButtonElement | undefined;
-      if (!button) {
-        throw new Error('Confirm and start BAT button not found');
-      }
-      button.click();
-    });
+    await clickButtonByText('Confirm and start BAT');
 
     await page.waitForFunction(
       () => document.body.innerText.includes('Workspace') && !document.body.innerText.includes('Initialize BAT Brain'),
@@ -132,7 +152,7 @@ async function main() {
           baseUrl,
         checks: [
           'signup_form_submission',
-          'workspace_intro_form_completion',
+          'workspace_intro_wizard_completion',
           'session_cookie_created',
           'verify_email_via_verify_page',
           'logout_button_flow',

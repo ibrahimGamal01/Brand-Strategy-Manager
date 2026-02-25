@@ -27,6 +27,7 @@ import {
   submitPortalWorkspaceIntake,
   suggestPortalWorkspaceIntakeCompletion,
 } from '../services/portal/portal-intake';
+import { savePortalWorkspaceIntakeDraft } from '../services/portal/portal-intake-draft';
 
 const router = Router();
 
@@ -302,6 +303,26 @@ router.post(
     }
   }
 );
+
+router.post('/workspaces/:workspaceId/intake/draft', requirePortalAuth, requireWorkspaceMembership, async (req, res) => {
+  try {
+    const workspaceId = safeString(req.params.workspaceId);
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'workspaceId is required' });
+    }
+
+    const payload =
+      req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+        ? (req.body as Record<string, unknown>)
+        : {};
+    const result = await savePortalWorkspaceIntakeDraft(workspaceId, payload);
+    return res.json(result);
+  } catch (error: any) {
+    const message = String(error?.message || '');
+    const status = message.toLowerCase().includes('not found') ? 404 : 500;
+    return res.status(status).json({ ok: false, error: message || 'Failed to save workspace intake draft' });
+  }
+});
 
 router.post('/workspaces/:workspaceId/intake', requirePortalAuth, requireWorkspaceMembership, async (req, res) => {
   try {
