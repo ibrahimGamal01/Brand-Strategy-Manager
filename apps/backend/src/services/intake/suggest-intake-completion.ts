@@ -112,6 +112,72 @@ function hasWebsiteProvided(partialPayload: Record<string, unknown>): boolean {
   return false;
 }
 
+function sanitizeSentence(value: string): string {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .replace(/^[^a-zA-Z0-9]+/, '')
+    .trim();
+}
+
+function extractDescriptionFromEvidence(websiteEvidence: string, brandName: string): string {
+  const text = String(websiteEvidence || '').trim();
+  if (!text) return '';
+  const candidates = text
+    .split(/[\n.!?]+/)
+    .map((row) => sanitizeSentence(row))
+    .filter(Boolean)
+    .filter((row) => {
+      const words = row.split(/\s+/).filter(Boolean);
+      return words.length >= 8 && words.length <= 34;
+    })
+    .filter((row) => row.length >= 60 && row.length <= 240)
+    .filter(
+      (row) =>
+        !/cookie|privacy|terms|copyright|javascript|menu|navigation|login|log in|sign up|subscribe|tip|tips|cart|checkout|home page/i.test(
+          row
+        )
+    );
+
+  const preferred = candidates.find((row) =>
+    /(offers|offer|provides|provide|supports|support|helps|help|deliver|delivers|enables|allow|experience|experiences|subscription|program|service|device|platform)/i.test(
+      row
+    )
+  );
+  const selected = preferred || '';
+  if (!selected) return '';
+
+  const normalized = selected.endsWith('.') ? selected : `${selected}.`;
+  if (brandName && !new RegExp(brandName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(normalized)) {
+    return `${brandName} ${normalized.charAt(0).toLowerCase()}${normalized.slice(1)}`;
+  }
+  return normalized;
+}
+
+function inferNicheFromEvidence(websiteEvidence: string): string {
+  const text = String(websiteEvidence || '').toLowerCase();
+  if (!text) return '';
+  if (
+    /(wellness|wellbeing|healing|nervous system|sleep|biohacking|biophoton|coherence|holistic|stress|calm)/.test(
+      text
+    )
+  ) {
+    return 'Wellness / holistic health';
+  }
+  if (/(marketing|agency|brand strategy|lead generation|content strategy|campaign)/.test(text)) {
+    return 'Marketing / brand strategy';
+  }
+  if (/(saas|software|platform|api|automation|developer)/.test(text)) {
+    return 'SaaS / software';
+  }
+  if (/(ecommerce|shop|store|cart|product catalog|sku)/.test(text)) {
+    return 'E-commerce';
+  }
+  if (/(coaching|consulting|advisor|training|workshop)/.test(text)) {
+    return 'Coaching / consulting';
+  }
+  return '';
+}
+
 function titleCase(value: string): string {
   return value
     .split(/\s+/)
@@ -142,6 +208,7 @@ function buildFallbackSuggestions(
   const fallback: Record<string, unknown> = {};
   const missing = new Set<string>(missingKeys);
   const normalizedWebsite = website.trim();
+  const websiteEvidence = String(partialPayload._websiteEvidence || partialPayload.websiteEvidence || '').trim();
   const brandName = String(partialPayload.name || '').trim() || deriveBrandNameFromWebsite(normalizedWebsite);
   const mainOffer = String(partialPayload.mainOffer || '').trim();
   const primaryGoal = String(partialPayload.primaryGoal || '').trim();
@@ -155,10 +222,32 @@ function buildFallbackSuggestions(
     fallback.name = brandName;
   }
 
-  if (missing.has('oneSentenceDescription') && brandName && (mainOffer || primaryGoal)) {
-    fallback.oneSentenceDescription = mainOffer
-      ? `${brandName} offers ${mainOffer}.`
-      : `${brandName} focuses on ${primaryGoal}.`;
+  if (missing.has('oneSentenceDescription')) {
+    const extractedDescription = extractDescriptionFromEvidence(websiteEvidence, brandName);
+    if (extractedDescription) {
+      fallback.oneSentenceDescription = extractedDescription;
+    } else if (brandName && (mainOffer || primaryGoal)) {
+      fallback.oneSentenceDescription = mainOffer
+        ? `${brandName} offers ${mainOffer}.`
+        : `${brandName} focuses on ${primaryGoal}.`;
+    } else if (brandName && normalizedWebsite) {
+      fallback.oneSentenceDescription = `${brandName} operates through ${normalizedWebsite}.`;
+    }
+  }
+
+  if (missing.has('niche')) {
+    const inferredNiche = inferNicheFromEvidence(websiteEvidence);
+    if (inferredNiche) {
+      fallback.niche = inferredNiche;
+    }
+  }
+
+  if (missing.has('businessType')) {
+    if (/subscription|plan|membership|stream/i.test(websiteEvidence)) {
+      fallback.businessType = 'Subscription business';
+    } else if (/agency|consulting|services/i.test(websiteEvidence)) {
+      fallback.businessType = 'Service business';
+    }
   }
 
   return fallback;
@@ -193,6 +282,11 @@ export async function suggestIntakeCompletion(
         Array.isArray(raw) ? (raw as unknown[]).join(', ') : String(raw);
       contextParts.push(`${key}: ${display}`);
     }
+  }
+
+  const websiteEvidence = String(partialPayload._websiteEvidence || partialPayload.websiteEvidence || '').trim();
+  if (websiteEvidence) {
+    contextParts.push(`websiteEvidence: ${websiteEvidence}`);
   }
 
   if (contextParts.length === 0) {

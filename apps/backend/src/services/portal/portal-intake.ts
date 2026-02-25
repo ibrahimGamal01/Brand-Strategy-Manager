@@ -163,6 +163,66 @@ function parseList(value: unknown, maxItems = 12): string[] {
     .slice(0, maxItems);
 }
 
+function compactText(value: unknown, maxChars = 2400): string {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, Math.max(0, maxChars - 3))}...`;
+}
+
+function getHostname(value: string): string {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try {
+    const parsed = new URL(raw.startsWith('http') ? raw : `https://${raw}`);
+    return parsed.hostname.replace(/^www\./i, '').toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+async function buildWebsiteEvidenceSummary(
+  workspaceId: string,
+  payload: Record<string, unknown>
+): Promise<string> {
+  const websites = parseWebsiteList([payload.website, payload.websites], 5);
+  const hostnames = new Set(
+    websites
+      .map((entry) => getHostname(entry))
+      .filter(Boolean)
+  );
+
+  const snapshots = await prisma.webPageSnapshot.findMany({
+    where: { researchJobId: workspaceId, isActive: true },
+    orderBy: { fetchedAt: 'desc' },
+    take: 30,
+    select: {
+      finalUrl: true,
+      cleanText: true,
+      fetchedAt: true,
+    },
+  });
+
+  const filtered = snapshots
+    .filter((row) => {
+      if (!hostnames.size) return true;
+      const host = getHostname(String(row.finalUrl || ''));
+      return host ? hostnames.has(host) : false;
+    })
+    .filter((row) => String(row.cleanText || '').trim().length > 0)
+    .slice(0, 4);
+
+  if (!filtered.length) return '';
+
+  const lines = filtered.map((row, index) => {
+    const url = String(row.finalUrl || '').trim();
+    const excerpt = compactText(row.cleanText || '', 1200);
+    return `Snapshot ${index + 1}: ${url}\n${excerpt}`;
+  });
+
+  return compactText(lines.join('\n\n'), 5000);
+}
+
 function stripUndefinedFromJson(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value
@@ -358,8 +418,23 @@ export async function suggestPortalWorkspaceIntakeCompletion(
         ? partialPayload.handles
         : prefill.handles,
   };
+
+  const websiteEvidence = await buildWebsiteEvidenceSummary(workspaceId, payload).catch((error) => {
+    console.warn(
+      `[PortalIntake] Failed to build website evidence summary for ${workspaceId}:`,
+      (error as Error)?.message || String(error)
+    );
+    return '';
+  });
+  const payloadWithEvidence = websiteEvidence
+    ? {
+        ...payload,
+        _websiteEvidence: websiteEvidence,
+      }
+    : payload;
+
   try {
-    return await suggestIntakeCompletion(payload);
+    return await suggestIntakeCompletion(payloadWithEvidence);
   } catch (error) {
     console.warn(
       `[PortalIntake] Suggestion fallback for workspace ${workspaceId}:`,
