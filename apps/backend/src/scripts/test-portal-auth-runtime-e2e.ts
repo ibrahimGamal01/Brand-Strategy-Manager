@@ -149,7 +149,7 @@ async function main() {
   assert.equal(intakeBefore.status, 200, 'Workspace intake status endpoint failed before setup');
   assert.equal(Boolean(intakeBefore.data.completed), false, 'New signup workspace should require intake setup');
 
-  const intakeSuggest = await apiRequest<{ success?: boolean }>(
+  const intakeSuggest = await apiRequest<{ success?: boolean; suggested?: Record<string, unknown> }>(
     baseUrl,
     `/api/portal/workspaces/${workspaceId}/intake/suggest`,
     {
@@ -168,6 +168,10 @@ async function main() {
   );
   assert.equal(intakeSuggest.status, 200, 'Workspace intake suggest endpoint failed');
   assert.equal(Boolean(intakeSuggest.data.success), true, 'Workspace intake suggest should return success=true');
+  assert.ok(
+    intakeSuggest.data.suggested && Object.keys(intakeSuggest.data.suggested).length > 0,
+    'Workspace intake suggest should return at least one suggested field for partial payload'
+  );
 
   const intakeSubmit = await apiRequest<{ success?: boolean }>(
     baseUrl,

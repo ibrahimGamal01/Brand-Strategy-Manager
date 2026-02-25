@@ -85,6 +85,69 @@ def _clean_text(html: str) -> str:
     return " ".join(soup.get_text(" ").split())[:80000]
 
 
+def _coerce_to_string(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="ignore")
+    if isinstance(value, str):
+        return value
+    try:
+        return str(value)
+    except Exception:
+        return ""
+
+
+def _extract_status(response: Any) -> Optional[int]:
+    status = getattr(response, "status", None)
+    if status is None:
+        status = getattr(response, "status_code", None)
+    try:
+        return int(status) if status is not None else None
+    except Exception:
+        return None
+
+
+def _extract_final_url(response: Any, fallback_url: str) -> str:
+    candidate = _coerce_to_string(getattr(response, "url", "")) or _coerce_to_string(
+        getattr(response, "final_url", "")
+    )
+    return candidate or fallback_url
+
+
+def _extract_html(response: Any) -> str:
+    candidates = [
+        getattr(response, "html", None),
+        getattr(response, "html_content", None),
+        getattr(response, "body", None),
+        getattr(response, "content", None),
+    ]
+    for candidate in candidates:
+        text = _coerce_to_string(candidate)
+        if text.strip():
+            return text
+    return ""
+
+
+def _extract_text(response: Any, html: str) -> str:
+    text_candidate = _coerce_to_string(getattr(response, "text", None))
+    if text_candidate.strip():
+        return " ".join(text_candidate.split())[:80000]
+
+    get_all_text = getattr(response, "get_all_text", None)
+    if callable(get_all_text):
+        try:
+            extracted = _coerce_to_string(get_all_text())
+            if extracted.strip():
+                return " ".join(extracted.split())[:80000]
+        except Exception:
+            pass
+
+    if html.strip():
+        return _clean_text(html)
+    return ""
+
+
 def _basic_fetch(url: str, timeout_ms: int) -> FetchResult:
     response = requests.get(
         url,
@@ -115,33 +178,19 @@ def _scrapling_fetch(url: str, mode: str, timeout_ms: int) -> FetchResult:
 
     selected = _normalize_mode(mode)
     blockers = {"captcha", "access denied", "please verify", "cloudflare"}
-    timeout_seconds = max(1, timeout_ms // 1000)
-
-    def configure_fetcher_timeout(fetcher_cls: Any) -> None:
-        if fetcher_cls is None:
-            return
-        configure = getattr(fetcher_cls, "configure", None)
-        if callable(configure):
-            try:
-                configure(timeout=timeout_seconds)
-            except Exception:
-                # Keep compatibility with older/newer scrapling versions.
-                pass
 
     def run_http() -> FetchResult:
         start = time.time()
-        configure_fetcher_timeout(Fetcher)
-        fetcher = Fetcher()
-        response = fetcher.get(url)
-        html = getattr(response, "html", "") or ""
-        status = getattr(response, "status", None)
-        text = _clean_text(html)
+        response = Fetcher().get(url, timeout=max(1, timeout_ms // 1000))
+        html = _extract_html(response)
+        status = _extract_status(response)
+        text = _extract_text(response, html)
         blocked = bool(status in {401, 403, 429, 503}) or any(token in text.lower() for token in blockers)
         _ = time.time() - start
         return FetchResult(
-            ok=bool(getattr(response, "ok", status is not None and 200 <= int(status) < 400)),
-            final_url=str(getattr(response, "url", url) or url),
-            status_code=int(status) if status is not None else None,
+            ok=bool(status is not None and 200 <= int(status) < 400),
+            final_url=_extract_final_url(response, url),
+            status_code=status,
             html=html,
             text=text,
             fetcher_used="HTTP",
@@ -151,17 +200,15 @@ def _scrapling_fetch(url: str, mode: str, timeout_ms: int) -> FetchResult:
     def run_dynamic() -> FetchResult:
         if DynamicFetcher is None:
             return _basic_fetch(url, timeout_ms)
-        configure_fetcher_timeout(DynamicFetcher)
-        fetcher = DynamicFetcher()
-        response = fetcher.get(url)
-        html = getattr(response, "html", "") or ""
-        status = getattr(response, "status", None)
-        text = _clean_text(html)
+        response = DynamicFetcher().get(url, timeout=max(1, timeout_ms // 1000))
+        html = _extract_html(response)
+        status = _extract_status(response)
+        text = _extract_text(response, html)
         blocked = bool(status in {401, 403, 429, 503})
         return FetchResult(
-            ok=bool(getattr(response, "ok", status is not None and 200 <= int(status) < 400)),
-            final_url=str(getattr(response, "url", url) or url),
-            status_code=int(status) if status is not None else None,
+            ok=bool(status is not None and 200 <= int(status) < 400),
+            final_url=_extract_final_url(response, url),
+            status_code=status,
             html=html,
             text=text,
             fetcher_used="DYNAMIC",

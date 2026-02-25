@@ -50,6 +50,12 @@ function normalizeMode(raw: unknown): ScraplingMode {
   return 'AUTO';
 }
 
+function hasUsableWorkerContent(payload: { html?: string | null; text?: string | null }): boolean {
+  const html = String(payload.html || '').trim();
+  const text = String(payload.text || '').trim();
+  return html.length > 0 || text.length > 0;
+}
+
 async function fetchViaWorker(payload: ScraplingFetchRequest): Promise<ScraplingFetchResponse> {
   const response = await axios.post(`${WORKER_URL}/v1/fetch`, payload, {
     timeout: payload.timeoutMs || DEFAULT_TIMEOUT_MS,
@@ -180,7 +186,21 @@ export const scraplingClient = {
     }
 
     try {
-      return await fetchViaWorker(payload);
+      const workerResult = await fetchViaWorker(payload);
+      if (workerResult.ok && !workerResult.blockedSuspected && !hasUsableWorkerContent(workerResult)) {
+        console.warn('[ScraplingClient] Worker returned empty html/text, falling back to HTTP fetch.');
+        const fallback = await fetchViaFallback(payload);
+        fallback.fallbackReason =
+          workerResult.fallbackReason ||
+          'Worker returned empty html/text payload; used HTTP fallback for usable content.';
+        fallback.metadata = {
+          ...(workerResult.metadata || {}),
+          ...(fallback.metadata || {}),
+          workerEmptyPayload: true,
+        };
+        return fallback;
+      }
+      return workerResult;
     } catch (error: any) {
       console.warn('[ScraplingClient] Worker fetch failed, falling back to lightweight mode:', error?.message || error);
       const fallback = await fetchViaFallback(payload);
@@ -208,6 +228,31 @@ export const scraplingClient = {
         headers: { 'Content-Type': 'application/json' },
       });
       const data = (response.data || {}) as Record<string, any>;
+      const pages: ScraplingCrawlPage[] = Array.isArray(data.pages)
+        ? data.pages.map((page) => ({
+            url: String(page.url || ''),
+            finalUrl: typeof page.finalUrl === 'string' ? page.finalUrl : undefined,
+            statusCode: Number.isFinite(Number(page.statusCode)) ? Number(page.statusCode) : undefined,
+            fetcherUsed: normalizeMode(page.fetcherUsed),
+            text: typeof page.text === 'string' ? page.text : null,
+            html: typeof page.html === 'string' ? page.html : null,
+            metadata:
+              typeof page.metadata === 'object' && page.metadata
+                ? (page.metadata as Record<string, unknown>)
+                : { sourceTransport: 'SCRAPLING_WORKER' },
+          }))
+        : [];
+
+      const hasUsablePageContent = pages.some((page) => hasUsableWorkerContent(page));
+      if (pages.length > 0 && !hasUsablePageContent) {
+        console.warn('[ScraplingClient] Worker crawl returned empty page payloads, falling back to HTTP crawl mode.');
+        const fallback = await fallbackCrawl({ ...payload, maxPages: Math.min(payload.maxPages || 20, 20) });
+        fallback.fallbackReason =
+          data.fallbackReason ||
+          'Worker crawl pages contained no html/text; used HTTP fallback crawl for usable content.';
+        return fallback;
+      }
+
       return {
         ok: Boolean(data.ok ?? true),
         runId: String(data.runId || `run-${Date.now()}`),
@@ -216,20 +261,7 @@ export const scraplingClient = {
           fetched: Number(data.summary?.fetched || 0),
           failed: Number(data.summary?.failed || 0),
         },
-        pages: Array.isArray(data.pages)
-          ? data.pages.map((page) => ({
-              url: String(page.url || ''),
-              finalUrl: typeof page.finalUrl === 'string' ? page.finalUrl : undefined,
-              statusCode: Number.isFinite(Number(page.statusCode)) ? Number(page.statusCode) : undefined,
-              fetcherUsed: normalizeMode(page.fetcherUsed),
-              text: typeof page.text === 'string' ? page.text : null,
-              html: typeof page.html === 'string' ? page.html : null,
-              metadata:
-                typeof page.metadata === 'object' && page.metadata
-                  ? (page.metadata as Record<string, unknown>)
-                  : { sourceTransport: 'SCRAPLING_WORKER' },
-            }))
-          : [],
+        pages,
       };
     } catch (error: any) {
       console.warn('[ScraplingClient] Worker crawl failed, using fallback crawl mode:', error?.message || error);
