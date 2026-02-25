@@ -231,8 +231,16 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   if (/competitor|rival|alternative/.test(normalized)) {
     pushIfMissing('intel.list', { section: 'competitors', limit: 12 });
   }
+  if (/intake|onboard|kickoff|audit|workspace|strategy|investigat|analy[sz]e/.test(normalized)) {
+    pushIfMissing('intel.list', { section: 'web_snapshots', limit: 20 });
+    pushIfMissing('intel.list', { section: 'competitors', limit: 12 });
+    pushIfMissing('intel.list', { section: 'community_insights', limit: 10 });
+    pushIfMissing('evidence.posts', { platform: 'any', sort: 'engagement', limit: 8 });
+    pushIfMissing('evidence.news', { limit: 8 });
+  }
   if (/web|site|website|source|snapshot|page/.test(normalized)) {
     pushIfMissing('intel.list', { section: 'web_sources', limit: 10 });
+    pushIfMissing('intel.list', { section: 'web_snapshots', limit: 12 });
   }
   if (/crawl|spider/.test(normalized) && firstUrl) {
     pushIfMissing('web.crawl', { startUrls: [firstUrl], maxPages: 8, maxDepth: 1 });

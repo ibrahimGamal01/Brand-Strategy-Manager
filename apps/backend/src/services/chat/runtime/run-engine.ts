@@ -7,6 +7,7 @@ import {
   ProcessEventType,
   ToolRunStatus,
 } from '@prisma/client';
+import { prisma } from '../../../lib/prisma';
 import { publishProcessEvent } from './process-event-bus';
 import {
   cancelActiveRuns,
@@ -61,6 +62,12 @@ const DEFAULT_POLICY: RunPolicy = {
   allowMutationTools: false,
   maxToolMs: 30_000,
 };
+
+const BOOTSTRAP_PROMPT =
+  'Bootstrap this workspace by auditing existing intelligence and producing an actionable kickoff. ' +
+  'Use tools to inspect web_sources, web_snapshots, competitors, social signals, community insights, and news. ' +
+  'If websites are known, run web.crawl first before synthesis. ' +
+  'Ground all claims in evidence and list clear next steps plus decisions needed from the client.';
 
 const SUPPORTED_TOOL_NAMES = new Set(TOOL_REGISTRY.map((tool) => tool.name));
 
@@ -153,6 +160,87 @@ function findFirstUrl(message: string): string | null {
   const bareDomain = raw.match(/\b([a-z0-9.-]+\.[a-z]{2,}(?:\/[^\s)]*)?)\b/i);
   if (!bareDomain?.[1]) return null;
   return `https://${bareDomain[1]}`;
+}
+
+function normalizeUrlCandidate(value: unknown): string | null {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  try {
+    const candidate = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    const parsed = new URL(candidate);
+    if (!['http:', 'https:'].includes(parsed.protocol)) return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function extractWorkspaceWebsites(inputData: unknown): string[] {
+  if (!isRecord(inputData)) return [];
+  const candidates: unknown[] = [];
+
+  if (typeof inputData.website === 'string') {
+    candidates.push(inputData.website);
+  }
+  if (Array.isArray(inputData.websites)) {
+    candidates.push(...inputData.websites);
+  }
+
+  const seen = new Set<string>();
+  const websites: string[] = [];
+  for (const candidate of candidates) {
+    const normalized = normalizeUrlCandidate(candidate);
+    if (!normalized) continue;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    websites.push(normalized);
+  }
+
+  return websites.slice(0, 5);
+}
+
+function buildBootstrapPrompt(input: { brandName?: string | null; websites: string[] }) {
+  const brand = String(input.brandName || '').trim();
+  const sites = input.websites;
+  const websiteClause = sites.length
+    ? `Known websites: ${sites.join(', ')}.`
+    : 'No websites are confirmed yet, so start from existing intelligence collections.';
+  const crawlClause = sites.length
+    ? `Run web.crawl on ${sites[0]} (respect domain boundaries), then inspect web_snapshots, competitors, community insights, social evidence, and news.`
+    : 'Inspect web_sources, web_snapshots, competitors, community insights, social evidence, and news.';
+  const brandClause = brand ? `Brand: ${brand}.` : '';
+
+  return [BOOTSTRAP_PROMPT, brandClause, websiteClause, crawlClause].filter(Boolean).join(' ');
+}
+
+function shouldForceDiscoveryTools(input: { triggerType: AgentRunTriggerType; userMessage: string }): boolean {
+  if (input.triggerType === AgentRunTriggerType.SCHEDULED_LOOP) return true;
+  const normalized = input.userMessage.toLowerCase();
+  return /(kickoff|intake|onboard|audit|investigat|analy[sz]e|strategy|workspace)/.test(normalized);
+}
+
+function buildFallbackDiscoveryToolCalls(userMessage: string, maxToolRuns: number): RuntimeToolCall[] {
+  const calls: RuntimeToolCall[] = [];
+  const seen = new Set<string>();
+  const push = (tool: string, args: Record<string, unknown>) => {
+    const key = `${tool}:${JSON.stringify(args)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    calls.push({ tool, args });
+  };
+
+  const primaryUrl = findFirstUrl(userMessage);
+  if (primaryUrl) {
+    push('web.crawl', { startUrls: [primaryUrl], maxPages: 20, maxDepth: 2, allowExternal: false });
+  }
+  push('intel.list', { section: 'web_snapshots', limit: 20 });
+  push('intel.list', { section: 'competitors', limit: 12 });
+  push('intel.list', { section: 'community_insights', limit: 10 });
+  push('evidence.posts', { platform: 'any', sort: 'engagement', limit: 8 });
+  push('evidence.news', { limit: 8 });
+
+  return sanitizeToolCalls(calls, userMessage, maxToolRuns).slice(0, maxToolRuns);
 }
 
 function normalizeIntelListSection(sectionRaw: unknown, userMessage: string): string {
@@ -1050,7 +1138,14 @@ export class RuntimeRunEngine {
       }
 
       const triggerContent = fresh.triggerMessage?.content || 'Continue workflow';
-      const sanitizedToolCalls = sanitizeToolCalls(plan.toolCalls, triggerContent, policy.maxToolRuns);
+      let sanitizedToolCalls = sanitizeToolCalls(plan.toolCalls, triggerContent, policy.maxToolRuns);
+      if (
+        sanitizedToolCalls.length === 0 &&
+        shouldForceDiscoveryTools({ triggerType: fresh.triggerType, userMessage: triggerContent })
+      ) {
+        sanitizedToolCalls = buildFallbackDiscoveryToolCalls(triggerContent, policy.maxToolRuns);
+      }
+
       if (JSON.stringify(plan.toolCalls) !== JSON.stringify(sanitizedToolCalls)) {
         plan = {
           ...plan,
@@ -1101,6 +1196,79 @@ export class RuntimeRunEngine {
       activeRunStatuses: runtimeEnums.ACTIVE_RUN_STATUSES,
       activeRuns,
     };
+  }
+
+  async bootstrapBranch(input: {
+    researchJobId: string;
+    branchId: string;
+    policy?: Partial<RunPolicy>;
+    initiatedBy?: string;
+  }): Promise<{ started: boolean; runId?: string; reason?: string }> {
+    const branch = await getBranch(input.branchId, input.researchJobId);
+    if (!branch) {
+      throw new Error('Branch not found for this research job');
+    }
+
+    const activeRuns = await listActiveRuns(input.branchId);
+    if (activeRuns.length > 0) {
+      return { started: false, reason: 'active_run' };
+    }
+
+    const existingMessages = await listBranchMessages(input.branchId, 80);
+    const hasClientConversation = existingMessages.some(
+      (message) =>
+        message.clientVisible !== false &&
+        (message.role === ChatBranchMessageRole.USER || message.role === ChatBranchMessageRole.ASSISTANT)
+    );
+    if (hasClientConversation) {
+      return { started: false, reason: 'already_initialized' };
+    }
+
+    const workspace = await prisma.researchJob.findUnique({
+      where: { id: input.researchJobId },
+      select: {
+        inputData: true,
+        client: { select: { name: true } },
+      },
+    });
+    const websites = extractWorkspaceWebsites(workspace?.inputData);
+    const bootstrapContent = buildBootstrapPrompt({
+      brandName: workspace?.client?.name || null,
+      websites,
+    });
+
+    const policy = normalizePolicy(input.policy);
+    const bootstrapMessage = await createBranchMessage({
+      branchId: input.branchId,
+      role: ChatBranchMessageRole.SYSTEM,
+      content: bootstrapContent,
+      clientVisible: false,
+    });
+
+    const run = await createAgentRun({
+      branchId: input.branchId,
+      triggerType: AgentRunTriggerType.SCHEDULED_LOOP,
+      triggerMessageId: bootstrapMessage.id,
+      policy,
+    });
+
+    await this.emitEvent({
+      branchId: input.branchId,
+      type: ProcessEventType.PROCESS_STARTED,
+      agentRunId: run.id,
+      message: 'BAT kickoff started for this workspace.',
+      payload: {
+        triggerType: run.triggerType,
+        triggerMessageId: bootstrapMessage.id,
+        initiatedBy: String(input.initiatedBy || 'system').trim() || 'system',
+      },
+    });
+
+    void this.executeRun(run.id).catch((error) => {
+      console.error('[RuntimeRunEngine] bootstrap executeRun failed:', error);
+    });
+
+    return { started: true, runId: run.id };
   }
 }
 

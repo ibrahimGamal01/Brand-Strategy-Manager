@@ -227,6 +227,30 @@ router.post('/:id/runtime/branches/:branchId/messages', async (req, res) => {
   }
 });
 
+router.post('/:id/runtime/branches/:branchId/bootstrap', async (req, res) => {
+  try {
+    const researchJobId = String(req.params.id || '').trim();
+    const branchId = String(req.params.branchId || '').trim();
+    const policy =
+      req.body?.policy && typeof req.body.policy === 'object' && !Array.isArray(req.body.policy)
+        ? req.body.policy
+        : undefined;
+    const initiatedBy = String(req.body?.initiatedBy || 'portal').trim() || 'portal';
+
+    const result = await runtimeRunEngine.bootstrapBranch({
+      researchJobId,
+      branchId,
+      policy,
+      initiatedBy,
+    });
+
+    return res.status(result.started ? 202 : 200).json(result);
+  } catch (error: any) {
+    const status = String(error?.message || '').includes('not found') ? 404 : 500;
+    return res.status(status).json({ error: 'Failed to bootstrap branch', details: error?.message || String(error) });
+  }
+});
+
 router.post('/:id/runtime/branches/:branchId/interrupt', async (req, res) => {
   try {
     const researchJobId = String(req.params.id || '').trim();

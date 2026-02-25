@@ -22,7 +22,28 @@ function StatusIcon({ status }: { status: ProcessRun["status"] }) {
   return <Clock3 className="h-4 w-4" style={{ color: "var(--bat-text-muted)" }} />;
 }
 
-function RunningTab({ runs }: { runs: ProcessRun[] }) {
+function RunningTab({ runs, onRunAudit }: { runs: ProcessRun[]; onRunAudit?: () => void }) {
+  if (!runs.length) {
+    return (
+      <div className="rounded-xl border p-4" style={{ borderColor: "var(--bat-border)" }}>
+        <p className="text-sm font-semibold">No active runs right now.</p>
+        <p className="mt-1 text-xs" style={{ color: "var(--bat-text-muted)" }}>
+          BAT can immediately run a workspace intelligence audit across web, competitors, social, and news.
+        </p>
+        {onRunAudit ? (
+          <button
+            type="button"
+            onClick={onRunAudit}
+            className="mt-3 rounded-full border px-3 py-1.5 text-xs"
+            style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}
+          >
+            Run Audit Now
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-3">
       {runs.map((run) => (
@@ -121,12 +142,14 @@ export function LiveActivityPanel({
   runs,
   feedItems,
   decisions,
-  onResolve
+  onResolve,
+  onRunAudit
 }: {
   runs: ProcessRun[];
   feedItems: ProcessFeedItem[];
   decisions: DecisionItem[];
   onResolve: (id: string, option: string) => void;
+  onRunAudit?: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("running");
   const tabs = useMemo(
@@ -162,7 +185,7 @@ export function LiveActivityPanel({
       </div>
 
       <div className="max-h-[62vh] overflow-y-auto pr-1">
-        {tab === "running" ? <RunningTab runs={runs} /> : null}
+        {tab === "running" ? <RunningTab runs={runs} onRunAudit={onRunAudit} /> : null}
         {tab === "feed" ? <FeedTab feedItems={feedItems} /> : null}
         {tab === "decisions" ? <DecisionsTab decisions={decisions} onResolve={onResolve} /> : null}
       </div>

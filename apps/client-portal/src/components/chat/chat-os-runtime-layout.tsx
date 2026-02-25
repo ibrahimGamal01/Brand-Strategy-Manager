@@ -139,6 +139,16 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     runAsync(sendMessage(command, mode));
   };
 
+  const onRunAudit = () => {
+    const mode: "send" | "queue" = isStreaming ? "queue" : "send";
+    runAsync(
+      sendMessage(
+        "Run a full workspace intelligence audit now. Use tools across web snapshots/sources, competitors, social evidence, community insights, and news, then summarize findings with next actions.",
+        mode
+      )
+    );
+  };
+
   if (loading) {
     return (
       <section className="bat-surface p-6">
@@ -289,6 +299,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
             feedItems={visibleFeed}
             decisions={decisions}
             onResolve={(decisionId, option) => runAsync(resolveDecision(decisionId, option))}
+            onRunAudit={onRunAudit}
           />
         ) : null}
       </div>

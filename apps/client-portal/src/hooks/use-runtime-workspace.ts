@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  bootstrapRuntimeBranch,
   cancelRuntimeQueueItem,
   createRuntimeBranch,
   createRuntimeThread,
   fetchRuntimeBranchState,
+  fetchWorkspaceLibrary,
   listRuntimeEvents,
   listRuntimeMessages,
   listRuntimeQueue,
@@ -66,6 +68,10 @@ const DEFAULT_PREFERENCES: SessionPreferences = {
   askQuestionsFirst: false,
 };
 
+const ACTIVE_POLL_INTERVAL_MS = 1200;
+const IDLE_POLL_INTERVAL_MS = 3200;
+const LIBRARY_POLL_INTERVAL_MS = 15_000;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -92,7 +98,11 @@ function asArrayOfStrings(value: unknown, max = 12): string[] {
 
 function mapMessages(messages: Array<Record<string, unknown>>): ChatMessage[] {
   return messages
-    .filter((message) => String(message.role || "").toUpperCase() !== "TOOL")
+    .filter(
+      (message) =>
+        String(message.role || "").toUpperCase() !== "TOOL" &&
+        message.clientVisible !== false
+    )
     .map((message) => {
       const reasoningRaw = isRecord(message.reasoningJson) ? message.reasoningJson : null;
       const evidenceRaw = reasoningRaw && Array.isArray(reasoningRaw.evidence) ? reasoningRaw.evidence : [];
@@ -199,7 +209,53 @@ function mapDecisionsFromEvents(
   return items;
 }
 
-function mapRuns(activeRuns: Array<Record<string, unknown>>): ProcessRun[] {
+function mapRecentRunsFromEvents(events: Array<Record<string, unknown>>): ProcessRun[] {
+  const latestByRun = new Map<string, Record<string, unknown>>();
+  for (let idx = events.length - 1; idx >= 0; idx -= 1) {
+    const event = events[idx];
+    const runId = String(event.agentRunId || "").trim();
+    if (!runId || latestByRun.has(runId)) continue;
+    latestByRun.set(runId, event);
+  }
+
+  const now = Date.now();
+  const recent: ProcessRun[] = [];
+  for (const [runId, event] of latestByRun.entries()) {
+    const createdAt = Date.parse(toIso(event.createdAt));
+    if (Number.isFinite(createdAt) && now - createdAt > 1000 * 60 * 45) continue;
+
+    const type = String(event.type || "").toUpperCase();
+    let status: ProcessRun["status"] = "running";
+    let progress = 70;
+    if (type === "DONE") {
+      status = "done";
+      progress = 100;
+    } else if (type === "FAILED") {
+      status = "failed";
+      progress = 100;
+    } else if (type === "WAITING_FOR_INPUT" || type === "DECISION_REQUIRED") {
+      status = "waiting_input";
+      progress = 95;
+    } else if (type === "PROCESS_CANCELLED") {
+      status = "cancelled";
+      progress = 100;
+    }
+
+    const payload = isRecord(event.payloadJson) ? event.payloadJson : null;
+    const trigger = String(payload?.triggerType || "workflow").toLowerCase().replace(/_/g, " ");
+    recent.push({
+      id: runId,
+      label: `Run ${trigger}`,
+      stage: String(event.message || "Recent runtime activity"),
+      progress,
+      status,
+    });
+  }
+
+  return recent.slice(0, 6);
+}
+
+function mapRuns(activeRuns: Array<Record<string, unknown>>, events: Array<Record<string, unknown>>): ProcessRun[] {
   return activeRuns.map((run) => {
     const statusRaw = String(run.status || "RUNNING").toUpperCase();
     const toolRuns = Array.isArray(run.toolRuns) ? run.toolRuns : [];
@@ -240,7 +296,7 @@ function mapRuns(activeRuns: Array<Record<string, unknown>>): ProcessRun[] {
       progress,
       status,
     };
-  });
+  }).concat(activeRuns.length ? [] : mapRecentRunsFromEvents(events));
 }
 
 function deriveLibrary(messages: ChatMessage[]): LibraryItem[] {
@@ -262,6 +318,25 @@ function deriveLibrary(messages: ChatMessage[]): LibraryItem[] {
   }
 
   return items.slice(0, 60);
+}
+
+function mergeLibraryItems(remote: LibraryItem[], derived: LibraryItem[]): LibraryItem[] {
+  const byId = new Map<string, LibraryItem>();
+  for (const item of [...remote, ...derived]) {
+    if (!item?.id) continue;
+    if (!byId.has(item.id)) {
+      byId.set(item.id, item);
+      continue;
+    }
+    const previous = byId.get(item.id)!;
+    const prevTs = Date.parse(previous.freshness || '');
+    const nextTs = Date.parse(item.freshness || '');
+    if (Number.isFinite(nextTs) && (!Number.isFinite(prevTs) || nextTs > prevTs)) {
+      byId.set(item.id, item);
+    }
+  }
+
+  return Array.from(byId.values()).sort((a, b) => Date.parse(b.freshness || '') - Date.parse(a.freshness || ''));
 }
 
 function buildPolicyFromPreferences(preferences: SessionPreferences): Record<string, unknown> {
@@ -291,10 +366,14 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
   const [feedItems, setFeedItems] = useState<ProcessFeedItem[]>([]);
   const [decisions, setDecisions] = useState<DecisionItem[]>([]);
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
+  const [libraryItemsRemote, setLibraryItemsRemote] = useState<LibraryItem[]>([]);
 
   const [preferences, setPreferences] = useState<SessionPreferences>(DEFAULT_PREFERENCES);
 
   const pollerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const libraryPollerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const syncInFlightRef = useRef(false);
+  const bootstrapAttemptedRef = useRef<Set<string>>(new Set());
 
   const activeThread = useMemo(
     () => threads.find((thread) => thread.id === activeThreadId) || null,
@@ -320,6 +399,8 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
 
   const syncBranch = useCallback(
     async (branchId: string) => {
+      if (syncInFlightRef.current) return;
+      syncInFlightRef.current = true;
       setSyncing(true);
       try {
         const [threadPayload, messagePayload, eventPayload, queuePayload, statePayload] = await Promise.all([
@@ -348,7 +429,7 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
         setMessages(normalizedMessages);
         setFeedItems(mapFeedItems(events));
         setDecisions(mapDecisionsFromEvents(events, activeRuns));
-        setProcessRuns(mapRuns(activeRuns));
+        setProcessRuns(mapRuns(activeRuns, events));
         setQueuedMessages(
           (queuePayload.queue || []).map((item) => ({
             id: String(item.id),
@@ -360,11 +441,21 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
       } catch (fetchError: any) {
         setError(String(fetchError?.message || "Failed to sync runtime data"));
       } finally {
+        syncInFlightRef.current = false;
         setSyncing(false);
       }
     },
     [workspaceId]
   );
+
+  const syncLibrary = useCallback(async () => {
+    try {
+      const payload = await fetchWorkspaceLibrary(workspaceId, { limit: 220 });
+      setLibraryItemsRemote(Array.isArray(payload.items) ? payload.items : []);
+    } catch (libraryError: any) {
+      setError((previous) => previous || String(libraryError?.message || "Failed to sync workspace library"));
+    }
+  }, [workspaceId]);
 
   const ensureInitialThread = useCallback(async () => {
     const listed = await listRuntimeThreads(workspaceId);
@@ -395,8 +486,8 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
 
   const refreshNow = useCallback(async () => {
     if (!activeBranchId) return;
-    await syncBranch(activeBranchId);
-  }, [activeBranchId, syncBranch]);
+    await Promise.all([syncBranch(activeBranchId), syncLibrary()]);
+  }, [activeBranchId, syncBranch, syncLibrary]);
 
   const sendMessage = useCallback(
     async (content: string, mode: "send" | "queue") => {
@@ -512,6 +603,18 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
     }));
   }, []);
 
+  const isBranchHot = useMemo(
+    () =>
+      processRuns.some((run) => run.status === "running" || run.status === "waiting_input") ||
+      queuedMessages.length > 0,
+    [processRuns, queuedMessages.length]
+  );
+
+  const mergedLibraryItems = useMemo(
+    () => mergeLibraryItems(libraryItemsRemote, deriveLibrary(messages)),
+    [libraryItemsRemote, messages]
+  );
+
   useEffect(() => {
     let mounted = true;
     setLoading(true);
@@ -542,9 +645,10 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
       pollerRef.current = null;
     }
 
+    const intervalMs = isBranchHot ? ACTIVE_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS;
     pollerRef.current = setInterval(() => {
       void syncBranch(activeBranchId);
-    }, 2200);
+    }, intervalMs);
 
     return () => {
       if (pollerRef.current) {
@@ -552,7 +656,59 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
         pollerRef.current = null;
       }
     };
-  }, [activeBranchId, syncBranch]);
+  }, [activeBranchId, isBranchHot, syncBranch]);
+
+  useEffect(() => {
+    if (!activeBranchId) return;
+
+    void syncLibrary();
+
+    if (libraryPollerRef.current) {
+      clearInterval(libraryPollerRef.current);
+      libraryPollerRef.current = null;
+    }
+
+    libraryPollerRef.current = setInterval(() => {
+      void syncLibrary();
+    }, LIBRARY_POLL_INTERVAL_MS);
+
+    return () => {
+      if (libraryPollerRef.current) {
+        clearInterval(libraryPollerRef.current);
+        libraryPollerRef.current = null;
+      }
+    };
+  }, [activeBranchId, syncLibrary]);
+
+  useEffect(() => {
+    if (!activeBranchId) return;
+    if (loading || syncing) return;
+    if (messages.length > 0) return;
+    if (processRuns.length > 0) return;
+    if (queuedMessages.length > 0) return;
+    if (bootstrapAttemptedRef.current.has(activeBranchId)) return;
+
+    bootstrapAttemptedRef.current.add(activeBranchId);
+
+    void bootstrapRuntimeBranch(workspaceId, activeBranchId, {
+      initiatedBy: "portal",
+      policy: buildPolicyFromPreferences(preferences),
+    })
+      .then(() => syncBranch(activeBranchId))
+      .catch((bootstrapError: any) => {
+        setError((previous) => previous || String(bootstrapError?.message || "Failed to bootstrap runtime branch"));
+      });
+  }, [
+    activeBranchId,
+    loading,
+    messages.length,
+    preferences,
+    processRuns.length,
+    queuedMessages.length,
+    syncing,
+    syncBranch,
+    workspaceId,
+  ]);
 
   useEffect(() => {
     if (!activeThreadId) return;
@@ -580,7 +736,7 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
     decisions,
     queuedMessages,
     isStreaming: processRuns.some((run) => run.status === "running" || run.status === "waiting_input"),
-    libraryItems: deriveLibrary(messages),
+    libraryItems: mergedLibraryItems,
     preferences,
     setActiveThreadId,
     setActiveBranchId,

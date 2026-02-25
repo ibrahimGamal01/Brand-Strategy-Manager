@@ -38,6 +38,7 @@ import {
   PortalIntakeScanMode,
   scanPortalIntakeWebsites,
 } from '../services/portal/portal-intake-websites';
+import { listPortalWorkspaceLibrary } from '../services/portal/portal-library';
 
 const router = Router();
 
@@ -60,6 +61,29 @@ function parseIntakeScanMode(value: unknown): PortalIntakeScanMode {
   const mode = String(value || '').trim().toLowerCase();
   if (mode === 'standard' || mode === 'deep') return mode;
   return 'quick';
+}
+
+function parseLibraryCollection(value: unknown):
+  | 'web'
+  | 'competitors'
+  | 'social'
+  | 'community'
+  | 'news'
+  | 'deliverables'
+  | undefined {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return undefined;
+  if (
+    raw === 'web' ||
+    raw === 'competitors' ||
+    raw === 'social' ||
+    raw === 'community' ||
+    raw === 'news' ||
+    raw === 'deliverables'
+  ) {
+    return raw;
+  }
+  return undefined;
 }
 
 function serializePortalIntakeEventSse(event: PortalIntakeEvent): string {
@@ -279,6 +303,32 @@ router.get('/workspaces', requirePortalAuth, async (req, res) => {
   return res.json({
     workspaces: toPortalWorkspacePayload(session.user as any),
   });
+});
+
+router.get('/workspaces/:workspaceId/library', requirePortalAuth, requireWorkspaceMembership, async (req, res) => {
+  try {
+    const workspaceId = safeString(req.params.workspaceId);
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'workspaceId is required' });
+    }
+
+    const queryRaw = Array.isArray(req.query.q) ? req.query.q[0] : req.query.q;
+    const collectionRaw = Array.isArray(req.query.collection) ? req.query.collection[0] : req.query.collection;
+    const limitRaw = Array.isArray(req.query.limit) ? req.query.limit[0] : req.query.limit;
+    const limitParsed = Number.parseInt(String(limitRaw || ''), 10);
+
+    const result = await listPortalWorkspaceLibrary(workspaceId, {
+      query: safeString(queryRaw),
+      collection: parseLibraryCollection(collectionRaw),
+      limit: Number.isFinite(limitParsed) ? limitParsed : undefined,
+    });
+
+    return res.json(result);
+  } catch (error: any) {
+    const message = String(error?.message || '');
+    const status = message.toLowerCase().includes('not found') ? 404 : 500;
+    return res.status(status).json({ error: 'LIBRARY_FETCH_FAILED', details: message || 'Failed to list workspace library' });
+  }
 });
 
 router.get('/workspaces/:workspaceId/intake', requirePortalAuth, requireWorkspaceMembership, async (req, res) => {

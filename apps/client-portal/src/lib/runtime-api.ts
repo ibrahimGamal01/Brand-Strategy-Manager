@@ -1,4 +1,5 @@
 import {
+  LibraryItem,
   RuntimeBranch,
   RuntimeThread,
   RuntimeWorkspace,
@@ -30,6 +31,41 @@ export async function fetchWorkspaces(): Promise<RuntimeWorkspace[]> {
   if (Array.isArray(payload?.workspaces)) return payload.workspaces;
   if (Array.isArray(payload?.jobs)) return payload.jobs;
   return [];
+}
+
+export async function fetchWorkspaceLibrary(
+  workspaceId: string,
+  options?: {
+    collection?: "web" | "competitors" | "social" | "community" | "news" | "deliverables";
+    q?: string;
+    limit?: number;
+  }
+) {
+  const params = new URLSearchParams();
+  if (options?.collection) params.set("collection", options.collection);
+  if (typeof options?.q === "string" && options.q.trim()) params.set("q", options.q.trim());
+  if (typeof options?.limit === "number" && Number.isFinite(options.limit)) {
+    params.set("limit", String(Math.max(10, Math.min(300, Math.floor(options.limit)))));
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/library${suffix}`, {
+    method: "GET",
+    cache: "no-store",
+    credentials: "include",
+  });
+
+  return parseJson<{
+    items: LibraryItem[];
+    counts: {
+      web: number;
+      competitors: number;
+      social: number;
+      community: number;
+      news: number;
+      deliverables: number;
+    };
+  }>(response);
 }
 
 export type WorkspaceIntakeFormData = {
@@ -376,6 +412,23 @@ export async function sendRuntimeMessage(
     runId?: string;
     userMessageId?: string;
   }>(response);
+}
+
+export async function bootstrapRuntimeBranch(
+  workspaceId: string,
+  branchId: string,
+  input?: {
+    initiatedBy?: string;
+    policy?: Record<string, unknown>;
+  }
+) {
+  const response = await fetch(`/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/bootstrap`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input || {}),
+    credentials: "include",
+  });
+  return parseJson<{ started: boolean; runId?: string; reason?: string }>(response);
 }
 
 export async function interruptRuntimeBranch(workspaceId: string, branchId: string, reason = "Interrupted by user") {
