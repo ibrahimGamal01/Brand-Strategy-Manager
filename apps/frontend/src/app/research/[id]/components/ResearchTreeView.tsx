@@ -3,7 +3,7 @@
 import {
     Video, Users, Search, ImageIcon,
     Newspaper, TrendingUp, MessageSquare, Brain,
-    RefreshCw, Database as DatabaseIcon
+    RefreshCw, Database as DatabaseIcon, Globe
 } from 'lucide-react';
 import { TreeLayout, TreeNodeCard, DataList } from './tree';
 import { ContentAndAiAnalysisView, getDeduplicatedMediaCount } from './ContentAndAiAnalysisView';
@@ -38,6 +38,10 @@ interface ResearchTreeViewProps {
         communityInsights: any[];
         mediaAssets: any[];
         aiQuestions: any[];
+        webSources?: any[];
+        webSnapshots?: any[];
+        webExtractionRecipes?: any[];
+        webExtractionRuns?: any[];
         socialProfiles: any[];
         brandMentions: any[];
         clientDocuments: any[];
@@ -82,6 +86,10 @@ export function ResearchTreeView({
     const trends = data.searchTrends || [];
     const insights = data.communityInsights || [];
     const aiQuestions = data.aiQuestions || [];
+    const webSources = data.webSources || [];
+    const webSnapshots = data.webSnapshots || [];
+    const webExtractionRecipes = data.webExtractionRecipes || [];
+    const webExtractionRuns = data.webExtractionRuns || [];
     const brandMentions = data.brandMentions || [];
     const clientDocuments = data.clientDocuments || [];
     const trendActionResult = getLastResult('search_trends');
@@ -105,6 +113,20 @@ export function ResearchTreeView({
     ).length;
 
     const visibleCompetitors = competitors.filter((c: any) => !isFilteredSelectionState(c?.selectionState));
+
+    const inferSnapshotSourceTransport = (snapshot: any): string => {
+      const meta = snapshot?.metadata && typeof snapshot.metadata === 'object' ? snapshot.metadata : {};
+      const sourceTransport = String((meta as Record<string, unknown>).sourceTransport || '').trim();
+      if (sourceTransport) return sourceTransport;
+      const fallbackReason = String((meta as Record<string, unknown>).fallbackReason || '').trim();
+      return fallbackReason ? 'HTTP_FALLBACK' : 'SCRAPLING_WORKER';
+    };
+
+    const sourceMethodLabel = (value?: string | null): string => {
+      const normalized = String(value || '').trim().toUpperCase();
+      if (!normalized) return 'UNKNOWN';
+      return normalized.replaceAll('_', ' ');
+    };
 
     async function loadBrandIntelligenceSummary() {
         try {
@@ -339,6 +361,85 @@ export function ResearchTreeView({
                         </div>
                     </TreeNodeCard >
                 </TreeNodeCard >
+
+                {/* Level 1: Web Intelligence */}
+                <TreeNodeCard
+                    title="Web Intelligence"
+                    icon={<Globe className="h-4 w-4" />}
+                    count={webSources.length + webSnapshots.length + webExtractionRuns.length}
+                    defaultExpanded={webSources.length + webSnapshots.length + webExtractionRuns.length > 0}
+                    level={1}
+                >
+                    <TreeNodeCard
+                        title="Web Sources"
+                        icon={<DatabaseIcon className="h-3 w-3" />}
+                        count={webSources.length}
+                        level={2}
+                        defaultExpanded={webSources.length > 0}
+                    >
+                        <DataList
+                            items={webSources.slice(0, 80).map((source: any, idx: number) => ({
+                                id: source.id || idx.toString(),
+                                title: source.domain || source.url || 'Web source',
+                                subtitle: `Source: ${sourceMethodLabel(source.discoveredBy)} • Type: ${sourceMethodLabel(source.sourceType)}`,
+                                content: source.url,
+                                url: source.url,
+                            }))}
+                            emptyMessage="No web sources available"
+                        />
+                    </TreeNodeCard>
+
+                    <TreeNodeCard
+                        title="Web Snapshots"
+                        icon={<DatabaseIcon className="h-3 w-3" />}
+                        count={webSnapshots.length}
+                        level={2}
+                        defaultExpanded={webSnapshots.length > 0}
+                    >
+                        <DataList
+                            items={webSnapshots.slice(0, 80).map((snapshot: any, idx: number) => {
+                                const sourceTransport = inferSnapshotSourceTransport(snapshot);
+                                const fallbackReason = String(snapshot?.metadata?.fallbackReason || '').trim();
+                                return {
+                                    id: snapshot.id || idx.toString(),
+                                    title:
+                                      snapshot?.webSource?.domain ||
+                                      snapshot?.finalUrl ||
+                                      snapshot?.webSource?.url ||
+                                      'Snapshot',
+                                    subtitle: `Transport: ${sourceMethodLabel(sourceTransport)} • Fetcher: ${sourceMethodLabel(snapshot.fetcherUsed)} • Status: ${snapshot.statusCode ?? 'n/a'}`,
+                                    content:
+                                      `${fallbackReason ? `Fallback: ${fallbackReason}\n\n` : ''}${snapshot.cleanText || ''}`.trim(),
+                                    url: snapshot.finalUrl || snapshot?.webSource?.url || undefined,
+                                };
+                            })}
+                            emptyMessage="No web snapshots available"
+                        />
+                    </TreeNodeCard>
+
+                    <TreeNodeCard
+                        title="Extraction Runs"
+                        icon={<DatabaseIcon className="h-3 w-3" />}
+                        count={webExtractionRuns.length}
+                        level={2}
+                        defaultExpanded={false}
+                    >
+                        <DataList
+                            items={webExtractionRuns.slice(0, 60).map((run: any, idx: number) => ({
+                                id: run.id || idx.toString(),
+                                title: run?.recipe?.name || `Extraction ${run.id || idx + 1}`,
+                                subtitle: `Confidence: ${typeof run.confidence === 'number' ? `${Math.round(run.confidence * 100)}%` : 'n/a'}`,
+                                content: run?.snapshot?.finalUrl || run.snapshotId || '',
+                                url: run?.snapshot?.finalUrl || undefined,
+                            }))}
+                            emptyMessage={
+                              webExtractionRecipes.length > 0
+                                ? 'No extraction runs yet. Use web.extract in chat or API.'
+                                : 'No extraction recipes or runs available'
+                            }
+                        />
+                    </TreeNodeCard>
+                </TreeNodeCard>
 
                 {/* Level 1: Brand Reputation (Mentions) */}
                 < TreeNodeCard

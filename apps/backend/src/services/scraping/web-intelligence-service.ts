@@ -75,6 +75,10 @@ export async function fetchAndPersistWebSnapshot(input: {
         blockedSuspected: fetchResult.blockedSuspected,
         timings: fetchResult.timings || null,
         fallbackReason: fetchResult.fallbackReason || null,
+        sourceTransport:
+          (fetchResult.metadata && (fetchResult.metadata as Record<string, unknown>).sourceTransport) ||
+          (fetchResult.fallbackReason ? 'HTTP_FALLBACK' : 'SCRAPLING_WORKER'),
+        sourceMetadata: fetchResult.metadata || null,
       }),
       cleanText: compactText(String(fetchResult.text || ''), 30000) || null,
     },
@@ -167,6 +171,10 @@ export async function crawlAndPersistWebSources(input: {
           metadata: toJsonSafe({
             crawlRunId: crawlResult.runId,
             fallbackReason: crawlResult.fallbackReason || null,
+            sourceTransport:
+              (page.metadata && (page.metadata as Record<string, unknown>).sourceTransport) ||
+              (crawlResult.fallbackReason ? 'HTTP_FALLBACK' : 'SCRAPLING_WORKER'),
+            sourceMetadata: page.metadata || null,
           }),
         },
       });

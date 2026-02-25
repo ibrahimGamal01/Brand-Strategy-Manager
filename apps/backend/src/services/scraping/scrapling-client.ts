@@ -56,6 +56,8 @@ async function fetchViaWorker(payload: ScraplingFetchRequest): Promise<Scrapling
     headers: { 'Content-Type': 'application/json' },
   });
   const data = (response.data || {}) as Record<string, any>;
+  const metadata =
+    typeof data.metadata === 'object' && data.metadata ? (data.metadata as Record<string, unknown>) : {};
   return {
     ok: Boolean(data.ok ?? true),
     finalUrl: String(data.finalUrl || payload.url),
@@ -65,7 +67,10 @@ async function fetchViaWorker(payload: ScraplingFetchRequest): Promise<Scrapling
     html: typeof data.html === 'string' ? data.html : null,
     text: typeof data.text === 'string' ? data.text : null,
     timings: typeof data.timings === 'object' && data.timings ? data.timings : undefined,
-    metadata: typeof data.metadata === 'object' && data.metadata ? data.metadata : undefined,
+    metadata: {
+      sourceTransport: 'SCRAPLING_WORKER',
+      ...metadata,
+    },
   };
 }
 
@@ -95,6 +100,7 @@ async function fetchViaFallback(payload: ScraplingFetchRequest): Promise<Scrapli
     text: payload.returnText === false ? null : stripHtml(html),
     timings: undefined,
     metadata: {
+      sourceTransport: 'HTTP_FALLBACK',
       fallback: true,
       contentType: String(response.headers['content-type'] || ''),
     },
@@ -113,6 +119,7 @@ function normalizeFallbackCrawlPages(
     fetcherUsed: result.fetcherUsed,
     text: result.text || null,
     html: result.html || null,
+    metadata: result.metadata || { sourceTransport: 'HTTP_FALLBACK' },
   }));
 }
 
@@ -217,6 +224,10 @@ export const scraplingClient = {
               fetcherUsed: normalizeMode(page.fetcherUsed),
               text: typeof page.text === 'string' ? page.text : null,
               html: typeof page.html === 'string' ? page.html : null,
+              metadata:
+                typeof page.metadata === 'object' && page.metadata
+                  ? (page.metadata as Record<string, unknown>)
+                  : { sourceTransport: 'SCRAPLING_WORKER' },
             }))
           : [],
       };

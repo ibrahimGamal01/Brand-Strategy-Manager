@@ -44,6 +44,7 @@ export type ScraplingCrawlPage = {
   fetcherUsed?: ScraplingMode;
   text?: string | null;
   html?: string | null;
+  metadata?: Record<string, unknown>;
 };
 
 export type ScraplingCrawlResponse = {

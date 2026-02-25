@@ -253,6 +253,7 @@ def fetch(payload: FetchRequest) -> Dict[str, Any]:
             "text": result.text if payload.returnText else None,
             "timings": {},
             "metadata": {
+                "sourceTransport": "SCRAPLING_WORKER",
                 "sessionKey": payload.sessionKey,
                 "proxyStrategy": payload.proxyStrategy,
                 "workerMode": _normalize_mode(payload.mode),
@@ -298,6 +299,10 @@ def crawl(payload: CrawlRequest) -> Dict[str, Any]:
                 "fetcherUsed": fetched.fetcher_used,
                 "text": fetched.text,
                 "html": fetched.html,
+                "metadata": {
+                    "sourceTransport": "SCRAPLING_WORKER",
+                    "workerMode": _normalize_mode(payload.mode),
+                },
             }
         )
 

@@ -383,6 +383,53 @@ router.get('/:id', async (req: Request, res: Response) => {
             }
           }
         },
+        webSources: {
+          where: { isActive: true },
+          orderBy: { updatedAt: 'desc' },
+          take: 200,
+        },
+        webPageSnapshots: {
+          where: { isActive: true },
+          orderBy: { fetchedAt: 'desc' },
+          take: 200,
+          include: {
+            webSource: {
+              select: {
+                id: true,
+                url: true,
+                domain: true,
+                sourceType: true,
+                discoveredBy: true,
+              },
+            },
+          },
+        },
+        webExtractionRecipes: {
+          where: { isActive: true },
+          orderBy: { updatedAt: 'desc' },
+          take: 100,
+        },
+        webExtractionRuns: {
+          where: { isActive: true },
+          orderBy: { createdAt: 'desc' },
+          take: 150,
+          include: {
+            recipe: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+            snapshot: {
+              select: {
+                id: true,
+                finalUrl: true,
+                fetcherUsed: true,
+                webSourceId: true,
+              },
+            },
+          },
+        },
         brainCommands: {
           orderBy: { createdAt: 'desc' },
           take: 50,
