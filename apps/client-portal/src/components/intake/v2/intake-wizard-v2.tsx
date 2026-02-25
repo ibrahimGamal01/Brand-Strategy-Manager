@@ -504,11 +504,13 @@ export function IntakeWizardV2({
             <SmartLinksAnswer
               value={state.competitorLinks}
               onChange={(next) => {
-                updateField("competitorLinks", next);
-                updateField(
-                  "competitorInspirationLinks",
-                  next.filter((item) => item.valid).map((item) => item.normalizedUrl || item.raw)
-                );
+                onChange({
+                  ...state,
+                  competitorLinks: next,
+                  competitorInspirationLinks: next
+                    .filter((item) => item.valid)
+                    .map((item) => item.normalizedUrl || item.raw),
+                });
               }}
               maxItems={5}
             />
