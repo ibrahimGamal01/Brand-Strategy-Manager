@@ -257,6 +257,21 @@ export async function scanPortalIntakeWebsites(
         pagesPersisted += Number(crawl.persisted || 0);
         targetsCompleted += 1;
 
+        if (crawl.fallbackReason) {
+          warnings += 1;
+          publishPortalIntakeEvent(
+            workspaceId,
+            'SCAN_WARNING',
+            `Crawler used fallback mode for ${target}.`,
+            {
+              target,
+              fallbackReason: crawl.fallbackReason,
+              persisted: crawl.persisted,
+              runId: crawl.runId,
+            }
+          );
+        }
+
         if (Array.isArray(crawl.failures) && crawl.failures.length > 0) {
           warnings += crawl.failures.length;
           publishPortalIntakeEvent(

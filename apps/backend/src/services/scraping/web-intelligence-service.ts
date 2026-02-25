@@ -21,6 +21,14 @@ function toJsonSafe(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value ?? null)) as Prisma.InputJsonValue;
 }
 
+function getHostnameFromUrl(value: string): string {
+  try {
+    return new URL(String(value || '')).hostname.replace(/^www\./i, '').toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
 export async function fetchAndPersistWebSnapshot(input: {
   researchJobId: string;
   url: string;
@@ -162,13 +170,20 @@ export async function crawlAndPersistWebSources(input: {
   const failures: string[] = [];
 
   for (const page of crawlResult.pages || []) {
-    const pageUrl = String(page.finalUrl || page.url || '').trim();
-    if (!pageUrl) continue;
+    const pageUrlRaw = String(page.finalUrl || page.url || '').trim();
+    if (!pageUrlRaw) continue;
 
     try {
+      const pageUrl = normalizeUrl(pageUrlRaw);
+      const pageHost = getHostnameFromUrl(pageUrl);
+      if (explicitAllowedDomains.length > 0 && pageHost && !explicitAllowedDomains.includes(pageHost)) {
+        failures.push(`Skipped external page outside allowed domains: ${pageUrl}`);
+        continue;
+      }
+
       const source = await upsertWebSource({
         researchJobId: input.researchJobId,
-        normalizedUrl: normalizeUrl(pageUrl),
+        normalizedUrl: pageUrl,
         sourceType: 'OTHER',
         discoveredBy: 'SCRAPLING_CRAWL',
       });
@@ -200,7 +215,7 @@ export async function crawlAndPersistWebSources(input: {
       await prisma.webPageSnapshot.update({ where: { id: snapshot.id }, data: { htmlPath, textPath } });
       persisted += 1;
     } catch (error: any) {
-      failures.push(`Failed to persist ${pageUrl}: ${error?.message || error}`);
+      failures.push(`Failed to persist ${pageUrlRaw}: ${error?.message || error}`);
     }
   }
 

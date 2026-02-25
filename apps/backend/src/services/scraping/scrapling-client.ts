@@ -114,19 +114,97 @@ async function fetchViaFallback(payload: ScraplingFetchRequest): Promise<Scrapli
   };
 }
 
-function normalizeFallbackCrawlPages(
-  startUrls: string[],
-  fetchResults: ScraplingFetchResponse[],
-): ScraplingCrawlPage[] {
-  return fetchResults.map((result, index) => ({
-    url: startUrls[index],
-    finalUrl: result.finalUrl,
-    statusCode: result.statusCode || undefined,
-    fetcherUsed: result.fetcherUsed,
-    text: result.text || null,
-    html: result.html || null,
-    metadata: result.metadata || { sourceTransport: 'HTTP_FALLBACK' },
-  }));
+function normalizeHostname(value: string): string {
+  return String(value || '').trim().toLowerCase().replace(/^www\./i, '');
+}
+
+function normalizeUrlForQueue(value: string): string {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try {
+    const parsed = new URL(raw);
+    if (!['http:', 'https:'].includes(parsed.protocol)) return '';
+    parsed.hash = '';
+    const normalized = parsed.toString();
+    if (parsed.pathname === '/' || !normalized.endsWith('/')) return normalized;
+    return normalized.slice(0, -1);
+  } catch {
+    return '';
+  }
+}
+
+function toAllowedDomainSet(payload: ScraplingCrawlRequest): Set<string> {
+  const candidates =
+    Array.isArray(payload.allowedDomains) && payload.allowedDomains.length > 0
+      ? payload.allowedDomains
+      : payload.startUrls;
+  const domains = candidates
+    .map((entry) => {
+      const value = String(entry || '').trim();
+      if (!value) return '';
+      try {
+        const parsed = new URL(value);
+        return normalizeHostname(parsed.hostname);
+      } catch {
+        return normalizeHostname(value.replace(/^https?:\/\//i, '').split('/')[0] || '');
+      }
+    })
+    .filter(Boolean);
+  return new Set(domains);
+}
+
+function isAllowedUrlByDomain(url: string, allowedDomains: Set<string>): boolean {
+  if (allowedDomains.size === 0) return true;
+  try {
+    const host = normalizeHostname(new URL(url).hostname);
+    return host.length > 0 && allowedDomains.has(host);
+  } catch {
+    return false;
+  }
+}
+
+function extractLinksFromHtml(html: string, baseUrl: string, allowedDomains: Set<string>): string[] {
+  const links: string[] = [];
+  const seen = new Set<string>();
+  const source = String(html || '')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ');
+  if (!source.trim()) return links;
+
+  const hrefRegex = /href\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s"'<>`]+))/gi;
+  let match: RegExpExecArray | null;
+  while ((match = hrefRegex.exec(source))) {
+    const rawHref = String(match[1] || match[2] || match[3] || '').trim();
+    if (!rawHref) continue;
+    if (
+      rawHref.startsWith('#') ||
+      /^javascript:/i.test(rawHref) ||
+      /^mailto:/i.test(rawHref) ||
+      /^tel:/i.test(rawHref) ||
+      /^data:/i.test(rawHref) ||
+      /^blob:/i.test(rawHref) ||
+      /window\.location/i.test(rawHref)
+    ) {
+      continue;
+    }
+
+    try {
+      const resolved = new URL(rawHref, baseUrl).toString();
+      const normalized = normalizeUrlForQueue(resolved);
+      if (!normalized) continue;
+      if (/\.(?:pdf|jpg|jpeg|png|gif|svg|webp|mp4|mov|avi|zip|rar|7z|docx?|xlsx?|pptx?)(?:$|[?#])/i.test(normalized)) {
+        continue;
+      }
+      if (!isAllowedUrlByDomain(normalized, allowedDomains)) continue;
+      if (seen.has(normalized)) continue;
+      seen.add(normalized);
+      links.push(normalized);
+    } catch {
+      // skip malformed href values
+    }
+  }
+
+  return links;
 }
 
 function fallbackExtract(request: ScraplingExtractRequest): ScraplingExtractResponse {
@@ -147,23 +225,73 @@ function fallbackExtract(request: ScraplingExtractRequest): ScraplingExtractResp
 }
 
 async function fallbackCrawl(payload: ScraplingCrawlRequest): Promise<ScraplingCrawlResponse> {
-  const targets = payload.startUrls.slice(0, payload.maxPages || 20);
-  const results = await Promise.all(
-    targets.map((url) =>
-      scraplingClient.fetch({ url, mode: payload.mode, timeoutMs: DEFAULT_TIMEOUT_MS, returnHtml: false, returnText: true }),
-    ),
-  );
-  const pages = normalizeFallbackCrawlPages(targets, results);
+  const fallbackMaxPages = Math.max(1, Math.min(60, Number(payload.maxPages || 20)));
+  const fallbackMaxDepth = Math.max(0, Math.min(5, Number(payload.maxDepth || 1)));
+  const allowedDomains = toAllowedDomainSet(payload);
+  const queue: Array<{ url: string; depth: number }> = payload.startUrls
+    .map((entry) => normalizeUrlForQueue(entry))
+    .filter(Boolean)
+    .map((url) => ({ url, depth: 0 }));
+  const queuedSet = new Set<string>(queue.map((entry) => entry.url));
+  const visited = new Set<string>();
+  const pages: ScraplingCrawlPage[] = [];
+  let failed = 0;
+  let queued = queue.length;
+
+  while (queue.length > 0 && pages.length < fallbackMaxPages) {
+    const next = queue.shift();
+    if (!next) break;
+    const currentUrl = normalizeUrlForQueue(next.url);
+    if (!currentUrl) continue;
+    queuedSet.delete(currentUrl);
+    if (visited.has(currentUrl)) continue;
+    visited.add(currentUrl);
+    if (!isAllowedUrlByDomain(currentUrl, allowedDomains)) continue;
+
+    try {
+      const result = await fetchViaFallback({
+        url: currentUrl,
+        mode: payload.mode,
+        timeoutMs: Math.min(DEFAULT_TIMEOUT_MS, 12_000),
+        returnHtml: true,
+        returnText: true,
+      });
+      pages.push({
+        url: currentUrl,
+        finalUrl: result.finalUrl,
+        statusCode: result.statusCode || undefined,
+        fetcherUsed: result.fetcherUsed,
+        text: result.text || null,
+        html: result.html || null,
+        metadata: result.metadata || { sourceTransport: 'HTTP_FALLBACK' },
+      });
+
+      if (next.depth >= fallbackMaxDepth) continue;
+
+      const baseUrl = result.finalUrl || currentUrl;
+      const links = extractLinksFromHtml(result.html || '', baseUrl, allowedDomains);
+      for (const link of links) {
+        if (pages.length + queue.length >= fallbackMaxPages * 3) break;
+        if (visited.has(link) || queuedSet.has(link)) continue;
+        queue.push({ url: link, depth: next.depth + 1 });
+        queuedSet.add(link);
+        queued += 1;
+      }
+    } catch {
+      failed += 1;
+    }
+  }
+
   return {
     ok: true,
     runId: `fallback-${Date.now()}`,
     summary: {
-      queued: targets.length,
+      queued,
       fetched: pages.filter((page) => (page.statusCode || 0) >= 200 && (page.statusCode || 0) < 400).length,
-      failed: pages.filter((page) => (page.statusCode || 0) >= 400 || !page.statusCode).length,
+      failed: pages.filter((page) => (page.statusCode || 0) >= 400 || !page.statusCode).length + failed,
     },
     pages,
-    fallbackReason: 'SCRAPLING_WORKER_URL is not configured; fallback crawl only fetches provided URLs.',
+    fallbackReason: 'Used HTTP fallback crawler with on-page link discovery.',
   };
 }
 
@@ -251,7 +379,7 @@ export const scraplingClient = {
       const hasUsablePageContent = pages.some((page) => hasUsableWorkerContent(page));
       if (pages.length > 0 && !hasUsablePageContent) {
         console.warn('[ScraplingClient] Worker crawl returned empty page payloads, falling back to HTTP crawl mode.');
-        const fallback = await fallbackCrawl({ ...payload, maxPages: Math.min(payload.maxPages || 20, 20) });
+        const fallback = await fallbackCrawl(payload);
         fallback.fallbackReason =
           data.fallbackReason ||
           'Worker crawl pages contained no html/text; used HTTP fallback crawl for usable content.';
@@ -270,7 +398,7 @@ export const scraplingClient = {
       };
     } catch (error: any) {
       console.warn('[ScraplingClient] Worker crawl failed, using fallback crawl mode:', error?.message || error);
-      const fallback = await fallbackCrawl({ ...payload, maxPages: Math.min(payload.maxPages || 20, 20) });
+      const fallback = await fallbackCrawl(payload);
       fallback.fallbackReason = `Worker crawl failed: ${error?.message || 'unknown error'}`;
       return fallback;
     }
