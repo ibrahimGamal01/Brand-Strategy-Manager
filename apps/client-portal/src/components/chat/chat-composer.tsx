@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { Play, Send, Square, ArrowUp, ArrowDown, X } from "lucide-react";
+import { Send, Square, ArrowUp, ArrowDown, X, WandSparkles } from "lucide-react";
 import { QueuedMessage } from "@/types/chat";
 
 const steerChipSet = [
@@ -43,14 +43,20 @@ export function ChatComposer({
     }
 
     if (isStreaming) {
-      const interrupt = window.confirm(
-        "BAT is currently running. Press OK to interrupt and send now, or Cancel to queue this message."
-      );
-      onSend(content, interrupt ? "send" : "queue");
+      onSend(content, "queue");
       setMessage("");
       return;
     }
 
+    onSend(content, "send");
+    setMessage("");
+  };
+
+  const steerRunNow = () => {
+    if (!isStreaming) return;
+    const content = message.trim();
+    if (!content) return;
+    // "send" while active maps to interrupt mode in the runtime hook.
     onSend(content, "send");
     setMessage("");
   };
@@ -120,6 +126,12 @@ export function ChatComposer({
         </div>
       ) : null}
 
+      {isStreaming ? (
+        <p className="mb-3 text-xs" style={{ color: "var(--bat-text-muted)" }}>
+          Send will queue your message. Use <strong>Steer Run</strong> to interrupt and apply direction immediately.
+        </p>
+      ) : null}
+
       <form onSubmit={submit} className="flex gap-2">
         <textarea
           value={message}
@@ -128,15 +140,26 @@ export function ChatComposer({
           className="min-h-[84px] flex-1 rounded-2xl border px-3 py-2 text-sm outline-none"
           style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}
         />
-        <div className="flex w-28 flex-col gap-2">
+        <div className="flex w-32 flex-col gap-2">
           <button
             type="submit"
             className="inline-flex items-center justify-center gap-1 rounded-full px-3 py-2 text-sm font-semibold"
             style={{ background: "var(--bat-accent)", color: "white" }}
           >
-            {isStreaming ? <Play className="h-4 w-4" /> : <Send className="h-4 w-4" />}
-            {isStreaming ? "Send" : "Run"}
+            <Send className="h-4 w-4" />
+            {isStreaming ? "Queue" : "Run"}
           </button>
+          {isStreaming ? (
+            <button
+              type="button"
+              onClick={steerRunNow}
+              disabled={!message.trim()}
+              className="inline-flex items-center justify-center gap-1 rounded-full border px-3 py-2 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+              style={{ borderColor: "var(--bat-border)" }}
+            >
+              <WandSparkles className="h-4 w-4" /> Steer run
+            </button>
+          ) : null}
           {isStreaming ? (
             <button
               type="button"
