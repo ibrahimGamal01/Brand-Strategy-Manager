@@ -10,6 +10,7 @@ import {
 import { evaluatePendingQuestionSets } from '../intake/question-workflow';
 import { suggestIntakeCompletion } from '../intake/suggest-intake-completion';
 import { resumeResearchJob } from '../social/research-resume';
+import { resolveIntakeWebsites, seedPortalIntakeWebsites, parseWebsiteList } from './portal-intake-websites';
 
 type IntakePlatform = 'instagram' | 'tiktok' | 'youtube' | 'twitter';
 
@@ -18,6 +19,7 @@ type IntakeHandles = Record<IntakePlatform, string>;
 export type PortalWorkspaceIntakePrefill = {
   name: string;
   website: string;
+  websites: string[];
   oneSentenceDescription: string;
   niche: string;
   businessType: string;
@@ -250,10 +252,13 @@ function buildPrefill(job: WorkspaceWithClient): PortalWorkspaceIntakePrefill {
   const input = asRecord(job.inputData);
   const profile = job.client.brainProfile;
   const constraints = asRecord(profile?.constraints);
+  const websites = parseWebsiteList([input.website, input.websites], 8);
+  const primaryWebsite = websites[0] || stringify(input.website);
 
   return {
     name: stringify(input.brandName) || job.client.name || '',
-    website: stringify(input.website),
+    website: primaryWebsite,
+    websites,
     oneSentenceDescription:
       stringify(input.description) || stringify(input.businessOverview) || stringify(job.client.businessOverview),
     niche: stringify(input.niche),
@@ -413,7 +418,8 @@ export async function submitPortalWorkspaceIntake(
     handle,
   }));
 
-  const website = stringify(nextPayload.website) || stringify(nextPayload.websiteDomain);
+  const { websites, primaryWebsite } = resolveIntakeWebsites(nextPayload);
+  const website = primaryWebsite || stringify(nextPayload.website) || stringify(nextPayload.websiteDomain);
   const oneSentenceDescription =
     stringify(nextPayload.oneSentenceDescription) ||
     stringify(nextPayload.description) ||
@@ -468,7 +474,7 @@ export async function submitPortalWorkspaceIntake(
       secondaryGoals: toJson(secondaryGoals),
       targetMarket: stringify(nextPayload.targetAudience) || null,
       geoScope: stringify(nextPayload.geoScope) || null,
-      websiteDomain: normalizeWebsiteDomain(website),
+    websiteDomain: normalizeWebsiteDomain(website),
       channels: toJson(channels),
       constraints: toJson(stripUndefinedFromJson(mergedConstraints)),
     },
@@ -480,7 +486,7 @@ export async function submitPortalWorkspaceIntake(
       secondaryGoals: toJson(secondaryGoals),
       targetMarket: stringify(nextPayload.targetAudience) || null,
       geoScope: stringify(nextPayload.geoScope) || null,
-      websiteDomain: normalizeWebsiteDomain(website),
+    websiteDomain: normalizeWebsiteDomain(website),
       channels: toJson(channels),
       constraints: toJson(stripUndefinedFromJson(mergedConstraints)),
     },
@@ -498,6 +504,7 @@ export async function submitPortalWorkspaceIntake(
     niche: stringify(nextPayload.niche),
     businessType: stringify(nextPayload.businessType),
     website,
+    websites: websites.length ? websites : undefined,
     primaryGoal,
     secondaryGoals,
     futureGoal: stringify(nextPayload.futureGoal),
@@ -545,6 +552,12 @@ export async function submitPortalWorkspaceIntake(
     const { seedTopPicksFromInspirationLinks } = await import('../discovery/seed-intake-competitors');
     await seedTopPicksFromInspirationLinks(workspaceId, competitorInspirationLinks).catch((error) => {
       console.error(`[PortalIntake] Failed to seed competitor inspiration links for ${workspaceId}:`, error);
+    });
+  }
+
+  if (websites.length > 0) {
+    void seedPortalIntakeWebsites(workspaceId, websites).catch((error) => {
+      console.error(`[PortalIntake] Failed to seed website scraping for ${workspaceId}:`, error);
     });
   }
 

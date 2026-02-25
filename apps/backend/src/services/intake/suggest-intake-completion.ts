@@ -22,6 +22,7 @@ function getOpenAiClient(): OpenAI | null {
 const INTAKE_KEYS = [
   'name',
   'website',
+  'websites',
   'oneSentenceDescription',
   'niche',
   'businessType',
@@ -140,7 +141,13 @@ export async function suggestIntakeCompletion(
     partialPayload.handles && typeof partialPayload.handles === 'object'
       ? (partialPayload.handles as Record<string, unknown>)
       : {};
-  const website = String(partialPayload.website || '').trim();
+  const websiteCandidates = Array.isArray(partialPayload.websites)
+    ? partialPayload.websites
+    : typeof partialPayload.websites === 'string'
+      ? [partialPayload.websites]
+      : [];
+  const websiteFromList = websiteCandidates.find((entry) => String(entry || '').trim().length > 0);
+  const website = String(websiteFromList || partialPayload.website || '').trim();
   const name = String(partialPayload.name || '').trim();
 
   if (missingKeys.length === 0) {
@@ -155,7 +162,7 @@ export async function suggestIntakeCompletion(
 
   const systemPrompt = `You are a brand strategy assistant. Given partial business intake form data, suggest plausible values ONLY for the missing fields. Return a JSON object with exactly the keys listed in the "Missing keys" section. Rules:
 - Do not suggest values for fields the user already provided.
-- For list fields (servicesList, topProblems, resultsIn90Days, questionsBeforeBuying, secondaryGoals, excludedCategories, competitorInspirationLinks) return an array of strings.
+- For list fields (websites, servicesList, topProblems, resultsIn90Days, questionsBeforeBuying, secondaryGoals, excludedCategories, competitorInspirationLinks) return an array of strings.
 - For single-line fields return a string. Keep suggestions concise and consistent with the provided context.
 - competitorInspirationLinks: return an empty array or leave out if you cannot suggest real URLs.
 - brandVoiceWords: 3-5 words only. topicsToAvoid: short list or comma-separated.

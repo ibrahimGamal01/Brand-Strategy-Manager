@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { buildPlatformHandles, parseStringList } from '../intake/brain-intake-utils';
 import { getPortalWorkspaceIntakeStatus } from './portal-intake';
+import { resolveIntakeWebsites } from './portal-intake-websites';
 
 type IntakePlatform = 'instagram' | 'tiktok' | 'youtube' | 'twitter';
 
@@ -122,6 +123,7 @@ export async function savePortalWorkspaceIntakeDraft(
   const resultsIn90Days = parseList(nextPayload.resultsIn90Days, 2);
   const questionsBeforeBuying = parseList(nextPayload.questionsBeforeBuying, 3);
   const competitorInspirationLinks = parseList(nextPayload.competitorInspirationLinks, 5);
+  const { websites, primaryWebsite } = resolveIntakeWebsites(nextPayload);
   const topicsToAvoid = parseList(nextPayload.topicsToAvoid, 20);
   const excludedCategories = parseStringList(nextPayload.excludedCategories);
   const secondaryGoals = parseStringList(nextPayload.secondaryGoals);
@@ -135,7 +137,8 @@ export async function savePortalWorkspaceIntakeDraft(
     brandName: stringify(nextPayload.name) || undefined,
     niche: stringify(nextPayload.niche),
     businessType: stringify(nextPayload.businessType),
-    website: stringify(nextPayload.website),
+    website: primaryWebsite || stringify(nextPayload.website),
+    websites: websites.length ? websites : undefined,
     description: stringify(nextPayload.oneSentenceDescription),
     businessOverview: stringify(nextPayload.oneSentenceDescription),
     mainOffer: stringify(nextPayload.mainOffer),

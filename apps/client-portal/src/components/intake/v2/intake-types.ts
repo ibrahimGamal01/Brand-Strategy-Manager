@@ -18,6 +18,7 @@ export interface CompetitorLinkItem {
 export interface IntakeStateV2 {
   name: string;
   website: string;
+  websites: string[];
   oneSentenceDescription: string;
   niche: string;
   businessType: string;
@@ -53,6 +54,7 @@ export interface IntakeStateV2 {
 export const INITIAL_INTAKE_STATE_V2: IntakeStateV2 = {
   name: "",
   website: "",
+  websites: [],
   oneSentenceDescription: "",
   niche: "",
   businessType: "",

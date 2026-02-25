@@ -35,6 +35,7 @@ export async function fetchWorkspaces(): Promise<RuntimeWorkspace[]> {
 export type WorkspaceIntakeFormData = {
   name: string;
   website: string;
+  websites?: string | string[];
   oneSentenceDescription: string;
   niche: string;
   businessType: string;

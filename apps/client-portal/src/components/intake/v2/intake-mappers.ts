@@ -8,6 +8,90 @@ function normalizeText(value: unknown): string {
   return String(value || "").trim();
 }
 
+const SOCIAL_HOST_MARKERS = [
+  "instagram.com",
+  "tiktok.com",
+  "youtube.com",
+  "youtu.be",
+  "x.com",
+  "twitter.com",
+  "facebook.com",
+  "linkedin.com",
+];
+
+function isSocialHost(hostname: string): boolean {
+  const host = String(hostname || "").toLowerCase();
+  return SOCIAL_HOST_MARKERS.some((marker) => host.includes(marker));
+}
+
+function normalizeWebsiteCandidate(rawValue: string): string {
+  let candidate = String(rawValue || "").trim();
+  if (!candidate) return "";
+
+  candidate = candidate
+    .replace(/^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/i, "$2")
+    .replace(/[)\],;.!]+$/g, "");
+
+  if (!/^https?:\/\//i.test(candidate)) {
+    candidate = `https://${candidate}`;
+  }
+
+  try {
+    const parsed = new URL(candidate);
+    if (!["http:", "https:"].includes(parsed.protocol)) return "";
+    if (isSocialHost(parsed.hostname)) return "";
+    parsed.hash = "";
+    const normalized = parsed.toString();
+    return normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
+  } catch {
+    return "";
+  }
+}
+
+function extractWebsiteCandidates(value: unknown): string[] {
+  const text = String(value || "").trim();
+  if (!text) return [];
+
+  const candidates: string[] = [];
+  const markdownLinkMatches = text.match(/\[[^\]]+\]\((https?:\/\/[^)]+)\)/gi) || [];
+  for (const match of markdownLinkMatches) {
+    const extracted = match.match(/\((https?:\/\/[^)]+)\)/i)?.[1];
+    if (extracted) candidates.push(extracted);
+  }
+
+  const urlMatches = text.match(/https?:\/\/[^\s)]+/gi) || [];
+  candidates.push(...urlMatches);
+
+  const domainMatches = text.match(/\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[\w\-./?%&=]*)?/gi) || [];
+  candidates.push(...domainMatches);
+
+  if (!candidates.length && !/\s/.test(text)) {
+    candidates.push(text);
+  }
+
+  return candidates;
+}
+
+function normalizeWebsiteList(values: unknown, maxItems = 8): string[] {
+  const chunks = Array.isArray(values) ? values : [values];
+  const output: string[] = [];
+  const seen = new Set<string>();
+
+  for (const chunk of chunks) {
+    for (const candidate of extractWebsiteCandidates(chunk)) {
+      const normalized = normalizeWebsiteCandidate(candidate);
+      if (!normalized) continue;
+      const key = normalized.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      output.push(normalized);
+      if (output.length >= maxItems) return output;
+    }
+  }
+
+  return output;
+}
+
 function splitList(value: unknown, maxItems = 20): string[] {
   if (Array.isArray(value)) {
     return value.map((item) => normalizeText(item)).filter(Boolean).slice(0, maxItems);
@@ -39,12 +123,14 @@ export function fromPrefillToV2(prefill?: WorkspaceIntakeFormData): IntakeStateV
     ...(prefill.handles || {}),
   };
 
+  const websiteStrings = normalizeWebsiteList([prefill.website, prefill.websites], 8);
   const competitorStrings = splitList(prefill.competitorInspirationLinks, 5);
 
   return {
     ...INITIAL_INTAKE_STATE_V2,
     name: normalizeText(prefill.name),
-    website: normalizeText(prefill.website),
+    website: normalizeText(prefill.website) || websiteStrings[0] || "",
+    websites: websiteStrings,
     oneSentenceDescription: normalizeText(prefill.oneSentenceDescription),
     niche: normalizeText(prefill.niche),
     businessType: normalizeText(prefill.businessType),
@@ -99,10 +185,12 @@ function withCompetitorLinks(state: IntakeStateV2): IntakeStateV2 {
 export function toSuggestPayloadV2(state: IntakeStateV2): Record<string, unknown> {
   const normalizedHandles = ensureNormalizedHandles(state.handles);
   const withLinks = withCompetitorLinks(state);
+  const websites = normalizeWebsiteList([state.website, state.websites], 8);
 
   return {
     name: state.name,
-    website: state.website,
+    website: websites[0] || state.website,
+    websites,
     oneSentenceDescription: state.oneSentenceDescription,
     niche: state.niche,
     businessType: state.businessType,
@@ -162,6 +250,7 @@ export function toSubmitPayloadV2(state: IntakeStateV2): Record<string, unknown>
 }
 
 export const LIST_FIELD_KEYS: Array<keyof IntakeStateV2> = [
+  "websites",
   "servicesList",
   "secondaryGoals",
   "topProblems",
@@ -174,7 +263,7 @@ export const LIST_FIELD_KEYS: Array<keyof IntakeStateV2> = [
 ];
 
 const STEP_FIELD_MAP: Record<IntakeWizardStepId, Array<keyof IntakeStateV2>> = {
-  brand: ["name", "website", "oneSentenceDescription", "niche", "businessType"],
+  brand: ["name", "website", "websites", "oneSentenceDescription", "niche", "businessType"],
   channels: ["primaryChannel", "handles"],
   offer: ["mainOffer", "servicesList", "primaryGoal", "budgetSensitivity", "secondaryGoals", "futureGoal"],
   audience: [
@@ -218,8 +307,14 @@ export function applySuggestedToState(
 
     const key = rawKey as keyof IntakeStateV2;
     if (LIST_FIELD_KEYS.includes(key)) {
-      const listValue = splitList(rawValue, key === "competitorInspirationLinks" ? 5 : 20);
+      const listValue =
+        key === "websites"
+          ? normalizeWebsiteList(rawValue, 8)
+          : splitList(rawValue, key === "competitorInspirationLinks" ? 5 : 20);
       (next[key] as unknown) = listValue;
+      if (key === "websites") {
+        next.website = next.website || listValue[0] || "";
+      }
       if (key === "competitorInspirationLinks") {
         next.competitorLinks = buildLinkItems(listValue);
       }

@@ -252,6 +252,20 @@ export function IntakeWizardV2({
           </QuestionCard>
 
           <QuestionCard
+            title="Additional websites to scrape"
+            description="Add multiple domains/pages BAT should crawl and persist into intelligence."
+            suggested={suggestedFields.has("websites")}
+          >
+            <SmartListAnswer
+              value={state.websites}
+              onChange={(next) => updateField("websites", next)}
+              maxItems={5}
+              placeholder="Add a site URL or domain and press Enter"
+              helperText="Up to 5 sites. BAT will scrape these into your workspace data."
+            />
+          </QuestionCard>
+
+          <QuestionCard
             title="One-sentence description"
             suggested={suggestedFields.has("oneSentenceDescription")}
             actions={
