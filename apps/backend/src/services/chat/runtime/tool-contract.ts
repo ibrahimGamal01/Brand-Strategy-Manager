@@ -287,9 +287,21 @@ function normalizeDecisions(raw: Record<string, unknown>): RuntimeDecision[] {
 function normalizeWarnings(raw: Record<string, unknown>): string[] {
   if (!Array.isArray(raw.warnings)) return [];
   return raw.warnings
-    .map((warning) => String(warning || '').trim())
+    .map((warning) => String(warning || '').replace(/\s+/g, ' ').trim())
     .filter(Boolean)
     .slice(0, 8);
+}
+
+function normalizeFailureWarning(error: unknown): string {
+  const raw = String((error as any)?.message || 'Tool execution failed');
+  const firstLine = raw
+    .split('\n')
+    .map((line) => line.trim())
+    .find(Boolean);
+
+  const compact = String(firstLine || raw || 'Tool execution failed').replace(/\s+/g, ' ').trim();
+  if (!compact) return 'Tool execution failed';
+  return compact.length > 260 ? `${compact.slice(0, 257)}...` : compact;
 }
 
 function summarize(raw: Record<string, unknown>, toolName: string): string {
@@ -542,7 +554,7 @@ export async function executeToolWithContract(input: {
       evidence: [],
       continuations: [],
       decisions: [],
-      warnings: [String(error?.message || 'Tool execution failed')],
+      warnings: [normalizeFailureWarning(error)],
     };
   }
 }

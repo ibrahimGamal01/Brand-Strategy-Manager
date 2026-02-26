@@ -448,7 +448,14 @@ function fallbackWriter(input: WriterInput): WriterOutput {
     })
     .filter(Boolean)
     .slice(0, 3);
-  const topWarnings = input.toolResults.flatMap((result) => result.warnings).map((item) => String(item || '').trim()).filter(Boolean).slice(0, 2);
+  const topWarnings = Array.from(
+    new Set(
+      input.toolResults
+        .flatMap((result) => result.warnings)
+        .map((item) => String(item || '').replace(/\s+/g, ' ').trim())
+        .filter(Boolean)
+    )
+  ).slice(0, 2);
   const hasToolResults = input.toolResults.length > 0;
 
   const responseSections: string[] = [];

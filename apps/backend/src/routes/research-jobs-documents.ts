@@ -6,6 +6,7 @@ import {
 } from '../services/documents/document-service';
 import type { DocumentPlan } from '../services/documents/document-spec';
 import { createFileAttachment } from '../services/chat/file-attachments';
+import { PdfRendererUnavailableError } from '../services/documents/pdf-renderer';
 
 const router = Router();
 
@@ -31,6 +32,12 @@ router.post('/:id/documents/generate', async (req, res) => {
     return res.json({ ok: true, document: result, attachmentId });
   } catch (error: any) {
     console.error('[Documents] Failed to generate document:', error);
+    if (error instanceof PdfRendererUnavailableError) {
+      return res.status(503).json({
+        error: 'PDF generation is temporarily unavailable',
+        details: error.message,
+      });
+    }
     return res.status(500).json({ error: 'Failed to generate document', details: error.message });
   }
 });
