@@ -11,6 +11,7 @@ export interface ChatMessage {
   role: MessageRole;
   content: string;
   createdAt: string;
+  blocks?: ChatMessageBlock[];
   reasoning?: {
     plan: string[];
     tools: string[];
@@ -19,6 +20,35 @@ export interface ChatMessage {
     evidence: MessageCitation[];
   };
 }
+
+export interface ChatMessageAction {
+  label: string;
+  action: string;
+  payload?: Record<string, unknown>;
+}
+
+export interface ChatMessageDecision {
+  id: string;
+  title: string;
+  options: Array<{ value: string; label?: string }>;
+  default?: string;
+  blocking?: boolean;
+}
+
+export type ChatMessageBlock =
+  | {
+      type: "decision_requests";
+      items: ChatMessageDecision[];
+    }
+  | {
+      type: "action_buttons";
+      actions: ChatMessageAction[];
+      decisions: ChatMessageDecision[];
+    }
+  | {
+      type: Exclude<string, "decision_requests" | "action_buttons">;
+      [key: string]: unknown;
+    };
 
 export interface QueuedMessage {
   id: string;
@@ -69,6 +99,10 @@ export interface LibraryItem {
   tags: string[];
   evidenceLabel: string;
   evidenceHref?: string;
+  links?: Array<{ label: string; href: string }>;
+  details?: string[];
+  previewText?: string;
+  downloadHref?: string;
 }
 
 export interface SessionPreferences {

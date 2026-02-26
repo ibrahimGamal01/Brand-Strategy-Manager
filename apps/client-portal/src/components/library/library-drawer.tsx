@@ -103,6 +103,21 @@ export function LibraryDrawer({
               <p className="mt-1 text-xs" style={{ color: "var(--bat-text-muted)" }}>
                 {item.summary}
               </p>
+              {item.previewText ? (
+                <p
+                  className="mt-2 rounded-lg border px-2 py-2 text-xs"
+                  style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)", color: "var(--bat-text-muted)" }}
+                >
+                  {item.previewText}
+                </p>
+              ) : null}
+              {item.details?.length ? (
+                <ul className="mt-2 space-y-1 text-xs" style={{ color: "var(--bat-text-muted)" }}>
+                  {item.details.slice(0, 4).map((detail) => (
+                    <li key={`${item.id}-${detail}`}>• {detail}</li>
+                  ))}
+                </ul>
+              ) : null}
               <div className="mt-2 flex flex-wrap gap-1">
                 {item.tags.map((tag) => (
                   <span key={tag} className="bat-chip">
@@ -122,6 +137,17 @@ export function LibraryDrawer({
                 >
                   Use in answer
                 </button>
+                {item.downloadHref ? (
+                  <a
+                    href={item.downloadHref}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-full border px-3 py-1 text-xs"
+                    style={{ borderColor: "var(--bat-border)" }}
+                  >
+                    Open downloaded content
+                  </a>
+                ) : null}
                 {item.evidenceHref ? (
                   <a
                     href={item.evidenceHref}
@@ -133,6 +159,18 @@ export function LibraryDrawer({
                     Open source
                   </a>
                 ) : null}
+                {item.links?.map((link) => (
+                  <a
+                    key={`${item.id}-${link.label}-${link.href}`}
+                    href={link.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-full border px-3 py-1 text-xs"
+                    style={{ borderColor: "var(--bat-border)" }}
+                  >
+                    {link.label}
+                  </a>
+                ))}
               </div>
             </article>
           ))}

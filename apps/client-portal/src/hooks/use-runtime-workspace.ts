@@ -19,6 +19,7 @@ import {
   interruptRuntimeBranch,
 } from "@/lib/runtime-api";
 import {
+  ChatMessageBlock,
   ChatMessage,
   DecisionItem,
   LibraryItem,
@@ -126,6 +127,114 @@ function asArrayOfStrings(value: unknown, max = 12): string[] {
     .slice(0, max);
 }
 
+function normalizeDecisionBlockItems(value: unknown): Array<{
+  id: string;
+  title: string;
+  options: Array<{ value: string; label?: string }>;
+  default?: string;
+  blocking?: boolean;
+}> {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (!isRecord(item)) return null;
+      const id = String(item.id || "").trim();
+      const title = String(item.title || "").trim();
+      if (!id || !title) return null;
+      const options = Array.isArray(item.options)
+        ? item.options
+            .map((option) => {
+              if (typeof option === "string") {
+                const raw = option.trim();
+                return raw ? { value: raw } : null;
+              }
+              if (!isRecord(option)) return null;
+              const valueRaw = String(option.value || option.label || "").trim();
+              if (!valueRaw) return null;
+              const labelRaw = String(option.label || "").trim();
+              return {
+                value: valueRaw,
+                ...(labelRaw ? { label: labelRaw } : {}),
+              };
+            })
+            .filter((entry): entry is { value: string; label?: string } => Boolean(entry))
+        : [];
+      if (!options.length) return null;
+      const defaultOption = String(item.default || "").trim();
+      return {
+        id,
+        title,
+        options,
+        ...(defaultOption ? { default: defaultOption } : {}),
+        ...(typeof item.blocking === "boolean" ? { blocking: item.blocking } : {}),
+      };
+    })
+    .filter(
+      (
+        entry
+      ): entry is {
+        id: string;
+        title: string;
+        options: Array<{ value: string; label?: string }>;
+        default?: string;
+        blocking?: boolean;
+      } => Boolean(entry)
+    )
+    .slice(0, 12);
+}
+
+function normalizeMessageBlocks(value: unknown): ChatMessageBlock[] {
+  const block = isRecord(value) ? value : null;
+  if (!block) return [];
+  const type = String(block.type || "").trim().toLowerCase();
+  if (!type) return [];
+
+  if (type === "decision_requests") {
+    const items = normalizeDecisionBlockItems(block.items);
+    if (!items.length) return [];
+    return [
+      {
+        type: "decision_requests",
+        items,
+      },
+    ];
+  }
+
+  if (type === "action_buttons") {
+    const actions = Array.isArray(block.actions)
+      ? block.actions
+          .map((action) => {
+            if (!isRecord(action)) return null;
+            const label = String(action.label || "").trim();
+            const actionKey = String(action.action || "").trim();
+            if (!label || !actionKey) return null;
+            return {
+              label,
+              action: actionKey,
+              ...(isRecord(action.payload) ? { payload: action.payload } : {}),
+            };
+          })
+          .filter((item): item is { label: string; action: string; payload?: Record<string, unknown> } => Boolean(item))
+      : [];
+    const decisions = normalizeDecisionBlockItems(block.decisions);
+    if (!actions.length && !decisions.length) return [];
+    return [
+      {
+        type: "action_buttons",
+        actions,
+        decisions,
+      },
+    ];
+  }
+
+  return [
+    {
+      type,
+      ...block,
+    },
+  ];
+}
+
 function mapMessages(messages: Array<Record<string, unknown>>): ChatMessage[] {
   return messages
     .filter(
@@ -135,6 +244,7 @@ function mapMessages(messages: Array<Record<string, unknown>>): ChatMessage[] {
     )
     .map((message) => {
       const reasoningRaw = isRecord(message.reasoningJson) ? message.reasoningJson : null;
+      const blocks = normalizeMessageBlocks(message.blocksJson);
       const evidenceRaw = reasoningRaw && Array.isArray(reasoningRaw.evidence) ? reasoningRaw.evidence : [];
       const evidence = evidenceRaw
         .map((item) => {
@@ -155,6 +265,11 @@ function mapMessages(messages: Array<Record<string, unknown>>): ChatMessage[] {
         role: toChatRole(String(message.role || "SYSTEM")),
         content: String(message.content || ""),
         createdAt: toIso(message.createdAt),
+        ...(blocks.length
+          ? {
+              blocks,
+            }
+          : {}),
         ...(reasoningRaw
           ? {
               reasoning: {

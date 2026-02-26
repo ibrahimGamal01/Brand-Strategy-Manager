@@ -658,14 +658,39 @@ export function buildPlanFromMessage(message: string): RuntimePlan {
   return plan;
 }
 
-function summarizeToolBatch(results: RuntimeToolResult[]): string {
-  if (!results.length) {
-    return 'No tools were required for this step.';
-  }
+function buildExecutedToolsSection(
+  toolRuns: Array<{
+    toolName: string;
+    status: ToolRunStatus;
+    resultJson: unknown;
+  }>
+): string {
+  if (!toolRuns.length) return 'No tools executed in this run.';
+  const lines = toolRuns.map((run, index) => {
+    const result = isRecord(run.resultJson) ? run.resultJson : null;
+    const summary = String(result?.summary || '').trim();
+    const artifactCount = Array.isArray(result?.artifacts) ? result.artifacts.length : 0;
+    const evidenceCount = Array.isArray(result?.evidence) ? result.evidence.length : 0;
+    const warningCount = Array.isArray(result?.warnings) ? result.warnings.length : 0;
+    const statusRaw = String(run.status || '').toUpperCase();
+    const statusLabel =
+      statusRaw === 'DONE'
+        ? 'done'
+        : statusRaw === 'FAILED'
+          ? 'failed'
+          : statusRaw === 'CANCELLED'
+            ? 'cancelled'
+            : statusRaw.toLowerCase();
+    const details = [
+      summary,
+      artifactCount ? `${artifactCount} artifact(s)` : '',
+      evidenceCount ? `${evidenceCount} evidence link(s)` : '',
+      warningCount ? `${warningCount} warning(s)` : '',
+    ].filter(Boolean);
+    return `${index + 1}. ${run.toolName} (${statusLabel})${details.length ? ` — ${details.join(' • ')}` : ''}`;
+  });
 
-  return results
-    .map((result, idx) => `${idx + 1}. ${result.summary}`)
-    .join('\n');
+  return `Tool execution trace:\n${lines.join('\n')}`;
 }
 
 function flattenEvidence(results: RuntimeToolResult[]) {
@@ -1205,7 +1230,7 @@ export class RuntimeRunEngine {
 
     const hasHighIssue = validatorOutput.issues.some((issue) => issue.severity === 'high');
     const validatorNote = hasHighIssue
-      ? `\n\nValidation note: ${validatorOutput.issues.map((issue) => issue.message).join(' | ')}`
+      ? `Validation note: ${validatorOutput.issues.map((issue) => issue.message).join(' | ')}`
       : '';
 
     const plannerBlockingDecisions = plan.decisionRequests.filter((decision) => decision.blocking);
@@ -1219,10 +1244,21 @@ export class RuntimeRunEngine {
         ? mergeBlockingDecisions([plannerBlockingDecisions, writerAlignedBlockingDecisions])
         : [];
 
+    const toolTraceSection = buildExecutedToolsSection(
+      toolRuns.map((toolRun) => ({
+        toolName: toolRun.toolName,
+        status: toolRun.status,
+        resultJson: toolRun.resultJson,
+      }))
+    );
+    const finalResponseContent = [writerOutput.response.trim(), toolTraceSection, validatorNote]
+      .filter((section) => String(section || '').trim().length > 0)
+      .join('\n\n');
+
     await createBranchMessage({
       branchId: run.branchId,
       role: ChatBranchMessageRole.ASSISTANT,
-      content: `${writerOutput.response}${validatorNote}`,
+      content: finalResponseContent,
       blocksJson:
         writerOutput.actions.length || finalDecisions.length
           ? {
@@ -1276,7 +1312,7 @@ export class RuntimeRunEngine {
       branchId: run.branchId,
       agentRunId: run.id,
       type: ProcessEventType.DONE,
-      message: 'Run completed.',
+      message: `Run completed: ${toolRuns.length} tool(s) executed.`,
       payload: {
         toolRuns: toolRuns.map((item) => ({ id: item.id, toolName: item.toolName, status: item.status })),
         validation: validatorOutput,

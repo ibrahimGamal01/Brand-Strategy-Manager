@@ -118,6 +118,25 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     setLibraryOpen(false);
   };
 
+  const onRunMessageAction = (
+    actionLabel: string,
+    actionKey: string,
+    payload?: Record<string, unknown>
+  ) => {
+    const action = actionKey.trim().toLowerCase();
+    const prompt =
+      action === "show_sources"
+        ? "Show all sources and evidence behind the previous answer."
+        : action === "fork_branch"
+          ? "Fork this branch and continue with an alternative strategy."
+          : action === "generate_pdf"
+            ? "Generate a client-ready PDF deliverable from this branch."
+            : `Run action ${actionKey} from the latest assistant response.`;
+    const payloadLine = payload ? `\nAction payload: ${JSON.stringify(payload)}` : "";
+    const mode: "send" | "queue" = isStreaming ? "queue" : "send";
+    runAsync(sendMessage(`${prompt}${payloadLine}\nRequested via button: ${actionLabel}`, mode));
+  };
+
   const onNewThread = () => {
     setNameDialog({ mode: "thread", title: "Create new thread" });
     setNameInput("Main workspace thread");
@@ -303,6 +322,8 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
           <ChatThread
             messages={messages}
             onForkFromMessage={onForkBranch}
+            onResolveDecision={(decisionId, option) => runAsync(resolveDecision(decisionId, option))}
+            onRunAction={onRunMessageAction}
             isStreaming={isStreaming}
             streamingInsight={streamingInsight}
           />

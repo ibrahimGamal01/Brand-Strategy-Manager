@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import { ChatMessage } from "@/types/chat";
+import { ChatMessage, ChatMessageBlock } from "@/types/chat";
 
 function TypingDots() {
   return (
@@ -105,14 +105,128 @@ function ReasoningPanel({ message }: { message: ChatMessage }) {
   );
 }
 
+function MessageBlocks({
+  message,
+  onResolveDecision,
+  onRunAction,
+}: {
+  message: ChatMessage;
+  onResolveDecision?: (decisionId: string, option: string) => void;
+  onRunAction?: (actionLabel: string, actionKey: string, payload?: Record<string, unknown>) => void;
+}) {
+  if (!message.blocks?.length || message.role !== "assistant") return null;
+
+  const isDecisionBlock = (
+    block: ChatMessageBlock
+  ): block is Extract<ChatMessageBlock, { type: "decision_requests" }> => block.type === "decision_requests";
+  const isActionBlock = (
+    block: ChatMessageBlock
+  ): block is Extract<ChatMessageBlock, { type: "action_buttons" }> => block.type === "action_buttons";
+
+  return (
+    <div className="mt-3 space-y-2">
+      {message.blocks.map((block, index) => {
+        if (isDecisionBlock(block)) {
+          return (
+            <div
+              key={`${message.id}-decision-${index}`}
+              className="rounded-xl border p-3"
+              style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}
+            >
+              <p className="text-xs uppercase tracking-[0.1em]" style={{ color: "var(--bat-text-muted)" }}>
+                Approval needed
+              </p>
+              <div className="mt-2 space-y-2">
+                {block.items.map((decision) => (
+                  <div key={decision.id} className="rounded-lg border p-2" style={{ borderColor: "var(--bat-border)" }}>
+                    <p className="text-sm font-semibold">{decision.title}</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {decision.options.map((option) => (
+                        <button
+                          key={`${decision.id}-${option.value}`}
+                          type="button"
+                          onClick={() => onResolveDecision?.(decision.id, option.value)}
+                          className="rounded-full border px-3 py-1 text-xs"
+                          style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}
+                        >
+                          {option.label || option.value}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        }
+
+        if (isActionBlock(block)) {
+          return (
+            <div
+              key={`${message.id}-actions-${index}`}
+              className="rounded-xl border p-3"
+              style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}
+            >
+              <p className="text-xs uppercase tracking-[0.1em]" style={{ color: "var(--bat-text-muted)" }}>
+                Next actions
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {block.actions.map((action) => (
+                  <button
+                    key={`${message.id}-${action.action}-${action.label}`}
+                    type="button"
+                    onClick={() => onRunAction?.(action.label, action.action, action.payload)}
+                    className="rounded-full border px-3 py-1 text-xs"
+                    style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+              {block.decisions.length ? (
+                <div className="mt-3 space-y-2">
+                  {block.decisions.map((decision) => (
+                    <div key={decision.id} className="rounded-lg border p-2" style={{ borderColor: "var(--bat-border)" }}>
+                      <p className="text-sm font-semibold">{decision.title}</p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {decision.options.map((option) => (
+                          <button
+                            key={`${decision.id}-${option.value}`}
+                            type="button"
+                            onClick={() => onResolveDecision?.(decision.id, option.value)}
+                            className="rounded-full border px-3 py-1 text-xs"
+                            style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}
+                          >
+                            {option.label || option.value}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          );
+        }
+
+        return null;
+      })}
+    </div>
+  );
+}
+
 export function ChatThread({
   messages,
   onForkFromMessage,
+  onResolveDecision,
+  onRunAction,
   isStreaming,
   streamingInsight,
 }: {
   messages: ChatMessage[];
   onForkFromMessage?: (messageId: string) => void;
+  onResolveDecision?: (decisionId: string, option: string) => void;
+  onRunAction?: (actionLabel: string, actionKey: string, payload?: Record<string, unknown>) => void;
   isStreaming?: boolean;
   streamingInsight?: string;
 }) {
@@ -164,6 +278,7 @@ export function ChatThread({
               ))}
             </div>
           ) : null}
+          <MessageBlocks message={message} onResolveDecision={onResolveDecision} onRunAction={onRunAction} />
           {message.role === "assistant" ? <ReasoningPanel message={message} /> : null}
         </article>
       ))}
