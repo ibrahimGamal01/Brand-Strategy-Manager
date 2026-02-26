@@ -85,27 +85,66 @@ function normalizeArtifacts(raw: Record<string, unknown>, toolName: string): Run
 }
 
 function normalizeEvidence(raw: Record<string, unknown>): RuntimeEvidenceItem[] {
+  const normalized: RuntimeEvidenceItem[] = [];
+  const seen = new Set<string>();
+
+  const pushEvidence = (entry: RuntimeEvidenceItem) => {
+    const label = String(entry.label || '').trim();
+    if (!label) return;
+    const key = `${entry.kind}:${label}:${String(entry.url || '').trim()}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    normalized.push(entry);
+  };
+
+  const pushRecordEvidence = (item: Record<string, unknown>, kind: string) => {
+    const label = String(
+      item.title ||
+        item.name ||
+        item.handle ||
+        item.finalUrl ||
+        item.url ||
+        item.href ||
+        item.profileUrl ||
+        item.id ||
+        ''
+    ).trim();
+    if (!label) return;
+    const url =
+      typeof item.url === 'string'
+        ? item.url
+        : typeof item.href === 'string'
+          ? item.href
+          : typeof item.finalUrl === 'string'
+            ? item.finalUrl
+            : typeof item.profileUrl === 'string'
+              ? item.profileUrl
+              : typeof item.internalLink === 'string'
+                ? item.internalLink
+                : undefined;
+    pushEvidence({
+      kind,
+      label,
+      ...(url ? { url } : {}),
+    });
+  };
+
   const evidence = raw.evidence;
   if (Array.isArray(evidence)) {
-    const normalized: RuntimeEvidenceItem[] = [];
-
     for (const item of evidence) {
       if (!isRecord(item)) continue;
       const kind = String(item.kind || 'url').trim();
       const label = String(item.label || item.title || '').trim();
       if (!label) continue;
-      normalized.push({
+      pushEvidence({
         kind,
         label,
         ...(typeof item.url === 'string' ? { url: item.url } : {}),
       });
     }
-
-    if (normalized.length) return normalized;
   }
 
   if (Array.isArray(raw.items)) {
-    const derived: RuntimeEvidenceItem[] = [];
     for (const item of raw.items.slice(0, 8)) {
       if (!isRecord(item)) continue;
       const label = String(item.title || item.captionSnippet || item.handle || item.id || '').trim();
@@ -118,53 +157,45 @@ function normalizeEvidence(raw: Record<string, unknown>): RuntimeEvidenceItem[] 
             : typeof item.internalLink === 'string'
               ? item.internalLink
               : undefined;
-      derived.push({
+      pushEvidence({
         kind: 'item',
         label,
         ...(url ? { url } : {}),
       });
     }
-    return derived;
   }
 
   if (Array.isArray(raw.data)) {
-    const derived: RuntimeEvidenceItem[] = [];
     for (const item of raw.data.slice(0, 12)) {
       if (!isRecord(item)) continue;
-      const label = String(
-        item.title ||
-          item.name ||
-          item.handle ||
-          item.finalUrl ||
-          item.url ||
-          item.href ||
-          item.profileUrl ||
-          item.id ||
-          ''
-      ).trim();
-      if (!label) continue;
-      const url =
-        typeof item.url === 'string'
-          ? item.url
-          : typeof item.href === 'string'
-            ? item.href
-            : typeof item.finalUrl === 'string'
-              ? item.finalUrl
-              : typeof item.profileUrl === 'string'
-                ? item.profileUrl
-                : typeof item.internalLink === 'string'
-                  ? item.internalLink
-                  : undefined;
-      derived.push({
-        kind: 'record',
-        label,
-        ...(url ? { url } : {}),
-      });
+      pushRecordEvidence(item, 'record');
     }
-    return derived;
   }
 
-  return [];
+  if (isRecord(raw.item)) {
+    pushRecordEvidence(raw.item, 'record');
+  }
+
+  const section = String(raw.section || '').trim();
+  const deepLink = typeof raw.deepLink === 'string' ? raw.deepLink.trim() : '';
+  if (deepLink) {
+    pushEvidence({
+      kind: 'internal',
+      label: section ? `Open ${section} in Intelligence` : 'Open in Intelligence',
+      url: deepLink,
+    });
+  }
+
+  const internalLink = typeof raw.internalLink === 'string' ? raw.internalLink.trim() : '';
+  if (internalLink) {
+    pushEvidence({
+      kind: 'internal',
+      label: section ? `Open ${section} detail` : 'Open in workspace',
+      url: internalLink,
+    });
+  }
+
+  return normalized.slice(0, 20);
 }
 
 function normalizeContinuations(raw: Record<string, unknown>): RuntimeContinuation[] {
@@ -259,6 +290,59 @@ function summarize(raw: Record<string, unknown>, toolName: string): string {
 
   if (typeof raw.reason === 'string' && raw.reason.trim()) {
     return raw.reason.trim();
+  }
+
+  if (toolName === 'intel.list') {
+    const count = Number(raw.count);
+    const section = String(raw.section || '').trim();
+    if (Number.isFinite(count)) {
+      return `intel.list returned ${Math.max(0, Math.floor(count))} row(s) from ${section || 'requested section'}.`;
+    }
+  }
+
+  if (toolName === 'intel.get') {
+    const section = String(raw.section || '').trim();
+    if (isRecord(raw.item)) {
+      return `intel.get fetched 1 item from ${section || 'requested section'}.`;
+    }
+  }
+
+  if (toolName === 'web.crawl') {
+    const persisted = Number(raw.persisted);
+    const runId = String(raw.runId || '').trim();
+    if (Number.isFinite(persisted)) {
+      return `web.crawl persisted ${Math.max(0, Math.floor(persisted))} page snapshot(s)${runId ? ` (runId=${runId})` : ''}.`;
+    }
+  }
+
+  if (toolName === 'web.fetch') {
+    const snapshotId = String(raw.snapshotId || '').trim();
+    const statusCode = Number(raw.statusCode);
+    if (snapshotId) {
+      return `web.fetch saved snapshot ${snapshotId}${Number.isFinite(statusCode) ? ` (status ${Math.floor(statusCode)})` : ''}.`;
+    }
+  }
+
+  if (toolName === 'web.extract') {
+    const extractionRunId = String(raw.extractionRunId || '').trim();
+    if (extractionRunId) {
+      return `web.extract completed extraction run ${extractionRunId}.`;
+    }
+  }
+
+  if (toolName === 'document.generate') {
+    const docId = String(raw.docId || '').trim();
+    if (docId) {
+      return `document.generate created deliverable ${docId}.`;
+    }
+  }
+
+  if (Number.isFinite(Number(raw.count)) && String(raw.section || '').trim()) {
+    return `${toolName} returned ${Math.max(0, Math.floor(Number(raw.count)))} row(s) from ${String(raw.section).trim()}.`;
+  }
+
+  if (isRecord(raw.item)) {
+    return `${toolName} returned one record.`;
   }
 
   if (Array.isArray(raw.items) && raw.items.length > 0) {

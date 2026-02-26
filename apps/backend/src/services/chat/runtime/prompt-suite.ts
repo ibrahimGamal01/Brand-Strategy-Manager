@@ -221,7 +221,31 @@ async function requestJson(task: Parameters<typeof openai.bat.chatCompletion>[0]
   )) as OpenAI.Chat.Completions.ChatCompletion;
 
   const text = completionText(completion);
-  return extractJsonObject(text);
+  const parsed = extractJsonObject(text);
+  if (parsed) return parsed;
+
+  // One repair attempt for malformed JSON output.
+  const repairCompletion = (await withTimeout(
+    openai.bat.chatCompletion('analysis_fast', {
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You repair malformed JSON. Return one valid JSON object only with no markdown and no explanation.',
+        },
+        {
+          role: 'user',
+          content: text,
+        },
+      ],
+      temperature: 0,
+      max_tokens: maxTokens,
+    }) as Promise<OpenAI.Chat.Completions.ChatCompletion>,
+    PROMPT_STEP_TIMEOUT_MS,
+    `Prompt task ${task} (repair)`
+  )) as OpenAI.Chat.Completions.ChatCompletion;
+
+  return extractJsonObject(completionText(repairCompletion));
 }
 
 function fallbackSummarizer(input: SummarizerInput): SummarizerOutput {
@@ -246,14 +270,29 @@ function fallbackSummarizer(input: SummarizerInput): SummarizerOutput {
   };
 }
 
+function findFirstUrl(message: string): string | undefined {
+  const fullUrl = message.match(/https?:\/\/[^\s)]+/i)?.[0];
+  if (fullUrl) return fullUrl;
+  const bareDomain = message.match(/\b([a-z0-9.-]+\.[a-z]{2,}(?:\/[^\s)]*)?)\b/i)?.[1];
+  return bareDomain ? `https://${bareDomain}` : undefined;
+}
+
+function findReferencedCrawlRunId(message: string): string | null {
+  const directId = message.match(/\b(crawl-[a-z0-9-]+)\b/i);
+  if (directId?.[1]) return directId[1].toLowerCase();
+
+  const labeled = message.match(/\bcrawl\s*run[:\s#-]*([a-z0-9-]+)/i);
+  if (!labeled?.[1]) return null;
+  const candidate = labeled[1].trim().toLowerCase();
+  if (!candidate) return null;
+  return candidate.startsWith('crawl-') ? candidate : `crawl-${candidate}`;
+}
+
 function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   const normalized = message.toLowerCase();
   const calls: RuntimeToolCall[] = [];
-  const firstUrl =
-    message.match(/https?:\/\/[^\s)]+/i)?.[0] ||
-    (message.match(/\b([a-z0-9.-]+\.[a-z]{2,}(?:\/[^\s)]*)?)\b/i)?.[1]
-      ? `https://${message.match(/\b([a-z0-9.-]+\.[a-z]{2,}(?:\/[^\s)]*)?)\b/i)?.[1]}`
-      : undefined);
+  const firstUrl = findFirstUrl(message);
+  const referencedCrawlRunId = findReferencedCrawlRunId(message);
 
   const pushIfMissing = (tool: string, args: Record<string, unknown>) => {
     const key = `${tool}:${JSON.stringify(args)}`;
@@ -286,6 +325,9 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
     /\b(investigat|research|analy[sz]e|profile|account|person|people|creator|founder|handle)\b/.test(normalized) &&
     (/(instagram\.com|tiktok\.com|youtube\.com|x\.com|twitter\.com|@[a-z0-9._-]+)/i.test(message) ||
       /\b(ddg|duckduckgo|scraply|scrapling|crawl|fetch)\b/.test(normalized));
+  const hasEvidenceReferenceIntent =
+    /use evidence from|evidence from/i.test(message) ||
+    (/\b(evidence|source|sources)\b/.test(normalized) && /\b(use|ground|base|summariz|detail|answer)\b/.test(normalized));
 
   if (hasCompetitorSignals) {
     pushIfMissing('intel.list', { section: 'competitors', limit: 12 });
@@ -328,6 +370,12 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   }
   if (/crawl|spider/.test(normalized) && firstUrl) {
     pushIfMissing('web.crawl', { startUrls: [firstUrl], maxPages: 8, maxDepth: 1 });
+  }
+  if (referencedCrawlRunId) {
+    pushIfMissing('intel.list', { section: 'web_snapshots', limit: 50, where: { crawlRunId: referencedCrawlRunId } });
+  }
+  if (hasEvidenceReferenceIntent && firstUrl) {
+    pushIfMissing('web.fetch', { url: firstUrl, sourceType: 'ARTICLE', discoveredBy: 'CHAT_TOOL' });
   }
   if (/(fetch|scrape|extract).*(web|site|page|url)|\bfetch\b/.test(normalized) && firstUrl) {
     pushIfMissing('web.fetch', { url: firstUrl, sourceType: 'ARTICLE', discoveredBy: 'CHAT_TOOL' });
@@ -390,68 +438,67 @@ function fallbackWriter(input: WriterInput): WriterOutput {
       ...(item.url ? { url: item.url } : {}),
     }));
 
-  const toolSummaries = input.toolResults
-    .map((result, index) => {
-      const toolName = input.plan.toolCalls[index]?.tool || input.plan.toolCalls[input.plan.toolCalls.length - 1]?.tool || 'tool';
-      const summary = String(result.summary || '').trim();
-      const artifactCount = Array.isArray(result.artifacts) ? result.artifacts.length : 0;
-      const evidenceCount = Array.isArray(result.evidence) ? result.evidence.length : 0;
-      const warningCount = Array.isArray(result.warnings) ? result.warnings.length : 0;
-      const parts = [
-        summary,
-        artifactCount ? `${artifactCount} artifact(s)` : '',
-        evidenceCount ? `${evidenceCount} evidence link(s)` : '',
-        warningCount ? `${warningCount} warning(s)` : '',
-      ].filter(Boolean);
-      return `${toolName}: ${parts.length ? parts.join(' • ') : 'completed.'}`;
+  const topHighlights = input.toolSummary.highlights.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 5);
+  const topFacts = input.toolSummary.facts
+    .map((fact) => {
+      const claim = String(fact.claim || '').trim();
+      if (!claim) return '';
+      const evidenceSnippet = fact.evidence.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 2);
+      return evidenceSnippet.length ? `${claim} (${evidenceSnippet.join('; ')})` : claim;
     })
     .filter(Boolean)
-    .slice(0, 8);
-  const userIntent = input.userMessage.toLowerCase();
-  const hasCompetitorIntent =
-    /\b(add|include|save|insert|append|update)\b/.test(userIntent) &&
-    /\b(competitor|inspiration|accounts?|handles?)\b/.test(userIntent);
-  const hasIntakeIntent =
-    /\b(update|replace|apply|rewrite|save)\b/.test(userIntent) &&
-    /\b(intake|form|onboard|onboarding)\b/.test(userIntent);
-  const hasDeepResearchIntent =
-    /\b(investigat|research|analy[sz]e|profile|account|person|people|creator|founder)\b/.test(userIntent) &&
-    (/\b(deep|deeper|thorough|full|comprehensive|detailed)\b/.test(userIntent) ||
-      /\b(ddg|duckduckgo|scraply|scrapling)\b/.test(userIntent));
-  const intentLead =
-    hasCompetitorIntent
-      ? 'I processed your competitor update request directly from your message.'
-      : hasDeepResearchIntent
-        ? 'I ran a deeper evidence pass using DDG and web intelligence tools for the requested accounts/people.'
-      : hasIntakeIntent
-        ? 'I updated the workspace intake context from your provided text.'
-        : 'I processed your request using the latest workspace data and tools.';
+    .slice(0, 3);
+  const topWarnings = input.toolResults.flatMap((result) => result.warnings).map((item) => String(item || '').trim()).filter(Boolean).slice(0, 2);
+  const hasToolResults = input.toolResults.length > 0;
 
-  const topHighlights = input.toolSummary.highlights.slice(0, 5);
+  const responseSections: string[] = [];
+  if (!hasToolResults) {
+    responseSections.push(
+      'I do not have new tool output attached to this message yet, so I cannot verify claims from this run.'
+    );
+    responseSections.push(
+      'Share a specific URL, crawl run id, or ask me to run crawl/fetch now and I will return an evidence-backed summary.'
+    );
+  } else {
+    if (topHighlights.length > 0) {
+      responseSections.push(topHighlights[0]);
+      if (topHighlights.length > 1) {
+        responseSections.push(
+          `Key findings:\n${topHighlights.slice(1).map((item, idx) => `${idx + 1}. ${item}`).join('\n')}`
+        );
+      }
+    } else {
+      responseSections.push('I reviewed the latest workspace evidence and compiled the key takeaways.');
+    }
+
+    if (topFacts.length > 0) {
+      responseSections.push(`Evidence notes:\n${topFacts.map((item, idx) => `${idx + 1}. ${item}`).join('\n')}`);
+    }
+
+    if (topWarnings.length > 0) {
+      responseSections.push(`Caveats:\n${topWarnings.map((item, idx) => `${idx + 1}. ${item}`).join('\n')}`);
+    }
+  }
+
+  const nextSteps = hasToolResults
+    ? [
+        ...(input.toolSummary.openQuestions.slice(0, 2).map((item) => String(item || '').trim()).filter(Boolean)),
+        'Confirm which finding should be prioritized first.',
+      ].slice(0, 3)
+    : ['Provide a URL or crawl run id to inspect.', 'Tell me whether you want coverage, issues, or recommendations first.'];
+
   return {
-    response: [
-      intentLead,
-      toolSummaries.length
-        ? `Tools executed:\n${toolSummaries.map((item, idx) => `${idx + 1}. ${item}`).join('\n')}`
-        : 'No tool executions were required for this step.',
-      topHighlights.length
-        ? `Evidence highlights:\n${topHighlights.map((item, idx) => `${idx + 1}. ${item}`).join('\n')}`
-        : '',
-    ]
-      .filter((section) => section.trim().length > 0)
-      .join('\n\n'),
+    response: responseSections.filter((section) => section.trim().length > 0).join('\n\n'),
     reasoning: {
       plan: input.plan.plan,
       tools: input.plan.toolCalls.map((call) => call.tool),
-      assumptions: ['Only evidence collected in this branch run is used for factual claims.'],
-      nextSteps: ['Refine scope', 'Fork branch for alternative strategy', 'Generate deliverable'],
+      assumptions: hasToolResults
+        ? ['Only evidence collected in this branch run is used for factual claims.']
+        : ['No tool results were available in this run.'],
+      nextSteps,
       evidence,
     },
-    actions: [
-      { label: 'Show sources', action: 'show_sources' },
-      { label: 'Fork branch', action: 'fork_branch' },
-      { label: 'Generate PDF', action: 'generate_pdf' },
-    ],
+    actions: [],
     decisions: [],
   };
 }
@@ -556,7 +603,8 @@ export async function summarizeToolResults(input: SummarizerInput): Promise<Summ
     'You are BAT Tool Result Summarizer.',
     'Return strict JSON only.',
     'No markdown.',
-    'Convert tool outputs into concise, usable context for a writer.',
+    'Convert tool outputs into complete, specific, usable context for a writer.',
+    'Prefer precision and coverage over brevity.',
     'JSON schema:',
     '{',
     '  "highlights": ["..."],',
@@ -613,7 +661,9 @@ export async function writeClientResponse(input: WriterInput): Promise<WriterOut
     'You are BAT Writer (client-facing communicator).',
     'Return strict JSON only.',
     'Do not include chain-of-thought.',
-    'Response must be actionable, concise, and evidence-grounded.',
+    'Response must be actionable, thorough, and evidence-grounded.',
+    'Do not be terse. Provide enough detail to be directly usable.',
+    'Never include scaffolding labels like "Fork from here", "How BAT got here", "Tools used", "Assumptions", or "Evidence".',
     'Must include recommendation, evidence-backed why, and next steps.',
     'JSON schema:',
     '{',

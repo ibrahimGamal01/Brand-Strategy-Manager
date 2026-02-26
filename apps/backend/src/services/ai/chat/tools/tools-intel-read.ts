@@ -84,8 +84,20 @@ async function listSection(context: AgentContext, args: IntelReadArgs): Promise<
     : 25;
   const includeInactive = Boolean(args.includeInactive);
   const scopeWhere = await resolveScopeWhere(context, section);
-  const extraWhere = sanitizeFilter(args.where, config.allowedFields);
+  const rawWhere = isRecord(args.where) ? args.where : {};
+  const extraWhere = sanitizeFilter(rawWhere, config.allowedFields);
   const where: Record<string, unknown> = { ...scopeWhere, ...extraWhere };
+
+  // Support filtering snapshots by crawl run id stored in metadata.crawlRunId.
+  if (section === 'web_snapshots') {
+    const crawlRunId = String(rawWhere.crawlRunId || '').trim();
+    if (crawlRunId) {
+      where.metadata = {
+        path: ['crawlRunId'],
+        equals: crawlRunId,
+      };
+    }
+  }
 
   if (config.supportsCuration && !includeInactive) {
     where.isActive = true;
@@ -101,12 +113,23 @@ async function listSection(context: AgentContext, args: IntelReadArgs): Promise<
       : { updatedAt: 'desc' },
   });
 
+  const deepLink = context.links.moduleLink('intelligence', { intelSection: section });
+
   return {
     section,
     count: rows.length,
+    items: rows,
     data: rows,
+    summary: `Listed ${rows.length} item(s) from ${section}.`,
+    evidence: [
+      {
+        kind: 'internal',
+        label: `Open ${section} in Intelligence`,
+        url: deepLink,
+      },
+    ],
     includeInactive,
-    deepLink: context.links.moduleLink('intelligence', { intelSection: section }),
+    deepLink,
   };
 }
 
@@ -136,11 +159,21 @@ async function getSectionItem(context: AgentContext, args: IntelReadArgs): Promi
   }
 
   const row = await delegate.findFirst({ where });
+  const deepLink = context.links.moduleLink('intelligence', { intelSection: section });
 
   return {
     section,
     item: row || null,
-    deepLink: context.links.moduleLink('intelligence', { intelSection: section }),
+    items: row ? [row] : [],
+    summary: row ? `Fetched 1 item from ${section}.` : `No item found in ${section}.`,
+    evidence: [
+      {
+        kind: 'internal',
+        label: `Open ${section} in Intelligence`,
+        url: deepLink,
+      },
+    ],
+    deepLink,
   };
 }
 
@@ -164,11 +197,14 @@ export const intelReadTools: ToolDefinition<Record<string, unknown>, Record<stri
       properties: {
         section: { type: 'string' },
         count: { type: 'number' },
+        items: { type: 'array' },
         data: { type: 'array' },
+        summary: { type: 'string' },
+        evidence: { type: 'array' },
         includeInactive: { type: 'boolean' },
         deepLink: { type: 'string' },
       },
-      required: ['section', 'count', 'data', 'includeInactive', 'deepLink'],
+      required: ['section', 'count', 'items', 'data', 'summary', 'evidence', 'includeInactive', 'deepLink'],
       additionalProperties: false,
     },
     mutate: false,
@@ -193,9 +229,12 @@ export const intelReadTools: ToolDefinition<Record<string, unknown>, Record<stri
       properties: {
         section: { type: 'string' },
         item: { type: ['object', 'null'] },
+        items: { type: 'array' },
+        summary: { type: 'string' },
+        evidence: { type: 'array' },
         deepLink: { type: 'string' },
       },
-      required: ['section', 'item', 'deepLink'],
+      required: ['section', 'item', 'items', 'summary', 'evidence', 'deepLink'],
       additionalProperties: false,
     },
     mutate: false,

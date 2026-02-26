@@ -56,13 +56,21 @@ export const scraplingTools: ToolDefinition<Record<string, unknown>, Record<stri
         discoveredBy: typeof args.discoveredBy === 'string' ? args.discoveredBy : 'CHAT_TOOL',
         allowExternal: Boolean(args.allowExternal),
       });
+      const internalLink = context.links.moduleLink('intelligence', {
+        intelSection: 'web_snapshots',
+        focusKind: 'web_snapshot',
+        focusId: result.snapshotId,
+      });
       return {
         ...result,
-        internalLink: context.links.moduleLink('intelligence', {
-          intelSection: 'web_snapshots',
-          focusKind: 'web_snapshot',
-          focusId: result.snapshotId,
-        }),
+        summaryText: `web.fetch saved snapshot ${result.snapshotId} from ${result.finalUrl}${
+          Number.isFinite(Number(result.statusCode)) ? ` (status ${Number(result.statusCode)})` : ''
+        }.`,
+        evidence: [
+          { kind: 'internal', label: `Open snapshot ${result.snapshotId.slice(0, 8)}`, url: internalLink },
+          { kind: 'url', label: `Fetched page ${result.finalUrl}`, url: result.finalUrl },
+        ],
+        internalLink,
       };
     },
   },
@@ -107,13 +115,19 @@ export const scraplingTools: ToolDefinition<Record<string, unknown>, Record<stri
         mode: normalizeMode(args.mode),
         allowExternal: Boolean(args.allowExternal),
       });
+      const internalLink = context.links.moduleLink('intelligence', {
+        intelSection: 'web_sources',
+        focusKind: 'crawl_run',
+        focusId: result.runId,
+      });
       return {
         ...result,
-        internalLink: context.links.moduleLink('intelligence', {
-          intelSection: 'web_sources',
-          focusKind: 'crawl_run',
-          focusId: result.runId,
-        }),
+        summaryText: `Crawl run ${result.runId} persisted ${result.persisted} page snapshot(s).`,
+        evidence: [
+          { kind: 'internal', label: `Open crawl run ${result.runId.slice(0, 8)}`, url: internalLink },
+          ...startUrls.slice(0, 4).map((url) => ({ kind: 'url', label: `Crawl start URL: ${url}`, url })),
+        ],
+        internalLink,
       };
     },
   },
@@ -156,13 +170,22 @@ export const scraplingTools: ToolDefinition<Record<string, unknown>, Record<stri
             : undefined,
         adaptiveNamespace: typeof args.adaptiveNamespace === 'string' ? args.adaptiveNamespace : undefined,
       });
+      const internalLink = context.links.moduleLink('intelligence', {
+        intelSection: 'web_extraction_runs',
+        focusKind: 'web_extraction',
+        focusId: result.extractionRunId || String(args.snapshotId || ''),
+      });
       return {
         ...result,
-        internalLink: context.links.moduleLink('intelligence', {
-          intelSection: 'web_extraction_runs',
-          focusKind: 'web_extraction',
-          focusId: result.extractionRunId || String(args.snapshotId || ''),
-        }),
+        summaryText: `Extraction completed for snapshot ${String(args.snapshotId || '').trim()}.`,
+        evidence: [
+          {
+            kind: 'internal',
+            label: `Open extraction ${String((result.extractionRunId || args.snapshotId || '')).slice(0, 8)}`,
+            url: internalLink,
+          },
+        ],
+        internalLink,
       };
     },
   },
