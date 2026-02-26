@@ -332,6 +332,16 @@ export type RuntimeEventDto = {
   createdAt: string;
   agentRunId?: string | null;
   toolRunId?: string | null;
+  eventV2?: {
+    version: number;
+    event: string;
+    phase: string;
+    status: "info" | "warn" | "error";
+    runId?: string;
+    toolRunId?: string;
+    toolName?: string;
+    createdAt?: string;
+  };
 };
 
 export async function listRuntimeEvents(workspaceId: string, branchId: string) {

@@ -9,6 +9,7 @@ import {
 } from '@prisma/client';
 import { prisma } from '../../../lib/prisma';
 import { publishProcessEvent } from './process-event-bus';
+import { attachRuntimeEventV2Payload } from './event-contract';
 import {
   cancelActiveRuns,
   cancelActiveToolRuns,
@@ -992,7 +993,21 @@ export class RuntimeRunEngine {
     toolRunId?: string | null;
     payload?: unknown;
   }) {
-    const event = await createProcessEvent(input);
+    const createdAt = new Date();
+    const payload = attachRuntimeEventV2Payload({
+      type: input.type,
+      level: input.level,
+      message: input.message,
+      agentRunId: input.agentRunId ?? null,
+      toolRunId: input.toolRunId ?? null,
+      payload: input.payload,
+      createdAt,
+    });
+
+    const event = await createProcessEvent({
+      ...input,
+      payload,
+    });
     publishProcessEvent(event);
     return event;
   }
@@ -1656,6 +1671,17 @@ export class RuntimeRunEngine {
       return;
     }
 
+    await this.emitEvent({
+      branchId: run.branchId,
+      agentRunId: run.id,
+      type: ProcessEventType.PROCESS_PROGRESS,
+      message: 'Writing final response from collected evidence.',
+      payload: {
+        phase: 'writing',
+        toolCount: toolRuns.length,
+      },
+    });
+
     const writerOutput = await writeClientResponse({
       userMessage: effectiveUserMessage,
       plan,
@@ -1824,6 +1850,16 @@ export class RuntimeRunEngine {
 
       let plan = normalizeRunPlan(fresh.planJson);
       if (!plan) {
+        await this.emitEvent({
+          branchId: fresh.branchId,
+          agentRunId: fresh.id,
+          type: ProcessEventType.PROCESS_PROGRESS,
+          message: 'Planning run execution.',
+          payload: {
+            phase: 'planning',
+          },
+        });
+
         const previousMessages = await listBranchMessages(fresh.branchId, 40);
         plan = await generatePlannerPlan({
           researchJobId: fresh.branch.thread.researchJobId,

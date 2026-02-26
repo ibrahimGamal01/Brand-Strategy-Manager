@@ -57,11 +57,21 @@ export interface QueuedMessage {
 }
 
 export type ProcessStatus = "running" | "waiting_input" | "done" | "failed" | "cancelled";
+export type ProcessPhase =
+  | "queued"
+  | "planning"
+  | "tools"
+  | "writing"
+  | "waiting_input"
+  | "completed"
+  | "failed"
+  | "cancelled";
 
 export interface ProcessRun {
   id: string;
   label: string;
   stage: string;
+  phase: ProcessPhase;
   progress: number;
   status: ProcessStatus;
   details?: string[];
@@ -74,6 +84,8 @@ export interface ProcessFeedItem {
   actionLabel?: string;
   runId?: string;
   toolName?: string;
+  phase?: ProcessPhase;
+  level?: "info" | "warn" | "error";
 }
 
 export interface DecisionItem {
@@ -106,7 +118,7 @@ export interface LibraryItem {
 }
 
 export interface SessionPreferences {
-  tone: "balanced" | "concise";
+  tone: "balanced" | "detailed" | "concise";
   sourceFocus: "mixed" | "web" | "social";
   transparency: boolean;
   askQuestionsFirst: boolean;

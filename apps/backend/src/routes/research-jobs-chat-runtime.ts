@@ -19,6 +19,7 @@ import {
   requirePortalAuth,
   requireWorkspaceMembership,
 } from '../services/portal/portal-auth-middleware';
+import { serializeRuntimeProcessEvent } from '../services/chat/runtime/event-contract';
 
 const router = Router();
 
@@ -179,7 +180,7 @@ router.get('/:id/runtime/branches/:branchId/events', async (req, res) => {
       limit: Number.isFinite(limit) ? limit : 100,
     });
 
-    return res.json({ events });
+    return res.json({ events: events.map((event) => serializeRuntimeProcessEvent(event)) });
   } catch (error: any) {
     const status = String(error?.message || '').includes('not found') ? 404 : 500;
     return res.status(status).json({ error: 'Failed to list process events', details: error?.message || String(error) });

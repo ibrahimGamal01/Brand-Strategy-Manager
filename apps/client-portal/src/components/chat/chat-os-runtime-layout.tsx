@@ -29,6 +29,13 @@ function formatThreadTime(iso?: string | null): string {
   return parsed.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+function formatPhaseLabel(phase?: string | null): string {
+  const normalized = String(phase || "").trim().toLowerCase();
+  if (!normalized) return "Running";
+  if (normalized === "waiting_input") return "Waiting input";
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
 export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [activeLibraryCollection, setActiveLibraryCollection] = useState<LibraryCollection | "all">("all");
@@ -78,7 +85,9 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     processRuns.find((run) => run.status === "running" || run.status === "waiting_input") ||
     processRuns[0] ||
     null;
-  const streamingInsight = activeRun ? `${activeRun.label} • ${activeRun.stage}` : visibleFeed[0]?.message || "";
+  const streamingInsight = activeRun
+    ? `${activeRun.label} • ${formatPhaseLabel(activeRun.phase)} • ${activeRun.stage}`
+    : visibleFeed[0]?.message || "";
 
   const activeThread = useMemo(
     () => threads.find((thread) => thread.id === activeThreadId) || threads[0] || null,
@@ -403,7 +412,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                 <p className="text-xs text-zinc-500">
                   {syncing ? "Syncing..." : activeBranch ? `Branch: ${activeBranch.name}` : "Main branch"}
                   {" • "}
-                  {isStreaming ? "Running" : "Idle"}
+                  {isStreaming ? formatPhaseLabel(activeRun?.phase) : "Idle"}
                 </p>
               </div>
               <div className="flex items-center gap-1.5">

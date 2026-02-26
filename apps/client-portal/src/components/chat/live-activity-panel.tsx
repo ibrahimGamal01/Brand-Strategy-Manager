@@ -22,6 +22,28 @@ function StatusIcon({ status }: { status: ProcessRun["status"] }) {
   return <Clock3 className="h-4 w-4" style={{ color: "var(--bat-text-muted)" }} />;
 }
 
+function phaseLabel(phase?: ProcessRun["phase"] | ProcessFeedItem["phase"]) {
+  if (!phase) return null;
+  if (phase === "waiting_input") return "Waiting input";
+  return phase.charAt(0).toUpperCase() + phase.slice(1);
+}
+
+function phaseChipStyle(phase?: ProcessRun["phase"] | ProcessFeedItem["phase"]) {
+  if (phase === "failed" || phase === "cancelled") {
+    return { borderColor: "#f2b8b5", background: "#fdf1f0", color: "#8a1f17" };
+  }
+  if (phase === "waiting_input") {
+    return { borderColor: "#f5d08b", background: "#fff8eb", color: "#7a4a00" };
+  }
+  if (phase === "completed") {
+    return { borderColor: "#9ad2b2", background: "#eefaf2", color: "#166534" };
+  }
+  if (phase === "writing") {
+    return { borderColor: "#9ac5f7", background: "#eef6ff", color: "#134a8a" };
+  }
+  return { borderColor: "var(--bat-border)", background: "var(--bat-surface)", color: "var(--bat-text-muted)" };
+}
+
 function TypingDots() {
   return (
     <span className="inline-flex items-center gap-1">
@@ -86,7 +108,7 @@ function RunningTab({
   const steerPresets = [
     "Use my latest message as top priority.",
     "Show evidence first, then recommendation.",
-    "Keep it concise and action-oriented.",
+    "Be detailed and action-oriented.",
   ];
 
   return (
@@ -152,7 +174,17 @@ function RunningTab({
       {runs.map((run) => (
         <article key={run.id} className="rounded-xl border p-3" style={{ borderColor: "var(--bat-border)" }}>
           <div className="flex items-center justify-between gap-2">
-            <p className="text-sm font-semibold">{run.label}</p>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold">{run.label}</p>
+              {phaseLabel(run.phase) ? (
+                <span
+                  className="mt-1 inline-flex rounded-full border px-2 py-0.5 text-[11px]"
+                  style={phaseChipStyle(run.phase)}
+                >
+                  {phaseLabel(run.phase)}
+                </span>
+              ) : null}
+            </div>
             <StatusIcon status={run.status} />
           </div>
           <p className="mt-1 text-xs" style={{ color: "var(--bat-text-muted)" }}>
@@ -192,6 +224,11 @@ function FeedTab({ feedItems }: { feedItems: ProcessFeedItem[] }) {
             <div className="flex items-center gap-2">
               {item.toolName ? <span className="bat-chip">{item.toolName}</span> : null}
               {item.runId ? <span className="bat-chip">Run {item.runId.slice(0, 8)}</span> : null}
+              {phaseLabel(item.phase) ? (
+                <span className="rounded-full border px-2 py-0.5 text-[11px]" style={phaseChipStyle(item.phase)}>
+                  {phaseLabel(item.phase)}
+                </span>
+              ) : null}
             {item.actionLabel ? (
               <button
                 type="button"

@@ -115,10 +115,186 @@ function shortId(value: unknown): string {
   return raw ? raw.slice(0, 8) : "unknown";
 }
 
-function extractToolNameFromEvent(event: Record<string, unknown>): string | undefined {
+type RuntimeEventPhase = ProcessRun["phase"];
+type RuntimeEventStatus = "info" | "warn" | "error";
+
+type NormalizedRuntimeEvent = {
+  id: string;
+  type: string;
+  level: RuntimeEventStatus;
+  message: string;
+  createdAt: string;
+  runId?: string;
+  toolRunId?: string;
+  toolName?: string;
+  triggerType?: string;
+  phase: RuntimeEventPhase;
+  event: string;
+  payload: Record<string, unknown> | null;
+};
+
+const RUNTIME_PHASES: RuntimeEventPhase[] = [
+  "queued",
+  "planning",
+  "tools",
+  "writing",
+  "waiting_input",
+  "completed",
+  "failed",
+  "cancelled",
+];
+
+function normalizeEventLevel(value: unknown): RuntimeEventStatus {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "error") return "error";
+  if (normalized === "warn" || normalized === "warning") return "warn";
+  return "info";
+}
+
+function normalizeEventPhase(value: unknown): RuntimeEventPhase | null {
+  const normalized = String(value || "").trim().toLowerCase().replace(/\s+/g, "_");
+  return RUNTIME_PHASES.includes(normalized as RuntimeEventPhase)
+    ? (normalized as RuntimeEventPhase)
+    : null;
+}
+
+function inferLegacyRuntimeEvent(
+  type: string,
+  message: string,
+  hasToolContext: boolean
+): { event: string; phase: RuntimeEventPhase } {
+  const normalizedType = type.toUpperCase();
+  const normalizedMessage = message.toLowerCase();
+
+  if (normalizedType === "PROCESS_STARTED") {
+    return { event: "run.started", phase: "planning" };
+  }
+  if (normalizedType === "PROCESS_PROGRESS") {
+    if (hasToolContext) return { event: "tool.started", phase: "tools" };
+    if (/\bwriting|drafting|final response|final answer\b/.test(normalizedMessage)) {
+      return { event: "run.writing", phase: "writing" };
+    }
+    if (/\bplanning?\b/.test(normalizedMessage)) {
+      return { event: "run.planning", phase: "planning" };
+    }
+    return { event: "run.progress", phase: "tools" };
+  }
+  if (normalizedType === "PROCESS_RESULT") {
+    return { event: "tool.output", phase: "tools" };
+  }
+  if (normalizedType === "DECISION_REQUIRED") {
+    return { event: "decision.required", phase: "waiting_input" };
+  }
+  if (normalizedType === "WAITING_FOR_INPUT") {
+    return { event: "run.waiting_input", phase: "waiting_input" };
+  }
+  if (normalizedType === "DONE") {
+    return { event: "run.completed", phase: "completed" };
+  }
+  if (normalizedType === "FAILED") {
+    return hasToolContext
+      ? { event: "tool.failed", phase: "tools" }
+      : { event: "run.failed", phase: "failed" };
+  }
+  if (normalizedType === "PROCESS_CANCELLED") {
+    return { event: "run.cancelled", phase: "cancelled" };
+  }
+  if (normalizedType === "PROCESS_LOG") {
+    if (/\bqueue|queued\b/.test(normalizedMessage)) return { event: "run.queued", phase: "queued" };
+    if (/\bplanning?\b/.test(normalizedMessage)) return { event: "run.planning", phase: "planning" };
+    if (/\bwriting|drafting|final response|final answer\b/.test(normalizedMessage)) {
+      return { event: "run.writing", phase: "writing" };
+    }
+    return { event: "run.log", phase: "tools" };
+  }
+  return { event: "run.log", phase: "tools" };
+}
+
+function normalizeRuntimeEvent(event: Record<string, unknown>): NormalizedRuntimeEvent {
+  const type = String(event.type || "").trim().toUpperCase();
+  const message = String(event.message || "Runtime event").trim() || "Runtime event";
+  const createdAt = toIso(event.createdAt);
   const payload = isRecord(event.payloadJson) ? event.payloadJson : null;
-  const toolName = String(payload?.toolName || "").trim();
-  return toolName || undefined;
+  const payloadEventV2 = payload && isRecord(payload.eventV2) ? payload.eventV2 : null;
+  const topEventV2 = isRecord(event.eventV2) ? event.eventV2 : null;
+  const eventV2 = topEventV2 || payloadEventV2;
+
+  const toolNameFromPayload = String(payload?.toolName || "").trim();
+  const hasToolContext = Boolean(event.toolRunId || toolNameFromPayload);
+  const fallback = inferLegacyRuntimeEvent(type, message, hasToolContext);
+
+  const runId =
+    String(eventV2?.runId || event.agentRunId || "").trim() || undefined;
+  const toolRunId =
+    String(eventV2?.toolRunId || event.toolRunId || "").trim() || undefined;
+  const toolName =
+    String(eventV2?.toolName || toolNameFromPayload || "").trim() || undefined;
+  const triggerType = String(payload?.triggerType || "").trim() || undefined;
+  const phase = normalizeEventPhase(eventV2?.phase) || fallback.phase;
+  const normalizedEvent = String(eventV2?.event || "").trim().toLowerCase() || fallback.event;
+  const level = normalizeEventLevel(eventV2?.status || event.level);
+  const timestamp = toIso(eventV2?.createdAt || createdAt);
+
+  return {
+    id: String(event.id || `${timestamp}-${Math.random()}`),
+    type,
+    level,
+    message,
+    createdAt: timestamp,
+    ...(runId ? { runId } : {}),
+    ...(toolRunId ? { toolRunId } : {}),
+    ...(toolName ? { toolName } : {}),
+    ...(triggerType ? { triggerType } : {}),
+    phase,
+    event: normalizedEvent,
+    payload,
+  };
+}
+
+function normalizeRuntimeEvents(events: Array<Record<string, unknown>>): NormalizedRuntimeEvent[] {
+  return events.map((event) => normalizeRuntimeEvent(event));
+}
+
+function phaseToStatus(phase: RuntimeEventPhase): ProcessRun["status"] {
+  if (phase === "waiting_input") return "waiting_input";
+  if (phase === "completed") return "done";
+  if (phase === "failed") return "failed";
+  if (phase === "cancelled") return "cancelled";
+  return "running";
+}
+
+function phaseToProgress(phase: RuntimeEventPhase, done = 0, total = 1): number {
+  if (phase === "completed" || phase === "failed" || phase === "cancelled") return 100;
+  if (phase === "queued") return 8;
+  if (phase === "planning") return 20;
+  if (phase === "writing") return 92;
+  if (phase === "waiting_input") return 96;
+  if (phase === "tools") {
+    const boundedTotal = Math.max(1, total);
+    const ratio = Math.max(0, Math.min(1, done / boundedTotal));
+    return Math.max(32, Math.min(88, Math.round(32 + ratio * 54)));
+  }
+  return 60;
+}
+
+function buildRunStage(input: {
+  phase: RuntimeEventPhase;
+  latestMessage?: string;
+  inFlightToolNames: string[];
+  totalTools: number;
+}): string {
+  if (input.phase === "queued") return "Queued";
+  if (input.phase === "planning") return "Planning next actions";
+  if (input.phase === "writing") return "Writing final response";
+  if (input.phase === "waiting_input") return "Waiting for approval";
+  if (input.phase === "completed") return "Completed";
+  if (input.phase === "failed") return "Failed";
+  if (input.phase === "cancelled") return "Cancelled";
+  if (input.inFlightToolNames.length) {
+    return `Running ${input.inFlightToolNames.join(", ")}`;
+  }
+  if (input.latestMessage) return input.latestMessage;
+  return `Running ${input.totalTools || 1} task(s)`;
 }
 
 function asArrayOfStrings(value: unknown, max = 12): string[] {
@@ -294,32 +470,32 @@ function formatTime(iso: string): string {
 }
 
 function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[] {
-  const latest = [...events].slice(-120).reverse();
+  const latest = normalizeRuntimeEvents(events).slice(-120).reverse();
   return latest.map((event) => {
-    const type = String(event.type || "").toUpperCase();
-    const payload = isRecord(event.payloadJson) ? event.payloadJson : null;
-    const toolName = extractToolNameFromEvent(event);
-    const runId = String(event.agentRunId || "").trim() || undefined;
+    let message = event.message || "Runtime event";
 
-    let message = String(event.message || "Runtime event");
-    if (type === "PROCESS_STARTED") {
-      message = `${humanizeTriggerType(payload?.triggerType || "workflow")} started.`;
-    } else if (type === "PROCESS_PROGRESS" && toolName) {
-      message = `Running ${toolName}...`;
-    } else if (type === "PROCESS_RESULT" && toolName) {
+    if (event.event === "run.started") {
+      message = `${humanizeTriggerType(event.triggerType || "workflow")} started.`;
+    } else if (event.event === "run.planning") {
+      message = "Planning execution steps.";
+    } else if (event.event === "tool.started" && event.toolName) {
+      message = `Running ${event.toolName}...`;
+    } else if (event.event === "tool.output" && event.toolName) {
       const raw = String(event.message || "Done").trim();
       message =
-        raw.toLowerCase().startsWith(toolName.toLowerCase()) || raw.toLowerCase().startsWith(`${toolName.toLowerCase()}:`)
+        raw.toLowerCase().startsWith(event.toolName.toLowerCase()) ||
+        raw.toLowerCase().startsWith(`${event.toolName.toLowerCase()}:`)
           ? raw
-          : `${toolName} completed: ${raw}`;
-    } else if (type === "FAILED" && toolName) {
+          : `${event.toolName} completed: ${raw}`;
+    } else if (event.event === "tool.failed" && event.toolName) {
       const raw = String(event.message || "Failed").trim();
       message =
-        raw.toLowerCase().startsWith(toolName.toLowerCase()) || raw.toLowerCase().startsWith(`${toolName.toLowerCase()}:`)
+        raw.toLowerCase().startsWith(event.toolName.toLowerCase()) ||
+        raw.toLowerCase().startsWith(`${event.toolName.toLowerCase()}:`)
           ? raw
-          : `${toolName} failed: ${raw}`;
-    } else if (type === "DONE") {
-      const toolRuns = Array.isArray(payload?.toolRuns) ? payload?.toolRuns : [];
+          : `${event.toolName} failed: ${raw}`;
+    } else if (event.event === "run.completed") {
+      const toolRuns = Array.isArray(event.payload?.toolRuns) ? event.payload.toolRuns : [];
       const tools = toolRuns
         .map((row) => (isRecord(row) ? String(row.toolName || "").trim() : ""))
         .filter(Boolean);
@@ -327,28 +503,32 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
         const preview = tools.slice(0, 3).join(", ");
         message = `Run completed (${tools.length} tools): ${preview}${tools.length > 3 ? "..." : ""}`;
       } else {
-        message = runId ? `Run ${runId.slice(0, 8)} completed.` : "Run completed.";
+        message = event.runId ? `Run ${event.runId.slice(0, 8)} completed.` : "Run completed.";
       }
-    } else if (type === "DECISION_REQUIRED") {
+    } else if (event.event === "decision.required" || event.phase === "waiting_input") {
       message = "Approval needed before BAT can continue.";
+    } else if (event.event === "run.writing") {
+      message = "Writing final response.";
     }
 
     const actionLabel =
-      type === "PROCESS_RESULT"
+      event.event === "tool.output"
         ? "View result"
-        : type === "DECISION_REQUIRED"
+        : event.event === "decision.required" || event.phase === "waiting_input"
           ? "Review approval"
-          : type === "FAILED"
+          : event.event === "tool.failed" || event.phase === "failed"
             ? "Inspect issue"
             : undefined;
 
     return {
-      id: String(event.id || `${event.createdAt || Math.random()}`),
-      timestamp: formatTime(toIso(event.createdAt)),
+      id: event.id,
+      timestamp: formatTime(event.createdAt),
       message,
       ...(actionLabel ? { actionLabel } : {}),
-      ...(runId ? { runId } : {}),
-      ...(toolName ? { toolName } : {}),
+      ...(event.runId ? { runId: event.runId } : {}),
+      ...(event.toolName ? { toolName: event.toolName } : {}),
+      phase: event.phase,
+      level: event.level,
     };
   });
 }
@@ -369,13 +549,13 @@ function mapDecisionsFromEvents(
     return [];
   }
 
-  const latest = [...events].slice(-160);
+  const latest = normalizeRuntimeEvents(events).slice(-160);
 
   for (const event of latest) {
-    const runId = String(event.agentRunId || "").trim();
+    const runId = String(event.runId || "").trim();
     if (!runId || !waitingRunIds.has(runId)) continue;
 
-    const payload = isRecord(event.payloadJson) ? event.payloadJson : null;
+    const payload = event.payload;
     if (!payload || !Array.isArray(payload.decisions)) continue;
     for (const decision of payload.decisions) {
       if (!isRecord(decision)) continue;
@@ -407,37 +587,35 @@ function mapRecentRunsFromEvents(events: Array<Record<string, unknown>>): Proces
     triggerType: string;
     latestMessage: string;
     latestAt: string;
-    status: ProcessRun["status"];
+    phase: RuntimeEventPhase;
     tools: Set<string>;
   };
 
+  const normalizedEvents = normalizeRuntimeEvents(events);
   const aggregates = new Map<string, RecentRunAggregate>();
   const now = Date.now();
 
-  for (const event of events) {
-    const runId = String(event.agentRunId || "").trim();
+  for (const event of normalizedEvents) {
+    const runId = String(event.runId || "").trim();
     if (!runId) continue;
-    const createdAt = toIso(event.createdAt);
+    const createdAt = event.createdAt;
     const createdAtMs = Date.parse(createdAt);
     if (Number.isFinite(createdAtMs) && now - createdAtMs > 1000 * 60 * 45) continue;
 
-    const payload = isRecord(event.payloadJson) ? event.payloadJson : null;
-    const type = String(event.type || "").toUpperCase();
-    const toolName = extractToolNameFromEvent(event);
     const aggregate = aggregates.get(runId) || {
       id: runId,
-      triggerType: String(payload?.triggerType || "workflow"),
+      triggerType: String(event.triggerType || "workflow"),
       latestMessage: String(event.message || "Recent runtime activity"),
       latestAt: createdAt,
-      status: "running" as const,
+      phase: "tools" as RuntimeEventPhase,
       tools: new Set<string>(),
     };
 
-    if (toolName) {
-      aggregate.tools.add(toolName);
+    if (event.toolName) {
+      aggregate.tools.add(event.toolName);
     }
-    if (type === "DONE" && Array.isArray(payload?.toolRuns)) {
-      for (const row of payload.toolRuns) {
+    if (event.event === "run.completed" && Array.isArray(event.payload?.toolRuns)) {
+      for (const row of event.payload.toolRuns) {
         if (!isRecord(row)) continue;
         const completedTool = String(row.toolName || "").trim();
         if (completedTool) {
@@ -445,21 +623,12 @@ function mapRecentRunsFromEvents(events: Array<Record<string, unknown>>): Proces
         }
       }
     }
-    if (payload?.triggerType && String(payload.triggerType).trim()) {
-      aggregate.triggerType = String(payload.triggerType);
+    if (event.triggerType) {
+      aggregate.triggerType = event.triggerType;
     }
     aggregate.latestMessage = String(event.message || aggregate.latestMessage || "Recent runtime activity");
     aggregate.latestAt = createdAt;
-
-    if (type === "DONE") {
-      aggregate.status = "done";
-    } else if (type === "FAILED") {
-      aggregate.status = "failed";
-    } else if (type === "WAITING_FOR_INPUT" || type === "DECISION_REQUIRED") {
-      aggregate.status = "waiting_input";
-    } else if (type === "PROCESS_CANCELLED") {
-      aggregate.status = "cancelled";
-    }
+    aggregate.phase = event.phase;
 
     aggregates.set(runId, aggregate);
   }
@@ -473,16 +642,33 @@ function mapRecentRunsFromEvents(events: Array<Record<string, unknown>>): Proces
       return {
         id: run.id,
         label: `${humanizeTriggerType(run.triggerType)} • ${shortId(run.id)}`,
-        stage: run.latestMessage,
-        progress: run.status === "done" || run.status === "failed" || run.status === "cancelled" ? 100 : 88,
-        status: run.status,
+        stage: buildRunStage({
+          phase: run.phase,
+          latestMessage: run.latestMessage,
+          inFlightToolNames: [],
+          totalTools: tools.length,
+        }),
+        phase: run.phase,
+        progress: phaseToProgress(run.phase, tools.length, tools.length || 1),
+        status: phaseToStatus(run.phase),
         ...(details.length ? { details } : {}),
       };
     });
 }
 
 function mapRuns(activeRuns: Array<Record<string, unknown>>, events: Array<Record<string, unknown>>): ProcessRun[] {
+  const normalizedEvents = normalizeRuntimeEvents(events);
+  const latestByRun = new Map<string, NormalizedRuntimeEvent>();
+  for (const event of normalizedEvents) {
+    if (!event.runId) continue;
+    const current = latestByRun.get(event.runId);
+    if (!current || Date.parse(current.createdAt) <= Date.parse(event.createdAt)) {
+      latestByRun.set(event.runId, event);
+    }
+  }
+
   const mappedActive = activeRuns.map((run) => {
+    const runId = String(run.id || "");
     const statusRaw = String(run.status || "RUNNING").toUpperCase();
     const toolRuns = Array.isArray(run.toolRuns) ? run.toolRuns : [];
     const total = toolRuns.length || 1;
@@ -495,45 +681,39 @@ function mapRuns(activeRuns: Array<Record<string, unknown>>, events: Array<Recor
       })
       .map((tool) => (isRecord(tool) ? String(tool.toolName || "").trim() : ""))
       .filter(Boolean);
-    const progress = statusRaw === "DONE" ? 100 : Math.min(95, Math.round((done / total) * 100));
-
-    const stage =
-      statusRaw === "WAITING_USER"
-        ? "Waiting for approval"
-        : statusRaw === "WAITING_TOOLS"
-          ? inFlightToolNames.length
-            ? `Running ${inFlightToolNames.join(", ")}`
-            : `Running ${toolRuns.length || 1} task(s)`
-          : statusRaw === "QUEUED"
-            ? "Queued"
-            : statusRaw === "FAILED"
-              ? "Failed"
-              : statusRaw === "CANCELLED"
-                ? "Cancelled"
-                : statusRaw === "DONE"
-                  ? "Completed"
-                  : "Running";
-
-    const status: ProcessRun["status"] =
+    const latestEvent = latestByRun.get(runId);
+    const phase: RuntimeEventPhase =
       statusRaw === "WAITING_USER"
         ? "waiting_input"
         : statusRaw === "DONE"
-          ? "done"
+          ? "completed"
           : statusRaw === "FAILED"
             ? "failed"
             : statusRaw === "CANCELLED"
               ? "cancelled"
-              : "running";
+              : statusRaw === "QUEUED"
+                ? "queued"
+                : latestEvent?.phase || (statusRaw === "WAITING_TOOLS" ? "tools" : "planning");
+
+    const stage = buildRunStage({
+      phase,
+      latestMessage: latestEvent?.message,
+      inFlightToolNames,
+      totalTools: toolRuns.length,
+    });
 
     return {
-      id: String(run.id || ""),
+      id: runId,
       label: `${humanizeTriggerType(run.triggerType)} • ${shortId(run.id)}`,
       stage,
-      progress,
-      status,
+      phase,
+      progress: phaseToProgress(phase, done, total),
+      status: phaseToStatus(phase),
       details: [
+        `Phase: ${humanizeToken(phase)}`,
         `Completed ${done}/${total} tool run(s)`,
         ...(inFlightToolNames.length ? [`In progress: ${inFlightToolNames.slice(0, 3).join(", ")}${inFlightToolNames.length > 3 ? "..." : ""}`] : []),
+        ...(latestEvent?.toolName ? [`Latest tool: ${latestEvent.toolName}`] : []),
       ],
     };
   });
