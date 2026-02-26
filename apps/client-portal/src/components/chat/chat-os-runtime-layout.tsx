@@ -1,26 +1,24 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Library, MessageSquarePlus, RefreshCcw, Search } from "lucide-react";
+import { Library, Menu, MessageSquarePlus, RefreshCcw, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRuntimeWorkspace } from "@/hooks/use-runtime-workspace";
 import { LibraryCollection, SessionPreferences } from "@/types/chat";
 import { ChatComposer } from "./chat-composer";
 import { ChatThread } from "./chat-thread";
 import { CommandPalette } from "./command-palette";
-import { LiveActivityPanel } from "./live-activity-panel";
 import { LibraryDrawer } from "@/components/library/library-drawer";
 
 const steerSystemPrompts: Record<
   string,
   { pref?: [keyof SessionPreferences, SessionPreferences[keyof SessionPreferences]]; prompt?: string }
 > = {
-  "Go deeper": { pref: ["tone", "balanced"], prompt: "Go deeper with the current strategy and include lane-by-lane recommendations." },
+  "Go deeper": { pref: ["tone", "detailed"], prompt: "Go deeper with the current strategy and include lane-by-lane recommendations." },
   "Show sources": { pref: ["transparency", true], prompt: "Show every claim with source evidence and confidence level." },
   "Make it a PDF": { prompt: "Generate a client-ready PDF deliverable from this branch." },
   "Focus on TikTok": { pref: ["sourceFocus", "social"], prompt: "Prioritize TikTok and social evidence in the next response." },
   "Focus on Web evidence": { pref: ["sourceFocus", "web"], prompt: "Prioritize web evidence and cite pages directly." },
-  "Be concise": { pref: ["tone", "concise"] },
   "Ask me questions first": { pref: ["askQuestionsFirst", true] },
 };
 
@@ -35,6 +33,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [activeLibraryCollection, setActiveLibraryCollection] = useState<LibraryCollection | "all">("all");
   const [actionError, setActionError] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [nameDialog, setNameDialog] = useState<
     | { mode: "thread"; title: string }
     | { mode: "branch"; title: string; forkedFromMessageId?: string }
@@ -42,7 +41,6 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   >(null);
   const [nameInput, setNameInput] = useState("");
   const [threadSearch, setThreadSearch] = useState("");
-  const [selectedAssistantMessageId, setSelectedAssistantMessageId] = useState<string | null>(null);
   const router = useRouter();
 
   const {
@@ -56,7 +54,6 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     messages,
     processRuns,
     feedItems,
-    decisions,
     queuedMessages,
     isStreaming,
     libraryItems,
@@ -103,23 +100,9 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     () =>
       libraryItems
         .filter((item) => item.collection === "deliverables" || item.collection === "web" || item.collection === "social")
-        .slice(0, 8),
+        .slice(0, 6),
     [libraryItems]
   );
-
-  const reasoningMessages = useMemo(
-    () => messages.filter((message) => message.role === "assistant" && Boolean(message.reasoning?.plan.length)),
-    [messages]
-  );
-
-  const selectedReasoningMessage = useMemo(() => {
-    if (!reasoningMessages.length) return null;
-    const selected =
-      (selectedAssistantMessageId
-        ? reasoningMessages.find((message) => message.id === selectedAssistantMessageId)
-        : null) || null;
-    return selected || reasoningMessages[reasoningMessages.length - 1] || null;
-  }, [reasoningMessages, selectedAssistantMessageId]);
 
   const runAsync = (work: Promise<void>) => {
     setActionError(null);
@@ -138,7 +121,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
 
     if (mapping.pref) {
       const [key, value] = mapping.pref;
-      if (key === "tone" && (value === "balanced" || value === "concise")) {
+      if (key === "tone" && (value === "balanced" || value === "detailed" || value === "concise")) {
         setPreference("tone", value);
       }
       if (key === "sourceFocus" && (value === "mixed" || value === "web" || value === "social")) {
@@ -173,6 +156,24 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     payload?: Record<string, unknown>
   ) => {
     const action = actionKey.trim().toLowerCase();
+    if (action === 'open_library') {
+      const requestedCollection = String(payload?.collection || '').trim().toLowerCase();
+      if (
+        requestedCollection === 'web' ||
+        requestedCollection === 'competitors' ||
+        requestedCollection === 'social' ||
+        requestedCollection === 'community' ||
+        requestedCollection === 'news' ||
+        requestedCollection === 'deliverables'
+      ) {
+        setActiveLibraryCollection(requestedCollection as LibraryCollection);
+      } else {
+        setActiveLibraryCollection('all');
+      }
+      setLibraryOpen(true);
+      return;
+    }
+
     const prompt =
       action === "show_sources"
         ? "Show all sources and evidence behind the previous answer."
@@ -239,12 +240,6 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     );
   };
 
-  const onLiveSteer = (instruction: string) => {
-    const text = instruction.trim();
-    if (!text) return;
-    runAsync(steerRun(text));
-  };
-
   if (loading) {
     return (
       <section className="bat-surface p-6">
@@ -258,302 +253,232 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   return (
     <>
       {error || actionError ? (
-        <div className="mb-3 rounded-2xl border p-3 text-sm" style={{ borderColor: "#f4b8b4", background: "#fff5f4", color: "#9f2317" }}>
+        <div className="mb-3 rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
           <p>{error || actionError}</p>
         </div>
       ) : null}
 
-      <div className="grid gap-3 xl:grid-cols-[280px,minmax(0,1fr),360px]">
-        <aside className="bat-surface min-h-[70vh] overflow-hidden">
-          <div className="border-b p-3" style={{ borderColor: "var(--bat-border)" }}>
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <p className="text-xs uppercase tracking-[0.1em]" style={{ color: "var(--bat-text-muted)" }}>
-                  Chats
-                </p>
-                <p className="text-sm font-semibold">Workspace conversations</p>
-              </div>
-              <button
-                type="button"
-                onClick={onNewThread}
-                className="rounded-full border px-2.5 py-1.5 text-xs"
-                style={{ borderColor: "var(--bat-border)" }}
-              >
-                <span className="inline-flex items-center gap-1">
-                  <MessageSquarePlus className="h-3.5 w-3.5" /> New
-                </span>
-              </button>
-            </div>
-
-            <label className="mt-3 flex items-center gap-2 rounded-xl border px-3 py-2 text-xs" style={{ borderColor: "var(--bat-border)" }}>
-              <Search className="h-3.5 w-3.5" />
-              <input
-                value={threadSearch}
-                onChange={(event) => setThreadSearch(event.target.value)}
-                placeholder="Search chats"
-                className="w-full border-none bg-transparent text-sm outline-none"
-              />
-            </label>
-          </div>
-
-          <div className="max-h-[34vh] space-y-1 overflow-y-auto p-2">
-            {filteredThreads.map((thread) => {
-              const active = thread.id === activeThreadId;
-              return (
+      <div className="relative overflow-hidden rounded-[28px] border border-zinc-200 bg-[#f7f7f8] shadow-[0_20px_60px_rgba(16,24,40,0.08)]">
+        <div className="grid h-[calc(100vh-9.5rem)] min-h-[680px] grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)]">
+          <aside
+            className={`${
+              sidebarOpen ? "absolute inset-y-0 left-0 z-30 flex w-[300px]" : "hidden"
+            } flex-col border-r border-zinc-800/70 bg-[#171717] text-zinc-200 lg:static lg:z-auto lg:flex lg:w-auto`}
+          >
+            <div className="border-b border-zinc-800 px-3 py-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium">Chats</p>
                 <button
-                  key={thread.id}
                   type="button"
-                  onClick={() => setActiveThreadId(thread.id)}
-                  className="w-full rounded-xl border px-3 py-2 text-left"
-                  style={{
-                    borderColor: active ? "var(--bat-accent)" : "var(--bat-border)",
-                    background: active ? "var(--bat-accent-soft)" : "transparent",
-                  }}
+                  onClick={onNewThread}
+                  className="inline-flex items-center gap-1 rounded-full border border-zinc-700 px-2.5 py-1 text-xs text-zinc-100 hover:bg-zinc-800"
                 >
-                  <p className="truncate text-sm font-medium">{thread.title}</p>
-                  <p className="mt-0.5 text-[11px]" style={{ color: "var(--bat-text-muted)" }}>
-                    Updated {formatThreadTime(thread.updatedAt) || "recently"}
-                  </p>
+                  <MessageSquarePlus className="h-3.5 w-3.5" />
+                  New
                 </button>
-              );
-            })}
-          </div>
-
-          <div className="border-t p-3" style={{ borderColor: "var(--bat-border)" }}>
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <p className="text-xs uppercase tracking-[0.1em]" style={{ color: "var(--bat-text-muted)" }}>
-                Branches
-              </p>
-              <button
-                type="button"
-                onClick={() => onForkBranch()}
-                className="rounded-full border px-2 py-1 text-[11px]"
-                style={{ borderColor: "var(--bat-border)" }}
-              >
-                New branch
-              </button>
+              </div>
+              <label className="mt-3 flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs text-zinc-400">
+                <Search className="h-3.5 w-3.5" />
+                <input
+                  value={threadSearch}
+                  onChange={(event) => setThreadSearch(event.target.value)}
+                  placeholder="Search chats"
+                  className="w-full border-none bg-transparent text-sm text-zinc-100 outline-none"
+                />
+              </label>
             </div>
-            <div className="flex flex-wrap gap-2">
-              {branches.map((branch) => {
-                const active = branch.id === activeBranchId;
+
+            <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-2 py-2">
+              {filteredThreads.map((thread) => {
+                const active = thread.id === activeThreadId;
                 return (
                   <button
-                    key={branch.id}
+                    key={thread.id}
                     type="button"
-                    onClick={() => runAsync(pinBranch(branch.id))}
-                    className="rounded-full border px-3 py-1 text-xs"
-                    style={{
-                      borderColor: active ? "var(--bat-accent)" : "var(--bat-border)",
-                      background: active ? "var(--bat-accent-soft)" : "transparent",
+                    onClick={() => {
+                      setActiveThreadId(thread.id);
+                      setSidebarOpen(false);
                     }}
+                    className={`w-full rounded-xl px-3 py-2 text-left transition ${
+                      active ? "bg-zinc-800 text-zinc-100" : "text-zinc-300 hover:bg-zinc-800/70"
+                    }`}
                   >
-                    {branch.name}
+                    <p className="truncate text-sm font-medium">{thread.title}</p>
+                    <p className="mt-0.5 text-[11px] text-zinc-400">
+                      Updated {formatThreadTime(thread.updatedAt) || "recently"}
+                    </p>
                   </button>
                 );
               })}
             </div>
 
-            <div className="mt-3 flex items-center gap-2">
-              <button
-                type="button"
-                className="rounded-full border px-3 py-1.5 text-xs"
-                style={{ borderColor: "var(--bat-border)" }}
-                onClick={() => runAsync(refreshNow())}
-              >
-                <span className="inline-flex items-center gap-1">
-                  <RefreshCcw className="h-3.5 w-3.5" /> Refresh
-                </span>
-              </button>
-              <CommandPalette onSelect={onCommand} />
-            </div>
-          </div>
-
-          <div className="border-t p-3" style={{ borderColor: "var(--bat-border)" }}>
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <p className="text-xs uppercase tracking-[0.1em]" style={{ color: "var(--bat-text-muted)" }}>
-                Documents
-              </p>
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveLibraryCollection("all");
-                  setLibraryOpen(true);
-                }}
-                className="rounded-full border px-2 py-1 text-[11px]"
-                style={{ borderColor: "var(--bat-border)" }}
-              >
-                Open library
-              </button>
-            </div>
-            <div className="max-h-[24vh] space-y-2 overflow-y-auto">
-              {quickLibraryItems.map((item) => (
-                <article key={item.id} className="rounded-xl border px-2.5 py-2" style={{ borderColor: "var(--bat-border)" }}>
-                  <p className="line-clamp-1 text-xs font-medium">{item.title}</p>
-                  <p className="mt-0.5 line-clamp-2 text-[11px]" style={{ color: "var(--bat-text-muted)" }}>
-                    {item.summary}
-                  </p>
+            <div className="space-y-3 border-t border-zinc-800 px-3 py-3">
+              <div>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <p className="text-[11px] uppercase tracking-[0.08em] text-zinc-400">Branches</p>
                   <button
                     type="button"
-                    className="mt-2 rounded-full border px-2 py-1 text-[11px]"
-                    style={{ borderColor: "var(--bat-border)" }}
-                    onClick={() => onUseLibraryItem(item.title)}
+                    onClick={() => onForkBranch()}
+                    className="rounded-full border border-zinc-700 px-2 py-1 text-[11px] hover:bg-zinc-800"
                   >
-                    Use in chat
+                    New
                   </button>
-                </article>
-              ))}
-              {quickLibraryItems.length === 0 ? (
-                <p className="text-xs" style={{ color: "var(--bat-text-muted)" }}>
-                  Library is still loading. Start a run to populate documents and evidence.
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {branches.map((branch) => {
+                    const active = branch.id === activeBranchId;
+                    return (
+                      <button
+                        key={branch.id}
+                        type="button"
+                        onClick={() => runAsync(pinBranch(branch.id))}
+                        className={`rounded-full border px-2.5 py-1 text-[11px] ${
+                          active
+                            ? "border-emerald-400/50 bg-emerald-400/10 text-emerald-200"
+                            : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+                        }`}
+                      >
+                        {branch.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="rounded-full border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800"
+                  onClick={() => runAsync(refreshNow())}
+                >
+                  <span className="inline-flex items-center gap-1">
+                    <RefreshCcw className="h-3.5 w-3.5" /> Refresh
+                  </span>
+                </button>
+                <CommandPalette onSelect={onCommand} />
+              </div>
+
+              <div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveLibraryCollection("all");
+                    setLibraryOpen(true);
+                  }}
+                  className="mb-2 inline-flex items-center gap-1 rounded-full border border-zinc-700 px-2.5 py-1 text-[11px] text-zinc-200 hover:bg-zinc-800"
+                >
+                  <Library className="h-3.5 w-3.5" />
+                  Open library
+                </button>
+                <div className="space-y-1.5">
+                  {quickLibraryItems.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => onUseLibraryItem(item.title)}
+                      className="w-full rounded-lg border border-zinc-700/80 px-2 py-1.5 text-left text-[11px] text-zinc-300 hover:bg-zinc-800"
+                    >
+                      <p className="line-clamp-1 font-medium text-zinc-200">{item.title}</p>
+                      <p className="line-clamp-2 text-zinc-400">{item.summary}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </aside>
+
+          <section className="relative flex min-h-0 flex-col bg-white">
+            <header className="flex items-center justify-between gap-2 border-b border-zinc-200 px-3 py-2.5">
+              <div className="min-w-0">
+                <div className="mb-0.5 flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-200 text-zinc-700 lg:hidden"
+                    onClick={() => setSidebarOpen((prev) => !prev)}
+                  >
+                    <Menu className="h-4 w-4" />
+                  </button>
+                  <h1 className="truncate text-sm font-semibold text-zinc-900">{activeThread?.title || "New chat"}</h1>
+                </div>
+                <p className="text-xs text-zinc-500">
+                  {syncing ? "Syncing..." : activeBranch ? `Branch: ${activeBranch.name}` : "Main branch"}
+                  {" • "}
+                  {isStreaming ? "Running" : "Idle"}
                 </p>
-              ) : null}
-            </div>
-          </div>
-        </aside>
-
-        <section className="flex min-h-[70vh] flex-col gap-3">
-          <header className="bat-surface flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-            <div>
-              <p className="text-xs uppercase tracking-[0.1em]" style={{ color: "var(--bat-text-muted)" }}>
-                {syncing ? "Syncing" : "Ready"}
-              </p>
-              <h1 className="text-lg font-semibold">{activeThread?.title || "Workspace chat"}</h1>
-              <p className="text-xs" style={{ color: "var(--bat-text-muted)" }}>
-                {activeBranch ? `Branch: ${activeBranch.name}` : "Main branch"} • {isStreaming ? "BAT is running" : "Idle"}
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="bat-chip">Queued: {queuedMessages.length}</span>
-              {branchNeedsDecision ? <span className="bat-chip">Needs approval</span> : null}
-              {preferences.askQuestionsFirst ? <span className="bat-chip">Question-first</span> : null}
-              <button
-                type="button"
-                className="rounded-full border px-3 py-1.5 text-xs"
-                style={{ borderColor: "var(--bat-border)" }}
-                onClick={() => setLibraryOpen((prev) => !prev)}
-              >
-                <span className="inline-flex items-center gap-1">
-                  <Library className="h-3.5 w-3.5" /> Library
-                </span>
-              </button>
-            </div>
-          </header>
-
-          <ChatThread
-            messages={messages}
-            onForkFromMessage={onForkBranch}
-            onResolveDecision={(decisionId, option) => runAsync(resolveDecision(decisionId, option))}
-            onRunAction={onRunMessageAction}
-            onInspectAssistantMessage={setSelectedAssistantMessageId}
-            selectedAssistantMessageId={selectedReasoningMessage?.id || null}
-            showInlineReasoning={false}
-            isStreaming={isStreaming}
-            streamingInsight={streamingInsight}
-          />
-
-          <ChatComposer
-            isStreaming={isStreaming}
-            queuedMessages={queuedMessages}
-            onSend={onSend}
-            onSteerRun={(note) => runAsync(steerRun(note))}
-            onSteerQueued={(id, content) =>
-              runAsync(
-                (async () => {
-                  await steerRun(content);
-                  await removeQueued(id);
-                })()
-              )
-            }
-            onStop={() => runAsync(interruptRun())}
-            onReorderQueue={(from, to) => runAsync(reorderQueue(from, to))}
-            onDeleteQueued={(id) => runAsync(removeQueued(id))}
-            onSteer={onSteer}
-          />
-        </section>
-
-        <aside className="space-y-3">
-          <section className="bat-surface p-3">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <p className="text-sm font-semibold">Thought process</p>
-              <span className="bat-chip">Selected reply</span>
-            </div>
-            {selectedReasoningMessage?.reasoning ? (
-              <div className="space-y-3 text-xs" style={{ color: "var(--bat-text-muted)" }}>
-                <div>
-                  <p className="text-xs font-semibold" style={{ color: "var(--bat-text)" }}>
-                    Plan
-                  </p>
-                  <ul className="mt-1 list-disc space-y-1 pl-4">
-                    {selectedReasoningMessage.reasoning.plan.map((line) => (
-                      <li key={`${selectedReasoningMessage.id}-plan-${line}`}>{line}</li>
-                    ))}
-                  </ul>
-                </div>
-                <div>
-                  <p className="text-xs font-semibold" style={{ color: "var(--bat-text)" }}>
-                    Tools used
-                  </p>
-                  <div className="mt-1 flex flex-wrap gap-1.5">
-                    {selectedReasoningMessage.reasoning.tools.map((tool) => (
-                      <span key={`${selectedReasoningMessage.id}-tool-${tool}`} className="bat-chip">
-                        {tool}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <p className="text-xs font-semibold" style={{ color: "var(--bat-text)" }}>
-                    Next steps
-                  </p>
-                  <ul className="mt-1 list-disc space-y-1 pl-4">
-                    {selectedReasoningMessage.reasoning.nextSteps.map((step) => (
-                      <li key={`${selectedReasoningMessage.id}-step-${step}`}>{step}</li>
-                    ))}
-                  </ul>
-                </div>
-                {selectedReasoningMessage.reasoning.evidence.length ? (
-                  <div>
-                    <p className="text-xs font-semibold" style={{ color: "var(--bat-text)" }}>
-                      Evidence
-                    </p>
-                    <div className="mt-1 flex flex-wrap gap-1.5">
-                      {selectedReasoningMessage.reasoning.evidence.map((item) =>
-                        item.href ? (
-                          <a
-                            key={`${selectedReasoningMessage.id}-evidence-${item.id}`}
-                            href={item.href}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="bat-chip hover:opacity-80"
-                          >
-                            {item.label}
-                          </a>
-                        ) : (
-                          <span key={`${selectedReasoningMessage.id}-evidence-${item.id}`} className="bat-chip">
-                            {item.label}
-                          </span>
-                        )
-                      )}
-                    </div>
-                  </div>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={onRunAudit}
+                  className="hidden rounded-full border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 md:inline-flex"
+                >
+                  Audit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLibraryOpen((prev) => !prev)}
+                  className="inline-flex items-center gap-1 rounded-full border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+                >
+                  <Library className="h-3.5 w-3.5" />
+                  Library
+                </button>
+                {queuedMessages.length > 0 ? (
+                  <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-[11px] text-zinc-600">
+                    Queue {queuedMessages.length}
+                  </span>
+                ) : null}
+                {branchNeedsDecision ? (
+                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] text-amber-700">
+                    Needs approval
+                  </span>
+                ) : null}
+                {preferences.askQuestionsFirst ? (
+                  <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-[11px] text-zinc-600">
+                    Question first
+                  </span>
                 ) : null}
               </div>
-            ) : (
-              <p className="text-xs" style={{ color: "var(--bat-text-muted)" }}>
-                Pick an assistant reply to inspect BAT reasoning and evidence.
-              </p>
-            )}
-          </section>
+            </header>
 
-          <LiveActivityPanel
-            runs={processRuns}
-            feedItems={visibleFeed}
-            decisions={decisions}
-            onResolve={(decisionId, option) => runAsync(resolveDecision(decisionId, option))}
-            onRunAudit={onRunAudit}
-            onSteer={onLiveSteer}
+            <ChatThread
+              messages={messages}
+              onForkFromMessage={onForkBranch}
+              onResolveDecision={(decisionId, option) => runAsync(resolveDecision(decisionId, option))}
+              onRunAction={onRunMessageAction}
+              showInlineReasoning={false}
+              isStreaming={isStreaming}
+              streamingInsight={streamingInsight}
+            />
+
+            <ChatComposer
+              isStreaming={isStreaming}
+              queuedMessages={queuedMessages}
+              onSend={onSend}
+              onSteerRun={(note) => runAsync(steerRun(note))}
+              onSteerQueued={(id, content) =>
+                runAsync(
+                  (async () => {
+                    await steerRun(content);
+                    await removeQueued(id);
+                  })()
+                )
+              }
+              onStop={() => runAsync(interruptRun())}
+              onReorderQueue={(from, to) => runAsync(reorderQueue(from, to))}
+              onDeleteQueued={(id) => runAsync(removeQueued(id))}
+              onSteer={onSteer}
+            />
+          </section>
+        </div>
+
+        {sidebarOpen ? (
+          <button
+            type="button"
+            className="absolute inset-0 z-20 bg-black/35 lg:hidden"
+            onClick={() => setSidebarOpen(false)}
+            aria-label="Close chats sidebar"
           />
-        </aside>
+        ) : null}
       </div>
 
       <LibraryDrawer
@@ -566,17 +491,16 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
       />
 
       {nameDialog ? (
-        <div className="fixed inset-0 z-50 grid place-items-start bg-black/30 pt-[18vh]">
-          <div className="w-full max-w-xl rounded-2xl border p-4" style={{ background: "var(--bat-surface)", borderColor: "var(--bat-border)" }}>
-            <p className="text-lg font-semibold">{nameDialog.title}</p>
-            <p className="mt-1 text-xs uppercase tracking-[0.08em]" style={{ color: "var(--bat-text-muted)" }}>
+        <div className="fixed inset-0 z-50 grid place-items-start bg-black/40 pt-[18vh]">
+          <div className="w-full max-w-xl rounded-2xl border border-zinc-200 bg-white p-4 shadow-xl">
+            <p className="text-lg font-semibold text-zinc-900">{nameDialog.title}</p>
+            <p className="mt-1 text-xs uppercase tracking-[0.08em] text-zinc-500">
               {nameDialog.mode === "thread" ? "Chat name" : "Branch name"}
             </p>
             <input
               value={nameInput}
               onChange={(event) => setNameInput(event.target.value)}
-              className="mt-2 w-full rounded-xl border px-3 py-2 text-sm outline-none"
-              style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}
+              className="mt-2 w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-400"
               autoFocus
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
@@ -592,8 +516,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
             <div className="mt-4 flex justify-end gap-2">
               <button
                 type="button"
-                className="rounded-full border px-4 py-2 text-sm"
-                style={{ borderColor: "var(--bat-border)" }}
+                className="rounded-full border border-zinc-200 px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-50"
                 onClick={() => {
                   setNameDialog(null);
                   setNameInput("");
@@ -603,8 +526,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
               </button>
               <button
                 type="button"
-                className="rounded-full px-4 py-2 text-sm font-semibold text-white"
-                style={{ background: "var(--bat-accent)" }}
+                className="rounded-full bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800"
                 onClick={submitNameDialog}
               >
                 Continue

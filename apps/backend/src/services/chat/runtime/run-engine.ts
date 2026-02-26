@@ -170,6 +170,53 @@ function findFirstUrl(message: string): string | null {
   return `https://${bareDomain[1]}`;
 }
 
+function findReferencedCrawlRunId(message: string): string | null {
+  const raw = String(message || '');
+  const directId = raw.match(/\b(crawl-[a-z0-9-]+)\b/i);
+  if (directId?.[1]) return directId[1].toLowerCase();
+
+  const labeled = raw.match(/\bcrawl\s*run[:\s#-]*([a-z0-9-]+)/i);
+  if (!labeled?.[1]) return null;
+  const candidate = labeled[1].trim().toLowerCase();
+  if (!candidate) return null;
+  return candidate.startsWith('crawl-') ? candidate : `crawl-${candidate}`;
+}
+
+function shouldIncludeOperationalTrace(message: string): boolean {
+  const normalized = String(message || '').toLowerCase();
+  return (
+    /\b(tool execution trace|execution trace|run trace|validation note|debug log|debug info|internal trace)\b/.test(
+      normalized
+    ) || /\bshow\b.*\btrace\b/.test(normalized)
+  );
+}
+
+export function stripLegacyBoilerplateResponse(content: string): string {
+  const raw = String(content || '').trim();
+  if (!raw) return '';
+
+  const markers = [
+    /fork from here/i,
+    /how bat got here/i,
+    /no tools executed in this run\./i,
+    /tool execution trace:/i,
+    /validation note:/i,
+    /^next actions$/im,
+    /^tools used$/im,
+    /^assumptions$/im,
+  ];
+  const markerCount = markers.reduce((count, pattern) => (pattern.test(raw) ? count + 1 : count), 0);
+  if (markerCount < 2) return raw;
+
+  let cleaned = raw.replace(/^\s*fork from here\s*\n?/i, '').trim();
+  cleaned = cleaned.replace(/\n{2,}how bat got here[\s\S]*$/i, '').trim();
+  cleaned = cleaned.replace(/\n{2,}next actions[\s\S]*$/i, '').trim();
+  cleaned = cleaned.replace(/\n{2,}tool execution trace:[\s\S]*$/i, '').trim();
+  cleaned = cleaned.replace(/\n{2,}no tools executed in this run\.[\s\S]*$/i, '').trim();
+  cleaned = cleaned.replace(/\n{2,}validation note:[\s\S]*$/i, '').trim();
+  return cleaned;
+}
+
 function normalizeUrlCandidate(value: unknown): string | null {
   const raw = String(value || '').trim();
   if (!raw) return null;
@@ -522,6 +569,7 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   const normalized = message.toLowerCase();
   const calls: RuntimeToolCall[] = [];
   const firstUrl = findFirstUrl(message);
+  const referencedCrawlRunId = findReferencedCrawlRunId(message);
 
   const pushIfMissing = (tool: string, args: Record<string, unknown>) => {
     const key = `${tool}:${JSON.stringify(args)}`;
@@ -554,6 +602,9 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
     /\b(investigat|research|analy[sz]e|profile|account|person|people|creator|founder|handle)\b/.test(normalized) &&
     (/(instagram\.com|tiktok\.com|youtube\.com|x\.com|twitter\.com|@[a-z0-9._-]+)/i.test(message) ||
       /\b(ddg|duckduckgo|scraply|scrapling|crawl|fetch)\b/.test(normalized));
+  const hasEvidenceReferenceIntent =
+    /use evidence from|evidence from/i.test(message) ||
+    (/\b(evidence|source|sources)\b/.test(normalized) && /\b(use|ground|base|summariz|detail|answer)\b/.test(normalized));
 
   if (hasCompetitorSignals) {
     pushIfMissing('intel.list', { section: 'competitors', limit: 12 });
@@ -597,6 +648,14 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
 
   if (/crawl|spider/.test(normalized) && firstUrl) {
     pushIfMissing('web.crawl', { startUrls: [firstUrl], maxPages: 8, maxDepth: 1 });
+  }
+
+  if (referencedCrawlRunId) {
+    pushIfMissing('intel.list', { section: 'web_snapshots', limit: 50, where: { crawlRunId: referencedCrawlRunId } });
+  }
+
+  if (hasEvidenceReferenceIntent && firstUrl) {
+    pushIfMissing('web.fetch', { url: firstUrl, sourceType: 'ARTICLE', discoveredBy: 'CHAT_TOOL' });
   }
 
   if (/(fetch|scrape|extract).*(web|site|page|url)|\bfetch\b/.test(normalized) && firstUrl) {
@@ -691,6 +750,134 @@ function buildExecutedToolsSection(
   });
 
   return `Tool execution trace:\n${lines.join('\n')}`;
+}
+
+function toNumber(value: unknown): number | null {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function shortArtifactId(value: unknown): string {
+  const raw = String(value || '').trim();
+  return raw ? raw.slice(0, 8) : '';
+}
+
+function buildLibraryUpdatesSection(
+  toolRuns: Array<{
+    toolName: string;
+    status: ToolRunStatus;
+    resultJson: unknown;
+  }>
+): { text: string; hasUpdates: boolean; collection?: string } {
+  const lines: string[] = [];
+  const seen = new Set<string>();
+  let primaryCollection: string | undefined;
+
+  const pushLine = (line: string, collection?: string) => {
+    const normalized = String(line || '').trim();
+    if (!normalized) return;
+    if (seen.has(normalized)) return;
+    seen.add(normalized);
+    lines.push(normalized);
+    if (!primaryCollection && collection) {
+      primaryCollection = collection;
+    }
+  };
+
+  for (const toolRun of toolRuns) {
+    if (toolRun.status !== ToolRunStatus.DONE) continue;
+    const result = isRecord(toolRun.resultJson) ? toolRun.resultJson : null;
+    if (!result) continue;
+
+    if (toolRun.toolName === 'web.fetch') {
+      const snapshotId = shortArtifactId(result.snapshotId);
+      const finalUrl = String(result.finalUrl || '').trim();
+      if (snapshotId || finalUrl) {
+        pushLine(
+          `Web library updated: saved page snapshot${snapshotId ? ` ${snapshotId}` : ''}${finalUrl ? ` from ${finalUrl}` : ''}.`,
+          'web'
+        );
+      }
+      continue;
+    }
+
+    if (toolRun.toolName === 'web.crawl') {
+      const persisted = toNumber(result.persisted);
+      const runId = shortArtifactId(result.runId);
+      if ((persisted !== null && persisted > 0) || runId) {
+        pushLine(
+          `Web library updated: crawl${runId ? ` ${runId}` : ''} captured ${persisted !== null ? Math.max(0, Math.floor(persisted)) : 0} page snapshot(s).`,
+          'web'
+        );
+      }
+      continue;
+    }
+
+    if (toolRun.toolName === 'research.gather') {
+      const websitesScanned = toNumber(result.websitesScanned);
+      const artifacts = Array.isArray(result.artifacts) ? result.artifacts.length : 0;
+      if ((websitesScanned !== null && websitesScanned > 0) || artifacts > 0) {
+        pushLine(
+          `Research saved new workspace evidence: ${artifacts} artifact(s)${websitesScanned !== null ? `, ${Math.max(0, Math.floor(websitesScanned))} website scan(s)` : ''}.`,
+          'web'
+        );
+      }
+      continue;
+    }
+
+    if (toolRun.toolName === 'competitors.add_links') {
+      const added = toNumber(result.added);
+      if (added !== null && added > 0) {
+        pushLine(
+          `Competitor library updated: added ${Math.max(0, Math.floor(added))} competitor/inspiration link(s).`,
+          'competitors'
+        );
+      }
+      continue;
+    }
+
+    if (toolRun.toolName === 'intake.update_from_text') {
+      const added = toNumber(result.competitorLinksAdded);
+      if (added !== null && added > 0) {
+        pushLine(
+          `Competitor library updated via intake: added ${Math.max(0, Math.floor(added))} inspiration link(s).`,
+          'competitors'
+        );
+      }
+      continue;
+    }
+
+    if (toolRun.toolName === 'orchestration.run') {
+      const summary = isRecord(result.summary) ? result.summary : null;
+      const shortlisted = summary ? toNumber(summary.shortlisted) : null;
+      const topPicks = summary ? toNumber(summary.topPicks) : null;
+      if ((shortlisted !== null && shortlisted > 0) || (topPicks !== null && topPicks > 0)) {
+        pushLine(
+          `Competitor library refreshed: ${shortlisted !== null ? Math.max(0, Math.floor(shortlisted)) : 0} shortlisted, ${topPicks !== null ? Math.max(0, Math.floor(topPicks)) : 0} top picks.`,
+          'competitors'
+        );
+      }
+      continue;
+    }
+
+    if (toolRun.toolName === 'document.generate') {
+      const docId = shortArtifactId(result.docId);
+      if (docId) {
+        pushLine(`Deliverables library updated: generated document ${docId}.`, 'deliverables');
+      }
+      continue;
+    }
+  }
+
+  if (!lines.length) {
+    return { text: '', hasUpdates: false };
+  }
+
+  return {
+    text: `Library updates:\n${lines.map((line, index) => `${index + 1}. ${line}`).join('\n')}`,
+    hasUpdates: true,
+    ...(primaryCollection ? { collection: primaryCollection } : {}),
+  };
 }
 
 function flattenEvidence(results: RuntimeToolResult[]) {
@@ -1483,26 +1670,51 @@ export class RuntimeRunEngine {
         ? mergeBlockingDecisions([plannerBlockingDecisions, writerAlignedBlockingDecisions])
         : [];
 
-    const toolTraceSection = buildExecutedToolsSection(
+    const includeOperationalTrace = shouldIncludeOperationalTrace(effectiveUserMessage);
+    const toolTraceSection = includeOperationalTrace
+      ? buildExecutedToolsSection(
+          toolRuns.map((toolRun) => ({
+            toolName: toolRun.toolName,
+            status: toolRun.status,
+            resultJson: toolRun.resultJson,
+          }))
+        )
+      : '';
+    const libraryUpdates = buildLibraryUpdatesSection(
       toolRuns.map((toolRun) => ({
         toolName: toolRun.toolName,
         status: toolRun.status,
         resultJson: toolRun.resultJson,
       }))
     );
-    const finalResponseContent = [writerOutput.response.trim(), toolTraceSection, validatorNote]
+
+    const finalResponseContent = [
+      stripLegacyBoilerplateResponse(writerOutput.response),
+      includeOperationalTrace ? toolTraceSection : '',
+      includeOperationalTrace ? validatorNote : '',
+      libraryUpdates.hasUpdates ? libraryUpdates.text : '',
+    ]
       .filter((section) => String(section || '').trim().length > 0)
       .join('\n\n');
+
+    const actionButtons = [...writerOutput.actions];
+    if (libraryUpdates.hasUpdates && !actionButtons.some((action) => action.action === 'open_library')) {
+      actionButtons.unshift({
+        label: 'Open library',
+        action: 'open_library',
+        ...(libraryUpdates.collection ? { payload: { collection: libraryUpdates.collection } } : {}),
+      });
+    }
 
     await createBranchMessage({
       branchId: run.branchId,
       role: ChatBranchMessageRole.ASSISTANT,
       content: finalResponseContent,
       blocksJson:
-        writerOutput.actions.length || finalDecisions.length
+        actionButtons.length || finalDecisions.length
           ? {
               type: 'action_buttons',
-              actions: writerOutput.actions,
+              actions: actionButtons,
               decisions: finalDecisions,
             }
           : undefined,

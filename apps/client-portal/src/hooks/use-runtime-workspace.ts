@@ -542,51 +542,12 @@ function mapRuns(activeRuns: Array<Record<string, unknown>>, events: Array<Recor
   return mapRecentRunsFromEvents(events);
 }
 
-function deriveLibrary(messages: ChatMessage[]): LibraryItem[] {
-  const items: LibraryItem[] = [];
-  for (const message of messages) {
-    if (!message.reasoning?.evidence?.length) continue;
-    for (const evidence of message.reasoning.evidence) {
-      items.push({
-        id: `${message.id}-${evidence.id}`,
-        collection: "web",
-        title: evidence.label,
-        summary: `Referenced in assistant message ${message.id.slice(0, 8)}`,
-        freshness: formatTime(message.createdAt),
-        tags: ["evidence", "chat"],
-        evidenceLabel: evidence.label,
-        ...(evidence.href ? { evidenceHref: evidence.href } : {}),
-      });
-    }
-  }
-
-  return items.slice(0, 60);
-}
-
-function mergeLibraryItems(remote: LibraryItem[], derived: LibraryItem[]): LibraryItem[] {
-  const byId = new Map<string, LibraryItem>();
-  for (const item of [...remote, ...derived]) {
-    if (!item?.id) continue;
-    if (!byId.has(item.id)) {
-      byId.set(item.id, item);
-      continue;
-    }
-    const previous = byId.get(item.id)!;
-    const prevTs = Date.parse(previous.freshness || '');
-    const nextTs = Date.parse(item.freshness || '');
-    if (Number.isFinite(nextTs) && (!Number.isFinite(prevTs) || nextTs > prevTs)) {
-      byId.set(item.id, item);
-    }
-  }
-
-  return Array.from(byId.values()).sort((a, b) => Date.parse(b.freshness || '') - Date.parse(a.freshness || ''));
-}
-
 function buildPolicyFromPreferences(preferences: SessionPreferences): Record<string, unknown> {
+  const normalizedTone = preferences.tone === "concise" ? "balanced" : preferences.tone;
   return {
     autoContinue: !preferences.askQuestionsFirst,
-    maxAutoContinuations: preferences.tone === "concise" ? 0 : 1,
-    maxToolRuns: preferences.tone === "concise" ? 2 : 4,
+    maxAutoContinuations: 1,
+    maxToolRuns: normalizedTone === "detailed" ? 5 : 4,
     toolConcurrency: preferences.sourceFocus === "mixed" ? 3 : 2,
     allowMutationTools: false,
     maxToolMs: 30000,
@@ -871,11 +832,6 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
     [activeRunIds.length, queuedMessages.length]
   );
 
-  const mergedLibraryItems = useMemo(
-    () => mergeLibraryItems(libraryItemsRemote, deriveLibrary(messages)),
-    [libraryItemsRemote, messages]
-  );
-
   useEffect(() => {
     let mounted = true;
     setLoading(true);
@@ -997,7 +953,7 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
     decisions,
     queuedMessages,
     isStreaming: activeRunIds.length > 0,
-    libraryItems: mergedLibraryItems,
+    libraryItems: libraryItemsRemote,
     preferences,
     setActiveThreadId,
     setActiveBranchId,

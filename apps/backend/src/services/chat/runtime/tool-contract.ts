@@ -39,21 +39,46 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
   });
 }
 
-function normalizeArtifacts(raw: Record<string, unknown>): RuntimeToolArtifact[] {
-  const artifacts = raw.artifacts;
-  if (!Array.isArray(artifacts)) return [];
+function normalizeArtifacts(raw: Record<string, unknown>, toolName: string): RuntimeToolArtifact[] {
   const normalized: RuntimeToolArtifact[] = [];
+  const seen = new Set<string>();
 
-  for (const item of artifacts) {
-    if (!isRecord(item)) continue;
-    const kind = String(item.kind || '').trim();
-    const id = String(item.id || '').trim();
-    if (!kind || !id) continue;
+  const pushArtifact = (kindRaw: unknown, idRaw: unknown, sectionRaw?: unknown) => {
+    const kind = String(kindRaw || '').trim();
+    const id = String(idRaw || '').trim();
+    if (!kind || !id) return;
+    const section = String(sectionRaw || '').trim();
+    const key = `${kind}:${id}:${section}`;
+    if (seen.has(key)) return;
+    seen.add(key);
     normalized.push({
       kind,
       id,
-      ...(typeof item.section === 'string' ? { section: item.section } : {}),
+      ...(section ? { section } : {}),
     });
+  };
+
+  const artifacts = raw.artifacts;
+  if (Array.isArray(artifacts)) {
+    for (const item of artifacts) {
+      if (!isRecord(item)) continue;
+      pushArtifact(item.kind, item.id, item.section);
+    }
+  }
+
+  // Some tools return mutation identifiers without explicit artifacts.
+  if (toolName === 'web.fetch') {
+    pushArtifact('web_source', raw.sourceId, 'web_sources');
+    pushArtifact('web_snapshot', raw.snapshotId, 'web_snapshots');
+  }
+  if (toolName === 'web.crawl') {
+    pushArtifact('crawl_run', raw.runId, 'web_snapshots');
+  }
+  if (toolName === 'web.extract') {
+    pushArtifact('web_extraction', raw.extractionRunId, 'web_extraction_runs');
+  }
+  if (toolName === 'document.generate') {
+    pushArtifact('deliverable', raw.docId, 'deliverables');
   }
 
   return normalized;
@@ -95,6 +120,43 @@ function normalizeEvidence(raw: Record<string, unknown>): RuntimeEvidenceItem[] 
               : undefined;
       derived.push({
         kind: 'item',
+        label,
+        ...(url ? { url } : {}),
+      });
+    }
+    return derived;
+  }
+
+  if (Array.isArray(raw.data)) {
+    const derived: RuntimeEvidenceItem[] = [];
+    for (const item of raw.data.slice(0, 12)) {
+      if (!isRecord(item)) continue;
+      const label = String(
+        item.title ||
+          item.name ||
+          item.handle ||
+          item.finalUrl ||
+          item.url ||
+          item.href ||
+          item.profileUrl ||
+          item.id ||
+          ''
+      ).trim();
+      if (!label) continue;
+      const url =
+        typeof item.url === 'string'
+          ? item.url
+          : typeof item.href === 'string'
+            ? item.href
+            : typeof item.finalUrl === 'string'
+              ? item.finalUrl
+              : typeof item.profileUrl === 'string'
+                ? item.profileUrl
+                : typeof item.internalLink === 'string'
+                  ? item.internalLink
+                  : undefined;
+      derived.push({
+        kind: 'record',
         label,
         ...(url ? { url } : {}),
       });
@@ -203,6 +265,10 @@ function summarize(raw: Record<string, unknown>, toolName: string): string {
     return `${toolName} returned ${raw.items.length} item(s).`;
   }
 
+  if (Array.isArray(raw.data) && raw.data.length > 0) {
+    return `${toolName} returned ${raw.data.length} record(s).`;
+  }
+
   return `${toolName} completed successfully.`;
 }
 
@@ -263,7 +329,7 @@ export async function executeToolWithContract(input: {
     const asRecord = isRecord(rawResult) ? rawResult : { value: rawResult as unknown };
 
     const summary = summarize(asRecord, input.toolName);
-    const artifacts = normalizeArtifacts(asRecord);
+    const artifacts = normalizeArtifacts(asRecord, input.toolName);
     const evidence = normalizeEvidence(asRecord);
     const continuations = normalizeContinuations(asRecord);
     const decisions = normalizeDecisions(asRecord);
