@@ -291,6 +291,7 @@ export async function updateAgentRun(
   data: {
     status?: AgentRunStatus;
     plan?: RuntimePlan | null;
+    policy?: Record<string, unknown> | null;
     error?: string | null;
     startedAt?: Date | null;
     endedAt?: Date | null;
@@ -303,6 +304,11 @@ export async function updateAgentRun(
       ...(data.plan !== undefined
         ? {
             planJson: data.plan === null ? Prisma.JsonNull : toJson(data.plan),
+          }
+        : {}),
+      ...(data.policy !== undefined
+        ? {
+            policyJson: data.policy === null ? Prisma.JsonNull : toJson(data.policy),
           }
         : {}),
       ...(data.error !== undefined ? { error: data.error } : {}),

@@ -62,6 +62,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     reorderQueue,
     removeQueued,
     resolveDecision,
+    steerRun,
     setPreference,
     refreshNow,
   } = useRuntimeWorkspace(workspaceId);
@@ -107,8 +108,11 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     }
 
     if (mapping.prompt) {
-      const mode: "send" | "queue" = isStreaming ? "queue" : "send";
-      runAsync(sendMessage(mapping.prompt, mode));
+      if (isStreaming) {
+        runAsync(steerRun(mapping.prompt));
+      } else {
+        runAsync(sendMessage(mapping.prompt, "send"));
+      }
     }
   };
 
@@ -193,7 +197,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   const onLiveSteer = (instruction: string) => {
     const text = instruction.trim();
     if (!text) return;
-    runAsync(sendMessage(`Steer run: ${text}`, "send"));
+    runAsync(steerRun(text));
   };
 
   if (loading) {
@@ -331,6 +335,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
             isStreaming={isStreaming}
             queuedMessages={queuedMessages}
             onSend={onSend}
+            onSteerRun={(note) => runAsync(steerRun(note))}
             onStop={() => runAsync(interruptRun())}
             onReorderQueue={(from, to) => runAsync(reorderQueue(from, to))}
             onDeleteQueued={(id) => runAsync(removeQueued(id))}

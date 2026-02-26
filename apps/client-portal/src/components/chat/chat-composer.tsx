@@ -18,6 +18,7 @@ interface ChatComposerProps {
   isStreaming: boolean;
   queuedMessages: QueuedMessage[];
   onSend: (content: string, mode: "send" | "queue") => void;
+  onSteerRun: (note: string) => void;
   onStop: () => void;
   onReorderQueue: (from: number, to: number) => void;
   onDeleteQueued: (id: string) => void;
@@ -28,6 +29,7 @@ export function ChatComposer({
   isStreaming,
   queuedMessages,
   onSend,
+  onSteerRun,
   onStop,
   onReorderQueue,
   onDeleteQueued,
@@ -56,8 +58,7 @@ export function ChatComposer({
     if (!isStreaming) return;
     const content = message.trim();
     if (!content) return;
-    // "send" while active maps to interrupt mode in the runtime hook.
-    onSend(content, "send");
+    onSteerRun(content);
     setMessage("");
   };
 

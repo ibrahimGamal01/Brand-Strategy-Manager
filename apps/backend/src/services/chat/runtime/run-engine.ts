@@ -738,6 +738,25 @@ export function collectContinuationTools(results: RuntimeToolResult[]): string[]
   return Array.from(new Set(next.map((tool) => tool.trim()).filter(Boolean)));
 }
 
+function compactSteerNote(value: string, maxChars = 140): string {
+  const normalized = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxChars - 3))}...`;
+}
+
+function extractRunSteerNotes(messages: Array<{ role: ChatBranchMessageRole; content: string; createdAt: Date }>, startedAt: Date): string[] {
+  return messages
+    .filter((message) => message.role === ChatBranchMessageRole.SYSTEM && message.createdAt >= startedAt)
+    .map((message) => {
+      const raw = String(message.content || '').trim();
+      if (!raw.startsWith('STEER_NOTE::')) return '';
+      return raw.replace(/^STEER_NOTE::/i, '').trim();
+    })
+    .filter(Boolean)
+    .slice(-6);
+}
+
 export class RuntimeRunEngine {
   private readonly branchLocks = new Map<string, Promise<void>>();
 
@@ -973,6 +992,212 @@ export class RuntimeRunEngine {
     return { ok: true };
   }
 
+  async resolveDecision(input: {
+    researchJobId: string;
+    branchId: string;
+    decisionId: string;
+    option: string;
+    actorUserId: string;
+  }): Promise<{ ok: boolean; runId: string; retriedToolRuns: number; skippedToolRuns: number }> {
+    const branch = await getBranch(input.branchId, input.researchJobId);
+    if (!branch) {
+      throw new Error('Branch not found for this research job');
+    }
+
+    const decisionId = String(input.decisionId || '').trim();
+    const option = String(input.option || '').trim();
+    if (!decisionId || !option) {
+      throw new Error('decisionId and option are required');
+    }
+
+    const waitingRuns = (await listActiveRuns(input.branchId)).filter(
+      (run) => run.status === AgentRunStatus.WAITING_USER
+    );
+    if (!waitingRuns.length) {
+      throw new Error('No waiting decision run found for this branch');
+    }
+
+    const targetRun = waitingRuns[waitingRuns.length - 1];
+    const normalizedOption = option.toLowerCase();
+    const shouldRetryBlockedTools = /(approve|allow|yes|continue|apply|run|proceed)/i.test(normalizedOption);
+
+    const plan = normalizeRunPlan(targetRun.planJson);
+    const updatedPlan =
+      plan && plan.decisionRequests.length
+        ? {
+            ...plan,
+            decisionRequests: plan.decisionRequests.filter((decision) => decision.id !== decisionId),
+          }
+        : plan;
+    if (updatedPlan) {
+      updatedPlan.needUserInput = updatedPlan.decisionRequests.some((decision) => Boolean(decision.blocking));
+    }
+
+    const basePolicy = normalizePolicy(
+      isRecord(targetRun.policyJson) ? (targetRun.policyJson as Partial<RunPolicy>) : undefined
+    );
+    const policyForRun: Record<string, unknown> = {
+      ...basePolicy,
+      ...(shouldRetryBlockedTools ? { allowMutationTools: true } : {}),
+    };
+
+    const blockedToolRuns = targetRun.toolRuns.filter((toolRun) => {
+      if (toolRun.status !== ToolRunStatus.FAILED) return false;
+      if (!isRecord(toolRun.resultJson)) return false;
+      const decisions = Array.isArray(toolRun.resultJson.decisions) ? toolRun.resultJson.decisions : [];
+      return decisions.some((decision) => isRecord(decision) && String(decision.id || '').trim() === decisionId);
+    });
+
+    if (shouldRetryBlockedTools) {
+      for (const toolRun of blockedToolRuns) {
+        await updateToolRun(toolRun.id, {
+          status: ToolRunStatus.QUEUED,
+          result: null,
+          startedAt: null,
+          endedAt: null,
+        });
+      }
+    } else {
+      for (const toolRun of blockedToolRuns) {
+        await updateToolRun(toolRun.id, {
+          status: ToolRunStatus.CANCELLED,
+          endedAt: new Date(),
+          result: {
+            ok: false,
+            summary: `Skipped ${toolRun.toolName} based on decision "${option}".`,
+            artifacts: [],
+            evidence: [],
+            continuations: [],
+            decisions: [],
+            warnings: [`Skipped by user decision: ${option}`],
+            raw: {
+              decisionId,
+              option,
+            },
+          } satisfies RuntimeToolResult,
+        });
+      }
+    }
+
+    await createBranchMessage({
+      branchId: input.branchId,
+      role: ChatBranchMessageRole.SYSTEM,
+      content: `DECISION_RESOLUTION::${decisionId}::${option}`,
+      clientVisible: false,
+    });
+
+    await updateAgentRun(targetRun.id, {
+      status: AgentRunStatus.RUNNING,
+      ...(updatedPlan ? { plan: updatedPlan } : {}),
+      policy: policyForRun,
+      error: null,
+      endedAt: null,
+    });
+
+    await this.emitEvent({
+      branchId: input.branchId,
+      agentRunId: targetRun.id,
+      type: ProcessEventType.PROCESS_LOG,
+      message: `Decision resolved (${decisionId}): ${option}`,
+      payload: {
+        decisionId,
+        option,
+        actorUserId: input.actorUserId,
+        retriedToolRuns: shouldRetryBlockedTools ? blockedToolRuns.length : 0,
+        skippedToolRuns: shouldRetryBlockedTools ? 0 : blockedToolRuns.length,
+      },
+    });
+
+    void this.executeRun(targetRun.id).catch((error) => {
+      console.error('[RuntimeRunEngine] executeRun failed after decision resolution:', error);
+      void this.handleRunFailure({
+        runId: targetRun.id,
+        branchId: input.branchId,
+        message: 'Run failed after resolving a decision.',
+        error,
+      });
+    });
+
+    return {
+      ok: true,
+      runId: targetRun.id,
+      retriedToolRuns: shouldRetryBlockedTools ? blockedToolRuns.length : 0,
+      skippedToolRuns: shouldRetryBlockedTools ? 0 : blockedToolRuns.length,
+    };
+  }
+
+  async steerActiveRun(input: {
+    researchJobId: string;
+    branchId: string;
+    userId: string;
+    note: string;
+  }): Promise<{ ok: boolean; applied: boolean; runId?: string; queued?: boolean; queueItemId?: string }> {
+    const branch = await getBranch(input.branchId, input.researchJobId);
+    if (!branch) {
+      throw new Error('Branch not found for this research job');
+    }
+
+    const note = String(input.note || '').trim();
+    if (!note) {
+      throw new Error('Steer note is required');
+    }
+
+    const activeRuns = (await listActiveRuns(input.branchId)).filter(
+      (run) => run.status !== AgentRunStatus.CANCELLED && run.status !== AgentRunStatus.DONE
+    );
+
+    if (!activeRuns.length) {
+      const queueItem = await enqueueMessage({
+        branchId: input.branchId,
+        userId: input.userId,
+        content: `Steer note: ${note}`,
+      });
+
+      await this.emitEvent({
+        branchId: input.branchId,
+        type: ProcessEventType.PROCESS_LOG,
+        message: 'No active run to steer. Steer note queued for the next run.',
+        payload: {
+          queueItemId: queueItem.id,
+          note: compactSteerNote(note),
+        },
+      });
+
+      return {
+        ok: true,
+        applied: false,
+        queued: true,
+        queueItemId: queueItem.id,
+      };
+    }
+
+    const activeRun = activeRuns[activeRuns.length - 1];
+
+    await createBranchMessage({
+      branchId: input.branchId,
+      role: ChatBranchMessageRole.SYSTEM,
+      content: `STEER_NOTE::${note}`,
+      clientVisible: false,
+    });
+
+    await this.emitEvent({
+      branchId: input.branchId,
+      agentRunId: activeRun.id,
+      type: ProcessEventType.PROCESS_LOG,
+      message: `Steer note applied to the active run: ${compactSteerNote(note)}`,
+      payload: {
+        note,
+        actorUserId: input.userId,
+      },
+    });
+
+    return {
+      ok: true,
+      applied: true,
+      runId: activeRun.id,
+    };
+  }
+
   private async ensureToolRuns(runId: string, toolCalls: RuntimeToolCall[], maxToolRuns: number) {
     const existing = await listToolRuns(runId);
     const existingKeys = new Set(
@@ -1097,6 +1322,20 @@ export class RuntimeRunEngine {
 
     const triggerMessage = run.triggerMessage?.content || 'Continue with available results.';
     const plan = normalizeRunPlan(run.planJson) || buildPlanFromMessage(triggerMessage);
+    const runStartedAt = run.startedAt || run.createdAt || new Date(0);
+    const runMessages = await listBranchMessages(run.branchId, 180);
+    const steerNotes = extractRunSteerNotes(
+      runMessages.map((message) => ({
+        role: message.role,
+        content: message.content,
+        createdAt: message.createdAt,
+      })),
+      runStartedAt
+    );
+    const effectiveUserMessage =
+      steerNotes.length > 0
+        ? `${triggerMessage}\n\nSteer notes for this run:\n${steerNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}`
+        : triggerMessage;
     const toolRuns = await listToolRuns(run.id);
     const toolResults = toolRuns
       .map((item) => (isRecord(item.resultJson) ? (item.resultJson as RuntimeToolResult) : null))
@@ -1158,7 +1397,7 @@ export class RuntimeRunEngine {
     }
 
     const toolSummary = await summarizeToolResults({
-      userMessage: triggerMessage,
+      userMessage: effectiveUserMessage,
       plan,
       toolResults,
     });
@@ -1215,14 +1454,14 @@ export class RuntimeRunEngine {
     }
 
     const writerOutput = await writeClientResponse({
-      userMessage: triggerMessage,
+      userMessage: effectiveUserMessage,
       plan,
       toolSummary,
       toolResults,
     });
 
     const validatorOutput = await validateClientResponse({
-      userMessage: triggerMessage,
+      userMessage: effectiveUserMessage,
       plan,
       writerOutput,
       toolResults,
@@ -1314,7 +1553,18 @@ export class RuntimeRunEngine {
       type: ProcessEventType.DONE,
       message: `Run completed: ${toolRuns.length} tool(s) executed.`,
       payload: {
-        toolRuns: toolRuns.map((item) => ({ id: item.id, toolName: item.toolName, status: item.status })),
+        toolRuns: toolRuns.map((item) => {
+          const result = isRecord(item.resultJson) ? item.resultJson : null;
+          return {
+            id: item.id,
+            toolName: item.toolName,
+            status: item.status,
+            summary: String(result?.summary || '').trim() || undefined,
+            artifactCount: Array.isArray(result?.artifacts) ? result.artifacts.length : 0,
+            evidenceCount: Array.isArray(result?.evidence) ? result.evidence.length : 0,
+            warningCount: Array.isArray(result?.warnings) ? result.warnings.length : 0,
+          };
+        }),
         validation: validatorOutput,
       },
     });

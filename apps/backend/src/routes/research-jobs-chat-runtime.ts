@@ -242,26 +242,57 @@ router.post('/:id/runtime/branches/:branchId/decisions/resolve', async (req, res
     }
 
     const portalReq = req as AuthedPortalRequest;
-    const userId = String(portalReq.portalSession?.user?.id || 'portal_user').trim() || 'portal_user';
-    const content = `Decision ${decisionId}: ${option}. Continue using this approved option.`;
+    const actorUserId = String(portalReq.portalSession?.user?.id || 'portal_user').trim() || 'portal_user';
 
-    const result = await runtimeRunEngine.sendMessage({
+    const result = await runtimeRunEngine.resolveDecision({
       researchJobId,
       branchId,
-      userId,
-      content,
-      mode: 'interrupt',
+      decisionId,
+      option,
+      actorUserId,
     });
 
     return res.json({
-      ok: true,
-      queued: result.queued,
+      ok: result.ok,
       runId: result.runId,
-      userMessageId: result.userMessageId,
+      retriedToolRuns: result.retriedToolRuns,
+      skippedToolRuns: result.skippedToolRuns,
     });
   } catch (error: any) {
-    const status = String(error?.message || '').includes('not found') ? 404 : 500;
+    const message = String(error?.message || '');
+    const status =
+      message.includes('not found')
+        ? 404
+        : message.toLowerCase().includes('required') || message.toLowerCase().includes('no waiting decision')
+          ? 400
+          : 500;
     return res.status(status).json({ error: 'Failed to resolve decision', details: error?.message || String(error) });
+  }
+});
+
+router.post('/:id/runtime/branches/:branchId/steer', async (req, res) => {
+  try {
+    const researchJobId = String(req.params.id || '').trim();
+    const branchId = String(req.params.branchId || '').trim();
+    const note = String(req.body?.note || '').trim();
+    if (!note) {
+      return res.status(400).json({ error: 'note is required' });
+    }
+
+    const portalReq = req as AuthedPortalRequest;
+    const userId = String(portalReq.portalSession?.user?.id || 'portal_user').trim() || 'portal_user';
+
+    const result = await runtimeRunEngine.steerActiveRun({
+      researchJobId,
+      branchId,
+      userId,
+      note,
+    });
+
+    return res.status(202).json(result);
+  } catch (error: any) {
+    const status = String(error?.message || '').includes('not found') ? 404 : 500;
+    return res.status(status).json({ error: 'Failed to steer active run', details: error?.message || String(error) });
   }
 });
 

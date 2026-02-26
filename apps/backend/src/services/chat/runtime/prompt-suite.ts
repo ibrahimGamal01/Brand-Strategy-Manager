@@ -394,7 +394,16 @@ function fallbackWriter(input: WriterInput): WriterOutput {
     .map((result, index) => {
       const toolName = input.plan.toolCalls[index]?.tool || input.plan.toolCalls[input.plan.toolCalls.length - 1]?.tool || 'tool';
       const summary = String(result.summary || '').trim();
-      return summary ? `${toolName}: ${summary}` : `${toolName}: completed.`;
+      const artifactCount = Array.isArray(result.artifacts) ? result.artifacts.length : 0;
+      const evidenceCount = Array.isArray(result.evidence) ? result.evidence.length : 0;
+      const warningCount = Array.isArray(result.warnings) ? result.warnings.length : 0;
+      const parts = [
+        summary,
+        artifactCount ? `${artifactCount} artifact(s)` : '',
+        evidenceCount ? `${evidenceCount} evidence link(s)` : '',
+        warningCount ? `${warningCount} warning(s)` : '',
+      ].filter(Boolean);
+      return `${toolName}: ${parts.length ? parts.join(' • ') : 'completed.'}`;
     })
     .filter(Boolean)
     .slice(0, 8);
@@ -418,15 +427,19 @@ function fallbackWriter(input: WriterInput): WriterOutput {
         ? 'I updated the workspace intake context from your provided text.'
         : 'I processed your request using the latest workspace data and tools.';
 
+  const topHighlights = input.toolSummary.highlights.slice(0, 5);
   return {
     response: [
       intentLead,
       toolSummaries.length
-        ? `What changed:\n${toolSummaries.map((item, idx) => `${idx + 1}. ${item}`).join('\n')}`
-        : input.toolSummary.highlights.length
-          ? `Highlights:\n${input.toolSummary.highlights.map((item, idx) => `${idx + 1}. ${item}`).join('\n')}`
-          : 'No additional evidence was required for this answer.',
-    ].join('\n\n'),
+        ? `Tools executed:\n${toolSummaries.map((item, idx) => `${idx + 1}. ${item}`).join('\n')}`
+        : 'No tool executions were required for this step.',
+      topHighlights.length
+        ? `Evidence highlights:\n${topHighlights.map((item, idx) => `${idx + 1}. ${item}`).join('\n')}`
+        : '',
+    ]
+      .filter((section) => section.trim().length > 0)
+      .join('\n\n'),
     reasoning: {
       plan: input.plan.plan,
       tools: input.plan.toolCalls.map((call) => call.tool),

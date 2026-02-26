@@ -470,5 +470,19 @@ export async function resolveRuntimeDecision(
     body: JSON.stringify(input),
     credentials: "include",
   });
-  return parseJson<{ ok: boolean; queued?: boolean; runId?: string; userMessageId?: string }>(response);
+  return parseJson<{ ok: boolean; runId?: string; retriedToolRuns?: number; skippedToolRuns?: number }>(response);
+}
+
+export async function steerRuntimeBranch(
+  workspaceId: string,
+  branchId: string,
+  input: { note: string }
+) {
+  const response = await fetch(`/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/steer`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+    credentials: "include",
+  });
+  return parseJson<{ ok: boolean; applied: boolean; runId?: string; queued?: boolean; queueItemId?: string }>(response);
 }

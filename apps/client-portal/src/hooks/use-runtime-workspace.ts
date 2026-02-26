@@ -16,6 +16,7 @@ import {
   resolveRuntimeDecision,
   reorderRuntimeQueue,
   sendRuntimeMessage,
+  steerRuntimeBranch,
   interruptRuntimeBranch,
 } from "@/lib/runtime-api";
 import {
@@ -59,6 +60,7 @@ type UseRuntimeWorkspaceResult = {
   reorderQueue: (from: number, to: number) => Promise<void>;
   removeQueued: (id: string) => Promise<void>;
   resolveDecision: (decisionId: string, option: string) => Promise<void>;
+  steerRun: (note: string) => Promise<void>;
   setPreference: <K extends keyof SessionPreferences>(key: K, value: SessionPreferences[K]) => void;
   refreshNow: () => Promise<void>;
 };
@@ -325,7 +327,7 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
         const preview = tools.slice(0, 3).join(", ");
         message = `Run completed (${tools.length} tools): ${preview}${tools.length > 3 ? "..." : ""}`;
       } else {
-        message = "Run completed.";
+        message = runId ? `Run ${runId.slice(0, 8)} completed.` : "Run completed.";
       }
     } else if (type === "DECISION_REQUIRED") {
       message = "Approval needed before BAT can continue.";
@@ -434,6 +436,15 @@ function mapRecentRunsFromEvents(events: Array<Record<string, unknown>>): Proces
     if (toolName) {
       aggregate.tools.add(toolName);
     }
+    if (type === "DONE" && Array.isArray(payload?.toolRuns)) {
+      for (const row of payload.toolRuns) {
+        if (!isRecord(row)) continue;
+        const completedTool = String(row.toolName || "").trim();
+        if (completedTool) {
+          aggregate.tools.add(completedTool);
+        }
+      }
+    }
     if (payload?.triggerType && String(payload.triggerType).trim()) {
       aggregate.triggerType = String(payload.triggerType);
     }
@@ -462,7 +473,7 @@ function mapRecentRunsFromEvents(events: Array<Record<string, unknown>>): Proces
       return {
         id: run.id,
         label: `${humanizeTriggerType(run.triggerType)} • ${shortId(run.id)}`,
-        stage: run.status === "done" ? "Completed" : run.latestMessage,
+        stage: run.latestMessage,
         progress: run.status === "done" || run.status === "failed" || run.status === "cancelled" ? 100 : 88,
         status: run.status,
         ...(details.length ? { details } : {}),
@@ -733,7 +744,7 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
       const trimmed = content.trim();
       if (!trimmed) return;
 
-      const effectiveMode = mode === "queue" ? "queue" : activeRunIds.length > 0 ? "interrupt" : "send";
+      const effectiveMode = mode === "queue" ? "queue" : activeRunIds.length > 0 ? "queue" : "send";
 
       await sendRuntimeMessage(workspaceId, activeBranchId, {
         content: trimmed,
@@ -745,6 +756,17 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
       await syncBranch(activeBranchId);
     },
     [activeBranchId, preferences, activeRunIds, syncBranch, workspaceId]
+  );
+
+  const steerRun = useCallback(
+    async (note: string) => {
+      if (!activeBranchId) return;
+      const trimmed = note.trim();
+      if (!trimmed) return;
+      await steerRuntimeBranch(workspaceId, activeBranchId, { note: trimmed });
+      await syncBranch(activeBranchId);
+    },
+    [activeBranchId, syncBranch, workspaceId]
   );
 
   const interruptRun = useCallback(async () => {
@@ -987,6 +1009,7 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
     reorderQueue,
     removeQueued,
     resolveDecision,
+    steerRun,
     setPreference,
     refreshNow,
   };
