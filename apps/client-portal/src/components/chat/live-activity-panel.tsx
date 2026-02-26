@@ -118,6 +118,14 @@ function RunningTab({
               <input
                 value={manualSteer}
                 onChange={(event) => setManualSteer(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") return;
+                  const value = manualSteer.trim();
+                  if (!value) return;
+                  event.preventDefault();
+                  onSteer(value);
+                  setManualSteer("");
+                }}
                 placeholder="Type a quick steer note"
                 className="w-full rounded-xl border px-3 py-2 text-xs outline-none"
                 style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, KeyboardEvent, useState } from "react";
 import { Send, Square, ArrowUp, ArrowDown, X, WandSparkles } from "lucide-react";
 import { QueuedMessage } from "@/types/chat";
 
@@ -37,21 +37,34 @@ export function ChatComposer({
 }: ChatComposerProps) {
   const [message, setMessage] = useState("");
 
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const dispatchMessage = () => {
     const content = message.trim();
     if (!content) {
-      return;
+      return false;
     }
 
     if (isStreaming) {
       onSend(content, "queue");
       setMessage("");
-      return;
+      return true;
     }
 
     onSend(content, "send");
     setMessage("");
+    return true;
+  };
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    dispatchMessage();
+  };
+
+  const onComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== "Enter") return;
+    // Keep multiline typing predictable and avoid accidental sends while composing (IME).
+    if (event.shiftKey || event.altKey || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    dispatchMessage();
   };
 
   const steerRunNow = () => {
@@ -137,6 +150,7 @@ export function ChatComposer({
         <textarea
           value={message}
           onChange={(event) => setMessage(event.target.value)}
+          onKeyDown={onComposerKeyDown}
           placeholder="Ask BAT to run analysis, generate a brief, or adjust strategy..."
           className="min-h-[84px] flex-1 rounded-2xl border px-3 py-2 text-sm outline-none"
           style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}
@@ -173,6 +187,9 @@ export function ChatComposer({
           ) : null}
         </div>
       </form>
+      <p className="mt-2 text-[11px]" style={{ color: "var(--bat-text-muted)" }}>
+        Enter sends. Shift+Enter adds a new line.
+      </p>
     </section>
   );
 }
