@@ -44,6 +44,15 @@ function testPlannerHeuristics() {
     intakeToolNames.includes('intake.update_from_text'),
     'Expected intake form update request to trigger intake.update_from_text.'
   );
+
+  const deepResearchMessage =
+    'Use DDG and Scraply to deeply investigate these instagram accounts and people for competitor details.';
+  const deepResearchCalls = inferToolCallsFromMessage(deepResearchMessage);
+  const deepResearchToolNames = deepResearchCalls.map((entry) => entry.tool);
+  assert.ok(
+    deepResearchToolNames.includes('research.gather'),
+    'Expected deep DDG/Scraply investigation request to trigger research.gather.'
+  );
 }
 
 function testContinuationCollection() {

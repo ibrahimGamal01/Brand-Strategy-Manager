@@ -133,6 +133,19 @@ function normalizeToolCalls(value: unknown, max = 8): RuntimeToolCall[] {
   return calls;
 }
 
+function dedupeToolCalls(calls: RuntimeToolCall[], max = 8): RuntimeToolCall[] {
+  const seen = new Set<string>();
+  const out: RuntimeToolCall[] = [];
+  for (const call of calls) {
+    const key = `${call.tool}:${JSON.stringify(call.args || {})}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(call);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
 function normalizeDecisions(value: unknown, max = 8): RuntimeDecision[] {
   if (!Array.isArray(value)) return [];
   const decisions: RuntimeDecision[] = [];
@@ -266,6 +279,13 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
     (/\bcompetitor\b/.test(normalized) && /\b(discovery|discover|investigat|analy[sz]e)\b/.test(normalized));
   const hasCompetitorStatusIntent =
     /\b(status|progress|started|update)\b/.test(normalized) && /\bcompetitor\b/.test(normalized);
+  const hasDeepInvestigationIntent =
+    /\b(deep|deeper|thorough|full|comprehensive|detailed)\b/.test(normalized) &&
+    /\b(investigat|research|analy[sz]e|profile|account|person|people|creator|founder)\b/.test(normalized);
+  const hasResearchSignal =
+    /\b(investigat|research|analy[sz]e|profile|account|person|people|creator|founder|handle)\b/.test(normalized) &&
+    (/(instagram\.com|tiktok\.com|youtube\.com|x\.com|twitter\.com|@[a-z0-9._-]+)/i.test(message) ||
+      /\b(ddg|duckduckgo|scraply|scrapling|crawl|fetch)\b/.test(normalized));
 
   if (hasCompetitorSignals) {
     pushIfMissing('intel.list', { section: 'competitors', limit: 12 });
@@ -286,6 +306,14 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   }
   if (hasCompetitorStatusIntent) {
     pushIfMissing('orchestration.status', {});
+  }
+  if (hasDeepInvestigationIntent || hasResearchSignal) {
+    pushIfMissing('research.gather', {
+      query: message,
+      depth: hasDeepInvestigationIntent ? 'deep' : 'standard',
+      includeScrapling: true,
+      includeAccountContext: true,
+    });
   }
   if (/intake|onboard|kickoff|audit|workspace|strategy|investigat|analy[sz]e/.test(normalized)) {
     pushIfMissing('intel.list', { section: 'web_snapshots', limit: 20 });
@@ -370,9 +398,15 @@ function fallbackWriter(input: WriterInput): WriterOutput {
   const hasIntakeIntent =
     /\b(update|replace|apply|rewrite|save)\b/.test(userIntent) &&
     /\b(intake|form|onboard|onboarding)\b/.test(userIntent);
+  const hasDeepResearchIntent =
+    /\b(investigat|research|analy[sz]e|profile|account|person|people|creator|founder)\b/.test(userIntent) &&
+    (/\b(deep|deeper|thorough|full|comprehensive|detailed)\b/.test(userIntent) ||
+      /\b(ddg|duckduckgo|scraply|scrapling)\b/.test(userIntent));
   const intentLead =
     hasCompetitorIntent
       ? 'I processed your competitor update request directly from your message.'
+      : hasDeepResearchIntent
+        ? 'I ran a deeper evidence pass using DDG and web intelligence tools for the requested accounts/people.'
       : hasIntakeIntent
         ? 'I updated the workspace intake context from your provided text.'
         : 'I processed your request using the latest workspace data and tools.';
@@ -420,6 +454,7 @@ export async function generatePlannerPlan(input: PlannerInput): Promise<RuntimeP
     'Always produce a plan and tool calls when evidence is needed.',
     'Never claim findings without evidence-producing tools.',
     'Prefer at least two evidence lanes when possible (web+social, web+community, etc.).',
+    'When the user asks for deeper research on people/accounts/handles or names DDG/Scraply, include research.gather.',
     'Mutation tools require explicit approvals and should be represented via decisionRequests.',
     `Only use tool names from this allowlist: ${ALLOWED_PLANNER_TOOL_NAMES.join(', ')}`,
     'JSON schema:',
@@ -450,7 +485,22 @@ export async function generatePlannerPlan(input: PlannerInput): Promise<RuntimeP
     if (!parsed) return fallback;
 
     const planSteps = normalizeStringArray(parsed.plan, 12);
-    const toolCalls = normalizeToolCalls(parsed.toolCalls, input.policy.maxToolRuns);
+    const plannerToolCalls = normalizeToolCalls(parsed.toolCalls, input.policy.maxToolRuns);
+    const hasDeepResearchIntent =
+      /\b(investigat|research|analy[sz]e|profile|account|person|people|creator|founder|handle)\b/i.test(input.userMessage) &&
+      /\b(deep|deeper|thorough|full|comprehensive|detailed|ddg|duckduckgo|scraply|scrapling)\b/i.test(input.userMessage);
+    const fallbackResearchCall = fallback.toolCalls.find((entry) => entry.tool === 'research.gather');
+    const plannerHasResearchGather = plannerToolCalls.some((entry) => entry.tool === 'research.gather');
+    const mergedToolCalls = plannerToolCalls.length
+      ? dedupeToolCalls(
+          [
+            ...(hasDeepResearchIntent && fallbackResearchCall && !plannerHasResearchGather ? [fallbackResearchCall] : []),
+            ...plannerToolCalls,
+            ...fallback.toolCalls,
+          ],
+          input.policy.maxToolRuns
+        )
+      : fallback.toolCalls;
     const decisions = normalizeDecisions(parsed.decisionRequests, 8);
 
     const depthRaw = String((isRecord(parsed.responseStyle) ? parsed.responseStyle.depth : '') || 'normal').toLowerCase();
@@ -463,7 +513,7 @@ export async function generatePlannerPlan(input: PlannerInput): Promise<RuntimeP
     return {
       goal: String(parsed.goal || fallback.goal),
       plan: planSteps.length ? planSteps : fallback.plan,
-      toolCalls,
+      toolCalls: mergedToolCalls,
       needUserInput: Boolean(parsed.needUserInput),
       decisionRequests: decisions,
       responseStyle: { depth, tone },

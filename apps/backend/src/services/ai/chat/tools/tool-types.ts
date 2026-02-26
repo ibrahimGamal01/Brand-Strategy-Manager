@@ -8,6 +8,7 @@ export type ToolName =
   | 'intel.undoMutation'
   | 'intake.update_from_text'
   | 'competitors.add_links'
+  | 'research.gather'
   | 'scrape.competitor'
   | 'orchestration.run'
   | 'orchestration.status'

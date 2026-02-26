@@ -16,6 +16,14 @@ function requiresMutationConfirmation(toolName: string): boolean {
   return CONFIRMATION_REQUIRED_MUTATION_TOOLS.has(toolName);
 }
 
+function resolveToolTimeoutMs(toolName: string, policyTimeoutMs: number): number {
+  // Deep discovery tools can require longer wall time due to DDG subprocesses and multi-page crawls.
+  if (toolName === 'research.gather') {
+    return Math.max(policyTimeoutMs, 180_000);
+  }
+  return policyTimeoutMs;
+}
+
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
@@ -247,7 +255,7 @@ export async function executeToolWithContract(input: {
 
     const rawResult = await withTimeout(
       tool.execute(agentContext, input.args),
-      input.policy.maxToolMs,
+      resolveToolTimeoutMs(input.toolName, input.policy.maxToolMs),
       `Tool ${input.toolName}`
     );
 

@@ -4,6 +4,11 @@ import { savePortalWorkspaceIntakeDraft } from '../../../portal/portal-intake-dr
 import { seedTopPicksFromInspirationLinks } from '../../../discovery/seed-intake-competitors';
 import { parseCompetitorInspirationInputs } from '../../../intake/brain-intake-utils';
 import { orchestrateCompetitorsForJob } from '../../../discovery/competitor-orchestrator-v2';
+import { gatherAllDDG, searchBrandContextDDG, searchRawDDG } from '../../../discovery/duckduckgo-search';
+import {
+  crawlAndPersistWebSources,
+  fetchAndPersistWebSnapshot,
+} from '../../../scraping/web-intelligence-service';
 
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -38,6 +43,117 @@ function extractDomains(text: string): string[] {
       .map((entry) => entry.replace(/[),.;]+$/, '')),
     20
   );
+}
+
+function extractSocialHandles(text: string): string[] {
+  const source = String(text || '');
+  const handles = new Set<string>();
+
+  const mentionMatches = source.match(/@([a-z0-9._-]{2,60})/gi) || [];
+  for (const row of mentionMatches) {
+    const handle = row.replace(/^@+/, '').trim().toLowerCase();
+    if (handle) handles.add(handle);
+  }
+
+  const urlPatterns = [
+    /instagram\.com\/([a-z0-9._]{2,30})/gi,
+    /tiktok\.com\/@([a-z0-9._]{2,30})/gi,
+    /youtube\.com\/@([a-z0-9._-]{2,60})/gi,
+    /x\.com\/([a-z0-9._]{2,30})/gi,
+    /twitter\.com\/([a-z0-9._]{2,30})/gi,
+  ];
+  for (const pattern of urlPatterns) {
+    const matches = source.matchAll(pattern);
+    for (const match of matches) {
+      const handle = String(match[1] || '').trim().toLowerCase();
+      if (handle) handles.add(handle);
+    }
+  }
+
+  return Array.from(handles).slice(0, 12);
+}
+
+function getHostname(value: string): string {
+  try {
+    const parsed = new URL(String(value || '').trim());
+    return parsed.hostname.replace(/^www\./i, '').toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function isSocialUrl(value: string): boolean {
+  const host = getHostname(value);
+  return (
+    host.includes('instagram.com') ||
+    host.includes('tiktok.com') ||
+    host.includes('youtube.com') ||
+    host.includes('x.com') ||
+    host.includes('twitter.com') ||
+    host.includes('linkedin.com') ||
+    host.includes('facebook.com')
+  );
+}
+
+type ResearchDepth = 'quick' | 'standard' | 'deep';
+
+function normalizeResearchDepth(value: unknown): ResearchDepth {
+  const raw = String(value || '').trim().toLowerCase();
+  if (raw === 'deep') return 'deep';
+  if (raw === 'quick') return 'quick';
+  return 'standard';
+}
+
+function getDepthProfile(depth: ResearchDepth): { maxPages: number; maxDepth: number; accountChecks: number; siteLimit: number } {
+  if (depth === 'deep') {
+    return { maxPages: 40, maxDepth: 2, accountChecks: 5, siteLimit: 3 };
+  }
+  if (depth === 'quick') {
+    return { maxPages: 6, maxDepth: 1, accountChecks: 2, siteLimit: 1 };
+  }
+  return { maxPages: 16, maxDepth: 2, accountChecks: 3, siteLimit: 2 };
+}
+
+function buildDdgQueries(input: {
+  text: string;
+  brandName: string;
+  niche: string;
+  handles: string[];
+  websites: string[];
+}): string[] {
+  const queries: string[] = [];
+  const firstLine =
+    String(input.text || '')
+      .split('\n')
+      .map((line) => line.trim())
+      .find(Boolean) || '';
+
+  if (firstLine) queries.push(firstLine.slice(0, 180));
+  if (input.brandName) {
+    queries.push(`${input.brandName} ${input.niche || 'brand'} overview`);
+    queries.push(`${input.brandName} offers pricing socials`);
+  }
+  for (const handle of input.handles.slice(0, 6)) {
+    queries.push(`"${handle}" instagram profile`);
+    queries.push(`"${handle}" tiktok profile`);
+  }
+  for (const website of input.websites.slice(0, 4)) {
+    const host = getHostname(website);
+    if (!host) continue;
+    queries.push(`site:${host} about`);
+    queries.push(`site:${host} pricing`);
+  }
+
+  return uniqueStrings(queries, 14);
+}
+
+function extractWorkspaceWebsites(inputData: Record<string, unknown>): string[] {
+  const raw: string[] = [];
+  if (typeof inputData.website === 'string') raw.push(inputData.website);
+  if (Array.isArray(inputData.websites)) {
+    raw.push(...inputData.websites.map((row) => String(row || '').trim()));
+  }
+  return uniqueStrings(raw, 6).filter(Boolean);
 }
 
 function sectionRegex(label: string): RegExp {
@@ -376,6 +492,186 @@ export const workspaceOpsTools: ToolDefinition<Record<string, unknown>, Record<s
             type: 'auto_continue',
             reason: 'Competitor list changed; refresh benchmark analysis.',
             suggestedNextTools: ['intel.list', 'evidence.posts', 'orchestration.status'],
+          },
+        ],
+      };
+    },
+  },
+  {
+    name: 'research.gather',
+    description:
+      'Run deeper research for people/accounts/brands mentioned in chat using DDG plus optional Scrapling fetch+crawl.',
+    argsSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string' },
+        text: { type: 'string' },
+        brandName: { type: 'string' },
+        niche: { type: 'string' },
+        handles: { type: 'array', items: { type: 'string' } },
+        websites: { type: 'array', items: { type: 'string' } },
+        depth: { type: 'string', enum: ['quick', 'standard', 'deep'] },
+        includeScrapling: { type: 'boolean' },
+        includeAccountContext: { type: 'boolean' },
+        includeWorkspaceWebsites: { type: 'boolean' },
+      },
+      additionalProperties: false,
+    },
+    returnsSchema: {
+      type: 'object',
+      properties: {
+        summary: { type: 'string' },
+        ddgTotals: { type: 'object' },
+        accountContexts: { type: 'array' },
+        websitesScanned: { type: 'number' },
+        artifacts: { type: 'array' },
+        evidence: { type: 'array' },
+        warnings: { type: 'array' },
+      },
+      required: ['summary', 'ddgTotals', 'accountContexts', 'websitesScanned'],
+      additionalProperties: true,
+    },
+    mutate: true,
+    execute: async (context, args) => {
+      const text = String(args.query || args.text || context.userMessage || '').trim();
+      const depth = normalizeResearchDepth(args.depth);
+      const profile = getDepthProfile(depth);
+      const includeScrapling = args.includeScrapling !== false;
+      const includeAccountContext = args.includeAccountContext !== false;
+      const includeWorkspaceWebsites = args.includeWorkspaceWebsites !== false;
+      const warnings: string[] = [];
+      const artifacts: Array<{ kind: string; section?: string; id: string }> = [];
+      const evidence: Array<{ kind: string; label: string; url?: string }> = [];
+
+      const workspace = await prisma.researchJob.findUnique({
+        where: { id: context.researchJobId },
+        select: {
+          inputData: true,
+          client: { select: { name: true } },
+        },
+      });
+      const inputData = asRecord(workspace?.inputData);
+      const brandName =
+        String(args.brandName || extractBrandName(text) || inputData.name || workspace?.client?.name || '').trim() ||
+        'brand';
+      const niche = String(args.niche || inputData.niche || inputData.businessType || 'business').trim() || 'business';
+
+      const explicitHandles = Array.isArray(args.handles) ? uniqueStrings(args.handles, 10) : [];
+      const handles = uniqueStrings([...explicitHandles, ...extractSocialHandles(text)], 10);
+
+      const explicitWebsites = Array.isArray(args.websites)
+        ? uniqueStrings(args.websites, 10)
+        : [];
+      const discoveredWebsites = uniqueStrings([...extractUrls(text), ...extractDomains(text)], 10);
+      const workspaceWebsites = includeWorkspaceWebsites ? extractWorkspaceWebsites(inputData) : [];
+      const allWebsites = uniqueStrings([...explicitWebsites, ...discoveredWebsites, ...workspaceWebsites], 10);
+      const scrapeWebsites = allWebsites.filter((url) => !isSocialUrl(url)).slice(0, profile.siteLimit);
+
+      const ddgQueries = buildDdgQueries({
+        text,
+        brandName,
+        niche,
+        handles,
+        websites: allWebsites,
+      });
+
+      let ddgTotals = { text: 0, news: 0, videos: 0, images: 0, total: 0 };
+      if (depth === 'deep') {
+        const gathered = await gatherAllDDG(brandName, niche, context.researchJobId);
+        ddgTotals = gathered.totals;
+      } else {
+        const rawRows = await searchRawDDG(ddgQueries, {
+          timeoutMs: depth === 'quick' ? 25_000 : 45_000,
+          maxResults: depth === 'quick' ? 40 : 120,
+          researchJobId: context.researchJobId,
+          source: 'chat_deep_research',
+        });
+        ddgTotals = {
+          text: rawRows.length,
+          news: 0,
+          videos: 0,
+          images: 0,
+          total: rawRows.length,
+        };
+      }
+
+      const accountContexts: Array<Record<string, unknown>> = [];
+      if (includeAccountContext) {
+        const accountTargets = uniqueStrings([brandName, ...handles], 10).slice(0, profile.accountChecks);
+        for (const target of accountTargets) {
+          const result = await searchBrandContextDDG(target, context.researchJobId, { timeoutMs: 25_000 });
+          accountContexts.push({
+            target,
+            website: result.website_url,
+            instagram: result.instagram_handle,
+            tiktok: result.tiktok_handle,
+            youtube: result.youtube_channel,
+            twitter: result.twitter_handle,
+            rawResults: Array.isArray(result.raw_results) ? result.raw_results.length : 0,
+            ...(result.error ? { error: result.error } : {}),
+          });
+        }
+      }
+
+      let websitesScanned = 0;
+      if (includeScrapling) {
+        for (const website of scrapeWebsites) {
+          try {
+            const fetchResult = await fetchAndPersistWebSnapshot({
+              researchJobId: context.researchJobId,
+              url: website,
+              sourceType: 'OTHER',
+              discoveredBy: 'CHAT_TOOL',
+              allowExternal: true,
+              mode: 'AUTO',
+            });
+            websitesScanned += 1;
+            artifacts.push({ kind: 'web_snapshot', section: 'web_snapshots', id: fetchResult.snapshotId });
+            evidence.push({
+              kind: 'url',
+              label: `Scraped snapshot: ${fetchResult.finalUrl}`,
+              url: fetchResult.finalUrl,
+            });
+
+            if (depth !== 'quick') {
+              const crawl = await crawlAndPersistWebSources({
+                researchJobId: context.researchJobId,
+                startUrls: [website],
+                maxPages: profile.maxPages,
+                maxDepth: profile.maxDepth,
+                allowExternal: true,
+                mode: 'AUTO',
+              });
+              if (crawl.runId) {
+                artifacts.push({ kind: 'crawl_run', section: 'web_snapshots', id: crawl.runId });
+              }
+              if (Array.isArray(crawl.failures) && crawl.failures.length > 0) {
+                warnings.push(...crawl.failures.slice(0, 3));
+              }
+            }
+          } catch (error: any) {
+            warnings.push(`Website scan failed for ${website}: ${error?.message || error}`);
+          }
+        }
+      }
+
+      for (const website of allWebsites.slice(0, 8)) {
+        evidence.push({ kind: 'url', label: `Research target: ${website}`, url: website });
+      }
+
+      return {
+        summary: `Deep research completed with ${ddgTotals.total} DDG signal(s), ${accountContexts.length} account context check(s), and ${websitesScanned} website scan(s).`,
+        ddgTotals,
+        accountContexts,
+        websitesScanned,
+        artifacts,
+        evidence,
+        warnings: uniqueStrings(warnings, 10),
+        continuations: [
+          {
+            type: 'auto_continue',
+            reason: 'Fresh DDG/Scrapling evidence is available; synthesize findings and cite sources.',
+            suggestedNextTools: ['intel.list', 'evidence.posts', 'evidence.news', 'evidence.videos'],
           },
         ],
       };

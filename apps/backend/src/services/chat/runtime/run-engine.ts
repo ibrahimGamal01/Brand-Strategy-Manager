@@ -76,6 +76,11 @@ const TOOL_NAME_ALIASES: Record<string, { tool: string; args: Record<string, unk
   competitoranalysistool: { tool: 'orchestration.run', args: { targetCount: 12, mode: 'append' } },
   competitoraudit: { tool: 'orchestration.run', args: { targetCount: 12, mode: 'append' } },
   runcompetitordiscovery: { tool: 'orchestration.run', args: { targetCount: 12, mode: 'append' } },
+  rundeepresearch: { tool: 'research.gather', args: { depth: 'deep', includeScrapling: true, includeAccountContext: true } },
+  deepresearch: { tool: 'research.gather', args: { depth: 'deep', includeScrapling: true, includeAccountContext: true } },
+  ddgsearch: { tool: 'research.gather', args: { depth: 'standard', includeScrapling: false, includeAccountContext: true } },
+  scraplyscan: { tool: 'research.gather', args: { depth: 'deep', includeScrapling: true, includeAccountContext: true } },
+  scraplingscan: { tool: 'research.gather', args: { depth: 'deep', includeScrapling: true, includeAccountContext: true } },
   addcompetitorlinks: { tool: 'competitors.add_links', args: {} },
   updateintake: { tool: 'intake.update_from_text', args: {} },
   newssearch: { tool: 'evidence.news', args: { limit: 8 } },
@@ -373,6 +378,48 @@ function normalizeToolArgs(tool: string, args: Record<string, unknown>, userMess
     return normalized;
   }
 
+  if (tool === 'research.gather') {
+    const query = String(normalized.query || normalized.text || userMessage || '').trim();
+    if (!query) return null;
+    normalized.query = query;
+
+    const depthRaw = String(normalized.depth || '').trim().toLowerCase();
+    if (depthRaw === 'deep' || depthRaw === 'quick' || depthRaw === 'standard') {
+      normalized.depth = depthRaw;
+    } else if (/\b(deep|deeper|thorough|full|comprehensive|detailed)\b/i.test(userMessage)) {
+      normalized.depth = 'deep';
+    } else if (/\b(quick|fast|brief)\b/i.test(userMessage)) {
+      normalized.depth = 'quick';
+    } else {
+      normalized.depth = 'standard';
+    }
+
+    if (Array.isArray(normalized.handles)) {
+      normalized.handles = normalized.handles
+        .map((entry) => String(entry || '').trim())
+        .filter(Boolean)
+        .slice(0, 12);
+      if (!(normalized.handles as string[]).length) {
+        delete normalized.handles;
+      }
+    }
+
+    if (Array.isArray(normalized.websites)) {
+      normalized.websites = normalized.websites
+        .map((entry) => String(entry || '').trim())
+        .filter(Boolean)
+        .slice(0, 8);
+      if (!(normalized.websites as string[]).length) {
+        delete normalized.websites;
+      }
+    }
+
+    if (typeof normalized.includeScrapling !== 'boolean') normalized.includeScrapling = true;
+    if (typeof normalized.includeAccountContext !== 'boolean') normalized.includeAccountContext = true;
+    if (typeof normalized.includeWorkspaceWebsites !== 'boolean') normalized.includeWorkspaceWebsites = true;
+    return normalized;
+  }
+
   return normalized;
 }
 
@@ -403,13 +450,10 @@ function sanitizeToolCalls(toolCalls: RuntimeToolCall[], userMessage: string, ma
       args: normalizedArgs,
       ...(Array.isArray(call.dependsOn) && call.dependsOn.length ? { dependsOn: call.dependsOn } : {}),
     });
-
-    if (sanitized.length >= maxToolRuns) break;
   }
 
   const inferred = inferToolCallsFromMessage(userMessage);
   for (const call of inferred) {
-    if (sanitized.length >= maxToolRuns) break;
     if (!SUPPORTED_TOOL_NAMES.has(call.tool as (typeof TOOL_REGISTRY)[number]['name'])) continue;
     const normalizedArgs = normalizeToolArgs(call.tool, isRecord(call.args) ? call.args : {}, userMessage);
     if (!normalizedArgs) continue;
@@ -419,7 +463,16 @@ function sanitizeToolCalls(toolCalls: RuntimeToolCall[], userMessage: string, ma
     sanitized.push({ tool: call.tool, args: normalizedArgs });
   }
 
-  return sanitized;
+  const hasResearchIntent =
+    /\b(investigat|research|analy[sz]e|profile|account|person|people|creator|founder|handle)\b/i.test(userMessage) &&
+    /\b(deep|deeper|thorough|full|comprehensive|detailed|ddg|duckduckgo|scraply|scrapling)\b/i.test(userMessage);
+  const researchIndex = sanitized.findIndex((entry) => entry.tool === 'research.gather');
+  if (hasResearchIntent && researchIndex > 0) {
+    const [researchCall] = sanitized.splice(researchIndex, 1);
+    sanitized.unshift(researchCall);
+  }
+
+  return sanitized.slice(0, maxToolRuns);
 }
 
 function normalizeRunPlan(value: unknown): RuntimePlan | null {
@@ -494,6 +547,13 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
     (/\bcompetitor\b/.test(normalized) && /\b(discovery|discover|investigat|analy[sz]e)\b/.test(normalized));
   const hasCompetitorStatusIntent =
     /\b(status|progress|started|update)\b/.test(normalized) && /\bcompetitor\b/.test(normalized);
+  const hasDeepInvestigationIntent =
+    /\b(deep|deeper|thorough|full|comprehensive|detailed)\b/.test(normalized) &&
+    /\b(investigat|research|analy[sz]e|profile|account|person|people|creator|founder)\b/.test(normalized);
+  const hasResearchSignal =
+    /\b(investigat|research|analy[sz]e|profile|account|person|people|creator|founder|handle)\b/.test(normalized) &&
+    (/(instagram\.com|tiktok\.com|youtube\.com|x\.com|twitter\.com|@[a-z0-9._-]+)/i.test(message) ||
+      /\b(ddg|duckduckgo|scraply|scrapling|crawl|fetch)\b/.test(normalized));
 
   if (hasCompetitorSignals) {
     pushIfMissing('intel.list', { section: 'competitors', limit: 12 });
@@ -520,8 +580,19 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
     pushIfMissing('orchestration.status', {});
   }
 
+  if (hasDeepInvestigationIntent || hasResearchSignal) {
+    pushIfMissing('research.gather', {
+      query: message,
+      depth: hasDeepInvestigationIntent ? 'deep' : 'standard',
+      includeScrapling: true,
+      includeAccountContext: true,
+      includeWorkspaceWebsites: true,
+    });
+  }
+
   if (/web|site|website|source|snapshot|page/.test(normalized)) {
     pushIfMissing('intel.list', { section: 'web_sources', limit: 10 });
+    pushIfMissing('intel.list', { section: 'web_snapshots', limit: 12 });
   }
 
   if (/crawl|spider/.test(normalized) && firstUrl) {
