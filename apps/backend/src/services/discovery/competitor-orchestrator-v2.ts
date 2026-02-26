@@ -13,6 +13,7 @@ import {
   approveAndQueueCandidates,
   continueQueueFromCandidates,
   persistOrchestrationCandidates,
+  pruneFilteredDiscoveredCompetitors,
   repairCandidateEligibilityForJob,
 } from './competitor-materializer';
 import { buildPointyCompetitorQueryPlan, DiscoveryPrecision } from './competitor-query-composer';
@@ -945,6 +946,7 @@ export async function orchestrateCompetitorsForJob(
         discoveryPolicy,
       },
       diagnostics,
+      pruneFilteredDiscovered: false,
     });
 
     // PHASE 2: Second-phase validation to review filtered competitors
@@ -966,6 +968,21 @@ export async function orchestrateCompetitorsForJob(
           totalReviewed: validationResult.totalReviewed,
           promoted: validationResult.promoted,
           keptFiltered: validationResult.keptFiltered,
+        },
+      });
+    }
+
+    const pruneResult = await pruneFilteredDiscoveredCompetitors(researchJobId);
+    if (pruneResult.deleted > 0) {
+      emitResearchJobEvent({
+        researchJobId,
+        runId: run.id,
+        source: 'competitor-orchestrator-v2',
+        code: 'competitor.orchestration.filtered_pruned',
+        level: 'info',
+        message: `Pruned ${pruneResult.deleted} non-actionable filtered discovered competitors`,
+        metrics: {
+          deleted: pruneResult.deleted,
         },
       });
     }

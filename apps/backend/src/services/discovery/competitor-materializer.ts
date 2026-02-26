@@ -11,6 +11,7 @@ import { emitResearchJobEvent } from '../social/research-job-events';
 import { scrapeCompetitorsIncremental } from './competitor-scraper';
 import { ScoredCandidate } from './competitor-scorer';
 import { deriveCandidateEligibility } from './competitor-pipeline-rules';
+import { classifyBlockerSeverity, CompetitorBlockerSeverity } from './competitor-blocker-taxonomy';
 
 type ScrapePlatform = 'instagram' | 'tiktok';
 
@@ -56,6 +57,7 @@ export interface CandidateProfileView {
   sourceType: CandidateProfileSourceType;
   scrapeEligible: boolean;
   blockerReasonCode: string | null;
+  blockerSeverity: CompetitorBlockerSeverity;
   readinessStatus: CandidateReadinessStatus;
   lastStateTransitionAt: string;
   pipelineStage: CompetitorPipelineStage;
@@ -135,7 +137,8 @@ async function findOrCreateIdentity(
 async function materializeCandidateToDiscovered(
   researchJobId: string,
   runId: string,
-  candidate: CompetitorCandidateProfile
+  candidate: CompetitorCandidateProfile,
+  options?: { preserveFiltered?: boolean }
 ): Promise<string | null> {
   if (!isScrapePlatform(candidate.platform)) return null;
 
@@ -162,7 +165,8 @@ async function materializeCandidateToDiscovered(
   // Keep discovered competitors focused on execution-ready or historically scraped rows.
   if (
     (selectionState === 'FILTERED_OUT' || selectionState === 'REJECTED') &&
-    !keepForHistory
+    !keepForHistory &&
+    !options?.preserveFiltered
   ) {
     if (existing?.id) {
       await prisma.discoveredCompetitor.deleteMany({ where: { id: existing.id } });
@@ -270,6 +274,7 @@ export async function persistOrchestrationCandidates(input: {
   strategyVersion: string;
   configSnapshot: Record<string, unknown>;
   diagnostics: Record<string, unknown>;
+  pruneFilteredDiscovered?: boolean;
 }): Promise<{
   candidatesDiscovered: number;
   candidatesFiltered: number;
@@ -411,7 +416,9 @@ export async function persistOrchestrationCandidates(input: {
       });
     }
 
-    await materializeCandidateToDiscovered(input.researchJobId, input.runId, profile);
+    await materializeCandidateToDiscovered(input.researchJobId, input.runId, profile, {
+      preserveFiltered: input.pruneFilteredDiscovered === false,
+    });
 
     if (nextState === 'TOP_PICK') {
       topPicks += 1;
@@ -423,14 +430,9 @@ export async function persistOrchestrationCandidates(input: {
     }
   }
 
-  // Remove non-actionable discovered rows to prevent noisy filtered competitors from cluttering UI.
-  await prisma.discoveredCompetitor.deleteMany({
-    where: {
-      researchJobId: input.researchJobId,
-      selectionState: { in: ['FILTERED_OUT', 'REJECTED'] },
-      status: { in: ['SUGGESTED', 'FAILED', 'REJECTED'] },
-    },
-  });
+  if (input.pruneFilteredDiscovered !== false) {
+    await pruneFilteredDiscoveredCompetitors(input.researchJobId);
+  }
 
   const summary = {
     candidatesDiscovered: scored.length,
@@ -455,6 +457,19 @@ export async function persistOrchestrationCandidates(input: {
   });
 
   return summary;
+}
+
+export async function pruneFilteredDiscoveredCompetitors(researchJobId: string): Promise<{ deleted: number }> {
+  const deletion = await prisma.discoveredCompetitor.deleteMany({
+    where: {
+      researchJobId,
+      selectionState: { in: ['FILTERED_OUT', 'REJECTED'] },
+      status: { in: ['SUGGESTED', 'FAILED', 'REJECTED'] },
+    },
+  });
+  return {
+    deleted: deletion.count || 0,
+  };
 }
 
 type CandidateProfileWithRelations = CompetitorCandidateProfile & {
@@ -497,6 +512,7 @@ function isScrapeEligiblePlatform(platform: string): boolean {
 type EligibilityShape = {
   inputType: string | null;
   scrapeEligible: boolean;
+  scrapeCapability: string;
   blockerReasonCode: string | null;
 };
 
@@ -513,6 +529,7 @@ function deriveEligibilityForProfile(profile: EligibilityComparableProfile): Eli
   return {
     inputType: derived.inputType,
     scrapeEligible: derived.scrapeEligible,
+    scrapeCapability: derived.scrapeCapability,
     blockerReasonCode: derived.blockerReasonCode,
   };
 }
@@ -608,7 +625,8 @@ export function classifyPipelineStage(profile: CandidateProfileView): Competitor
     return 'SCRAPED_READY';
   }
 
-  if (profile.blockerReasonCode || profile.readinessStatus === 'BLOCKED') {
+  const blockerSeverity = classifyBlockerSeverity(profile.blockerReasonCode);
+  if (blockerSeverity === 'hard' || profile.readinessStatus === 'BLOCKED') {
     return 'BLOCKED';
   }
 
@@ -636,6 +654,7 @@ function profileToView(
     options.readinessByProfileKey?.[profileLookupKey(profile.platform, profile.normalizedHandle)] || null;
   const sourceType = normalizeSourceType(profile.source);
   const blockerReasonCode = deriveBlockerReasonCode(profile);
+  const blockerSeverity = classifyBlockerSeverity(blockerReasonCode);
   const view: CandidateProfileView = {
     id: profile.id,
     platform: profile.platform,
@@ -666,6 +685,7 @@ function profileToView(
     sourceType,
     scrapeEligible: Boolean(profile.scrapeEligible),
     blockerReasonCode,
+    blockerSeverity,
     readinessStatus,
     lastStateTransitionAt: profile.updatedAt.toISOString(),
     pipelineStage: 'DISCOVERED_CANDIDATES',

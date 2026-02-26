@@ -35,6 +35,7 @@ function makeProfile(overrides: Partial<CandidateProfileView>): CandidateProfile
     sourceType: 'orchestrated',
     scrapeEligible: false,
     blockerReasonCode: null,
+    blockerSeverity: 'none',
     readinessStatus: null,
     lastStateTransitionAt: new Date().toISOString(),
     pipelineStage: 'DISCOVERED_CANDIDATES',
@@ -75,6 +76,18 @@ function runPipelineStageChecks(): void {
   });
   const blockedStage = classifyPipelineStage(blockedUnscraped);
   assert(blockedStage === 'BLOCKED', `Expected blocked unspraped profile to stay BLOCKED`);
+
+  const softBlocked = makeProfile({
+    discoveredStatus: 'SUGGESTED',
+    blockerReasonCode: 'UNSUPPORTED_SCRAPE_PLATFORM',
+    blockerSeverity: 'soft',
+    readinessStatus: null,
+  });
+  const softStage = classifyPipelineStage(softBlocked);
+  assert(
+    softStage !== 'BLOCKED',
+    `Expected soft blocker to avoid BLOCKED stage, received ${softStage}`
+  );
 }
 
 async function main(): Promise<void> {

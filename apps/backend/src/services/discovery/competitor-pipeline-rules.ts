@@ -26,12 +26,18 @@ export function normalizeInputType(platformOrInputType: unknown): string | null 
   return null;
 }
 
+export type CompetitorScrapeCapability =
+  | 'SCRAPABLE_NOW'
+  | 'NOT_SCRAPABLE_YET'
+  | 'HARD_BLOCKED';
+
 export function deriveCandidateEligibility(input: {
   platformOrInputType: unknown;
   availabilityStatus?: CompetitorAvailabilityStatus | null;
 }): {
   inputType: string | null;
   scrapeEligible: boolean;
+  scrapeCapability: CompetitorScrapeCapability;
   blockerReasonCode: string | null;
 } {
   const inputType = normalizeInputType(input.platformOrInputType);
@@ -41,6 +47,7 @@ export function deriveCandidateEligibility(input: {
     return {
       inputType,
       scrapeEligible: false,
+      scrapeCapability: 'NOT_SCRAPABLE_YET',
       blockerReasonCode: 'WEBSITE_ONLY_REQUIRES_SURFACE_RESOLUTION',
     };
   }
@@ -49,6 +56,7 @@ export function deriveCandidateEligibility(input: {
     return {
       inputType,
       scrapeEligible: false,
+      scrapeCapability: 'NOT_SCRAPABLE_YET',
       blockerReasonCode: 'UNSUPPORTED_SCRAPE_PLATFORM',
     };
   }
@@ -57,6 +65,7 @@ export function deriveCandidateEligibility(input: {
     return {
       inputType,
       scrapeEligible: false,
+      scrapeCapability: 'HARD_BLOCKED',
       blockerReasonCode: 'PROFILE_UNAVAILABLE',
     };
   }
@@ -65,6 +74,7 @@ export function deriveCandidateEligibility(input: {
     return {
       inputType,
       scrapeEligible: false,
+      scrapeCapability: 'HARD_BLOCKED',
       blockerReasonCode: 'INVALID_HANDLE',
     };
   }
@@ -72,6 +82,7 @@ export function deriveCandidateEligibility(input: {
   return {
     inputType,
     scrapeEligible: true,
+    scrapeCapability: 'SCRAPABLE_NOW',
     blockerReasonCode: null,
   };
 }
