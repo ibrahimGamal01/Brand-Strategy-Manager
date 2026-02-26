@@ -47,7 +47,18 @@ export function inferHeuristicToolCalls(input: {
     /\bshow\b/i,
     /\bread\b/i,
     /\bwhat do we have\b/i,
+    /\bwhat do you see\b/i,
+    /\bwhat(?:'s| is) here\b/i,
+    /\boverview\b/i,
     /\bfetch\b/i,
+  ]);
+  const asksWorkspaceOverview = includesAny(message, [
+    /\bwhat do you see\b/i,
+    /\bwhat do we have\b/i,
+    /\bwhat(?:'s| is) (on|in) (the )?(app|application|workspace)\b/i,
+    /\bworkspace status\b/i,
+    /\bworkspace snapshot\b/i,
+    /\boverview\b/i,
   ]);
   const asksGetById = includesAny(message, [/\b(id|row|record)\b/i, /\bget\b/i]);
 
@@ -130,6 +141,16 @@ export function inferHeuristicToolCalls(input: {
           includeInactive: includesAny(message, [/\barchived\b/i, /\binactive\b/i]),
         },
         reason: `Message asks to list/read intelligence data for ${matched.section}.`,
+      });
+    } else if (asksWorkspaceOverview) {
+      calls.push({
+        name: 'intel.list',
+        args: {
+          section: 'web_snapshots',
+          limit: 20,
+          includeInactive: includesAny(message, [/\barchived\b/i, /\binactive\b/i]),
+        },
+        reason: 'Message asks for a workspace/app overview; list recent web snapshots as grounding context.',
       });
     }
   }

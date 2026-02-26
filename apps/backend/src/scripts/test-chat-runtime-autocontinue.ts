@@ -69,6 +69,14 @@ function testPlannerHeuristics() {
     urlEvidenceCalls.some((entry) => entry.tool === 'web.fetch'),
     'Expected URL evidence reference to trigger web.fetch.'
   );
+
+  const workspaceOverviewCalls = inferToolCallsFromMessage('what do you see on the application that we have here?');
+  assert.ok(
+    workspaceOverviewCalls.some(
+      (entry) => entry.tool === 'intel.list' && String((entry.args as Record<string, unknown>).section || '') === 'web_snapshots'
+    ),
+    'Expected workspace overview phrasing to trigger intel.list for web_snapshots.'
+  );
 }
 
 function testContinuationCollection() {

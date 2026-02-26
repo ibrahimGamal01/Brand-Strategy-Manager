@@ -36,4 +36,11 @@ const recordCall = inferHeuristicToolCalls({
 });
 assert.ok(recordCall.some((entry) => entry.name === 'intel.get'), 'Expected intel.get call for record id lookups');
 
+const workspaceOverviewCalls = inferHeuristicToolCalls({
+  userMessage: 'What do you see on the application that we have here?',
+});
+const workspaceIntelList = workspaceOverviewCalls.find((entry) => entry.name === 'intel.list');
+assert.ok(workspaceIntelList, 'Expected intel.list call for workspace overview requests');
+assert.equal(workspaceIntelList?.args.section, 'web_snapshots');
+
 console.log('chat-tool-hints tests passed');

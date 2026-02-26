@@ -328,6 +328,10 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   const hasEvidenceReferenceIntent =
     /use evidence from|evidence from/i.test(message) ||
     (/\b(evidence|source|sources)\b/.test(normalized) && /\b(use|ground|base|summariz|detail|answer)\b/.test(normalized));
+  const hasWorkspaceOverviewIntent =
+    /\b(what do (you|we) (see|have)|what['’]s (on|in) (the )?(app|application|workspace)|show (me )?(what|everything) (we|you) (have|see)|workspace status|workspace snapshot|summari[sz]e (the )?(workspace|app|application))\b/.test(
+      normalized
+    );
 
   if (hasCompetitorSignals) {
     pushIfMissing('intel.list', { section: 'competitors', limit: 12 });
@@ -367,6 +371,12 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   if (/web|site|website|source|snapshot|page/.test(normalized)) {
     pushIfMissing('intel.list', { section: 'web_sources', limit: 10 });
     pushIfMissing('intel.list', { section: 'web_snapshots', limit: 12 });
+  }
+  if (hasWorkspaceOverviewIntent) {
+    pushIfMissing('intel.list', { section: 'web_snapshots', limit: 20 });
+    pushIfMissing('intel.list', { section: 'web_sources', limit: 10 });
+    pushIfMissing('intel.list', { section: 'competitors', limit: 12 });
+    pushIfMissing('intel.list', { section: 'community_insights', limit: 10 });
   }
   if (/crawl|spider/.test(normalized) && firstUrl) {
     pushIfMissing('web.crawl', { startUrls: [firstUrl], maxPages: 8, maxDepth: 1 });
@@ -529,6 +539,7 @@ export async function generatePlannerPlan(input: PlannerInput): Promise<RuntimeP
     'Never claim findings without evidence-producing tools.',
     'Prefer at least two evidence lanes when possible (web+social, web+community, etc.).',
     'When the user asks for deeper research on people/accounts/handles or names DDG/Scraply, include research.gather.',
+    'Use intel.get only when you have section + id/target. For overviews, use intel.list.',
     'Mutation tools require explicit approvals and should be represented via decisionRequests.',
     `Only use tool names from this allowlist: ${ALLOWED_PLANNER_TOOL_NAMES.join(', ')}`,
     'JSON schema:',

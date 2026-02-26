@@ -125,6 +125,17 @@ function normalizeArgsAgainstSchema(
     }
     normalized[key] = value;
   }
+
+  const required = Array.isArray(schema.required)
+    ? schema.required.map((entry) => String(entry || '').trim()).filter(Boolean)
+    : [];
+  for (const field of required) {
+    if (!Object.hasOwn(normalized, field)) return null;
+    const value = normalized[field];
+    if (value === undefined || value === null) return null;
+    if (typeof value === 'string' && !value.trim()) return null;
+  }
+
   return normalized;
 }
 
@@ -174,7 +185,7 @@ async function runPlanner(params: {
     '- "news/press/articles" -> evidence.news',
     '- "list/show/read competitors" -> intel.list section=competitors',
     '- "show web snapshots/sources/recipes/runs" -> intel.list section matching request',
-    '- "get item by id" -> intel.get',
+    '- "get item by id" -> intel.get (requires section + id/target; never call intel.get with missing section)',
     'If no tools are required, return {"tool_calls":[]}.',
     'JSON schema:',
     '{"tool_calls":[{"name":"tool","args":{}}]}',

@@ -325,6 +325,24 @@ function normalizeToolArgs(tool: string, args: Record<string, unknown>, userMess
     return normalized;
   }
 
+  if (tool === 'intel.get') {
+    normalized.section = normalizeIntelListSection(normalized.section, userMessage);
+    const id = String(normalized.id || '').trim();
+    const target = isRecord(normalized.target) ? normalized.target : null;
+    if (id) {
+      normalized.id = id;
+    } else {
+      delete normalized.id;
+    }
+    if (target && Object.keys(target).length > 0) {
+      normalized.target = target;
+    } else {
+      delete normalized.target;
+    }
+    if (!normalized.id && !normalized.target) return null;
+    return normalized;
+  }
+
   if (tool === 'evidence.news' || tool === 'evidence.videos') {
     const limit = Number(normalized.limit);
     normalized.limit = Number.isFinite(limit) ? Math.max(1, Math.min(20, Math.floor(limit))) : 8;
@@ -622,6 +640,10 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   const hasEvidenceReferenceIntent =
     /use evidence from|evidence from/i.test(message) ||
     (/\b(evidence|source|sources)\b/.test(normalized) && /\b(use|ground|base|summariz|detail|answer)\b/.test(normalized));
+  const hasWorkspaceOverviewIntent =
+    /\b(what do (you|we) (see|have)|what['’]s (on|in) (the )?(app|application|workspace)|show (me )?(what|everything) (we|you) (have|see)|workspace status|workspace snapshot|summari[sz]e (the )?(workspace|app|application))\b/.test(
+      normalized
+    );
 
   if (hasCompetitorSignals) {
     pushIfMissing('intel.list', { section: 'competitors', limit: 12 });
@@ -661,6 +683,13 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   if (/web|site|website|source|snapshot|page/.test(normalized)) {
     pushIfMissing('intel.list', { section: 'web_sources', limit: 10 });
     pushIfMissing('intel.list', { section: 'web_snapshots', limit: 12 });
+  }
+
+  if (hasWorkspaceOverviewIntent) {
+    pushIfMissing('intel.list', { section: 'web_snapshots', limit: 20 });
+    pushIfMissing('intel.list', { section: 'web_sources', limit: 10 });
+    pushIfMissing('intel.list', { section: 'competitors', limit: 12 });
+    pushIfMissing('intel.list', { section: 'community_insights', limit: 10 });
   }
 
   if (/crawl|spider/.test(normalized) && firstUrl) {
