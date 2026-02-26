@@ -1,5 +1,8 @@
 import { buildAgentContext } from '../../ai/chat/chat-tool-runtime';
 import { getTool } from '../../ai/chat/tools/tool-registry';
+import { buildRuntimeAgentContext } from './context-assembler';
+import { createRuntimeMutationAuditEntry } from './mutations/mutation-audit';
+import { buildRuntimeMutationOperationsFromIntelToolCall, evaluateRuntimeMutationGuard } from './mutations/mutation-guard';
 import type { RunPolicy, RuntimeContinuation, RuntimeDecision, RuntimeEvidenceItem, RuntimeToolArtifact, RuntimeToolResult } from './types';
 
 const CONFIRMATION_REQUIRED_MUTATION_TOOLS = new Set([
@@ -10,6 +13,27 @@ const CONFIRMATION_REQUIRED_MUTATION_TOOLS = new Set([
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function resolveBranchIdFromSyntheticSessionId(syntheticSessionId: string): string {
+  const raw = String(syntheticSessionId || '').trim();
+  if (!raw) return 'runtime-unknown';
+  if (raw.startsWith('runtime-') && raw.length > 'runtime-'.length) {
+    return raw.slice('runtime-'.length);
+  }
+  return raw;
+}
+
+function mergeWarnings(...groups: string[][]): string[] {
+  const deduped = new Set<string>();
+  for (const group of groups) {
+    for (const warning of group) {
+      const normalized = String(warning || '').trim();
+      if (!normalized) continue;
+      deduped.add(normalized);
+    }
+  }
+  return Array.from(deduped);
 }
 
 function requiresMutationConfirmation(toolName: string): boolean {
@@ -398,6 +422,78 @@ export async function executeToolWithContract(input: {
   }
 
   try {
+    let mutationGuardWarnings: string[] = [];
+    let mutationGuardDecision: RuntimeDecision | null = null;
+    let mutationGuardAudit: Record<string, unknown> | null = null;
+
+    if (input.toolName === 'intel.stageMutation') {
+      const branchId = resolveBranchIdFromSyntheticSessionId(input.syntheticSessionId);
+      const operations = buildRuntimeMutationOperationsFromIntelToolCall(input.toolName, input.args);
+      if (!operations.length) {
+        mutationGuardWarnings = ['Mutation guard could not infer operations from intel.stageMutation payload.'];
+      } else {
+        try {
+          const runtimeContext = await buildRuntimeAgentContext({
+            researchJobId: input.researchJobId,
+            branchId,
+            syntheticSessionId: input.syntheticSessionId,
+            userMessage: input.userMessage,
+            actor: {
+              userId: input.syntheticSessionId,
+              role: 'system',
+            },
+            permissionsOverride: {
+              canMutate: input.policy.allowMutationTools,
+            },
+          });
+
+          const guard = evaluateRuntimeMutationGuard({
+            context: {
+              permissions: runtimeContext.permissions,
+              actor: runtimeContext.actor,
+            },
+            operations,
+          });
+
+          mutationGuardWarnings = guard.warnings;
+          mutationGuardDecision = guard.requiresDecision && guard.decision ? guard.decision : null;
+          mutationGuardAudit = createRuntimeMutationAuditEntry({
+            context: runtimeContext,
+            runId: runtimeContext.runId,
+            risk: guard.risk,
+            operations,
+            sourceTool: input.toolName,
+            status: guard.ok ? 'staged' : 'blocked',
+            ...(guard.ok
+              ? {}
+              : {
+                  reason: guard.issues.map((issue) => issue.code).join(','),
+                }),
+          });
+
+          if (!guard.ok) {
+            return {
+              ok: false,
+              summary: 'Mutation guard blocked intel.stageMutation request.',
+              artifacts: [],
+              evidence: [],
+              continuations: [],
+              decisions: mutationGuardDecision ? [mutationGuardDecision] : [],
+              warnings: mergeWarnings(
+                mutationGuardWarnings,
+                guard.issues.map((issue) => issue.message)
+              ),
+              ...(mutationGuardAudit ? { raw: { runtimeMutationAudit: mutationGuardAudit } } : {}),
+            };
+          }
+        } catch (guardError: any) {
+          mutationGuardWarnings = mergeWarnings([
+            `Mutation guard context assembly failed: ${String(guardError?.message || guardError || 'unknown error')}`,
+          ]);
+        }
+      }
+    }
+
     const { agentContext } = await buildAgentContext(
       input.researchJobId,
       input.syntheticSessionId,
@@ -417,7 +513,16 @@ export async function executeToolWithContract(input: {
     const evidence = normalizeEvidence(asRecord);
     const continuations = normalizeContinuations(asRecord);
     const decisions = normalizeDecisions(asRecord);
-    const warnings = normalizeWarnings(asRecord);
+    if (mutationGuardDecision && !decisions.some((decision) => decision.id === mutationGuardDecision?.id)) {
+      decisions.unshift(mutationGuardDecision);
+    }
+    const warnings = mergeWarnings(normalizeWarnings(asRecord), mutationGuardWarnings);
+    const raw = mutationGuardAudit
+      ? {
+          ...asRecord,
+          runtimeMutationAudit: mutationGuardAudit,
+        }
+      : asRecord;
 
     return {
       ok: true,
@@ -427,7 +532,7 @@ export async function executeToolWithContract(input: {
       continuations,
       decisions,
       warnings,
-      raw: asRecord,
+      raw,
     };
   } catch (error: any) {
     return {
