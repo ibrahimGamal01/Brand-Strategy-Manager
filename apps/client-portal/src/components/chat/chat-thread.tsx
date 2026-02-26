@@ -220,6 +220,9 @@ export function ChatThread({
   onForkFromMessage,
   onResolveDecision,
   onRunAction,
+  onInspectAssistantMessage,
+  selectedAssistantMessageId,
+  showInlineReasoning = false,
   isStreaming,
   streamingInsight,
 }: {
@@ -227,6 +230,9 @@ export function ChatThread({
   onForkFromMessage?: (messageId: string) => void;
   onResolveDecision?: (decisionId: string, option: string) => void;
   onRunAction?: (actionLabel: string, actionKey: string, payload?: Record<string, unknown>) => void;
+  onInspectAssistantMessage?: (messageId: string) => void;
+  selectedAssistantMessageId?: string | null;
+  showInlineReasoning?: boolean;
   isStreaming?: boolean;
   streamingInsight?: string;
 }) {
@@ -242,33 +248,57 @@ export function ChatThread({
   }
 
   return (
-    <section className="bat-surface flex min-h-[55vh] flex-col gap-4 p-4 md:p-5">
+    <section className="bat-surface flex min-h-[55vh] flex-col gap-6 p-4 md:p-5">
       {messages.map((message) => (
         <article
           key={message.id}
-          className="max-w-[92%] rounded-2xl border px-4 py-3"
+          className={message.role === "user" ? "ml-auto max-w-[85%]" : "max-w-[94%]"}
           style={{
-            borderColor: message.role === "user" ? "transparent" : "var(--bat-border)",
             marginLeft: message.role === "user" ? "auto" : 0,
-            background: message.role === "user" ? "var(--bat-accent-soft)" : "var(--bat-surface)"
           }}
         >
           <div className="mb-2 flex items-center justify-between gap-2">
             <p className="text-xs uppercase tracking-[0.12em]" style={{ color: "var(--bat-text-muted)" }}>
-              {message.role}
+              {message.role === "assistant" ? "BAT" : message.role === "user" ? "You" : "System"}
             </p>
-            {onForkFromMessage ? (
-              <button
-                type="button"
-                onClick={() => onForkFromMessage(message.id)}
-                className="rounded-full border px-2 py-1 text-[11px]"
-                style={{ borderColor: "var(--bat-border)" }}
-              >
-                Fork from here
-              </button>
-            ) : null}
+            <div className="flex items-center gap-2">
+              {message.role === "assistant" && onInspectAssistantMessage ? (
+                <button
+                  type="button"
+                  onClick={() => onInspectAssistantMessage(message.id)}
+                  className="rounded-full border px-2 py-1 text-[11px]"
+                  style={{
+                    borderColor: "var(--bat-border)",
+                    background:
+                      selectedAssistantMessageId === message.id ? "var(--bat-accent-soft)" : "transparent",
+                  }}
+                >
+                  {selectedAssistantMessageId === message.id ? "Thoughts open" : "Open thoughts"}
+                </button>
+              ) : null}
+              {onForkFromMessage ? (
+                <button
+                  type="button"
+                  onClick={() => onForkFromMessage(message.id)}
+                  className="rounded-full border px-2 py-1 text-[11px]"
+                  style={{ borderColor: "var(--bat-border)" }}
+                >
+                  Fork from here
+                </button>
+              ) : null}
+            </div>
           </div>
-          <p className="whitespace-pre-wrap text-sm md:text-[15px]">{message.content}</p>
+          <div
+            className={`rounded-2xl px-4 py-3 ${
+              message.role === "user" ? "border" : ""
+            }`}
+            style={{
+              borderColor: message.role === "user" ? "var(--bat-border)" : "transparent",
+              background: message.role === "user" ? "var(--bat-accent-soft)" : "transparent",
+            }}
+          >
+            <p className="whitespace-pre-wrap text-sm md:text-[15px]">{message.content}</p>
+          </div>
           {message.role === "assistant" && message.reasoning?.tools?.length ? (
             <div className="mt-3 flex flex-wrap gap-2">
               {message.reasoning.tools.slice(0, 8).map((tool) => (
@@ -279,7 +309,7 @@ export function ChatThread({
             </div>
           ) : null}
           <MessageBlocks message={message} onResolveDecision={onResolveDecision} onRunAction={onRunAction} />
-          {message.role === "assistant" ? <ReasoningPanel message={message} /> : null}
+          {showInlineReasoning && message.role === "assistant" ? <ReasoningPanel message={message} /> : null}
         </article>
       ))}
       {isStreaming ? (

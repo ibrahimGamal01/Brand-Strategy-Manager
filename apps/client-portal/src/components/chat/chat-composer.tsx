@@ -19,6 +19,7 @@ interface ChatComposerProps {
   queuedMessages: QueuedMessage[];
   onSend: (content: string, mode: "send" | "queue") => void;
   onSteerRun: (note: string) => void;
+  onSteerQueued: (id: string, content: string) => void;
   onStop: () => void;
   onReorderQueue: (from: number, to: number) => void;
   onDeleteQueued: (id: string) => void;
@@ -30,6 +31,7 @@ export function ChatComposer({
   queuedMessages,
   onSend,
   onSteerRun,
+  onSteerQueued,
   onStop,
   onReorderQueue,
   onDeleteQueued,
@@ -132,6 +134,16 @@ export function ChatComposer({
                     style={{ borderColor: "var(--bat-border)" }}
                   >
                     <X className="h-3 w-3" />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Steer run with this queued message"
+                    disabled={!isStreaming}
+                    onClick={() => onSteerQueued(item.id, item.content)}
+                    className="rounded-full border px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-60"
+                    style={{ borderColor: "var(--bat-border)" }}
+                  >
+                    Steer
                   </button>
                 </div>
               </div>
