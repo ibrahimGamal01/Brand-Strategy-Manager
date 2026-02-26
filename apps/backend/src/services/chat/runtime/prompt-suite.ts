@@ -72,6 +72,7 @@ type ValidatorOutput = {
 };
 
 const ALLOWED_PLANNER_TOOL_NAMES = TOOL_REGISTRY.map((tool) => tool.name).sort();
+const PROMPT_STEP_TIMEOUT_MS = 30_000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -180,12 +181,31 @@ function completionText(response: OpenAI.Chat.Completions.ChatCompletion): strin
   return String(response.choices?.[0]?.message?.content || '').trim();
 }
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
+
 async function requestJson(task: Parameters<typeof openai.bat.chatCompletion>[0], messages: OpenAI.Chat.ChatCompletionMessageParam[], maxTokens = 900) {
-  const completion = (await openai.bat.chatCompletion(task, {
-    messages,
-    temperature: 0,
-    max_tokens: maxTokens,
-  })) as OpenAI.Chat.Completions.ChatCompletion;
+  const completion = (await withTimeout(
+    openai.bat.chatCompletion(task, {
+      messages,
+      temperature: 0,
+      max_tokens: maxTokens,
+    }) as Promise<OpenAI.Chat.Completions.ChatCompletion>,
+    PROMPT_STEP_TIMEOUT_MS,
+    `Prompt task ${task}`
+  )) as OpenAI.Chat.Completions.ChatCompletion;
 
   const text = completionText(completion);
   return extractJsonObject(text);
