@@ -13,6 +13,7 @@ import {
   listRuntimeQueue,
   listRuntimeThreads,
   pinRuntimeBranch,
+  resolveRuntimeDecision,
   reorderRuntimeQueue,
   sendRuntimeMessage,
   interruptRuntimeBranch,
@@ -88,6 +89,35 @@ function toChatRole(role: string): "user" | "assistant" | "system" {
   return "system";
 }
 
+function humanizeToken(value: string): string {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function humanizeTriggerType(value: unknown): string {
+  const normalized = String(value || "workflow").trim().toUpperCase();
+  if (normalized === "USER_MESSAGE") return "User message run";
+  if (normalized === "TOOL_RESULT") return "Tool continuation run";
+  if (normalized === "SCHEDULED_LOOP") return "Scheduled run";
+  if (normalized === "MUTATION_APPLIED") return "Mutation run";
+  if (normalized === "MANUAL_RETRY") return "Retry run";
+  return `${humanizeToken(normalized.toLowerCase()) || "Workflow"} run`;
+}
+
+function shortId(value: unknown): string {
+  const raw = String(value || "").trim();
+  return raw ? raw.slice(0, 8) : "unknown";
+}
+
+function extractToolNameFromEvent(event: Record<string, unknown>): string | undefined {
+  const payload = isRecord(event.payloadJson) ? event.payloadJson : null;
+  const toolName = String(payload?.toolName || "").trim();
+  return toolName || undefined;
+}
+
 function asArrayOfStrings(value: unknown, max = 12): string[] {
   if (!Array.isArray(value)) return [];
   return value
@@ -147,16 +177,61 @@ function formatTime(iso: string): string {
 }
 
 function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[] {
-  const latest = [...events].slice(-60).reverse();
+  const latest = [...events].slice(-120).reverse();
   return latest.map((event) => {
     const type = String(event.type || "").toUpperCase();
+    const payload = isRecord(event.payloadJson) ? event.payloadJson : null;
+    const toolName = extractToolNameFromEvent(event);
+    const runId = String(event.agentRunId || "").trim() || undefined;
+
+    let message = String(event.message || "Runtime event");
+    if (type === "PROCESS_STARTED") {
+      message = `${humanizeTriggerType(payload?.triggerType || "workflow")} started.`;
+    } else if (type === "PROCESS_PROGRESS" && toolName) {
+      message = `Running ${toolName}...`;
+    } else if (type === "PROCESS_RESULT" && toolName) {
+      const raw = String(event.message || "Done").trim();
+      message =
+        raw.toLowerCase().startsWith(toolName.toLowerCase()) || raw.toLowerCase().startsWith(`${toolName.toLowerCase()}:`)
+          ? raw
+          : `${toolName} completed: ${raw}`;
+    } else if (type === "FAILED" && toolName) {
+      const raw = String(event.message || "Failed").trim();
+      message =
+        raw.toLowerCase().startsWith(toolName.toLowerCase()) || raw.toLowerCase().startsWith(`${toolName.toLowerCase()}:`)
+          ? raw
+          : `${toolName} failed: ${raw}`;
+    } else if (type === "DONE") {
+      const toolRuns = Array.isArray(payload?.toolRuns) ? payload?.toolRuns : [];
+      const tools = toolRuns
+        .map((row) => (isRecord(row) ? String(row.toolName || "").trim() : ""))
+        .filter(Boolean);
+      if (tools.length) {
+        const preview = tools.slice(0, 3).join(", ");
+        message = `Run completed (${tools.length} tools): ${preview}${tools.length > 3 ? "..." : ""}`;
+      } else {
+        message = "Run completed.";
+      }
+    } else if (type === "DECISION_REQUIRED") {
+      message = "Approval needed before BAT can continue.";
+    }
+
     const actionLabel =
-      type === "PROCESS_RESULT" ? "Open result" : type === "DECISION_REQUIRED" ? "Review options" : undefined;
+      type === "PROCESS_RESULT"
+        ? "View result"
+        : type === "DECISION_REQUIRED"
+          ? "Review approval"
+          : type === "FAILED"
+            ? "Inspect issue"
+            : undefined;
+
     return {
       id: String(event.id || `${event.createdAt || Math.random()}`),
       timestamp: formatTime(toIso(event.createdAt)),
-      message: String(event.message || ""),
+      message,
       ...(actionLabel ? { actionLabel } : {}),
+      ...(runId ? { runId } : {}),
+      ...(toolName ? { toolName } : {}),
     };
   });
 }
@@ -210,64 +285,99 @@ function mapDecisionsFromEvents(
 }
 
 function mapRecentRunsFromEvents(events: Array<Record<string, unknown>>): ProcessRun[] {
-  const latestByRun = new Map<string, Record<string, unknown>>();
-  for (let idx = events.length - 1; idx >= 0; idx -= 1) {
-    const event = events[idx];
-    const runId = String(event.agentRunId || "").trim();
-    if (!runId || latestByRun.has(runId)) continue;
-    latestByRun.set(runId, event);
-  }
+  type RecentRunAggregate = {
+    id: string;
+    triggerType: string;
+    latestMessage: string;
+    latestAt: string;
+    status: ProcessRun["status"];
+    tools: Set<string>;
+  };
 
+  const aggregates = new Map<string, RecentRunAggregate>();
   const now = Date.now();
-  const recent: ProcessRun[] = [];
-  for (const [runId, event] of latestByRun.entries()) {
-    const createdAt = Date.parse(toIso(event.createdAt));
-    if (Number.isFinite(createdAt) && now - createdAt > 1000 * 60 * 45) continue;
 
-    const type = String(event.type || "").toUpperCase();
-    let status: ProcessRun["status"] = "running";
-    let progress = 70;
-    if (type === "DONE") {
-      status = "done";
-      progress = 100;
-    } else if (type === "FAILED") {
-      status = "failed";
-      progress = 100;
-    } else if (type === "WAITING_FOR_INPUT" || type === "DECISION_REQUIRED") {
-      status = "waiting_input";
-      progress = 95;
-    } else if (type === "PROCESS_CANCELLED") {
-      status = "cancelled";
-      progress = 100;
-    }
+  for (const event of events) {
+    const runId = String(event.agentRunId || "").trim();
+    if (!runId) continue;
+    const createdAt = toIso(event.createdAt);
+    const createdAtMs = Date.parse(createdAt);
+    if (Number.isFinite(createdAtMs) && now - createdAtMs > 1000 * 60 * 45) continue;
 
     const payload = isRecord(event.payloadJson) ? event.payloadJson : null;
-    const trigger = String(payload?.triggerType || "workflow").toLowerCase().replace(/_/g, " ");
-    recent.push({
+    const type = String(event.type || "").toUpperCase();
+    const toolName = extractToolNameFromEvent(event);
+    const aggregate = aggregates.get(runId) || {
       id: runId,
-      label: `Run ${trigger}`,
-      stage: String(event.message || "Recent runtime activity"),
-      progress,
-      status,
-    });
+      triggerType: String(payload?.triggerType || "workflow"),
+      latestMessage: String(event.message || "Recent runtime activity"),
+      latestAt: createdAt,
+      status: "running" as const,
+      tools: new Set<string>(),
+    };
+
+    if (toolName) {
+      aggregate.tools.add(toolName);
+    }
+    if (payload?.triggerType && String(payload.triggerType).trim()) {
+      aggregate.triggerType = String(payload.triggerType);
+    }
+    aggregate.latestMessage = String(event.message || aggregate.latestMessage || "Recent runtime activity");
+    aggregate.latestAt = createdAt;
+
+    if (type === "DONE") {
+      aggregate.status = "done";
+    } else if (type === "FAILED") {
+      aggregate.status = "failed";
+    } else if (type === "WAITING_FOR_INPUT" || type === "DECISION_REQUIRED") {
+      aggregate.status = "waiting_input";
+    } else if (type === "PROCESS_CANCELLED") {
+      aggregate.status = "cancelled";
+    }
+
+    aggregates.set(runId, aggregate);
   }
 
-  return recent.slice(0, 6);
+  return Array.from(aggregates.values())
+    .sort((a, b) => Date.parse(b.latestAt) - Date.parse(a.latestAt))
+    .slice(0, 8)
+    .map((run) => {
+      const tools = Array.from(run.tools);
+      const details = tools.length ? [`Tools: ${tools.slice(0, 4).join(", ")}${tools.length > 4 ? "..." : ""}`] : [];
+      return {
+        id: run.id,
+        label: `${humanizeTriggerType(run.triggerType)} • ${shortId(run.id)}`,
+        stage: run.status === "done" ? "Completed" : run.latestMessage,
+        progress: run.status === "done" || run.status === "failed" || run.status === "cancelled" ? 100 : 88,
+        status: run.status,
+        ...(details.length ? { details } : {}),
+      };
+    });
 }
 
 function mapRuns(activeRuns: Array<Record<string, unknown>>, events: Array<Record<string, unknown>>): ProcessRun[] {
-  return activeRuns.map((run) => {
+  const mappedActive = activeRuns.map((run) => {
     const statusRaw = String(run.status || "RUNNING").toUpperCase();
     const toolRuns = Array.isArray(run.toolRuns) ? run.toolRuns : [];
     const total = toolRuns.length || 1;
     const done = toolRuns.filter((tool) => isRecord(tool) && String(tool.status || "").toUpperCase() === "DONE").length;
+    const inFlightToolNames = toolRuns
+      .filter((tool) => {
+        if (!isRecord(tool)) return false;
+        const status = String(tool.status || "").toUpperCase();
+        return status === "RUNNING" || status === "QUEUED";
+      })
+      .map((tool) => (isRecord(tool) ? String(tool.toolName || "").trim() : ""))
+      .filter(Boolean);
     const progress = statusRaw === "DONE" ? 100 : Math.min(95, Math.round((done / total) * 100));
 
     const stage =
       statusRaw === "WAITING_USER"
         ? "Waiting for approval"
         : statusRaw === "WAITING_TOOLS"
-          ? `Running ${toolRuns.length || 1} task(s)`
+          ? inFlightToolNames.length
+            ? `Running ${inFlightToolNames.join(", ")}`
+            : `Running ${toolRuns.length || 1} task(s)`
           : statusRaw === "QUEUED"
             ? "Queued"
             : statusRaw === "FAILED"
@@ -291,12 +401,19 @@ function mapRuns(activeRuns: Array<Record<string, unknown>>, events: Array<Recor
 
     return {
       id: String(run.id || ""),
-      label: `Run ${String(run.triggerType || "workflow").toLowerCase().replace(/_/g, " ")}`,
+      label: `${humanizeTriggerType(run.triggerType)} • ${shortId(run.id)}`,
       stage,
       progress,
       status,
+      details: [
+        `Completed ${done}/${total} tool run(s)`,
+        ...(inFlightToolNames.length ? [`In progress: ${inFlightToolNames.slice(0, 3).join(", ")}${inFlightToolNames.length > 3 ? "..." : ""}`] : []),
+      ],
     };
-  }).concat(activeRuns.length ? [] : mapRecentRunsFromEvents(events));
+  });
+
+  if (mappedActive.length > 0) return mappedActive;
+  return mapRecentRunsFromEvents(events);
 }
 
 function deriveLibrary(messages: ChatMessage[]): LibraryItem[] {
@@ -367,6 +484,7 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
   const [decisions, setDecisions] = useState<DecisionItem[]>([]);
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
   const [libraryItemsRemote, setLibraryItemsRemote] = useState<LibraryItem[]>([]);
+  const [activeRunIds, setActiveRunIds] = useState<string[]>([]);
 
   const [preferences, setPreferences] = useState<SessionPreferences>(DEFAULT_PREFERENCES);
 
@@ -426,6 +544,11 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
         const normalizedMessages = mapMessages(messagePayload.messages as Array<Record<string, unknown>>);
         const events = eventPayload.events as Array<Record<string, unknown>>;
         const activeRuns = (statePayload.activeRuns || []) as Array<Record<string, unknown>>;
+        setActiveRunIds(
+          activeRuns
+            .map((run) => String(run.id || "").trim())
+            .filter(Boolean)
+        );
         setMessages(normalizedMessages);
         setFeedItems(mapFeedItems(events));
         setDecisions(mapDecisionsFromEvents(events, activeRuns));
@@ -495,8 +618,7 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
       const trimmed = content.trim();
       if (!trimmed) return;
 
-      const effectiveMode =
-        mode === "queue" ? "queue" : processRuns.some((run) => run.status === "running") ? "interrupt" : "send";
+      const effectiveMode = mode === "queue" ? "queue" : activeRunIds.length > 0 ? "interrupt" : "send";
 
       await sendRuntimeMessage(workspaceId, activeBranchId, {
         content: trimmed,
@@ -507,7 +629,7 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
 
       await syncBranch(activeBranchId);
     },
-    [activeBranchId, preferences, processRuns, syncBranch, workspaceId]
+    [activeBranchId, preferences, activeRunIds, syncBranch, workspaceId]
   );
 
   const interruptRun = useCallback(async () => {
@@ -544,9 +666,11 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
 
   const resolveDecision = useCallback(
     async (decisionId: string, option: string) => {
-      await sendMessage(`Decision ${decisionId}: ${option}`, "send");
+      if (!activeBranchId) return;
+      await resolveRuntimeDecision(workspaceId, activeBranchId, { decisionId, option });
+      await syncBranch(activeBranchId);
     },
-    [sendMessage]
+    [activeBranchId, syncBranch, workspaceId]
   );
 
   const createThread = useCallback(
@@ -605,9 +729,9 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
 
   const isBranchHot = useMemo(
     () =>
-      processRuns.some((run) => run.status === "running" || run.status === "waiting_input") ||
+      activeRunIds.length > 0 ||
       queuedMessages.length > 0,
-    [processRuns, queuedMessages.length]
+    [activeRunIds.length, queuedMessages.length]
   );
 
   const mergedLibraryItems = useMemo(
@@ -735,7 +859,7 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
     feedItems,
     decisions,
     queuedMessages,
-    isStreaming: processRuns.some((run) => run.status === "running" || run.status === "waiting_input"),
+    isStreaming: activeRunIds.length > 0,
     libraryItems: mergedLibraryItems,
     preferences,
     setActiveThreadId,

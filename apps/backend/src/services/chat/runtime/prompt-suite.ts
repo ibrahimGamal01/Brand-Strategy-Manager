@@ -390,7 +390,14 @@ function fallbackWriter(input: WriterInput): WriterOutput {
       ...(item.url ? { url: item.url } : {}),
     }));
 
-  const toolSummaries = input.toolResults.map((result) => result.summary).filter(Boolean).slice(0, 6);
+  const toolSummaries = input.toolResults
+    .map((result, index) => {
+      const toolName = input.plan.toolCalls[index]?.tool || input.plan.toolCalls[input.plan.toolCalls.length - 1]?.tool || 'tool';
+      const summary = String(result.summary || '').trim();
+      return summary ? `${toolName}: ${summary}` : `${toolName}: completed.`;
+    })
+    .filter(Boolean)
+    .slice(0, 8);
   const userIntent = input.userMessage.toLowerCase();
   const hasCompetitorIntent =
     /\b(add|include|save|insert|append|update)\b/.test(userIntent) &&

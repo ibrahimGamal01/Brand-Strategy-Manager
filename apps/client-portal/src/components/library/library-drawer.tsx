@@ -96,7 +96,10 @@ export function LibraryDrawer({
         <div className="space-y-2 overflow-y-auto pb-4" style={{ maxHeight: "calc(100vh - 220px)" }}>
           {filtered.map((item) => (
             <article key={item.id} className="rounded-xl border p-3" style={{ borderColor: "var(--bat-border)" }}>
-              <p className="text-sm font-semibold">{item.title}</p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold">{item.title}</p>
+                <span className="bat-chip">{item.collection}</span>
+              </div>
               <p className="mt-1 text-xs" style={{ color: "var(--bat-text-muted)" }}>
                 {item.summary}
               </p>
@@ -110,14 +113,27 @@ export function LibraryDrawer({
               <p className="mt-2 text-xs" style={{ color: "var(--bat-text-muted)" }}>
                 {item.freshness} • {item.evidenceLabel}
               </p>
-              <button
-                type="button"
-                onClick={() => onUseInChat(item)}
-                className="mt-2 rounded-full border px-3 py-1 text-xs"
-                style={{ borderColor: "var(--bat-border)" }}
-              >
-                Use in answer
-              </button>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => onUseInChat(item)}
+                  className="rounded-full border px-3 py-1 text-xs"
+                  style={{ borderColor: "var(--bat-border)" }}
+                >
+                  Use in answer
+                </button>
+                {item.evidenceHref ? (
+                  <a
+                    href={item.evidenceHref}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-full border px-3 py-1 text-xs"
+                    style={{ borderColor: "var(--bat-border)" }}
+                  >
+                    Open source
+                  </a>
+                ) : null}
+              </div>
             </article>
           ))}
         </div>

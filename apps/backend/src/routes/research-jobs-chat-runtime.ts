@@ -14,7 +14,11 @@ import {
   reorderQueue,
 } from '../services/chat/runtime/repository';
 import { runtimeRunEngine } from '../services/chat/runtime/run-engine';
-import { requirePortalAuth, requireWorkspaceMembership } from '../services/portal/portal-auth-middleware';
+import {
+  AuthedPortalRequest,
+  requirePortalAuth,
+  requireWorkspaceMembership,
+} from '../services/portal/portal-auth-middleware';
 
 const router = Router();
 
@@ -224,6 +228,40 @@ router.post('/:id/runtime/branches/:branchId/messages', async (req, res) => {
   } catch (error: any) {
     const status = String(error?.message || '').includes('not found') ? 404 : 500;
     return res.status(status).json({ error: 'Failed to process branch message', details: error?.message || String(error) });
+  }
+});
+
+router.post('/:id/runtime/branches/:branchId/decisions/resolve', async (req, res) => {
+  try {
+    const researchJobId = String(req.params.id || '').trim();
+    const branchId = String(req.params.branchId || '').trim();
+    const decisionId = String(req.body?.decisionId || '').trim();
+    const option = String(req.body?.option || '').trim();
+    if (!decisionId || !option) {
+      return res.status(400).json({ error: 'decisionId and option are required' });
+    }
+
+    const portalReq = req as AuthedPortalRequest;
+    const userId = String(portalReq.portalSession?.user?.id || 'portal_user').trim() || 'portal_user';
+    const content = `Decision ${decisionId}: ${option}. Continue using this approved option.`;
+
+    const result = await runtimeRunEngine.sendMessage({
+      researchJobId,
+      branchId,
+      userId,
+      content,
+      mode: 'interrupt',
+    });
+
+    return res.json({
+      ok: true,
+      queued: result.queued,
+      runId: result.runId,
+      userMessageId: result.userMessageId,
+    });
+  } catch (error: any) {
+    const status = String(error?.message || '').includes('not found') ? 404 : 500;
+    return res.status(status).json({ error: 'Failed to resolve decision', details: error?.message || String(error) });
   }
 });
 

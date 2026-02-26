@@ -150,6 +150,13 @@ function RunningTab({
           <p className="mt-1 text-xs" style={{ color: "var(--bat-text-muted)" }}>
             {run.stage}
           </p>
+          {run.details?.length ? (
+            <ul className="mt-2 space-y-1 text-xs" style={{ color: "var(--bat-text-muted)" }}>
+              {run.details.map((detail) => (
+                <li key={`${run.id}-${detail}`}>• {detail}</li>
+              ))}
+            </ul>
+          ) : null}
           <div className="mt-2 h-2 rounded-full" style={{ background: "var(--bat-surface-muted)" }}>
             <div
               className="h-2 rounded-full transition-all"
@@ -174,6 +181,9 @@ function FeedTab({ feedItems }: { feedItems: ProcessFeedItem[] }) {
             <p className="text-xs uppercase tracking-[0.08em]" style={{ color: "var(--bat-text-muted)" }}>
               {item.timestamp}
             </p>
+            <div className="flex items-center gap-2">
+              {item.toolName ? <span className="bat-chip">{item.toolName}</span> : null}
+              {item.runId ? <span className="bat-chip">Run {item.runId.slice(0, 8)}</span> : null}
             {item.actionLabel ? (
               <button
                 type="button"
@@ -183,6 +193,7 @@ function FeedTab({ feedItems }: { feedItems: ProcessFeedItem[] }) {
                 {item.actionLabel}
               </button>
             ) : null}
+            </div>
           </div>
           <p className="mt-1 text-sm">{item.message}</p>
         </article>

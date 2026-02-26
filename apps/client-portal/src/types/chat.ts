@@ -34,6 +34,7 @@ export interface ProcessRun {
   stage: string;
   progress: number;
   status: ProcessStatus;
+  details?: string[];
 }
 
 export interface ProcessFeedItem {
@@ -41,6 +42,8 @@ export interface ProcessFeedItem {
   timestamp: string;
   message: string;
   actionLabel?: string;
+  runId?: string;
+  toolName?: string;
 }
 
 export interface DecisionItem {

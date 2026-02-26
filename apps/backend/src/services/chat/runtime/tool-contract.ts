@@ -175,8 +175,9 @@ function normalizeWarnings(raw: Record<string, unknown>): string[] {
     .slice(0, 8);
 }
 
-function summarize(raw: Record<string, unknown>): string {
-  if (typeof raw.summary === 'string' && raw.summary.trim()) {
+function summarize(raw: Record<string, unknown>, toolName: string): string {
+  const genericSummary = /^(tool completed successfully\.?|tool returned \d+ item\(s\)\.?)/i;
+  if (typeof raw.summary === 'string' && raw.summary.trim() && !genericSummary.test(raw.summary.trim())) {
     return raw.summary.trim();
   }
 
@@ -199,10 +200,10 @@ function summarize(raw: Record<string, unknown>): string {
   }
 
   if (Array.isArray(raw.items) && raw.items.length > 0) {
-    return `Tool returned ${raw.items.length} item(s).`;
+    return `${toolName} returned ${raw.items.length} item(s).`;
   }
 
-  return 'Tool completed successfully.';
+  return `${toolName} completed successfully.`;
 }
 
 export async function executeToolWithContract(input: {
@@ -261,7 +262,7 @@ export async function executeToolWithContract(input: {
 
     const asRecord = isRecord(rawResult) ? rawResult : { value: rawResult as unknown };
 
-    const summary = summarize(asRecord);
+    const summary = summarize(asRecord, input.toolName);
     const artifacts = normalizeArtifacts(asRecord);
     const evidence = normalizeEvidence(asRecord);
     const continuations = normalizeContinuations(asRecord);

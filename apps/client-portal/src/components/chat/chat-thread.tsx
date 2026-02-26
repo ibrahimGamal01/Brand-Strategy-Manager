@@ -4,6 +4,16 @@ import { useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { ChatMessage } from "@/types/chat";
 
+function TypingDots() {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full" style={{ background: "var(--bat-accent)", animationDelay: "0ms" }} />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full" style={{ background: "var(--bat-accent)", animationDelay: "140ms" }} />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full" style={{ background: "var(--bat-accent)", animationDelay: "280ms" }} />
+    </span>
+  );
+}
+
 function ReasoningPanel({ message }: { message: ChatMessage }) {
   const [open, setOpen] = useState(false);
 
@@ -98,9 +108,13 @@ function ReasoningPanel({ message }: { message: ChatMessage }) {
 export function ChatThread({
   messages,
   onForkFromMessage,
+  isStreaming,
+  streamingInsight,
 }: {
   messages: ChatMessage[];
   onForkFromMessage?: (messageId: string) => void;
+  isStreaming?: boolean;
+  streamingInsight?: string;
 }) {
   if (!messages.length) {
     return (
@@ -141,9 +155,34 @@ export function ChatThread({
             ) : null}
           </div>
           <p className="whitespace-pre-wrap text-sm md:text-[15px]">{message.content}</p>
+          {message.role === "assistant" && message.reasoning?.tools?.length ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {message.reasoning.tools.slice(0, 8).map((tool) => (
+                <span key={`${message.id}-${tool}`} className="bat-chip">
+                  Ran {tool}
+                </span>
+              ))}
+            </div>
+          ) : null}
           {message.role === "assistant" ? <ReasoningPanel message={message} /> : null}
         </article>
       ))}
+      {isStreaming ? (
+        <article
+          className="max-w-[92%] rounded-2xl border px-4 py-3"
+          style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}
+        >
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="text-xs uppercase tracking-[0.12em]" style={{ color: "var(--bat-text-muted)" }}>
+              assistant
+            </p>
+            <TypingDots />
+          </div>
+          <p className="text-sm md:text-[15px]">
+            {streamingInsight || "BAT is thinking and running tools..."}
+          </p>
+        </article>
+      ) : null}
     </section>
   );
 }

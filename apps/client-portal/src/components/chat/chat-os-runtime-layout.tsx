@@ -29,6 +29,12 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [activeLibraryCollection, setActiveLibraryCollection] = useState<LibraryCollection | "all">("all");
   const [actionError, setActionError] = useState<string | null>(null);
+  const [nameDialog, setNameDialog] = useState<
+    | { mode: "thread"; title: string }
+    | { mode: "branch"; title: string; forkedFromMessageId?: string }
+    | null
+  >(null);
+  const [nameInput, setNameInput] = useState("");
   const router = useRouter();
 
   const {
@@ -63,6 +69,11 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   const visibleFeed = useMemo(() => feedItems.slice(0, 8), [feedItems]);
 
   const branchNeedsDecision = processRuns.some((run) => run.status === "waiting_input");
+  const activeRun =
+    processRuns.find((run) => run.status === "running" || run.status === "waiting_input") ||
+    processRuns[0] ||
+    null;
+  const streamingInsight = activeRun ? `${activeRun.label} • ${activeRun.stage}` : visibleFeed[0]?.message || "";
 
   const runAsync = (work: Promise<void>) => {
     setActionError(null);
@@ -108,15 +119,26 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   };
 
   const onNewThread = () => {
-    const title = window.prompt("Thread name", "Main workspace thread");
-    if (!title) return;
-    runAsync(createThread(title));
+    setNameDialog({ mode: "thread", title: "Create new thread" });
+    setNameInput("Main workspace thread");
   };
 
   const onForkBranch = (forkedFromMessageId?: string) => {
-    const branchName = window.prompt("Branch name", `What-if ${new Date().toLocaleTimeString()}`);
-    if (!branchName) return;
-    runAsync(createBranch(branchName, forkedFromMessageId));
+    setNameDialog({ mode: "branch", title: "Fork branch", forkedFromMessageId });
+    setNameInput(`What-if ${new Date().toLocaleTimeString()}`);
+  };
+
+  const submitNameDialog = () => {
+    if (!nameDialog) return;
+    const value = nameInput.trim();
+    if (!value) return;
+    if (nameDialog.mode === "thread") {
+      runAsync(createThread(value));
+    } else {
+      runAsync(createBranch(value, nameDialog.forkedFromMessageId));
+    }
+    setNameDialog(null);
+    setNameInput("");
   };
 
   const onCommand = (command: string) => {
@@ -278,7 +300,12 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
 
       <div className={`grid gap-4 ${focusMode ? "grid-cols-1" : "grid-cols-1 xl:grid-cols-[1fr,360px]"}`}>
         <div className="space-y-4">
-          <ChatThread messages={messages} onForkFromMessage={onForkBranch} />
+          <ChatThread
+            messages={messages}
+            onForkFromMessage={onForkBranch}
+            isStreaming={isStreaming}
+            streamingInsight={streamingInsight}
+          />
           <ChatComposer
             isStreaming={isStreaming}
             queuedMessages={queuedMessages}
@@ -319,6 +346,55 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
         onCollectionChange={setActiveLibraryCollection}
         onUseInChat={(item) => onUseLibraryItem(item.title)}
       />
+
+      {nameDialog ? (
+        <div className="fixed inset-0 z-50 grid place-items-start bg-black/30 pt-[18vh]">
+          <div className="w-full max-w-xl rounded-2xl border p-4" style={{ background: "var(--bat-surface)", borderColor: "var(--bat-border)" }}>
+            <p className="text-lg font-semibold">{nameDialog.title}</p>
+            <p className="mt-1 text-xs uppercase tracking-[0.08em]" style={{ color: "var(--bat-text-muted)" }}>
+              {nameDialog.mode === "thread" ? "Thread name" : "Branch name"}
+            </p>
+            <input
+              value={nameInput}
+              onChange={(event) => setNameInput(event.target.value)}
+              className="mt-2 w-full rounded-xl border px-3 py-2 text-sm outline-none"
+              style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}
+              autoFocus
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  submitNameDialog();
+                }
+                if (event.key === "Escape") {
+                  setNameDialog(null);
+                  setNameInput("");
+                }
+              }}
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-full border px-4 py-2 text-sm"
+                style={{ borderColor: "var(--bat-border)" }}
+                onClick={() => {
+                  setNameDialog(null);
+                  setNameInput("");
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="rounded-full px-4 py-2 text-sm font-semibold text-white"
+                style={{ background: "var(--bat-accent)" }}
+                onClick={submitNameDialog}
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }

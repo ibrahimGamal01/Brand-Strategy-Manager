@@ -335,7 +335,7 @@ export type RuntimeEventDto = {
 };
 
 export async function listRuntimeEvents(workspaceId: string, branchId: string) {
-  const response = await fetch(`/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/events?limit=150`, {
+  const response = await fetch(`/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/events?limit=300`, {
     method: "GET",
     cache: "no-store",
     credentials: "include",
@@ -457,4 +457,18 @@ export async function cancelRuntimeQueueItem(workspaceId: string, branchId: stri
     credentials: "include",
   });
   return parseJson<{ queue: RuntimeQueueDto[] }>(response);
+}
+
+export async function resolveRuntimeDecision(
+  workspaceId: string,
+  branchId: string,
+  input: { decisionId: string; option: string }
+) {
+  const response = await fetch(`/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/decisions/resolve`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+    credentials: "include",
+  });
+  return parseJson<{ ok: boolean; queued?: boolean; runId?: string; userMessageId?: string }>(response);
 }

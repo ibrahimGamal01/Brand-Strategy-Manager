@@ -25,6 +25,10 @@ type ListPortalLibraryOptions = {
   limit?: number;
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function compactText(value: unknown, maxChars = 220): string {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
   if (!text) return '';
@@ -114,7 +118,9 @@ export async function listPortalWorkspaceLibrary(
   const collectionFilter = normalizeCollection(options?.collection);
 
   const [
+    webSources,
     webSnapshots,
+    webExtractionRuns,
     competitors,
     socialPosts,
     communityInsights,
@@ -123,6 +129,11 @@ export async function listPortalWorkspaceLibrary(
     fileAttachments,
     aiBusinessAnalyses,
   ] = await Promise.all([
+    prisma.webSource.findMany({
+      where: { researchJobId: workspaceId, isActive: true },
+      orderBy: { updatedAt: 'desc' },
+      take: limit,
+    }),
     prisma.webPageSnapshot.findMany({
       where: { researchJobId: workspaceId, isActive: true },
       include: {
@@ -137,6 +148,25 @@ export async function listPortalWorkspaceLibrary(
       },
       orderBy: { fetchedAt: 'desc' },
       take: limit,
+    }),
+    prisma.webExtractionRun.findMany({
+      where: { researchJobId: workspaceId, isActive: true },
+      include: {
+        recipe: {
+          select: { name: true, targetDomain: true },
+        },
+        snapshot: {
+          select: {
+            finalUrl: true,
+            fetchedAt: true,
+            webSource: {
+              select: { url: true, domain: true },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: Math.min(limit, 120),
     }),
     prisma.discoveredCompetitor.findMany({
       where: { researchJobId: workspaceId, isActive: true },
@@ -188,6 +218,22 @@ export async function listPortalWorkspaceLibrary(
     }),
   ]);
 
+  const webSourceItems: PortalLibraryItem[] = webSources.map((source) => {
+    const href = toHttpHref(source.url);
+    const sourceType = String(source.sourceType || 'OTHER').toLowerCase();
+    const discoveredBy = String(source.discoveredBy || 'user').toLowerCase();
+    return {
+      id: `web-source:${source.id}`,
+      collection: 'web',
+      title: titleFromUrl(source.url),
+      summary: `Tracked source for ${source.domain}. Added via ${discoveredBy.replace(/_/g, ' ')}.`,
+      freshness: toIso(source.updatedAt || source.createdAt),
+      tags: ['source', sourceType, discoveredBy].filter(Boolean),
+      evidenceLabel: `${sourceType.toUpperCase()} source`,
+      ...(href ? { evidenceHref: href } : {}),
+    };
+  });
+
   const webItems: PortalLibraryItem[] = webSnapshots.map((snapshot) => {
     const href = toHttpHref(snapshot.finalUrl || snapshot.webSource.url);
     const sourceType = String(snapshot.webSource.sourceType || 'OTHER').toLowerCase();
@@ -204,6 +250,80 @@ export async function listPortalWorkspaceLibrary(
       tags: ['snapshot', sourceType, discoveredBy, fetcher].filter(Boolean),
       evidenceLabel: `${sourceType.toUpperCase()} • ${fetcher.toUpperCase()}`,
       ...(href ? { evidenceHref: href } : {}),
+    };
+  });
+
+  const crawlRuns = new Map<
+    string,
+    {
+      runId: string;
+      latestAt: string;
+      domains: Set<string>;
+      pages: number;
+      link?: string;
+      discoveredBy: Set<string>;
+    }
+  >();
+
+  for (const snapshot of webSnapshots) {
+    const metadata = isRecord(snapshot.metadata) ? snapshot.metadata : null;
+    const crawlRunId = String(metadata?.crawlRunId || '').trim();
+    if (!crawlRunId) continue;
+
+    const existing = crawlRuns.get(crawlRunId) || {
+      runId: crawlRunId,
+      latestAt: toIso(snapshot.fetchedAt),
+      domains: new Set<string>(),
+      pages: 0,
+      link: toHttpHref(snapshot.finalUrl || snapshot.webSource.url),
+      discoveredBy: new Set<string>(),
+    };
+
+    existing.pages += 1;
+    existing.domains.add(String(snapshot.webSource.domain || '').trim());
+    existing.discoveredBy.add(String(snapshot.webSource.discoveredBy || '').toLowerCase());
+    const snapshotFreshness = Date.parse(toIso(snapshot.fetchedAt));
+    const existingFreshness = Date.parse(existing.latestAt);
+    if (!Number.isFinite(existingFreshness) || snapshotFreshness > existingFreshness) {
+      existing.latestAt = toIso(snapshot.fetchedAt);
+    }
+    if (!existing.link) {
+      existing.link = toHttpHref(snapshot.finalUrl || snapshot.webSource.url);
+    }
+
+    crawlRuns.set(crawlRunId, existing);
+  }
+
+  const crawlRunItems: PortalLibraryItem[] = Array.from(crawlRuns.values()).map((row) => ({
+    id: `web-crawl:${row.runId}`,
+    collection: 'web',
+    title: `Crawl run ${row.runId.slice(0, 8)}`,
+    summary: `Captured ${row.pages} page snapshot(s) across ${row.domains.size || 1} domain(s).`,
+    freshness: row.latestAt,
+    tags: ['crawl', ...Array.from(row.discoveredBy)],
+    evidenceLabel: `Crawl • ${row.pages} pages`,
+    ...(row.link ? { evidenceHref: row.link } : {}),
+  }));
+
+  const extractionItems: PortalLibraryItem[] = webExtractionRuns.map((run) => {
+    const extracted = isRecord(run.extracted) ? run.extracted : null;
+    const extractedFieldCount = extracted ? Object.keys(extracted).length : 0;
+    const warningsCount = Array.isArray(run.warnings) ? run.warnings.length : 0;
+    const sourceUrl = run.snapshot.finalUrl || run.snapshot.webSource.url;
+    const domain = run.recipe.targetDomain || run.snapshot.webSource.domain || titleFromUrl(sourceUrl);
+
+    return {
+      id: `web-extraction:${run.id}`,
+      collection: 'web',
+      title: `Extraction ${run.recipe.name}`,
+      summary: compactText(
+        `Extracted ${extractedFieldCount} field(s) from ${domain}${warningsCount ? ` with ${warningsCount} warning(s)` : ''}.`,
+        240
+      ),
+      freshness: toIso(run.createdAt),
+      tags: ['extraction', String(domain || '').toLowerCase()].filter(Boolean),
+      evidenceLabel: `Confidence ${Number(run.confidence || 0).toFixed(2)}`,
+      ...(toHttpHref(sourceUrl) ? { evidenceHref: toHttpHref(sourceUrl) } : {}),
     };
   });
 
@@ -304,8 +424,10 @@ export async function listPortalWorkspaceLibrary(
     })),
   ];
 
+  const allWebItems = [...webSourceItems, ...webItems, ...crawlRunItems, ...extractionItems];
+
   const counts = {
-    web: webItems.length,
+    web: allWebItems.length,
     competitors: competitorItems.length,
     social: socialItems.length,
     community: communityItems.length,
@@ -314,7 +436,7 @@ export async function listPortalWorkspaceLibrary(
   };
 
   let items = dedupeItems([
-    ...webItems,
+    ...allWebItems,
     ...competitorItems,
     ...socialItems,
     ...communityItems,
