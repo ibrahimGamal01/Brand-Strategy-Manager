@@ -3,12 +3,27 @@ import {
   extractFromWebSnapshot,
   fetchAndPersistWebSnapshot,
 } from '../../../scraping/web-intelligence-service';
+import { prisma } from '../../../../lib/prisma';
 import type { ToolDefinition } from './tool-types';
 
 function normalizeMode(raw: unknown): 'AUTO' | 'HTTP' | 'DYNAMIC' | 'STEALTH' {
   const value = String(raw || 'AUTO').trim().toUpperCase();
   if (value === 'HTTP' || value === 'DYNAMIC' || value === 'STEALTH') return value;
   return 'AUTO';
+}
+
+function toIso(value: unknown): string {
+  if (!value) return new Date(0).toISOString();
+  const parsed = value instanceof Date ? value : new Date(String(value));
+  if (Number.isNaN(parsed.getTime())) return new Date(0).toISOString();
+  return parsed.toISOString();
+}
+
+function compactSnippet(value: unknown, maxChars = 220): string {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, Math.max(0, maxChars - 3))}...`;
 }
 
 export const scraplingTools: ToolDefinition<Record<string, unknown>, Record<string, unknown>>[] = [
@@ -184,6 +199,179 @@ export const scraplingTools: ToolDefinition<Record<string, unknown>, Record<stri
             label: `Open extraction ${String((result.extractionRunId || args.snapshotId || '')).slice(0, 8)}`,
             url: internalLink,
           },
+        ],
+        internalLink,
+      };
+    },
+  },
+  {
+    name: 'web.crawl.get_run',
+    description: 'Fetch crawl run metadata by run id and include sample pages from saved snapshots.',
+    argsSchema: {
+      type: 'object',
+      properties: {
+        runId: { type: 'string' },
+      },
+      required: ['runId'],
+      additionalProperties: false,
+    },
+    returnsSchema: {
+      type: 'object',
+      properties: {
+        runId: { type: 'string' },
+        persisted: { type: 'number' },
+        summary: { type: 'object' },
+        items: { type: 'array' },
+        evidence: { type: 'array' },
+        summaryText: { type: 'string' },
+        internalLink: { type: 'string' },
+      },
+      required: ['runId', 'persisted', 'summary', 'items', 'evidence', 'summaryText', 'internalLink'],
+      additionalProperties: true,
+    },
+    mutate: false,
+    execute: async (context, args) => {
+      const runId = String(args.runId || '').trim().toLowerCase();
+      if (!runId) {
+        throw new Error('runId is required.');
+      }
+
+      const snapshots = await prisma.webPageSnapshot.findMany({
+        where: {
+          researchJobId: context.researchJobId,
+          metadata: {
+            path: ['crawlRunId'],
+            equals: runId,
+          },
+        },
+        include: {
+          webSource: {
+            select: {
+              domain: true,
+              url: true,
+            },
+          },
+        },
+        orderBy: { fetchedAt: 'desc' },
+        take: 120,
+      });
+
+      const domains = Array.from(
+        new Set(snapshots.map((row) => String(row.webSource.domain || '').trim()).filter(Boolean))
+      );
+      const persisted = snapshots.length;
+      const items = snapshots.slice(0, 20).map((row) => ({
+        snapshotId: row.id,
+        finalUrl: row.finalUrl || row.webSource.url,
+        statusCode: row.statusCode || null,
+        fetchedAt: toIso(row.fetchedAt),
+        cleanTextSnippet: compactSnippet(row.cleanText, 260),
+      }));
+      const internalLink = context.links.moduleLink('intelligence', {
+        intelSection: 'web_sources',
+        focusKind: 'crawl_run',
+        focusId: runId,
+      });
+
+      return {
+        runId,
+        persisted,
+        summary: {
+          domains,
+          latestSnapshotAt: snapshots[0]?.fetchedAt ? toIso(snapshots[0].fetchedAt) : null,
+        },
+        items,
+        summaryText: `Crawl run ${runId} has ${persisted} persisted snapshot(s) across ${domains.length || 1} domain(s).`,
+        evidence: [
+          { kind: 'internal', label: `Open crawl run ${runId.slice(0, 8)}`, url: internalLink },
+          ...items.slice(0, 6).map((item) => ({
+            kind: 'url',
+            label: `Snapshot ${item.snapshotId.slice(0, 8)}`,
+            url: item.finalUrl,
+          })),
+        ],
+        internalLink,
+      };
+    },
+  },
+  {
+    name: 'web.crawl.list_snapshots',
+    description: 'List page snapshots captured by a specific crawl run id.',
+    argsSchema: {
+      type: 'object',
+      properties: {
+        runId: { type: 'string' },
+        limit: { type: 'number', minimum: 1, maximum: 120 },
+      },
+      required: ['runId'],
+      additionalProperties: false,
+    },
+    returnsSchema: {
+      type: 'object',
+      properties: {
+        runId: { type: 'string' },
+        count: { type: 'number' },
+        items: { type: 'array' },
+        summaryText: { type: 'string' },
+        evidence: { type: 'array' },
+        internalLink: { type: 'string' },
+      },
+      required: ['runId', 'count', 'items', 'summaryText', 'evidence', 'internalLink'],
+      additionalProperties: true,
+    },
+    mutate: false,
+    execute: async (context, args) => {
+      const runId = String(args.runId || '').trim().toLowerCase();
+      if (!runId) {
+        throw new Error('runId is required.');
+      }
+      const limitRaw = Number(args.limit);
+      const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(120, Math.floor(limitRaw))) : 40;
+
+      const snapshots = await prisma.webPageSnapshot.findMany({
+        where: {
+          researchJobId: context.researchJobId,
+          metadata: {
+            path: ['crawlRunId'],
+            equals: runId,
+          },
+        },
+        include: {
+          webSource: {
+            select: {
+              url: true,
+            },
+          },
+        },
+        orderBy: { fetchedAt: 'desc' },
+        take: limit,
+      });
+
+      const items = snapshots.map((row) => ({
+        snapshotId: row.id,
+        finalUrl: row.finalUrl || row.webSource.url,
+        statusCode: row.statusCode || null,
+        fetchedAt: toIso(row.fetchedAt),
+        cleanTextSnippet: compactSnippet(row.cleanText, 260),
+      }));
+      const internalLink = context.links.moduleLink('intelligence', {
+        intelSection: 'web_sources',
+        focusKind: 'crawl_run',
+        focusId: runId,
+      });
+
+      return {
+        runId,
+        count: items.length,
+        items,
+        summaryText: `Listed ${items.length} snapshot(s) for crawl run ${runId}.`,
+        evidence: [
+          { kind: 'internal', label: `Open crawl run ${runId.slice(0, 8)}`, url: internalLink },
+          ...items.slice(0, 8).map((item) => ({
+            kind: 'url',
+            label: `Snapshot ${item.snapshotId.slice(0, 8)}`,
+            url: item.finalUrl,
+          })),
         ],
         internalLink,
       };

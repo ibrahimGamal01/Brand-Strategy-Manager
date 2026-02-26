@@ -4,6 +4,7 @@ import {
   collectContinuationTools,
   inferToolCallsFromMessage,
   normalizePolicy,
+  stripLegacyBoilerplateResponse,
 } from '../services/chat/runtime/run-engine';
 import type { RuntimeToolResult } from '../services/chat/runtime/types';
 
@@ -52,6 +53,21 @@ function testPlannerHeuristics() {
   assert.ok(
     deepResearchToolNames.includes('research.gather'),
     'Expected deep DDG/Scraply investigation request to trigger research.gather.'
+  );
+
+  const crawlRunReferenceCalls = inferToolCallsFromMessage('Use evidence from: Crawl run crawl-e8');
+  const crawlRunListCall = crawlRunReferenceCalls.find((entry) => entry.tool === 'web.crawl.list_snapshots');
+  assert.ok(crawlRunListCall, 'Expected crawl run evidence reference to trigger web.crawl.list_snapshots.');
+  assert.equal(
+    String((crawlRunListCall?.args as Record<string, unknown>)?.runId || ''),
+    'crawl-e8',
+    'Expected crawl run evidence reference to preserve crawl run id in filter args.'
+  );
+
+  const urlEvidenceCalls = inferToolCallsFromMessage('Use evidence from: consciouslifeexpo.com/refund-policy/');
+  assert.ok(
+    urlEvidenceCalls.some((entry) => entry.tool === 'web.fetch'),
+    'Expected URL evidence reference to trigger web.fetch.'
   );
 }
 
@@ -107,10 +123,29 @@ function testPolicyNormalization() {
   assert.equal(policy.maxToolMs, 1000, 'Policy must clamp tool timeout to minimum 1000ms.');
 }
 
+function testLegacyBoilerplateStripping() {
+  const raw = [
+    'Fork from here',
+    'Here is the actual answer.',
+    '',
+    'No tools executed in this run.',
+    '',
+    'Next actions',
+    '',
+    'Do A',
+    'How BAT got here',
+    'Plan',
+    '- Step',
+  ].join('\n');
+  const cleaned = stripLegacyBoilerplateResponse(raw);
+  assert.equal(cleaned, 'Here is the actual answer.', 'Expected legacy scaffold text to be stripped from response.');
+}
+
 function main() {
   testPlannerHeuristics();
   testContinuationCollection();
   testPolicyNormalization();
+  testLegacyBoilerplateStripping();
   console.log('[Runtime Engine] Heuristic + continuation tests passed.');
 }
 

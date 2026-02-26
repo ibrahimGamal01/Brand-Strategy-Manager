@@ -370,6 +370,22 @@ function normalizeToolArgs(tool: string, args: Record<string, unknown>, userMess
     return normalized;
   }
 
+  if (tool === 'web.crawl.get_run') {
+    const runId = String(normalized.runId || '').trim() || findReferencedCrawlRunId(userMessage) || '';
+    if (!runId) return null;
+    normalized.runId = runId;
+    return normalized;
+  }
+
+  if (tool === 'web.crawl.list_snapshots') {
+    const runId = String(normalized.runId || '').trim() || findReferencedCrawlRunId(userMessage) || '';
+    if (!runId) return null;
+    normalized.runId = runId;
+    const limit = Number(normalized.limit);
+    normalized.limit = Number.isFinite(limit) ? Math.max(1, Math.min(120, Math.floor(limit))) : 40;
+    return normalized;
+  }
+
   if (tool === 'web.extract') {
     const snapshotId = String(normalized.snapshotId || '').trim();
     if (!snapshotId) return null;
@@ -651,7 +667,7 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   }
 
   if (referencedCrawlRunId) {
-    pushIfMissing('intel.list', { section: 'web_snapshots', limit: 50, where: { crawlRunId: referencedCrawlRunId } });
+    pushIfMissing('web.crawl.list_snapshots', { runId: referencedCrawlRunId, limit: 50 });
   }
 
   if (hasEvidenceReferenceIntent && firstUrl) {

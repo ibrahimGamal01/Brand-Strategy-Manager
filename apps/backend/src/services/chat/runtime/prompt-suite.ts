@@ -372,7 +372,7 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
     pushIfMissing('web.crawl', { startUrls: [firstUrl], maxPages: 8, maxDepth: 1 });
   }
   if (referencedCrawlRunId) {
-    pushIfMissing('intel.list', { section: 'web_snapshots', limit: 50, where: { crawlRunId: referencedCrawlRunId } });
+    pushIfMissing('web.crawl.list_snapshots', { runId: referencedCrawlRunId, limit: 50 });
   }
   if (hasEvidenceReferenceIntent && firstUrl) {
     pushIfMissing('web.fetch', { url: firstUrl, sourceType: 'ARTICLE', discoveredBy: 'CHAT_TOOL' });

@@ -17,6 +17,8 @@ export type ToolName =
   | 'evidence.news'
   | 'web.fetch'
   | 'web.crawl'
+  | 'web.crawl.get_run'
+  | 'web.crawl.list_snapshots'
   | 'web.extract'
   | 'document.plan'
   | 'document.generate'
