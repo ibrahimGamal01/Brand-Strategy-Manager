@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, KeyboardEvent, useState } from "react";
-import { Send, Square, ArrowUp, ArrowDown, X, WandSparkles } from "lucide-react";
+import { ArrowDown, ArrowUp, ListOrdered, SendHorizontal, Sparkles, Square, X } from "lucide-react";
 import { QueuedMessage } from "@/types/chat";
 
 const steerChipSet = [
@@ -10,7 +10,6 @@ const steerChipSet = [
   "Make it a PDF",
   "Focus on TikTok",
   "Focus on Web evidence",
-  "Be concise",
   "Ask me questions first"
 ];
 
@@ -24,6 +23,7 @@ interface ChatComposerProps {
   onReorderQueue: (from: number, to: number) => void;
   onDeleteQueued: (id: string) => void;
   onSteer: (chip: string) => void;
+  contentWidthClassName?: string;
 }
 
 export function ChatComposer({
@@ -35,9 +35,12 @@ export function ChatComposer({
   onStop,
   onReorderQueue,
   onDeleteQueued,
-  onSteer
+  onSteer,
+  contentWidthClassName = "max-w-3xl",
 }: ChatComposerProps) {
   const [message, setMessage] = useState("");
+  const [showQueue, setShowQueue] = useState(false);
+  const [showSteerChips, setShowSteerChips] = useState(false);
 
   const dispatchMessage = () => {
     const content = message.trim();
@@ -78,130 +81,141 @@ export function ChatComposer({
   };
 
   return (
-    <section className="bat-surface p-4">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm font-medium">Steer BAT</p>
-        <span className="bat-chip">Queued: {queuedMessages.length}</span>
-      </div>
-
-      <div className="mb-3 flex flex-wrap gap-2">
-        {steerChipSet.map((chip) => (
+    <section className="border-t border-zinc-200 bg-gradient-to-t from-white via-white to-white/70 px-3 pb-4 pt-3 sm:px-5">
+      <div className={`mx-auto w-full ${contentWidthClassName}`}>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-xs text-zinc-500">
+            <span className={`rounded-full px-2 py-1 ${isStreaming ? "bg-emerald-50 text-emerald-700" : "bg-zinc-100 text-zinc-600"}`}>
+              {isStreaming ? "Generating" : "Ready"}
+            </span>
+            {queuedMessages.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setShowQueue((prev) => !prev)}
+                className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-2 py-1 text-zinc-600 hover:bg-zinc-100"
+              >
+                <ListOrdered className="h-3.5 w-3.5" />
+                Queue {queuedMessages.length}
+              </button>
+            ) : null}
+          </div>
           <button
-            key={chip}
             type="button"
-            onClick={() => onSteer(chip)}
-            className="rounded-full border px-3 py-1.5 text-xs"
-            style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}
+            onClick={() => setShowSteerChips((prev) => !prev)}
+            className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
           >
-            {chip}
+            <Sparkles className="h-3.5 w-3.5" />
+            Quick actions
           </button>
-        ))}
-      </div>
+        </div>
 
-      {queuedMessages.length > 0 ? (
-        <div className="mb-3 rounded-xl border p-3" style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}>
-          <p className="text-xs uppercase tracking-[0.08em]" style={{ color: "var(--bat-text-muted)" }}>
-            Message Queue
-          </p>
-          <div className="mt-2 space-y-2">
-            {queuedMessages.map((item, index) => (
-              <div key={item.id} className="flex items-center gap-2 rounded-xl border p-2" style={{ borderColor: "var(--bat-border)" }}>
-                <p className="flex-1 text-sm">{item.content}</p>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    aria-label="Move up"
-                    onClick={() => onReorderQueue(index, index - 1)}
-                    className="rounded-full border p-1"
-                    style={{ borderColor: "var(--bat-border)" }}
-                  >
-                    <ArrowUp className="h-3 w-3" />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label="Move down"
-                    onClick={() => onReorderQueue(index, index + 1)}
-                    className="rounded-full border p-1"
-                    style={{ borderColor: "var(--bat-border)" }}
-                  >
-                    <ArrowDown className="h-3 w-3" />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label="Remove"
-                    onClick={() => onDeleteQueued(item.id)}
-                    className="rounded-full border p-1"
-                    style={{ borderColor: "var(--bat-border)" }}
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label="Steer run with this queued message"
-                    disabled={!isStreaming}
-                    onClick={() => onSteerQueued(item.id, item.content)}
-                    className="rounded-full border px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-60"
-                    style={{ borderColor: "var(--bat-border)" }}
-                  >
-                    Steer
-                  </button>
-                </div>
-              </div>
+        {showSteerChips ? (
+          <div className="mb-2.5 flex flex-wrap gap-1.5">
+            {steerChipSet.map((chip) => (
+              <button
+                key={chip}
+                type="button"
+                onClick={() => onSteer(chip)}
+                className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
+              >
+                {chip}
+              </button>
             ))}
           </div>
-        </div>
-      ) : null}
+        ) : null}
 
-      {isStreaming ? (
-        <p className="mb-3 text-xs" style={{ color: "var(--bat-text-muted)" }}>
-          Send will queue your message. Use <strong>Steer Run</strong> to interrupt and apply direction immediately.
-        </p>
-      ) : null}
+        {showQueue && queuedMessages.length > 0 ? (
+          <div className="mb-2.5 rounded-2xl border border-zinc-200 bg-zinc-50/90 p-2.5">
+            <div className="space-y-1.5">
+              {queuedMessages.map((item, index) => (
+                <div key={item.id} className="flex items-start gap-2 rounded-xl border border-zinc-200 bg-white p-2">
+                  <p className="flex-1 text-sm text-zinc-700">{item.content}</p>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      aria-label="Move up"
+                      onClick={() => onReorderQueue(index, index - 1)}
+                      className="rounded-full border border-zinc-200 p-1 text-zinc-600 hover:bg-zinc-100"
+                    >
+                      <ArrowUp className="h-3 w-3" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Move down"
+                      onClick={() => onReorderQueue(index, index + 1)}
+                      className="rounded-full border border-zinc-200 p-1 text-zinc-600 hover:bg-zinc-100"
+                    >
+                      <ArrowDown className="h-3 w-3" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Remove"
+                      onClick={() => onDeleteQueued(item.id)}
+                      className="rounded-full border border-zinc-200 p-1 text-zinc-600 hover:bg-zinc-100"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Steer run with this queued message"
+                      disabled={!isStreaming}
+                      onClick={() => onSteerQueued(item.id, item.content)}
+                      className="rounded-full border border-zinc-200 px-2 py-1 text-[11px] text-zinc-600 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-55"
+                    >
+                      Steer
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
 
-      <form onSubmit={submit} className="flex gap-2">
-        <textarea
-          value={message}
-          onChange={(event) => setMessage(event.target.value)}
-          onKeyDown={onComposerKeyDown}
-          placeholder="Ask BAT to run analysis, generate a brief, or adjust strategy..."
-          className="min-h-[84px] flex-1 rounded-2xl border px-3 py-2 text-sm outline-none"
-          style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}
-        />
-        <div className="flex w-32 flex-col gap-2">
-          <button
-            type="submit"
-            className="inline-flex items-center justify-center gap-1 rounded-full px-3 py-2 text-sm font-semibold"
-            style={{ background: "var(--bat-accent)", color: "white" }}
-          >
-            <Send className="h-4 w-4" />
-            {isStreaming ? "Queue" : "Run"}
-          </button>
-          {isStreaming ? (
+        <form onSubmit={submit} className="relative">
+          <textarea
+            value={message}
+            onChange={(event) => setMessage(event.target.value)}
+            onKeyDown={onComposerKeyDown}
+            placeholder="Message BAT..."
+            className="min-h-[108px] w-full resize-none rounded-[30px] border border-zinc-300 bg-white px-4 pb-12 pt-3 text-[15px] text-zinc-900 outline-none transition focus:border-zinc-400 focus:ring-2 focus:ring-zinc-200"
+          />
+
+          <p className="pointer-events-none absolute bottom-3 left-4 text-[11px] text-zinc-400">
+            Enter to send, Shift+Enter for newline
+          </p>
+
+          <div className="absolute bottom-2.5 right-2.5 flex items-center gap-2">
+            {isStreaming ? (
+              <button
+                type="button"
+                onClick={onStop}
+                className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-600 hover:bg-zinc-100"
+              >
+                <Square className="h-3.5 w-3.5" />
+                Stop
+              </button>
+            ) : null}
+            {isStreaming && message.trim() ? (
+              <button
+                type="button"
+                onClick={steerRunNow}
+                className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-600 hover:bg-zinc-100"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                Steer
+              </button>
+            ) : null}
             <button
-              type="button"
-              onClick={steerRunNow}
+              type="submit"
               disabled={!message.trim()}
-              className="inline-flex items-center justify-center gap-1 rounded-full border px-3 py-2 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
-              style={{ borderColor: "var(--bat-border)" }}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-zinc-900 text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300"
+              aria-label={isStreaming ? "Queue message" : "Send message"}
             >
-              <WandSparkles className="h-4 w-4" /> Steer run
+              <SendHorizontal className="h-4 w-4" />
             </button>
-          ) : null}
-          {isStreaming ? (
-            <button
-              type="button"
-              onClick={onStop}
-              className="inline-flex items-center justify-center gap-1 rounded-full border px-3 py-2 text-sm"
-              style={{ borderColor: "var(--bat-border)" }}
-            >
-              <Square className="h-4 w-4" /> Stop
-            </button>
-          ) : null}
-        </div>
-      </form>
-      <p className="mt-2 text-[11px]" style={{ color: "var(--bat-text-muted)" }}>
-        Enter sends. Shift+Enter adds a new line.
-      </p>
+          </div>
+        </form>
+      </div>
     </section>
   );
 }

@@ -312,7 +312,7 @@ export function LiveActivityPanel({
   );
 
   return (
-    <aside className="bat-surface h-full p-4">
+    <aside className="bat-surface flex h-full min-h-0 flex-col p-4">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-base font-semibold">Live Activity</h2>
         <span className="bat-chip">Client Friendly View</span>
@@ -334,7 +334,7 @@ export function LiveActivityPanel({
         ))}
       </div>
 
-      <div className="max-h-[62vh] overflow-y-auto pr-1">
+      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
         {tab === "running" ? (
           <RunningTab runs={runs} feedItems={feedItems} onRunAudit={onRunAudit} onSteer={onSteer} />
         ) : null}

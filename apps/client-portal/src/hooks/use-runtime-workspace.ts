@@ -751,7 +751,7 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
   const [decisions, setDecisions] = useState<DecisionItem[]>([]);
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
   const [libraryItemsRemote, setLibraryItemsRemote] = useState<LibraryItem[]>([]);
-  const [activeRunIds, setActiveRunIds] = useState<string[]>([]);
+  const [activeRunIdsByBranch, setActiveRunIdsByBranch] = useState<Record<string, string[]>>({});
 
   const [preferences, setPreferences] = useState<SessionPreferences>(DEFAULT_PREFERENCES);
 
@@ -766,6 +766,10 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
   );
 
   const branches = useMemo(() => activeThread?.branches || [], [activeThread]);
+  const activeRunIds = useMemo(() => {
+    if (!activeBranchId) return [];
+    return activeRunIdsByBranch[activeBranchId] || [];
+  }, [activeBranchId, activeRunIdsByBranch]);
 
   const setActiveThreadId = useCallback(
     (threadId: string) => {
@@ -811,11 +815,13 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
         const normalizedMessages = mapMessages(messagePayload.messages as Array<Record<string, unknown>>);
         const events = eventPayload.events as Array<Record<string, unknown>>;
         const activeRuns = (statePayload.activeRuns || []) as Array<Record<string, unknown>>;
-        setActiveRunIds(
-          activeRuns
-            .map((run) => String(run.id || "").trim())
-            .filter(Boolean)
-        );
+        const activeIds = activeRuns
+          .map((run) => String(run.id || "").trim())
+          .filter(Boolean);
+        setActiveRunIdsByBranch((previous) => ({
+          ...previous,
+          [branchId]: activeIds,
+        }));
         setMessages(normalizedMessages);
         setFeedItems(mapFeedItems(events));
         setDecisions(mapDecisionsFromEvents(events, activeRuns));

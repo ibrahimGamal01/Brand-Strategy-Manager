@@ -8,6 +8,7 @@ import { LibraryCollection, SessionPreferences } from "@/types/chat";
 import { ChatComposer } from "./chat-composer";
 import { ChatThread } from "./chat-thread";
 import { CommandPalette } from "./command-palette";
+import { LiveActivityPanel } from "./live-activity-panel";
 import { LibraryDrawer } from "@/components/library/library-drawer";
 
 const steerSystemPrompts: Record<
@@ -61,6 +62,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     messages,
     processRuns,
     feedItems,
+    decisions,
     queuedMessages,
     isStreaming,
     libraryItems,
@@ -267,8 +269,8 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
         </div>
       ) : null}
 
-      <div className="relative overflow-hidden rounded-[28px] border border-zinc-200 bg-[#f7f7f8] shadow-[0_20px_60px_rgba(16,24,40,0.08)]">
-        <div className="grid h-[calc(100vh-9.5rem)] min-h-[680px] grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)]">
+      <div className="relative overflow-hidden rounded-[28px] border border-zinc-200 bg-[#f3f4f6] shadow-[0_20px_60px_rgba(16,24,40,0.08)]">
+        <div className="grid h-[calc(100vh-7.5rem)] min-h-[640px] grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)]">
           <aside
             className={`${
               sidebarOpen ? "absolute inset-y-0 left-0 z-30 flex w-[300px]" : "hidden"
@@ -449,34 +451,51 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
               </div>
             </header>
 
-            <ChatThread
-              messages={messages}
-              onForkFromMessage={onForkBranch}
-              onResolveDecision={(decisionId, option) => runAsync(resolveDecision(decisionId, option))}
-              onRunAction={onRunMessageAction}
-              showInlineReasoning={false}
-              isStreaming={isStreaming}
-              streamingInsight={streamingInsight}
-            />
+            <div className="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px]">
+              <div className="flex min-h-0 flex-col border-zinc-200 xl:border-r">
+                <ChatThread
+                  messages={messages}
+                  onForkFromMessage={onForkBranch}
+                  onResolveDecision={(decisionId, option) => runAsync(resolveDecision(decisionId, option))}
+                  onRunAction={onRunMessageAction}
+                  showInlineReasoning={false}
+                  isStreaming={isStreaming}
+                  streamingInsight={streamingInsight}
+                  contentWidthClassName="max-w-5xl 2xl:max-w-6xl"
+                />
 
-            <ChatComposer
-              isStreaming={isStreaming}
-              queuedMessages={queuedMessages}
-              onSend={onSend}
-              onSteerRun={(note) => runAsync(steerRun(note))}
-              onSteerQueued={(id, content) =>
-                runAsync(
-                  (async () => {
-                    await steerRun(content);
-                    await removeQueued(id);
-                  })()
-                )
-              }
-              onStop={() => runAsync(interruptRun())}
-              onReorderQueue={(from, to) => runAsync(reorderQueue(from, to))}
-              onDeleteQueued={(id) => runAsync(removeQueued(id))}
-              onSteer={onSteer}
-            />
+                <ChatComposer
+                  isStreaming={isStreaming}
+                  queuedMessages={queuedMessages}
+                  onSend={onSend}
+                  onSteerRun={(note) => runAsync(steerRun(note))}
+                  onSteerQueued={(id, content) =>
+                    runAsync(
+                      (async () => {
+                        await steerRun(content);
+                        await removeQueued(id);
+                      })()
+                    )
+                  }
+                  onStop={() => runAsync(interruptRun())}
+                  onReorderQueue={(from, to) => runAsync(reorderQueue(from, to))}
+                  onDeleteQueued={(id) => runAsync(removeQueued(id))}
+                  onSteer={onSteer}
+                  contentWidthClassName="max-w-5xl 2xl:max-w-6xl"
+                />
+              </div>
+
+              <div className="hidden min-h-0 bg-[#f8fafc] xl:block">
+                <LiveActivityPanel
+                  runs={processRuns}
+                  feedItems={feedItems}
+                  decisions={decisions}
+                  onResolve={(decisionId, option) => runAsync(resolveDecision(decisionId, option))}
+                  onRunAudit={onRunAudit}
+                  onSteer={(instruction) => runAsync(steerRun(instruction))}
+                />
+              </div>
+            </div>
           </section>
         </div>
 

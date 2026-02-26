@@ -1,17 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { ChatMessage, ChatMessageBlock } from "@/types/chat";
 
 function TypingDots() {
   return (
-    <span className="inline-flex items-center gap-1">
-      <span className="h-1.5 w-1.5 animate-bounce rounded-full" style={{ background: "var(--bat-accent)", animationDelay: "0ms" }} />
-      <span className="h-1.5 w-1.5 animate-bounce rounded-full" style={{ background: "var(--bat-accent)", animationDelay: "140ms" }} />
-      <span className="h-1.5 w-1.5 animate-bounce rounded-full" style={{ background: "var(--bat-accent)", animationDelay: "280ms" }} />
+    <span className="inline-flex items-center gap-1.5">
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500/90" style={{ animationDelay: "0ms" }} />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500/90" style={{ animationDelay: "140ms" }} />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500/90" style={{ animationDelay: "280ms" }} />
     </span>
   );
+}
+
+function formatMessageTime(iso: string): string {
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
 function ReasoningPanel({ message }: { message: ChatMessage }) {
@@ -22,81 +28,71 @@ function ReasoningPanel({ message }: { message: ChatMessage }) {
   }
 
   return (
-    <div className="mt-3 rounded-xl border p-3" style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}>
+    <div className="mt-3 rounded-2xl border border-zinc-200 bg-zinc-50/90 p-3">
       <button
         type="button"
-        className="flex w-full items-center justify-between text-sm font-semibold"
+        className="flex w-full items-center justify-between text-sm font-semibold text-zinc-700"
         onClick={() => setOpen((prev) => !prev)}
       >
         How BAT got here
         {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
       </button>
       {open ? (
-        <div className="mt-3 space-y-3 text-sm" style={{ color: "var(--bat-text-muted)" }}>
+        <div className="mt-3 space-y-3 text-sm text-zinc-600">
           <div>
-            <p className="font-semibold" style={{ color: "var(--bat-text)" }}>
-              Plan
-            </p>
-            <ul className="mt-1 list-disc pl-5">
+            <p className="font-semibold text-zinc-900">Plan</p>
+            <ul className="mt-1 list-disc space-y-1 pl-5">
               {message.reasoning.plan.map((line) => (
                 <li key={line}>{line}</li>
               ))}
             </ul>
           </div>
           <div>
-            <p className="font-semibold" style={{ color: "var(--bat-text)" }}>
-              Tools used
-            </p>
+            <p className="font-semibold text-zinc-900">Tools used</p>
             <div className="mt-1 flex flex-wrap gap-2">
               {message.reasoning.tools.map((tool) => (
-                <span key={tool} className="bat-chip">
+                <span key={tool} className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-600">
                   {tool}
                 </span>
               ))}
             </div>
           </div>
           <div>
-            <p className="font-semibold" style={{ color: "var(--bat-text)" }}>
-              Assumptions
-            </p>
-            <ul className="mt-1 list-disc pl-5">
+            <p className="font-semibold text-zinc-900">Assumptions</p>
+            <ul className="mt-1 list-disc space-y-1 pl-5">
               {message.reasoning.assumptions.map((assumption) => (
                 <li key={assumption}>{assumption}</li>
               ))}
             </ul>
           </div>
           <div>
-            <p className="font-semibold" style={{ color: "var(--bat-text)" }}>
-              Next steps
-            </p>
-            <ul className="mt-1 list-disc pl-5">
+            <p className="font-semibold text-zinc-900">Next steps</p>
+            <ul className="mt-1 list-disc space-y-1 pl-5">
               {message.reasoning.nextSteps.map((step) => (
                 <li key={step}>{step}</li>
               ))}
             </ul>
           </div>
           <div>
-            <p className="font-semibold" style={{ color: "var(--bat-text)" }}>
-              Evidence
-            </p>
+            <p className="font-semibold text-zinc-900">Evidence</p>
             <div className="mt-1 flex flex-wrap gap-2">
-              {message.reasoning.evidence.map((citation) => (
+              {message.reasoning.evidence.map((citation) =>
                 citation.href ? (
                   <a
                     key={citation.id}
                     href={citation.href}
                     target="_blank"
                     rel="noreferrer"
-                    className="bat-chip hover:opacity-80"
+                    className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
                   >
                     {citation.label}
                   </a>
                 ) : (
-                  <span key={citation.id} className="bat-chip">
+                  <span key={citation.id} className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-700">
                     {citation.label}
                   </span>
                 )
-              ))}
+              )}
             </div>
           </div>
         </div>
@@ -124,30 +120,26 @@ function MessageBlocks({
   ): block is Extract<ChatMessageBlock, { type: "action_buttons" }> => block.type === "action_buttons";
 
   return (
-    <div className="mt-3 space-y-2">
+    <div className="mt-4 space-y-2.5">
       {message.blocks.map((block, index) => {
         if (isDecisionBlock(block)) {
           return (
             <div
               key={`${message.id}-decision-${index}`}
-              className="rounded-xl border p-3"
-              style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}
+              className="rounded-2xl border border-amber-200/80 bg-amber-50/80 p-3"
             >
-              <p className="text-xs uppercase tracking-[0.1em]" style={{ color: "var(--bat-text-muted)" }}>
-                Approval needed
-              </p>
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-amber-700">Approval needed</p>
               <div className="mt-2 space-y-2">
                 {block.items.map((decision) => (
-                  <div key={decision.id} className="rounded-lg border p-2" style={{ borderColor: "var(--bat-border)" }}>
-                    <p className="text-sm font-semibold">{decision.title}</p>
+                  <div key={decision.id} className="rounded-xl border border-amber-200 bg-white p-2.5">
+                    <p className="text-sm font-semibold text-zinc-900">{decision.title}</p>
                     <div className="mt-2 flex flex-wrap gap-2">
                       {decision.options.map((option) => (
                         <button
                           key={`${decision.id}-${option.value}`}
                           type="button"
                           onClick={() => onResolveDecision?.(decision.id, option.value)}
-                          className="rounded-full border px-3 py-1 text-xs"
-                          style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}
+                          className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs text-amber-800 hover:bg-amber-100"
                         >
                           {option.label || option.value}
                         </button>
@@ -164,20 +156,16 @@ function MessageBlocks({
           return (
             <div
               key={`${message.id}-actions-${index}`}
-              className="rounded-xl border p-3"
-              style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}
+              className="rounded-2xl border border-zinc-200 bg-zinc-50/80 p-3"
             >
-              <p className="text-xs uppercase tracking-[0.1em]" style={{ color: "var(--bat-text-muted)" }}>
-                Next actions
-              </p>
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-zinc-500">Quick actions</p>
               <div className="mt-2 flex flex-wrap gap-2">
                 {block.actions.map((action) => (
                   <button
                     key={`${message.id}-${action.action}-${action.label}`}
                     type="button"
                     onClick={() => onRunAction?.(action.label, action.action, action.payload)}
-                    className="rounded-full border px-3 py-1 text-xs"
-                    style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}
+                    className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
                   >
                     {action.label}
                   </button>
@@ -186,16 +174,15 @@ function MessageBlocks({
               {block.decisions.length ? (
                 <div className="mt-3 space-y-2">
                   {block.decisions.map((decision) => (
-                    <div key={decision.id} className="rounded-lg border p-2" style={{ borderColor: "var(--bat-border)" }}>
-                      <p className="text-sm font-semibold">{decision.title}</p>
+                    <div key={decision.id} className="rounded-xl border border-zinc-200 bg-white p-2.5">
+                      <p className="text-sm font-semibold text-zinc-900">{decision.title}</p>
                       <div className="mt-2 flex flex-wrap gap-2">
                         {decision.options.map((option) => (
                           <button
                             key={`${decision.id}-${option.value}`}
                             type="button"
                             onClick={() => onResolveDecision?.(decision.id, option.value)}
-                            className="rounded-full border px-3 py-1 text-xs"
-                            style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}
+                            className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
                           >
                             {option.label || option.value}
                           </button>
@@ -225,6 +212,7 @@ export function ChatThread({
   showInlineReasoning = false,
   isStreaming,
   streamingInsight,
+  contentWidthClassName = "max-w-3xl",
 }: {
   messages: ChatMessage[];
   onForkFromMessage?: (messageId: string) => void;
@@ -235,99 +223,98 @@ export function ChatThread({
   showInlineReasoning?: boolean;
   isStreaming?: boolean;
   streamingInsight?: string;
+  contentWidthClassName?: string;
 }) {
-  if (!messages.length) {
+  const scrollRef = useRef<HTMLElement | null>(null);
+  const endRef = useRef<HTMLDivElement | null>(null);
+  const visibleMessages = useMemo(() => messages.filter((message) => message.role !== "system"), [messages]);
+
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+
+    const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    if (distanceToBottom < 200) {
+      endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
+  }, [visibleMessages.length, isStreaming, streamingInsight]);
+
+  if (!visibleMessages.length) {
     return (
-      <section className="bat-surface flex min-h-[55vh] items-center justify-center p-6 text-center">
-        <p className="max-w-md text-sm" style={{ color: "var(--bat-text-muted)" }}>
-          Start by asking BAT for an analysis, a 30-day plan, or a competitor audit. Results and approvals will appear
-          here in one thread.
-        </p>
+      <section className="flex min-h-0 flex-1 items-center justify-center bg-[#f7f7f8] p-8 text-center">
+        <div className="max-w-lg">
+          <p className="text-[28px] font-semibold tracking-tight text-zinc-900">How can I help with this workspace?</p>
+          <p className="mt-3 text-sm text-zinc-500">
+            Ask for analysis, debugging, implementation, or evidence review and responses will appear here.
+          </p>
+        </div>
       </section>
     );
   }
 
   return (
-    <section className="bat-surface flex min-h-[55vh] flex-col gap-6 p-4 md:p-5">
-      {messages.map((message) => (
-        <article
-          key={message.id}
-          className={message.role === "user" ? "ml-auto max-w-[85%]" : "max-w-[94%]"}
-          style={{
-            marginLeft: message.role === "user" ? "auto" : 0,
-          }}
-        >
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <p className="text-xs uppercase tracking-[0.12em]" style={{ color: "var(--bat-text-muted)" }}>
-              {message.role === "assistant" ? "BAT" : message.role === "user" ? "You" : "System"}
-            </p>
-            <div className="flex items-center gap-2">
-              {message.role === "assistant" && onInspectAssistantMessage ? (
-                <button
-                  type="button"
-                  onClick={() => onInspectAssistantMessage(message.id)}
-                  className="rounded-full border px-2 py-1 text-[11px]"
-                  style={{
-                    borderColor: "var(--bat-border)",
-                    background:
-                      selectedAssistantMessageId === message.id ? "var(--bat-accent-soft)" : "transparent",
-                  }}
-                >
-                  {selectedAssistantMessageId === message.id ? "Thoughts open" : "Open thoughts"}
-                </button>
+    <section ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto bg-[#f7f7f8]">
+      <div className={`mx-auto w-full ${contentWidthClassName} px-4 pb-24 pt-8 sm:px-6`}>
+        {visibleMessages.map((message) => {
+          const isUser = message.role === "user";
+          return (
+            <article key={message.id} className="group mb-9">
+              <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+                <div className={isUser ? "max-w-[84%] rounded-[26px] bg-[#303030] px-4 py-3 text-white sm:max-w-[78%]" : "w-full"}>
+                  {!isUser ? (
+                    <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.08em] text-zinc-400">Assistant</p>
+                  ) : null}
+                  <p className={`whitespace-pre-wrap text-[15px] leading-7 ${isUser ? "text-white" : "text-zinc-800"}`}>
+                    {message.content}
+                  </p>
+                  <p className={`mt-2 text-[11px] ${isUser ? "text-zinc-300" : "text-zinc-400"}`}>{formatMessageTime(message.createdAt)}</p>
+                </div>
+              </div>
+
+              {!isUser ? (
+                <div className="mt-2 flex flex-wrap items-center gap-2 opacity-100 transition md:opacity-0 md:group-hover:opacity-100">
+                  {onInspectAssistantMessage ? (
+                    <button
+                      type="button"
+                      onClick={() => onInspectAssistantMessage(message.id)}
+                      className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[11px] text-zinc-600 hover:bg-zinc-100"
+                    >
+                      {selectedAssistantMessageId === message.id ? "Thoughts open" : "Open thoughts"}
+                    </button>
+                  ) : null}
+                  {onForkFromMessage ? (
+                    <button
+                      type="button"
+                      onClick={() => onForkFromMessage(message.id)}
+                      className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[11px] text-zinc-600 hover:bg-zinc-100"
+                    >
+                      Fork from here
+                    </button>
+                  ) : null}
+                </div>
               ) : null}
-              {onForkFromMessage ? (
-                <button
-                  type="button"
-                  onClick={() => onForkFromMessage(message.id)}
-                  className="rounded-full border px-2 py-1 text-[11px]"
-                  style={{ borderColor: "var(--bat-border)" }}
-                >
-                  Fork from here
-                </button>
-              ) : null}
+
+              <MessageBlocks message={message} onResolveDecision={onResolveDecision} onRunAction={onRunAction} />
+              {showInlineReasoning && message.role === "assistant" ? <ReasoningPanel message={message} /> : null}
+            </article>
+          );
+        })}
+
+        {isStreaming ? (
+          <article className="mb-8">
+            <div className="mb-2 flex items-center gap-2">
+              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-zinc-400">Assistant</p>
+              <TypingDots />
             </div>
-          </div>
-          <div
-            className={`rounded-2xl px-4 py-3 ${
-              message.role === "user" ? "border" : ""
-            }`}
-            style={{
-              borderColor: message.role === "user" ? "var(--bat-border)" : "transparent",
-              background: message.role === "user" ? "var(--bat-accent-soft)" : "transparent",
-            }}
-          >
-            <p className="whitespace-pre-wrap text-sm md:text-[15px]">{message.content}</p>
-          </div>
-          {message.role === "assistant" && message.reasoning?.tools?.length ? (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {message.reasoning.tools.slice(0, 8).map((tool) => (
-                <span key={`${message.id}-${tool}`} className="bat-chip">
-                  Ran {tool}
-                </span>
-              ))}
+            <div className="rounded-2xl border border-zinc-200 bg-white px-4 py-3 shadow-[0_8px_24px_rgba(16,24,40,0.06)]">
+              <p className="text-[15px] leading-7 text-zinc-700">
+                {streamingInsight || "Thinking and running tools..."}
+              </p>
             </div>
-          ) : null}
-          <MessageBlocks message={message} onResolveDecision={onResolveDecision} onRunAction={onRunAction} />
-          {showInlineReasoning && message.role === "assistant" ? <ReasoningPanel message={message} /> : null}
-        </article>
-      ))}
-      {isStreaming ? (
-        <article
-          className="max-w-[92%] rounded-2xl border px-4 py-3"
-          style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}
-        >
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <p className="text-xs uppercase tracking-[0.12em]" style={{ color: "var(--bat-text-muted)" }}>
-              assistant
-            </p>
-            <TypingDots />
-          </div>
-          <p className="text-sm md:text-[15px]">
-            {streamingInsight || "BAT is thinking and running tools..."}
-          </p>
-        </article>
-      ) : null}
+          </article>
+        ) : null}
+        <div ref={endRef} />
+      </div>
     </section>
   );
 }
