@@ -26,5 +26,6 @@ assert.ok(Array.isArray(TOOL_REGISTRY));
 assert.ok(getTool('intel.list'));
 assert.ok(getTool('evidence.posts'));
 assert.ok(getTool('web.fetch'));
+assert.ok(getTool('workspace.intake.get'));
 
 console.log('Chat tool foundations compile test passed.');

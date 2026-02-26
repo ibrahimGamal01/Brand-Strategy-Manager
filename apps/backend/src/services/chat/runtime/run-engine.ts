@@ -343,6 +343,10 @@ function normalizeToolArgs(tool: string, args: Record<string, unknown>, userMess
     return normalized;
   }
 
+  if (tool === 'workspace.intake.get') {
+    return {};
+  }
+
   if (tool === 'evidence.news' || tool === 'evidence.videos') {
     const limit = Number(normalized.limit);
     normalized.limit = Number.isFinite(limit) ? Math.max(1, Math.min(20, Math.floor(limit))) : 8;
@@ -624,6 +628,10 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   const hasIntakeUpdateIntent =
     /\b(update|replace|refresh|apply|rewrite|save)\b/.test(normalized) &&
     /\b(form|intake|onboarding|onboard|original form content)\b/.test(normalized);
+  const hasIntakeReadIntent =
+    /\b(original|initial|first)\b/.test(normalized) &&
+    /\b(form|intake|onboarding)\b/.test(normalized) &&
+    /\b(response|submission|answers?)\b/.test(normalized);
   const hasRunIntent = /\b(run|start|continue|resume|expand|investigat(?:e|ing)|analy[sz]e)\b/.test(normalized);
   const hasCompetitorDiscoveryIntent =
     /\b(competitor discovery|discover competitors|competitor investigation|competitor set)\b/.test(normalized) ||
@@ -660,6 +668,10 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
 
   if (hasIntakeUpdateIntent || hasIntakeHeadings) {
     pushIfMissing('intake.update_from_text', { text: message });
+  }
+
+  if (hasIntakeReadIntent) {
+    pushIfMissing('workspace.intake.get', {});
   }
 
   if (hasRunIntent && hasCompetitorDiscoveryIntent) {

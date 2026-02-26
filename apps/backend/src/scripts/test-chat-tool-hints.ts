@@ -43,4 +43,12 @@ const workspaceIntelList = workspaceOverviewCalls.find((entry) => entry.name ===
 assert.ok(workspaceIntelList, 'Expected intel.list call for workspace overview requests');
 assert.equal(workspaceIntelList?.args.section, 'web_snapshots');
 
+const originalFormCalls = inferHeuristicToolCalls({
+  userMessage: 'what was my original form response',
+});
+assert.ok(
+  originalFormCalls.some((entry) => entry.name === 'workspace.intake.get'),
+  'Expected workspace.intake.get call for original form response request'
+);
+
 console.log('chat-tool-hints tests passed');

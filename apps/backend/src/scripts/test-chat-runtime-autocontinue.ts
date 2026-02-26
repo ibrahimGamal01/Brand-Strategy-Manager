@@ -77,6 +77,12 @@ function testPlannerHeuristics() {
     ),
     'Expected workspace overview phrasing to trigger intel.list for web_snapshots.'
   );
+
+  const originalFormCalls = inferToolCallsFromMessage('what was my original form response');
+  assert.ok(
+    originalFormCalls.some((entry) => entry.tool === 'workspace.intake.get'),
+    'Expected original form response request to trigger workspace.intake.get.'
+  );
 }
 
 function testContinuationCollection() {

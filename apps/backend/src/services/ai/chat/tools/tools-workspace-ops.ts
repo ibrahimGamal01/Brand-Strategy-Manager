@@ -357,7 +357,172 @@ async function addCompetitorLinksForWorkspace(input: {
   };
 }
 
+function toJsonScalar(value: unknown): string | number | boolean | null {
+  if (value === null) return null;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'boolean') return value;
+  return String(value);
+}
+
+function normalizeIntakeAnswer(value: unknown): unknown {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => normalizeIntakeAnswer(entry));
+  }
+  if (typeof value === 'object') {
+    const output: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      output[key] = normalizeIntakeAnswer(entry);
+    }
+    return output;
+  }
+  return toJsonScalar(value);
+}
+
+function compactIntakeAnswer(value: unknown, maxChars = 240): string {
+  const normalized =
+    typeof value === 'string'
+      ? value
+      : value === null || value === undefined
+        ? ''
+        : JSON.stringify(value);
+  const compact = String(normalized || '').replace(/\s+/g, ' ').trim();
+  if (!compact) return '';
+  if (compact.length <= maxChars) return compact;
+  return `${compact.slice(0, Math.max(0, maxChars - 3))}...`;
+}
+
 export const workspaceOpsTools: ToolDefinition<Record<string, unknown>, Record<string, unknown>>[] = [
+  {
+    name: 'workspace.intake.get',
+    description: 'Read the original intake/form responses captured for this workspace.',
+    argsSchema: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    },
+    returnsSchema: {
+      type: 'object',
+      properties: {
+        section: { type: 'string' },
+        summary: { type: 'string' },
+        count: { type: 'number' },
+        items: { type: 'array' },
+        originalResponse: { type: 'object' },
+        latestResponse: { type: 'object' },
+        inputData: { type: 'object' },
+        firstSubmittedAt: { type: 'string' },
+        lastUpdatedAt: { type: 'string' },
+        evidence: { type: 'array' },
+        deepLink: { type: 'string' },
+      },
+      required: ['section', 'summary', 'count', 'items', 'originalResponse', 'latestResponse', 'inputData', 'evidence', 'deepLink'],
+      additionalProperties: true,
+    },
+    mutate: false,
+    execute: async (context) => {
+      const [job, intakeAnswers] = await Promise.all([
+        prisma.researchJob.findUnique({
+          where: { id: context.researchJobId },
+          select: {
+            inputData: true,
+          },
+        }),
+        prisma.clientIntakeAnswer.findMany({
+          where: { researchJobId: context.researchJobId },
+          orderBy: { createdAt: 'asc' },
+          take: 400,
+          select: {
+            id: true,
+            questionSetId: true,
+            questionKey: true,
+            answerType: true,
+            answer: true,
+            createdAt: true,
+          },
+        }),
+      ]);
+
+      const inputData = asRecord(job?.inputData);
+      const earliestByKey = new Map<string, unknown>();
+      const latestByKey = new Map<string, unknown>();
+      const firstSeenOrder: string[] = [];
+
+      for (const row of intakeAnswers) {
+        const key = String(row.questionKey || '').trim();
+        if (!key) continue;
+        const normalizedAnswer = normalizeIntakeAnswer(row.answer);
+        if (!earliestByKey.has(key)) {
+          earliestByKey.set(key, normalizedAnswer);
+          firstSeenOrder.push(key);
+        }
+        latestByKey.set(key, normalizedAnswer);
+      }
+
+      const orderedKeys = firstSeenOrder.length
+        ? firstSeenOrder
+        : Object.keys(inputData);
+
+      const originalResponse: Record<string, unknown> = {};
+      const latestResponse: Record<string, unknown> = {};
+      for (const key of orderedKeys) {
+        if (earliestByKey.has(key)) {
+          originalResponse[key] = earliestByKey.get(key) as unknown;
+        } else if (Object.hasOwn(inputData, key)) {
+          originalResponse[key] = normalizeIntakeAnswer(inputData[key]);
+        }
+
+        if (latestByKey.has(key)) {
+          latestResponse[key] = latestByKey.get(key) as unknown;
+        } else if (Object.hasOwn(inputData, key)) {
+          latestResponse[key] = normalizeIntakeAnswer(inputData[key]);
+        }
+      }
+
+      const items = intakeAnswers.slice(0, 120).map((row) => ({
+        id: row.id,
+        questionSetId: row.questionSetId,
+        questionKey: row.questionKey,
+        answerType: row.answerType,
+        answer: normalizeIntakeAnswer(row.answer),
+        answerPreview: compactIntakeAnswer(row.answer),
+        createdAt: row.createdAt.toISOString(),
+      }));
+
+      const deepLink = context.links.moduleLink('workspace', { view: 'intake' });
+      const uniqueFieldsCount = Object.keys(originalResponse).length;
+      const summary =
+        uniqueFieldsCount > 0 || intakeAnswers.length > 0
+          ? `Loaded original intake response with ${uniqueFieldsCount} field(s) from ${intakeAnswers.length} captured answer row(s).`
+          : 'No saved intake form response was found for this workspace.';
+
+      return {
+        section: 'workspace_intake',
+        summary,
+        count: items.length,
+        items,
+        originalResponse,
+        latestResponse,
+        inputData: normalizeIntakeAnswer(inputData),
+        ...(intakeAnswers[0]?.createdAt ? { firstSubmittedAt: intakeAnswers[0].createdAt.toISOString() } : {}),
+        ...(intakeAnswers[intakeAnswers.length - 1]?.createdAt
+          ? { lastUpdatedAt: intakeAnswers[intakeAnswers.length - 1].createdAt.toISOString() }
+          : {}),
+        evidence: [
+          {
+            kind: 'internal',
+            label: 'Open workspace intake',
+            url: deepLink,
+          },
+        ],
+        deepLink,
+      };
+    },
+  },
   {
     name: 'intake.update_from_text',
     description: 'Parse freeform intake text and update the workspace intake draft, including competitor links.',

@@ -7,6 +7,7 @@ export type ToolName =
   | 'intel.applyMutation'
   | 'intel.undoMutation'
   | 'intake.update_from_text'
+  | 'workspace.intake.get'
   | 'competitors.add_links'
   | 'research.gather'
   | 'scrape.competitor'

@@ -61,6 +61,10 @@ export function inferHeuristicToolCalls(input: {
     /\boverview\b/i,
   ]);
   const asksGetById = includesAny(message, [/\b(id|row|record)\b/i, /\bget\b/i]);
+  const asksOriginalForm = includesAny(message, [
+    /\b(original|initial|first)\b.*\b(form|intake|onboarding)\b.*\b(response|submission|answers?)\b/i,
+    /\bwhat was my original form response\b/i,
+  ]);
 
   if (asksPosts && !existingNames.has('evidence.posts')) {
     const competitorOnly = includesAny(message, [/\bcompetitors?\b/i, /\btheir\s+posts\b/i]);
@@ -167,6 +171,14 @@ export function inferHeuristicToolCalls(input: {
         reason: 'Message includes a specific record id and asks for details.',
       });
     }
+  }
+
+  if (asksOriginalForm && !existingNames.has('workspace.intake.get')) {
+    calls.push({
+      name: 'workspace.intake.get',
+      args: {},
+      reason: 'Message asks for original intake/form responses stored in the workspace.',
+    });
   }
 
   return calls;
