@@ -53,6 +53,14 @@ export interface GetCompetitorContextOptions {
   mode?: CompetitorContextMode;
 }
 
+type CompetitorLike = {
+  handle: string;
+  platform: string;
+  relevanceScore: number | null;
+  discoveryReason: string | null;
+  status: string | null;
+};
+
 /**
  * Get competitor context with quality validation
  * CRITICAL: Filters out client's own social handles to prevent self-comparison
@@ -82,8 +90,8 @@ export async function getCompetitorContext(
     return normalizedHandle.includes(normalizedClient) || normalizedClient.includes(normalizedHandle);
   };
 
-  // Get discovered competitors (all statuses - SUGGESTED, CONFIRMED, SCRAPED)
-  const discoveredCompetitors = await prisma.discoveredCompetitor.findMany({
+  // Get discovered competitors (all statuses - SUGGESTED, CONFIRMED, SCRAPED).
+  const discoveredRows = await prisma.discoveredCompetitor.findMany({
     where: { 
       researchJobId
       // Removed status filter - get all competitors to match content-intelligence behavior
@@ -91,6 +99,38 @@ export async function getCompetitorContext(
     orderBy: { relevanceScore: 'desc' },
     take: 20 // Limit to top 20 by relevance
   });
+
+  let discoveredCompetitors: CompetitorLike[] = discoveredRows.map((row) => ({
+    handle: row.handle,
+    platform: row.platform,
+    relevanceScore: typeof row.relevanceScore === 'number' ? row.relevanceScore : null,
+    discoveryReason: row.discoveryReason || null,
+    status: row.status || null,
+  }));
+
+  let usingCandidateFallback = false;
+  if (discoveredCompetitors.length === 0) {
+    const candidateRows = await prisma.competitorCandidateProfile.findMany({
+      where: {
+        researchJobId,
+        state: { in: ['TOP_PICK', 'SHORTLISTED', 'APPROVED', 'DISCOVERED'] },
+        availabilityStatus: { notIn: ['INVALID_HANDLE'] },
+      },
+      orderBy: [{ relevanceScore: 'desc' }, { updatedAt: 'desc' }],
+      take: 20,
+    });
+
+    if (candidateRows.length > 0) {
+      discoveredCompetitors = candidateRows.map((row) => ({
+        handle: row.handle,
+        platform: row.platform,
+        relevanceScore: typeof row.relevanceScore === 'number' ? row.relevanceScore : null,
+        discoveryReason: row.stateReason || 'Candidate fallback',
+        status: row.availabilityStatus || row.state || null,
+      }));
+      usingCandidateFallback = true;
+    }
+  }
 
   // CRITICAL: Filter out client handles
   let filtered = discoveredCompetitors.filter((dc) => !isClientHandle(dc.handle));
@@ -160,6 +200,9 @@ export async function getCompetitorContext(
     if (mode === 'chat_relaxed' && filtered.length > 0) {
       warnings.push('Using discovered competitors without readiness-qualified snapshots (unverified metrics)');
     }
+  }
+  if (usingCandidateFallback) {
+    warnings.push('No canonical discovered competitors found; using competitor candidate profiles as fallback.');
   }
   if (scope.hasCompetitorReady && beforeReadinessFilter > readinessQualifiedCompetitors.length) {
     warnings.push(
