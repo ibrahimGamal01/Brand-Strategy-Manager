@@ -43,6 +43,8 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
+  const [composerDraft, setComposerDraft] = useState("");
+  const [composerFocusSignal, setComposerFocusSignal] = useState(0);
   const [nameDialog, setNameDialog] = useState<
     | { mode: "thread"; title: string }
     | { mode: "branch"; title: string; forkedFromMessageId?: string }
@@ -151,6 +153,19 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     runAsync(sendMessage(content, mode));
   };
 
+  const injectComposerText = (value: string, mode: "replace" | "append" = "append") => {
+    const next = value.trim();
+    if (!next) return;
+    setComposerDraft((current) => {
+      if (mode === "replace" || !current.trim()) {
+        return next;
+      }
+      const separator = current.endsWith("\n") ? "" : "\n";
+      return `${current}${separator}${next}`;
+    });
+    setComposerFocusSignal((previous) => previous + 1);
+  };
+
   const onSteer = (chip: string) => {
     const mapping = steerSystemPrompts[chip];
     if (!mapping) return;
@@ -180,8 +195,8 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     }
   };
 
-  const onUseLibraryItem = (title: string) => {
-    runAsync(sendMessage(`Use evidence from: ${title}`, "send"));
+  const onUseLibraryItem = (item: { id: string; title: string }) => {
+    injectComposerText(`@library[${item.id}|${item.title}]`, "append");
     setLibraryOpen(false);
   };
 
@@ -209,16 +224,19 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
       return;
     }
 
-    const prompt =
+    if (action === "fork_branch") {
+      onForkBranch();
+      return;
+    }
+
+    const normalizedCommand =
       action === "show_sources"
-        ? "Show all sources and evidence behind the previous answer."
-        : action === "fork_branch"
-          ? "Fork this branch and continue with an alternative strategy."
-          : action === "generate_pdf"
-            ? "Generate a client-ready PDF deliverable from this branch."
-            : `Run action ${actionKey} from the latest assistant response.`;
-    const payloadLine = payload ? `\nAction payload: ${JSON.stringify(payload)}` : "";
-    runAsync(sendMessage(`${prompt}${payloadLine}\nRequested via button: ${actionLabel}`, "send"));
+        ? "show_sources"
+        : action === "generate_pdf"
+          ? "generate_pdf"
+          : action.replace(/[^a-z0-9_/-]+/g, "_");
+    const payloadText = payload ? ` ${JSON.stringify(payload)}` : "";
+    injectComposerText(`/${normalizedCommand}${payloadText}`, "append");
   };
 
   const onNewThread = () => {
@@ -291,11 +309,11 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
       ) : null}
 
       <div className="relative overflow-hidden rounded-3xl border border-zinc-200 bg-[#f3f4f6] shadow-2xl">
-        <div className="grid h-[calc(100dvh-6.25rem)] min-h-[70vh] grid-cols-1 lg:grid-cols-[22%_78%]">
+        <div className="grid h-[88vh] min-h-[70vh] grid-cols-1 lg:grid-cols-[22%_78%]">
           <aside
             className={`${
               sidebarOpen ? "absolute inset-y-0 left-0 z-30 flex w-11/12 max-w-sm" : "hidden"
-            } flex-col border-r border-zinc-800/70 bg-[#171717] text-zinc-200 lg:static lg:z-auto lg:flex lg:w-auto`}
+            } min-h-0 flex-col border-r border-zinc-800/70 bg-[#171717] text-zinc-200 lg:static lg:z-auto lg:flex lg:w-auto`}
           >
             <div className="border-b border-zinc-800 px-3 py-3">
               <div className="flex items-center justify-between gap-2">
@@ -328,6 +346,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                     key={thread.id}
                     type="button"
                     onClick={() => {
+                      setComposerDraft("");
                       setActiveThreadId(thread.id);
                       setSidebarOpen(false);
                     }}
@@ -344,7 +363,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
               })}
             </div>
 
-            <div className="space-y-3 border-t border-zinc-800 px-3 py-3">
+            <div className="bat-scrollbar max-h-[38%] shrink-0 space-y-3 overflow-y-auto border-t border-zinc-800 px-3 py-3">
               <div>
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <p className="text-xs uppercase tracking-[0.08em] text-zinc-400">Branches</p>
@@ -363,7 +382,10 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                       <button
                         key={branch.id}
                         type="button"
-                        onClick={() => runAsync(pinBranch(branch.id))}
+                        onClick={() => {
+                          setComposerDraft("");
+                          runAsync(pinBranch(branch.id));
+                        }}
                         className={`rounded-full border px-2.5 py-1 text-xs ${
                           active
                             ? "border-emerald-400/50 bg-emerald-400/10 text-emerald-200"
@@ -407,7 +429,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                     <button
                       key={item.id}
                       type="button"
-                      onClick={() => onUseLibraryItem(item.title)}
+                      onClick={() => onUseLibraryItem(item)}
                       className="w-full rounded-lg border border-zinc-700/80 px-2 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800"
                     >
                       <p className="line-clamp-1 font-medium text-zinc-200">{item.title}</p>
@@ -419,7 +441,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
             </div>
           </aside>
 
-          <section className="relative flex min-h-0 flex-col bg-white">
+          <section className="relative flex min-h-0 flex-col overflow-hidden bg-white">
             <header className="flex items-center justify-between gap-2 border-b border-zinc-200 px-3 py-2.5">
               <div className="min-w-0">
                 <div className="mb-0.5 flex items-center gap-2">
@@ -480,7 +502,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
               </div>
             </header>
 
-            <div className="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[68%_32%] 2xl:grid-cols-[70%_30%]">
+            <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden xl:grid-cols-[68%_32%] 2xl:grid-cols-[70%_30%]">
               <div className="flex min-h-0 flex-col border-zinc-200 xl:border-r">
                 <ChatThread
                   messages={messages}
@@ -494,6 +516,9 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                 />
 
                 <ChatComposer
+                  draft={composerDraft}
+                  onDraftChange={setComposerDraft}
+                  focusSignal={composerFocusSignal}
                   isStreaming={isStreaming}
                   queuedMessages={queuedMessages}
                   onSend={onSend}
@@ -577,7 +602,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
         items={libraryItems}
         activeCollection={activeLibraryCollection}
         onCollectionChange={setActiveLibraryCollection}
-        onUseInChat={(item) => onUseLibraryItem(item.title)}
+        onUseInChat={(item) => onUseLibraryItem(item)}
       />
 
       {nameDialog ? (

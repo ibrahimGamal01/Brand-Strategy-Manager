@@ -469,6 +469,77 @@ function formatTime(iso: string): string {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function readableToolName(toolName?: string): string {
+  const normalized = String(toolName || "").trim().toLowerCase();
+  if (!normalized) return "Tool";
+  if (normalized === "intel.list") return "Workspace records";
+  if (normalized === "intel.get") return "Workspace record";
+  if (normalized === "web.fetch") return "Page fetch";
+  if (normalized === "web.crawl") return "Website crawl";
+  if (normalized === "web.crawl.list_snapshots") return "Crawl snapshots";
+  if (normalized === "evidence.posts") return "Social evidence";
+  if (normalized === "evidence.news") return "News evidence";
+  if (normalized === "evidence.videos") return "Video evidence";
+  if (normalized === "document.plan") return "Document planner";
+  if (normalized === "document.generate") return "Document generator";
+  if (normalized === "research.gather") return "Deep research";
+  return humanizeToken(normalized.replace(/\./g, " "));
+}
+
+function pluralize(value: number, singular: string, plural: string): string {
+  return `${value} ${value === 1 ? singular : plural}`;
+}
+
+function parseNumericResult(raw: string): { count: number; unit: string } | null {
+  const match = raw.match(
+    /\b(\d+)\s+(item\(s\)|items?|row\(s\)|rows?|record\(s\)|records?|post\(s\)|posts?|video\(s\)|videos?|tool\(s\)|tools?|page snapshot\(s\)|page snapshots?)\b/i
+  );
+  if (!match) return null;
+  const count = Number(match[1]);
+  if (!Number.isFinite(count)) return null;
+  const unitRaw = String(match[2] || "").toLowerCase();
+  const normalizedUnit = unitRaw.replace(/\(s\)/g, "s");
+  return { count, unit: normalizedUnit };
+}
+
+function toValueFirstToolMessage(toolName: string | undefined, inputMessage: string): string {
+  const raw = String(inputMessage || "").trim();
+  if (!raw) return `${readableToolName(toolName)} updated.`;
+
+  const numberResult = parseNumericResult(raw);
+  if (toolName === "intel.list" && numberResult) {
+    const sectionMatch = raw.match(/\bfrom\s+([a-z_]+)\b/i);
+    const section = sectionMatch?.[1] ? humanizeToken(sectionMatch[1]) : "workspace section";
+    return `Loaded ${pluralize(numberResult.count, "record", "records")} from ${section}.`;
+  }
+
+  if (toolName === "evidence.posts" && numberResult) {
+    return `Found ${pluralize(numberResult.count, "social post", "social posts")} for review.`;
+  }
+
+  if (toolName === "evidence.news" && numberResult) {
+    return `Found ${pluralize(numberResult.count, "news source", "news sources")} to cite.`;
+  }
+
+  if (toolName === "web.crawl" && numberResult) {
+    return `Captured ${pluralize(numberResult.count, "page snapshot", "page snapshots")} from the crawl.`;
+  }
+
+  if (toolName === "web.fetch") {
+    const statusMatch = raw.match(/\bstatus\s+(\d{3})\b/i);
+    if (statusMatch?.[1]) {
+      return `Saved a page snapshot (HTTP ${statusMatch[1]}).`;
+    }
+    return "Saved a page snapshot for workspace evidence.";
+  }
+
+  if (/\bcompleted successfully\b/i.test(raw)) {
+    return `${readableToolName(toolName)} completed.`;
+  }
+
+  return raw;
+}
+
 function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[] {
   const latest = normalizeRuntimeEvents(events).slice(-120).reverse();
   return latest.map((event) => {
@@ -481,27 +552,18 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
     } else if (event.event === "tool.started" && event.toolName) {
       message = `Running ${event.toolName}...`;
     } else if (event.event === "tool.output" && event.toolName) {
-      const raw = String(event.message || "Done").trim();
-      message =
-        raw.toLowerCase().startsWith(event.toolName.toLowerCase()) ||
-        raw.toLowerCase().startsWith(`${event.toolName.toLowerCase()}:`)
-          ? raw
-          : `${event.toolName} completed: ${raw}`;
+      message = toValueFirstToolMessage(event.toolName, event.message);
     } else if (event.event === "tool.failed" && event.toolName) {
       const raw = String(event.message || "Failed").trim();
-      message =
-        raw.toLowerCase().startsWith(event.toolName.toLowerCase()) ||
-        raw.toLowerCase().startsWith(`${event.toolName.toLowerCase()}:`)
-          ? raw
-          : `${event.toolName} failed: ${raw}`;
+      message = `${readableToolName(event.toolName)} failed: ${raw}`;
     } else if (event.event === "run.completed") {
       const toolRuns = Array.isArray(event.payload?.toolRuns) ? event.payload.toolRuns : [];
       const tools = toolRuns
         .map((row) => (isRecord(row) ? String(row.toolName || "").trim() : ""))
         .filter(Boolean);
       if (tools.length) {
-        const preview = tools.slice(0, 3).join(", ");
-        message = `Run completed (${tools.length} tools): ${preview}${tools.length > 3 ? "..." : ""}`;
+        const preview = tools.slice(0, 3).map((tool) => readableToolName(tool)).join(", ");
+        message = `Run completed with ${pluralize(tools.length, "tool", "tools")}: ${preview}${tools.length > 3 ? "..." : ""}`;
       } else {
         message = event.runId ? `Run ${event.runId.slice(0, 8)} completed.` : "Run completed.";
       }
@@ -638,7 +700,14 @@ function mapRecentRunsFromEvents(events: Array<Record<string, unknown>>): Proces
     .slice(0, 8)
     .map((run) => {
       const tools = Array.from(run.tools);
-      const details = tools.length ? [`Tools: ${tools.slice(0, 4).join(", ")}${tools.length > 4 ? "..." : ""}`] : [];
+      const details = tools.length
+        ? [
+            `Used ${pluralize(tools.length, "tool", "tools")}: ${tools
+              .slice(0, 4)
+              .map((tool) => readableToolName(tool))
+              .join(", ")}${tools.length > 4 ? "..." : ""}`,
+          ]
+        : [];
       return {
         id: run.id,
         label: `${humanizeTriggerType(run.triggerType)} • ${shortId(run.id)}`,
@@ -695,12 +764,32 @@ function mapRuns(activeRuns: Array<Record<string, unknown>>, events: Array<Recor
                 ? "queued"
                 : latestEvent?.phase || (statusRaw === "WAITING_TOOLS" ? "tools" : "planning");
 
+    const latestToolSummary =
+      latestEvent?.toolName ? toValueFirstToolMessage(latestEvent.toolName, latestEvent.message) : latestEvent?.message;
+
     const stage = buildRunStage({
       phase,
-      latestMessage: latestEvent?.message,
+      latestMessage: latestToolSummary,
       inFlightToolNames,
       totalTools: toolRuns.length,
     });
+
+    const details = [
+      `${pluralize(done, "tool run", "tool runs")} finished out of ${total}`,
+      ...(inFlightToolNames.length
+        ? [
+            `Running now: ${inFlightToolNames
+              .slice(0, 3)
+              .map((tool) => readableToolName(tool))
+              .join(", ")}${inFlightToolNames.length > 3 ? "..." : ""}`,
+          ]
+        : []),
+      ...(latestEvent?.toolName ? [`Latest update: ${toValueFirstToolMessage(latestEvent.toolName, latestEvent.message)}`] : []),
+    ];
+
+    if (phase === "waiting_input") {
+      details.unshift("Waiting for your approval to continue.");
+    }
 
     return {
       id: runId,
@@ -709,12 +798,7 @@ function mapRuns(activeRuns: Array<Record<string, unknown>>, events: Array<Recor
       phase,
       progress: phaseToProgress(phase, done, total),
       status: phaseToStatus(phase),
-      details: [
-        `Phase: ${humanizeToken(phase)}`,
-        `Completed ${done}/${total} tool run(s)`,
-        ...(inFlightToolNames.length ? [`In progress: ${inFlightToolNames.slice(0, 3).join(", ")}${inFlightToolNames.length > 3 ? "..." : ""}`] : []),
-        ...(latestEvent?.toolName ? [`Latest tool: ${latestEvent.toolName}`] : []),
-      ],
+      details,
     };
   });
 

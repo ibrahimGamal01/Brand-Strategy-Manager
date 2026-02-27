@@ -112,8 +112,8 @@ function RunningTab({
   ];
 
   return (
-    <div className="space-y-3">
-      <article className="rounded-xl border p-3" style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}>
+    <div className="flex h-full min-h-0 flex-col gap-3">
+      <article className="shrink-0 rounded-xl border p-3" style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}>
         <div className="flex items-center justify-between gap-2">
           <p className="text-sm font-semibold">BAT is actively working</p>
           <TypingDots />
@@ -171,43 +171,45 @@ function RunningTab({
         ) : null}
       </article>
 
-      {runs.map((run) => (
-        <article key={run.id} className="rounded-xl border p-3" style={{ borderColor: "var(--bat-border)" }}>
-          <div className="flex items-center justify-between gap-2">
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold">{run.label}</p>
-              {phaseLabel(run.phase) ? (
-                <span
-                  className="mt-1 inline-flex rounded-full border px-2 py-0.5 text-xs"
-                  style={phaseChipStyle(run.phase)}
-                >
-                  {phaseLabel(run.phase)}
-                </span>
-              ) : null}
+      <div className="bat-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+        {runs.map((run) => (
+          <article key={run.id} className="rounded-xl border p-3" style={{ borderColor: "var(--bat-border)" }}>
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold">{run.label}</p>
+                {phaseLabel(run.phase) ? (
+                  <span
+                    className="mt-1 inline-flex rounded-full border px-2 py-0.5 text-xs"
+                    style={phaseChipStyle(run.phase)}
+                  >
+                    {phaseLabel(run.phase)}
+                  </span>
+                ) : null}
+              </div>
+              <StatusIcon status={run.status} />
             </div>
-            <StatusIcon status={run.status} />
-          </div>
-          <p className="mt-1 text-xs" style={{ color: "var(--bat-text-muted)" }}>
-            {run.stage}
-          </p>
-          {run.details?.length ? (
-            <ul className="mt-2 space-y-1 text-xs" style={{ color: "var(--bat-text-muted)" }}>
-              {run.details.map((detail) => (
-                <li key={`${run.id}-${detail}`}>• {detail}</li>
-              ))}
-            </ul>
-          ) : null}
-          <div className="mt-2 h-2 rounded-full" style={{ background: "var(--bat-surface-muted)" }}>
-            <div
-              className="h-2 rounded-full transition-all"
-              style={{
-                width: `${Math.max(0, Math.min(100, run.progress))}%`,
-                background: "var(--bat-accent)"
-              }}
-            />
-          </div>
-        </article>
-      ))}
+            <p className="mt-1 text-xs" style={{ color: "var(--bat-text-muted)" }}>
+              {run.stage}
+            </p>
+            {run.details?.length ? (
+              <ul className="mt-2 space-y-1 text-xs" style={{ color: "var(--bat-text-muted)" }}>
+                {run.details.map((detail) => (
+                  <li key={`${run.id}-${detail}`}>• {detail}</li>
+                ))}
+              </ul>
+            ) : null}
+            <div className="mt-2 h-2 rounded-full" style={{ background: "var(--bat-surface-muted)" }}>
+              <div
+                className="h-2 rounded-full transition-all"
+                style={{
+                  width: `${Math.max(0, Math.min(100, run.progress))}%`,
+                  background: "var(--bat-accent)"
+                }}
+              />
+            </div>
+          </article>
+        ))}
+      </div>
     </div>
   );
 }
@@ -334,12 +336,20 @@ export function LiveActivityPanel({
         ))}
       </div>
 
-      <div className="bat-scrollbar min-h-0 flex-1 overflow-y-auto pr-1">
+      <div className="min-h-0 flex-1 overflow-hidden">
         {tab === "running" ? (
           <RunningTab runs={runs} feedItems={feedItems} onRunAudit={onRunAudit} onSteer={onSteer} />
         ) : null}
-        {tab === "feed" ? <FeedTab feedItems={feedItems} /> : null}
-        {tab === "decisions" ? <DecisionsTab decisions={decisions} onResolve={onResolve} /> : null}
+        {tab === "feed" ? (
+          <div className="bat-scrollbar h-full overflow-y-auto pr-1">
+            <FeedTab feedItems={feedItems} />
+          </div>
+        ) : null}
+        {tab === "decisions" ? (
+          <div className="bat-scrollbar h-full overflow-y-auto pr-1">
+            <DecisionsTab decisions={decisions} onResolve={onResolve} />
+          </div>
+        ) : null}
       </div>
     </aside>
   );

@@ -83,6 +83,36 @@ function testPlannerHeuristics() {
     originalFormCalls.some((entry) => entry.tool === 'workspace.intake.get'),
     'Expected original form response request to trigger workspace.intake.get.'
   );
+
+  const slashShowSourcesCalls = inferToolCallsFromMessage('/show_sources');
+  assert.ok(
+    slashShowSourcesCalls.some(
+      (entry) => entry.tool === 'intel.list' && String((entry.args as Record<string, unknown>).section || '') === 'web_snapshots'
+    ),
+    'Expected /show_sources to trigger intel.list for web_snapshots.'
+  );
+  assert.ok(
+    slashShowSourcesCalls.some((entry) => entry.tool === 'evidence.news'),
+    'Expected /show_sources to trigger evidence.news.'
+  );
+
+  const slashGeneratePdfCalls = inferToolCallsFromMessage('/generate_pdf');
+  assert.ok(
+    slashGeneratePdfCalls.some((entry) => entry.tool === 'document.plan'),
+    'Expected /generate_pdf to trigger document.plan.'
+  );
+
+  const mentionCrawlRunCalls = inferToolCallsFromMessage('Please use @library[item-1|Crawl run crawl-e8] in this answer.');
+  assert.ok(
+    mentionCrawlRunCalls.some((entry) => entry.tool === 'web.crawl.list_snapshots'),
+    'Expected @library mention with crawl run title to trigger web.crawl.list_snapshots.'
+  );
+
+  const mentionUrlCalls = inferToolCallsFromMessage('Ground this using @library[item-2|consciouslifeexpo.com/refund-policy/]');
+  assert.ok(
+    mentionUrlCalls.some((entry) => entry.tool === 'web.fetch'),
+    'Expected @library mention with URL title to trigger web.fetch.'
+  );
 }
 
 function testContinuationCollection() {

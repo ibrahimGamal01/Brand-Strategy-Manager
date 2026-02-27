@@ -353,6 +353,53 @@ function findReferencedCrawlRunId(message: string): string | null {
   return candidate.startsWith('crawl-') ? candidate : `crawl-${candidate}`;
 }
 
+function extractLibraryMentions(message: string): Array<{ id: string; title: string }> {
+  const raw = String(message || '');
+  const mentions: Array<{ id: string; title: string }> = [];
+  const matcher = /@library\[([^\]|]+)\|([^\]]+)\]/gi;
+  let current = matcher.exec(raw);
+  while (current) {
+    const id = String(current[1] || '').trim();
+    const title = String(current[2] || '').trim();
+    if (id && title) {
+      mentions.push({ id, title });
+    }
+    current = matcher.exec(raw);
+  }
+  return mentions;
+}
+
+function withLibraryMentionHints(message: string): string {
+  const mentions = extractLibraryMentions(message);
+  if (!mentions.length) return message;
+  const hints = mentions.map((entry) => `Use evidence from: ${entry.title}`).join('\n');
+  return `${message}\n${hints}`;
+}
+
+function parseSlashCommand(message: string): { command: string; argsText: string; argsJson: Record<string, unknown> | null } | null {
+  const raw = String(message || '').trim();
+  const match = raw.match(/^\/([a-z0-9_./-]+)(?:\s+([\s\S]+))?$/i);
+  if (!match?.[1]) return null;
+
+  const command = match[1].trim().toLowerCase();
+  const argsText = String(match[2] || '').trim();
+  if (!argsText) {
+    return { command, argsText: '', argsJson: null };
+  }
+
+  if (argsText.startsWith('{') && argsText.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(argsText);
+      if (isRecord(parsed)) {
+        return { command, argsText, argsJson: parsed };
+      }
+    } catch {
+      // Keep argsText fallback for non-JSON slash commands.
+    }
+  }
+  return { command, argsText, argsJson: null };
+}
+
 function shouldIncludeOperationalTrace(message: string): boolean {
   const normalized = String(message || '').toLowerCase();
   return (
@@ -775,10 +822,14 @@ function normalizeRunPlan(value: unknown): RuntimePlan | null {
 }
 
 export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
-  const normalized = message.toLowerCase();
+  const originalMessage = String(message || '');
+  const messageWithMentions = withLibraryMentionHints(originalMessage);
+  const normalized = messageWithMentions.toLowerCase();
   const calls: RuntimeToolCall[] = [];
-  const firstUrl = findFirstUrl(message);
-  const referencedCrawlRunId = findReferencedCrawlRunId(message);
+  const firstUrl = findFirstUrl(messageWithMentions);
+  const referencedCrawlRunId = findReferencedCrawlRunId(messageWithMentions);
+  const libraryMentions = extractLibraryMentions(originalMessage);
+  const slashCommand = parseSlashCommand(originalMessage);
 
   const pushIfMissing = (tool: string, args: Record<string, unknown>) => {
     const key = `${tool}:${JSON.stringify(args)}`;
@@ -813,15 +864,50 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
     /\b(investigat|research|analy[sz]e|profile|account|person|people|creator|founder)\b/.test(normalized);
   const hasResearchSignal =
     /\b(investigat|research|analy[sz]e|profile|account|person|people|creator|founder|handle)\b/.test(normalized) &&
-    (/(instagram\.com|tiktok\.com|youtube\.com|x\.com|twitter\.com|@[a-z0-9._-]+)/i.test(message) ||
+    (/(instagram\.com|tiktok\.com|youtube\.com|x\.com|twitter\.com|@[a-z0-9._-]+)/i.test(messageWithMentions) ||
       /\b(ddg|duckduckgo|scraply|scrapling|crawl|fetch)\b/.test(normalized));
   const hasEvidenceReferenceIntent =
-    /use evidence from|evidence from/i.test(message) ||
+    /use evidence from|evidence from/i.test(messageWithMentions) ||
     (/\b(evidence|source|sources)\b/.test(normalized) && /\b(use|ground|base|summariz|detail|answer)\b/.test(normalized));
   const hasWorkspaceOverviewIntent =
     /\b(what do (you|we) (see|have)|what['’]s (on|in) (the )?(app|application|workspace)|show (me )?(what|everything) (we|you) (have|see)|workspace status|workspace snapshot|summari[sz]e (the )?(workspace|app|application))\b/.test(
       normalized
     );
+
+  if (slashCommand) {
+    if (slashCommand.command === 'show_sources') {
+      pushIfMissing('intel.list', { section: 'web_snapshots', limit: 20 });
+      pushIfMissing('intel.list', { section: 'web_sources', limit: 10 });
+      pushIfMissing('intel.list', { section: 'competitors', limit: 12 });
+      pushIfMissing('intel.list', { section: 'community_insights', limit: 10 });
+      pushIfMissing('evidence.posts', { platform: 'any', sort: 'engagement', limit: 8 });
+      pushIfMissing('evidence.news', { limit: 8 });
+    } else if (slashCommand.command === 'generate_pdf') {
+      pushIfMissing('document.plan', {
+        docType: 'STRATEGY_BRIEF',
+        depth: 'standard',
+        includeCompetitors: true,
+        includeEvidenceLinks: true,
+      });
+    } else if (slashCommand.command === 'audit') {
+      pushIfMissing('intel.list', { section: 'web_sources', limit: 10 });
+      pushIfMissing('intel.list', { section: 'web_snapshots', limit: 20 });
+      pushIfMissing('intel.list', { section: 'competitors', limit: 12 });
+      pushIfMissing('intel.list', { section: 'community_insights', limit: 10 });
+      pushIfMissing('evidence.posts', { platform: 'any', sort: 'engagement', limit: 8 });
+      pushIfMissing('evidence.news', { limit: 8 });
+    } else if (SUPPORTED_TOOL_NAMES.has(slashCommand.command as (typeof TOOL_REGISTRY)[number]['name'])) {
+      pushIfMissing(slashCommand.command, slashCommand.argsJson || {});
+    } else {
+      const alias = TOOL_NAME_ALIASES[normalizeToolAliasKey(slashCommand.command)];
+      if (alias) {
+        pushIfMissing(alias.tool, {
+          ...(slashCommand.argsJson || {}),
+          ...(alias.args || {}),
+        });
+      }
+    }
+  }
 
   if (hasCompetitorSignals) {
     pushIfMissing('intel.list', { section: 'competitors', limit: 12 });
@@ -829,11 +915,11 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
 
   if (
     ((hasAddIntent && hasCompetitorSignals) ||
-      /competitors?\s*(?:\/|or)\s*inspiration/i.test(message) ||
+      /competitors?\s*(?:\/|or)\s*inspiration/i.test(messageWithMentions) ||
       /\bcompetitor(?:s)?\b/.test(normalized)) &&
     hasCompetitorLinks
   ) {
-    pushIfMissing('competitors.add_links', { text: message });
+    pushIfMissing('competitors.add_links', { text: messageWithMentions });
   }
 
   if (hasIntakeUpdateIntent || hasIntakeHeadings) {
@@ -854,7 +940,7 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
 
   if (hasDeepInvestigationIntent || hasResearchSignal) {
     pushIfMissing('research.gather', {
-      query: message,
+      query: messageWithMentions,
       depth: hasDeepInvestigationIntent ? 'deep' : 'standard',
       includeScrapling: true,
       includeAccountContext: true,
@@ -913,6 +999,10 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
       includeCompetitors: true,
       includeEvidenceLinks: true,
     });
+  }
+
+  if (libraryMentions.length) {
+    pushIfMissing('intel.list', { section: 'web_snapshots', limit: 20 });
   }
 
   return calls;

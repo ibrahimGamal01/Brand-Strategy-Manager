@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, useState } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, ListOrdered, SendHorizontal, Sparkles, Square, X } from "lucide-react";
 import { QueuedMessage } from "@/types/chat";
 
@@ -14,6 +14,9 @@ const steerChipSet = [
 ];
 
 interface ChatComposerProps {
+  draft: string;
+  onDraftChange: (value: string) => void;
+  focusSignal?: number;
   isStreaming: boolean;
   queuedMessages: QueuedMessage[];
   onSend: (content: string, mode: "send" | "queue") => void;
@@ -27,6 +30,9 @@ interface ChatComposerProps {
 }
 
 export function ChatComposer({
+  draft,
+  onDraftChange,
+  focusSignal,
   isStreaming,
   queuedMessages,
   onSend,
@@ -38,18 +44,27 @@ export function ChatComposer({
   onSteer,
   contentWidthClassName = "max-w-3xl",
 }: ChatComposerProps) {
-  const [message, setMessage] = useState("");
   const [showQueue, setShowQueue] = useState(false);
   const [showSteerChips, setShowSteerChips] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    if (typeof focusSignal !== "number") return;
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.focus();
+    const cursor = textarea.value.length;
+    textarea.setSelectionRange(cursor, cursor);
+  }, [focusSignal]);
 
   const dispatchMessage = () => {
-    const content = message.trim();
+    const content = draft.trim();
     if (!content) {
       return false;
     }
 
     onSend(content, "send");
-    setMessage("");
+    onDraftChange("");
     return true;
   };
 
@@ -68,10 +83,10 @@ export function ChatComposer({
 
   const steerRunNow = () => {
     if (!isStreaming) return;
-    const content = message.trim();
+    const content = draft.trim();
     if (!content) return;
     onSteerRun(content);
-    setMessage("");
+    onDraftChange("");
   };
 
   return (
@@ -167,8 +182,9 @@ export function ChatComposer({
 
         <form onSubmit={submit} className="relative">
           <textarea
-            value={message}
-            onChange={(event) => setMessage(event.target.value)}
+            ref={textareaRef}
+            value={draft}
+            onChange={(event) => onDraftChange(event.target.value)}
             onKeyDown={onComposerKeyDown}
             placeholder="Message BAT..."
             className="min-h-24 w-full resize-none rounded-3xl border border-zinc-300 bg-white px-4 pb-12 pt-3 text-base text-zinc-900 outline-none transition focus:border-zinc-400 focus:ring-2 focus:ring-zinc-200 sm:min-h-28"
@@ -189,7 +205,7 @@ export function ChatComposer({
                 Stop
               </button>
             ) : null}
-            {isStreaming && message.trim() ? (
+            {isStreaming && draft.trim() ? (
               <button
                 type="button"
                 onClick={steerRunNow}
@@ -201,7 +217,7 @@ export function ChatComposer({
             ) : null}
             <button
               type="submit"
-              disabled={!message.trim()}
+              disabled={!draft.trim()}
               className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-zinc-900 text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300"
               aria-label="Send message"
             >
