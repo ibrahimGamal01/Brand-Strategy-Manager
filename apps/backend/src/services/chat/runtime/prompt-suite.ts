@@ -270,6 +270,12 @@ function fallbackSummarizer(input: SummarizerInput): SummarizerOutput {
   };
 }
 
+function prefersConciseOutput(message: string): boolean {
+  const normalized = String(message || '').toLowerCase();
+  if (!normalized.trim()) return false;
+  return /\b(concise|brief|short|tl;dr|tldr|in short|summarize quickly|quick summary)\b/.test(normalized);
+}
+
 function findFirstUrl(message: string): string | undefined {
   const fullUrl = message.match(/https?:\/\/[^\s)]+/i)?.[0];
   if (fullUrl) return fullUrl;
@@ -497,6 +503,7 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
 
 function fallbackPlannerPlan(message: string): RuntimePlan {
   const toolCalls = inferToolCallsFromMessage(message);
+  const concise = prefersConciseOutput(message);
   return {
     goal: 'Generate an evidence-grounded response for the active branch',
     plan: toolCalls.length
@@ -510,7 +517,7 @@ function fallbackPlannerPlan(message: string): RuntimePlan {
     needUserInput: false,
     decisionRequests: [],
     responseStyle: {
-      depth: toolCalls.length ? 'normal' : 'fast',
+      depth: concise ? 'fast' : toolCalls.length ? 'deep' : 'normal',
       tone: 'friendly',
     },
     runtime: {
@@ -520,25 +527,32 @@ function fallbackPlannerPlan(message: string): RuntimePlan {
 }
 
 function fallbackWriter(input: WriterInput): WriterOutput {
+  const concise = prefersConciseOutput(input.userMessage);
   const evidence = input.toolResults
     .flatMap((result) => result.evidence)
-    .slice(0, 8)
+    .slice(0, concise ? 8 : 14)
     .map((item, idx) => ({
       id: `e-${idx + 1}`,
       label: item.label,
       ...(item.url ? { url: item.url } : {}),
     }));
 
-  const topHighlights = input.toolSummary.highlights.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 5);
+  const topHighlights = input.toolSummary.highlights
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+    .slice(0, concise ? 4 : 8);
   const topFacts = input.toolSummary.facts
     .map((fact) => {
       const claim = String(fact.claim || '').trim();
       if (!claim) return '';
-      const evidenceSnippet = fact.evidence.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 2);
+      const evidenceSnippet = fact.evidence
+        .map((item) => String(item || '').trim())
+        .filter(Boolean)
+        .slice(0, concise ? 2 : 3);
       return evidenceSnippet.length ? `${claim} (${evidenceSnippet.join('; ')})` : claim;
     })
     .filter(Boolean)
-    .slice(0, 3);
+    .slice(0, concise ? 3 : 7);
   const topWarnings = Array.from(
     new Set(
       input.toolResults
@@ -546,44 +560,79 @@ function fallbackWriter(input: WriterInput): WriterOutput {
         .map((item) => String(item || '').replace(/\s+/g, ' ').trim())
         .filter(Boolean)
     )
-  ).slice(0, 2);
+  ).slice(0, concise ? 2 : 4);
   const hasToolResults = input.toolResults.length > 0;
 
   const responseSections: string[] = [];
   if (!hasToolResults) {
-    responseSections.push(
-      'I do not have new tool output attached to this message yet, so I cannot verify claims from this run.'
-    );
-    responseSections.push(
-      'Share a specific URL, crawl run id, or ask me to run crawl/fetch now and I will return an evidence-backed summary.'
-    );
+    if (concise) {
+      responseSections.push(
+        'I do not have fresh tool output attached to this message yet, so I cannot verify claims from this run.'
+      );
+      responseSections.push('Share a URL or crawl run id and I will immediately return an evidence-backed summary.');
+    } else {
+      responseSections.push(
+        'I do not have fresh tool output attached to this message yet, so I cannot responsibly make factual claims from this run.'
+      );
+      responseSections.push(
+        'If you share a URL, crawl run id, or ask me to fetch/crawl now, I can produce a grounded answer that includes what was found, what it likely means for your strategy, and what to do next.'
+      );
+      responseSections.push(
+        'If you want, I can also run a broader pass (web + social + news) and deliver a fuller narrative instead of a narrow point lookup.'
+      );
+    }
   } else {
     if (topHighlights.length > 0) {
       responseSections.push(topHighlights[0]);
-      if (topHighlights.length > 1) {
-        responseSections.push(
-          `Key findings:\n${topHighlights.slice(1).map((item, idx) => `${idx + 1}. ${item}`).join('\n')}`
-        );
-      }
     } else {
-      responseSections.push('I reviewed the latest workspace evidence and compiled the key takeaways.');
+      responseSections.push('I reviewed the latest workspace evidence and compiled the most relevant takeaways.');
+    }
+
+    if (topHighlights.length > 1) {
+      const findingLimit = concise ? 3 : 6;
+      responseSections.push(
+        `${concise ? 'Key findings' : 'What stands out most'}:\n${topHighlights
+          .slice(1, 1 + findingLimit)
+          .map((item, idx) => `${idx + 1}. ${item}`)
+          .join('\n')}`
+      );
     }
 
     if (topFacts.length > 0) {
-      responseSections.push(`Evidence notes:\n${topFacts.map((item, idx) => `${idx + 1}. ${item}`).join('\n')}`);
+      responseSections.push(
+        `${concise ? 'Evidence references' : 'Evidence I used for this answer'}:\n${topFacts
+          .map((item, idx) => `${idx + 1}. ${item}`)
+          .join('\n')}`
+      );
     }
 
     if (topWarnings.length > 0) {
-      responseSections.push(`Caveats:\n${topWarnings.map((item, idx) => `${idx + 1}. ${item}`).join('\n')}`);
+      responseSections.push(
+        `${concise ? 'Caveats' : 'What to keep in mind'}:\n${topWarnings.map((item, idx) => `${idx + 1}. ${item}`).join('\n')}`
+      );
+    }
+
+    if (!concise) {
+      responseSections.push(
+        'If you want, I can now turn this into a concrete deliverable next (for example: a post concept, testing plan, or client-ready brief) using the same evidence set.'
+      );
     }
   }
 
   const nextSteps = hasToolResults
-    ? [
-        ...(input.toolSummary.openQuestions.slice(0, 2).map((item) => String(item || '').trim()).filter(Boolean)),
-        'Confirm which finding should be prioritized first.',
-      ].slice(0, 3)
-    : ['Provide a URL or crawl run id to inspect.', 'Tell me whether you want coverage, issues, or recommendations first.'];
+    ? concise
+      ? ['Tell me which finding to prioritize first.', 'Say "go deeper" if you want an expanded strategic pass.']
+      : [
+          ...input.toolSummary.openQuestions.slice(0, 3).map((item) => String(item || '').trim()).filter(Boolean),
+          'Tell me which angle to deepen first: strategy implications, content ideas, or execution plan.',
+          'If helpful, I can draft the next output directly from this evidence (post prompt, campaign brief, or PDF).',
+        ].slice(0, 5)
+    : concise
+      ? ['Provide a URL or crawl run id to inspect next.']
+      : [
+          'Provide one URL or crawl run id and I will run a grounded pass.',
+          'Tell me if you want a narrow answer (single source) or a broad answer (web + social + news).',
+        ];
 
   return {
     response: responseSections.filter((section) => section.trim().length > 0).join('\n\n'),
@@ -611,6 +660,7 @@ function fallbackValidator(): ValidatorOutput {
 
 export async function generatePlannerPlan(input: PlannerInput): Promise<RuntimePlan> {
   const fallback = fallbackPlannerPlan(input.userMessage);
+  const conciseRequested = prefersConciseOutput(input.userMessage);
 
   const systemPrompt = [
     'You are BAT Planner (Agency Operator).',
@@ -619,6 +669,8 @@ export async function generatePlannerPlan(input: PlannerInput): Promise<RuntimeP
     'Always produce a plan and tool calls when evidence is needed.',
     'Never claim findings without evidence-producing tools.',
     'Prefer at least two evidence lanes when possible (web+social, web+community, etc.).',
+    'Default response depth should be deep and comfortable for real users.',
+    'Only choose fast depth when the user explicitly asks for concise/brief output.',
     'When the user asks for deeper research on people/accounts/handles or names DDG/Scraply, include research.gather.',
     'Use intel.get only when you have section + id/target. For overviews, use intel.list.',
     'Mutation tools require explicit approvals and should be represented via decisionRequests.',
@@ -669,11 +721,16 @@ export async function generatePlannerPlan(input: PlannerInput): Promise<RuntimeP
       : fallback.toolCalls;
     const decisions = normalizeDecisions(parsed.decisionRequests, 8);
 
-    const depthRaw = String((isRecord(parsed.responseStyle) ? parsed.responseStyle.depth : '') || 'normal').toLowerCase();
+    const defaultDepth = conciseRequested ? 'fast' : 'deep';
+    const depthRaw = String((isRecord(parsed.responseStyle) ? parsed.responseStyle.depth : '') || defaultDepth).toLowerCase();
     const toneRaw = String((isRecord(parsed.responseStyle) ? parsed.responseStyle.tone : '') || 'direct').toLowerCase();
 
     const depth: 'fast' | 'normal' | 'deep' =
-      depthRaw === 'fast' || depthRaw === 'deep' ? (depthRaw as 'fast' | 'deep') : 'normal';
+      conciseRequested
+        ? 'fast'
+        : depthRaw === 'fast' || depthRaw === 'deep'
+          ? (depthRaw as 'fast' | 'deep')
+          : 'deep';
     const tone: 'direct' | 'friendly' = toneRaw === 'friendly' ? 'friendly' : 'direct';
 
     return {
@@ -755,6 +812,7 @@ export async function summarizeToolResults(input: SummarizerInput): Promise<Summ
 
 export async function writeClientResponse(input: WriterInput): Promise<WriterOutput> {
   const fallback = fallbackWriter(input);
+  const conciseRequested = prefersConciseOutput(input.userMessage);
 
   const systemPrompt = [
     'You are BAT Writer (client-facing communicator).',
@@ -762,6 +820,10 @@ export async function writeClientResponse(input: WriterInput): Promise<WriterOut
     'Do not include chain-of-thought.',
     'Response must be actionable, thorough, and evidence-grounded.',
     'Do not be terse. Provide enough detail to be directly usable.',
+    'Default to a comfortable, high-context response with substantial detail.',
+    'Only be concise when the user explicitly asks for concise/brief output.',
+    `Concise mode for this request: ${conciseRequested ? 'true' : 'false'}.`,
+    'Synthesize evidence into clear narrative and recommendations; do not just output sparse bullet points.',
     'Never include scaffolding labels like "Fork from here", "How BAT got here", "Tools used", "Assumptions", or "Evidence".',
     'Must include recommendation, evidence-backed why, and next steps.',
     'JSON schema:',
@@ -790,7 +852,7 @@ export async function writeClientResponse(input: WriterInput): Promise<WriterOut
     const parsed = await requestJson('workspace_chat_writer', [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: JSON.stringify(writerPayload) },
-    ], 1200);
+    ], 2200);
 
     if (!parsed) return fallback;
 

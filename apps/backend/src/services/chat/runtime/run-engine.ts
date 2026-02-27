@@ -262,7 +262,7 @@ type RuntimeValidatorOutput = Awaited<ReturnType<typeof validateClientResponse>>
 
 function fallbackToolSummary(toolResults: RuntimeToolResult[]): RuntimeToolSummary {
   return {
-    highlights: toolResults.slice(0, 6).map((result) => compactPromptString(result.summary, 220)).filter(Boolean),
+    highlights: toolResults.slice(0, 8).map((result) => compactPromptString(result.summary, 220)).filter(Boolean),
     facts: toolResults
       .flatMap((result) =>
         result.evidence.slice(0, 2).map((evidence) => ({
@@ -282,18 +282,51 @@ function fallbackToolSummary(toolResults: RuntimeToolResult[]): RuntimeToolSumma
   };
 }
 
+function prefersConciseOutput(message: string): boolean {
+  const normalized = String(message || '').toLowerCase();
+  if (!normalized.trim()) return false;
+  return /\b(concise|brief|short|tl;dr|tldr|in short|summarize quickly|quick summary)\b/.test(normalized);
+}
+
 function fallbackWriterOutput(input: {
   toolSummary: RuntimeToolSummary;
   toolResults: RuntimeToolResult[];
   plan: RuntimePlan;
+  userMessage?: string;
 }): RuntimeWriterOutput {
-  const highlights = input.toolSummary.highlights.filter(Boolean).slice(0, 3);
-  const response = highlights.length
-    ? `${highlights[0]}\n\n${highlights
-        .slice(1)
-        .map((item, index) => `${index + 1}. ${item}`)
-        .join('\n')}`
-    : 'I reviewed the available workspace evidence and compiled the latest findings.';
+  const concise = prefersConciseOutput(input.userMessage || '');
+  const highlights = input.toolSummary.highlights.filter(Boolean).slice(0, concise ? 4 : 8);
+  const evidenceLines = input.toolResults
+    .flatMap((result) => result.evidence)
+    .slice(0, concise ? 5 : 10)
+    .map((entry, index) => `${index + 1}. ${compactPromptString(entry.label, 220)}`);
+  const responseSections: string[] = [];
+
+  if (highlights.length > 0) {
+    responseSections.push(highlights[0]);
+    if (highlights.length > 1) {
+      responseSections.push(
+        `${concise ? 'Key findings' : 'What stands out most'}:\n${highlights
+          .slice(1, concise ? 4 : 7)
+          .map((item, index) => `${index + 1}. ${item}`)
+          .join('\n')}`
+      );
+    }
+  } else {
+    responseSections.push('I reviewed the available workspace evidence and compiled the latest findings.');
+  }
+
+  if (evidenceLines.length > 0) {
+    responseSections.push(`${concise ? 'Evidence' : 'Evidence used for this response'}:\n${evidenceLines.join('\n')}`);
+  }
+
+  if (!concise) {
+    responseSections.push(
+      'If you want, I can now deepen this into a more strategic output (execution plan, post prompt, or client-ready brief) using the same evidence set.'
+    );
+  }
+
+  const response = responseSections.filter(Boolean).join('\n\n');
 
   return {
     response,
@@ -301,10 +334,12 @@ function fallbackWriterOutput(input: {
       plan: input.plan.plan.slice(0, 8),
       tools: input.plan.toolCalls.map((entry) => entry.tool).slice(0, 8),
       assumptions: ['This response uses the most recent tool outputs available in this run.'],
-      nextSteps: ['Confirm whether to continue with a deeper pass on the same evidence.'],
+      nextSteps: concise
+        ? ['Tell me if you want a deeper pass on the same evidence.']
+        : ['Tell me which angle to deepen next: strategy implications, content direction, or execution plan.'],
       evidence: input.toolResults
         .flatMap((result) => result.evidence)
-        .slice(0, 8)
+        .slice(0, concise ? 8 : 12)
         .map((entry, index) => ({
           id: `e-${index + 1}`,
           label: compactPromptString(entry.label, 220),
@@ -784,9 +819,9 @@ function normalizeRunPlan(value: unknown): RuntimePlan | null {
 
   const responseStyle = isRecord(value.responseStyle)
     ? value.responseStyle
-    : { depth: 'normal', tone: 'direct' };
+    : { depth: 'deep', tone: 'direct' };
 
-  const depth = responseStyle.depth === 'deep' || responseStyle.depth === 'fast' ? responseStyle.depth : 'normal';
+  const depth = responseStyle.depth === 'deep' || responseStyle.depth === 'fast' ? responseStyle.depth : 'deep';
   const tone = responseStyle.tone === 'friendly' ? 'friendly' : 'direct';
 
   const toolCalls: RuntimeToolCall[] = [];
@@ -1010,6 +1045,7 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
 
 export function buildPlanFromMessage(message: string): RuntimePlan {
   const toolCalls = inferToolCallsFromMessage(message);
+  const concise = prefersConciseOutput(message);
 
   const plan: RuntimePlan = {
     goal: 'Generate an evidence-grounded response for the active branch',
@@ -1024,7 +1060,7 @@ export function buildPlanFromMessage(message: string): RuntimePlan {
     needUserInput: false,
     decisionRequests: [],
     responseStyle: {
-      depth: toolCalls.length ? 'normal' : 'fast',
+      depth: concise ? 'fast' : toolCalls.length ? 'deep' : 'normal',
       tone: 'friendly',
     },
     runtime: {
@@ -2044,6 +2080,7 @@ export class RuntimeRunEngine {
         toolSummary,
         toolResults: promptToolResults,
         plan,
+        userMessage: effectiveUserMessage,
       });
     });
 

@@ -66,7 +66,7 @@ type UseRuntimeWorkspaceResult = {
 };
 
 const DEFAULT_PREFERENCES: SessionPreferences = {
-  tone: "balanced",
+  tone: "detailed",
   sourceFocus: "mixed",
   transparency: true,
   askQuestionsFirst: false,
@@ -811,7 +811,7 @@ function buildPolicyFromPreferences(preferences: SessionPreferences): Record<str
   return {
     autoContinue: !preferences.askQuestionsFirst,
     maxAutoContinuations: 1,
-    maxToolRuns: normalizedTone === "detailed" ? 5 : 4,
+    maxToolRuns: normalizedTone === "detailed" ? 6 : 4,
     toolConcurrency: preferences.sourceFocus === "mixed" ? 3 : 2,
     allowMutationTools: false,
     maxToolMs: 30000,
