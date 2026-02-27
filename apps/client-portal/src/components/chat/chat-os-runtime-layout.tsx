@@ -156,8 +156,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   };
 
   const onUseLibraryItem = (title: string) => {
-    const mode: "send" | "queue" = isStreaming ? "queue" : "send";
-    runAsync(sendMessage(`Use evidence from: ${title}`, mode));
+    runAsync(sendMessage(`Use evidence from: ${title}`, "send"));
     setLibraryOpen(false);
   };
 
@@ -194,8 +193,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
             ? "Generate a client-ready PDF deliverable from this branch."
             : `Run action ${actionKey} from the latest assistant response.`;
     const payloadLine = payload ? `\nAction payload: ${JSON.stringify(payload)}` : "";
-    const mode: "send" | "queue" = isStreaming ? "queue" : "send";
-    runAsync(sendMessage(`${prompt}${payloadLine}\nRequested via button: ${actionLabel}`, mode));
+    runAsync(sendMessage(`${prompt}${payloadLine}\nRequested via button: ${actionLabel}`, "send"));
   };
 
   const onNewThread = () => {
@@ -237,16 +235,14 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
       return;
     }
 
-    const mode: "send" | "queue" = isStreaming ? "queue" : "send";
-    runAsync(sendMessage(command, mode));
+    runAsync(sendMessage(command, "send"));
   };
 
   const onRunAudit = () => {
-    const mode: "send" | "queue" = isStreaming ? "queue" : "send";
     runAsync(
       sendMessage(
         "Run a full workspace intelligence audit now. Use tools across web snapshots/sources, competitors, social evidence, community insights, and news, then summarize findings with next actions.",
-        mode
+        "send"
       )
     );
   };

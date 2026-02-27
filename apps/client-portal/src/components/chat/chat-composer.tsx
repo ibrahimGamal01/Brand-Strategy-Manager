@@ -48,12 +48,6 @@ export function ChatComposer({
       return false;
     }
 
-    if (isStreaming) {
-      onSend(content, "queue");
-      setMessage("");
-      return true;
-    }
-
     onSend(content, "send");
     setMessage("");
     return true;
@@ -209,7 +203,7 @@ export function ChatComposer({
               type="submit"
               disabled={!message.trim()}
               className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-zinc-900 text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300"
-              aria-label={isStreaming ? "Queue message" : "Send message"}
+              aria-label="Send message"
             >
               <SendHorizontal className="h-4 w-4" />
             </button>

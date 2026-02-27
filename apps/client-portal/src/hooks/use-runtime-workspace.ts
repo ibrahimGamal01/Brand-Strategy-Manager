@@ -891,18 +891,16 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
       const trimmed = content.trim();
       if (!trimmed) return;
 
-      const effectiveMode = mode === "queue" ? "queue" : activeRunIds.length > 0 ? "queue" : "send";
-
       await sendRuntimeMessage(workspaceId, activeBranchId, {
         content: trimmed,
         userId: "portal-user",
-        mode: effectiveMode,
+        mode,
         policy: buildPolicyFromPreferences(preferences),
       });
 
       await syncBranch(activeBranchId);
     },
-    [activeBranchId, preferences, activeRunIds, syncBranch, workspaceId]
+    [activeBranchId, preferences, syncBranch, workspaceId]
   );
 
   const steerRun = useCallback(
