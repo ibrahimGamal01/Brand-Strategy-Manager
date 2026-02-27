@@ -84,13 +84,16 @@ model ResearchJob {
   clientProfileSnapshots      ClientProfileSnapshot[]
   communityInsights           CommunityInsight[]
   competitorCandidateProfiles CompetitorCandidateProfile[]
+  competitorEntities          CompetitorEntity[]
   competitorIdentities        CompetitorIdentity[]
   competitorOrchestrationRuns CompetitorOrchestrationRun[]
   competitorProfileSnapshots  CompetitorProfileSnapshot[]
+  competitorSurfaces          CompetitorSurface[]
   ddgImageResults             DdgImageResult[]
   ddgNewsResults              DdgNewsResult[]
   ddgVideoResults             DdgVideoResult[]
   discoveredCompetitors       DiscoveredCompetitor[]
+  evidenceRefs                EvidenceRef[]
   orchestrationPlans          OrchestrationPlan[]
   rawSearchResults            RawSearchResult[]
   events                      ResearchJobEvent[]
@@ -912,6 +915,77 @@ model CompetitorCandidateEvidence {
   @@map("competitor_candidate_evidence")
 }
 
+model CompetitorEntity {
+  id               String                    @id @default(uuid())
+  researchJobId    String                    @map("research_job_id")
+  entityType       CompetitorEntityType      @default(BUSINESS) @map("entity_type")
+  name             String
+  primaryDomain    String?                   @map("primary_domain")
+  canonicalUrl     String?                   @map("canonical_url")
+  relationshipType CompetitorRelationshipType? @map("relationship_type")
+  confidence       Float?
+  tags             Json?
+  fingerprintJson  Json?                     @map("fingerprint_json")
+  createdBy        String                    @default("SYSTEM") @map("created_by")
+  status           CompetitorEntityStatus    @default(ACTIVE)
+  createdAt        DateTime                  @default(now()) @map("created_at")
+  updatedAt        DateTime                  @updatedAt @map("updated_at")
+  researchJob      ResearchJob               @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  surfaces         CompetitorSurface[]
+  evidenceRefs     EvidenceRef[]
+
+  @@index([researchJobId, relationshipType, confidence(sort: Desc)], map: "competitor_entities_relationship_idx")
+  @@index([researchJobId, primaryDomain], map: "competitor_entities_domain_idx")
+  @@unique([researchJobId, entityType, primaryDomain], map: "comp_entities_rj_et_pd_key")
+  @@map("competitor_entities")
+}
+
+model CompetitorSurface {
+  id                String                     @id @default(uuid())
+  researchJobId     String                     @map("research_job_id")
+  entityId          String                     @map("entity_id")
+  surfaceType       CompetitorSurfaceType      @map("surface_type")
+  value             String
+  normalizedValue   String                     @map("normalized_value")
+  url               String?
+  scrapeCapability  CompetitorScrapeCapability @default(NOT_SCRAPABLE_YET) @map("scrape_capability")
+  blockerReasonCode String?                    @map("blocker_reason_code")
+  lastScrapedAt     DateTime?                  @map("last_scraped_at")
+  metadata          Json?
+  createdAt         DateTime                   @default(now()) @map("created_at")
+  updatedAt         DateTime                   @updatedAt @map("updated_at")
+  entity            CompetitorEntity           @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  researchJob       ResearchJob                @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  evidenceRefs      EvidenceRef[]
+
+  @@unique([researchJobId, surfaceType, normalizedValue], map: "comp_surfaces_rj_st_nv_key")
+  @@index([entityId, surfaceType], map: "competitor_surfaces_entity_surface_idx")
+  @@index([researchJobId, surfaceType, scrapeCapability], map: "competitor_surfaces_research_surface_capability_idx")
+  @@map("competitor_surfaces")
+}
+
+model EvidenceRef {
+  id            String          @id @default(uuid())
+  researchJobId String          @map("research_job_id")
+  entityId      String?         @map("entity_id")
+  surfaceId     String?         @map("surface_id")
+  kind          EvidenceRefKind
+  refId         String?         @map("ref_id")
+  url           String?
+  label         String?
+  metadata      Json?
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+  entity        CompetitorEntity? @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  surface       CompetitorSurface? @relation(fields: [surfaceId], references: [id], onDelete: Cascade)
+  researchJob   ResearchJob     @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+
+  @@index([researchJobId, kind, createdAt(sort: Desc)], map: "evidence_refs_job_kind_created_idx")
+  @@index([entityId, kind], map: "evidence_refs_entity_kind_idx")
+  @@index([surfaceId], map: "evidence_refs_surface_idx")
+  @@map("evidence_refs")
+}
+
 model ClientAccount {
   id              String       @id @default(uuid())
   clientId        String       @map("client_id")
@@ -1463,6 +1537,55 @@ enum CompetitorCandidateState {
   TOP_PICK
   APPROVED
   REJECTED
+}
+
+enum CompetitorEntityType {
+  BUSINESS
+  PERSON
+  PRODUCT
+  ORG
+}
+
+enum CompetitorRelationshipType {
+  DIRECT
+  INDIRECT
+  SUBSTITUTE
+  INSPIRATION
+  COMPLEMENT
+}
+
+enum CompetitorEntityStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum CompetitorSurfaceType {
+  WEBSITE
+  INSTAGRAM
+  TIKTOK
+  YOUTUBE
+  X
+  LINKEDIN
+  APP_STORE
+  DIRECTORY
+  OTHER
+}
+
+enum CompetitorScrapeCapability {
+  SCRAPABLE_NOW
+  NOT_SCRAPABLE_YET
+  HARD_BLOCKED
+}
+
+enum EvidenceRefKind {
+  WEB_SNAPSHOT
+  WEB_EXTRACTION
+  URL
+  DOCUMENT
+  CRAWL_RUN
+  SOCIAL_POST
+  NEWS_ITEM
+  OTHER
 }
 
 enum BrainCommandStatus {

@@ -5,6 +5,7 @@ import {
   bootstrapRuntimeBranch,
   cancelRuntimeQueueItem,
   createRuntimeBranch,
+  createRuntimeEventsSocket,
   createRuntimeThread,
   fetchRuntimeBranchState,
   fetchWorkspaceLibrary,
@@ -18,6 +19,7 @@ import {
   sendRuntimeMessage,
   steerRuntimeBranch,
   interruptRuntimeBranch,
+  RuntimeSocketMessage,
 } from "@/lib/runtime-api";
 import {
   ChatMessageBlock,
@@ -75,6 +77,7 @@ const DEFAULT_PREFERENCES: SessionPreferences = {
 const ACTIVE_POLL_INTERVAL_MS = 1200;
 const IDLE_POLL_INTERVAL_MS = 3200;
 const LIBRARY_POLL_INTERVAL_MS = 15_000;
+const WS_HEARTBEAT_INTERVAL_MS = 20_000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -511,7 +514,7 @@ function previewItemsFromUnknown(value: unknown, max = 5): Array<{ label: string
       if (!isRecord(item)) return null;
       const label = String(item.label || item.title || item.name || "").replace(/\s+/g, " ").trim();
       if (!label) return null;
-      const url = String(item.url || item.href || "").trim();
+      const url = String(item.url || item.href || item.profileUrl || "").trim();
       return {
         label,
         ...(url ? { url } : {}),
@@ -758,52 +761,158 @@ function extractRunInsightsFromToolRuns(toolRuns: Array<Record<string, unknown>>
   };
 }
 
+function mapDecisionItems(rawDecisions: unknown, runId?: string): DecisionItem[] {
+  if (!Array.isArray(rawDecisions)) return [];
+  const items: DecisionItem[] = [];
+  for (const decision of rawDecisions) {
+    if (!isRecord(decision)) continue;
+    const id = String(decision.id || "").trim();
+    const prompt = String(decision.title || decision.prompt || "").trim();
+    if (!id || !prompt) continue;
+    const options = Array.isArray(decision.options)
+      ? decision.options
+          .map((option) => {
+            if (typeof option === "string") return option.trim();
+            if (!isRecord(option)) return "";
+            return String(option.label || option.value || "").trim();
+          })
+          .filter(Boolean)
+      : [];
+    if (!options.length) continue;
+    items.push({
+      id,
+      prompt,
+      options,
+      ...(runId ? { runId } : {}),
+    });
+  }
+  return items;
+}
+
 function mapDecisionsFromEvents(
   events: Array<Record<string, unknown>>,
   activeRuns: Array<Record<string, unknown>>
 ): DecisionItem[] {
-  const items: DecisionItem[] = [];
   const waitingRunIds = new Set(
     activeRuns
       .filter((run) => String(run.status || "").toUpperCase() === "WAITING_USER")
       .map((run) => String(run.id || "").trim())
       .filter(Boolean)
   );
+  if (waitingRunIds.size === 0) return [];
 
-  if (waitingRunIds.size === 0) {
-    return [];
-  }
-
-  const latest = normalizeRuntimeEvents(events).slice(-160);
-
+  const latest = normalizeRuntimeEvents(events).slice(-180);
+  const items: DecisionItem[] = [];
   for (const event of latest) {
     const runId = String(event.runId || "").trim();
-    if (!runId || !waitingRunIds.has(runId)) continue;
-
-    const payload = event.payload;
-    if (!payload || !Array.isArray(payload.decisions)) continue;
-    for (const decision of payload.decisions) {
-      if (!isRecord(decision)) continue;
-      const id = String(decision.id || "").trim();
-      const prompt = String(decision.title || "").trim();
-      if (!id || !prompt) continue;
-      const options = Array.isArray(decision.options)
-        ? decision.options
-            .map((option) => {
-              if (typeof option === "string") return option.trim();
-              if (!isRecord(option)) return "";
-              return String(option.label || option.value || "").trim();
-            })
-            .filter(Boolean)
-        : [];
-      if (!options.length) continue;
-      if (!items.some((item) => item.id === id)) {
-        items.push({ id, prompt, options });
-      }
+    if (!runId || !waitingRunIds.has(runId) || !event.payload) continue;
+    const nextItems = mapDecisionItems(event.payload.decisions, runId);
+    for (const entry of nextItems) {
+      if (items.some((item) => item.id === entry.id && item.runId === entry.runId)) continue;
+      items.push(entry);
     }
   }
-
   return items;
+}
+
+function extractRunApprovals(runId: string, normalizedEvents: NormalizedRuntimeEvent[]): DecisionItem[] {
+  const items: DecisionItem[] = [];
+  for (const event of normalizedEvents) {
+    if (String(event.runId || "").trim() !== runId || !event.payload) continue;
+    const nextItems = mapDecisionItems(event.payload.decisions, runId);
+    for (const item of nextItems) {
+      if (items.some((existing) => existing.id === item.id)) continue;
+      items.push(item);
+    }
+  }
+  return items.slice(0, 8);
+}
+
+function laneStatsFromUnknown(value: unknown): Array<{ lane: string; queries: number; hits: number }> {
+  if (!isRecord(value)) return [];
+  return Object.entries(value)
+    .map(([laneKey, laneValue]) => {
+      if (!isRecord(laneValue)) return null;
+      const queries = Number(laneValue.queries);
+      const hits = Number(laneValue.hits);
+      return {
+        lane: humanizeToken(laneKey),
+        queries: Number.isFinite(queries) ? Math.max(0, Math.floor(queries)) : 0,
+        hits: Number.isFinite(hits) ? Math.max(0, Math.floor(hits)) : 0,
+      };
+    })
+    .filter((entry): entry is { lane: string; queries: number; hits: number } => Boolean(entry))
+    .sort((a, b) => b.hits - a.hits || b.queries - a.queries)
+    .slice(0, 12);
+}
+
+function v3CandidatesFromUnknown(value: unknown, max = 10): Array<{ label: string; url?: string }> {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((candidate) => {
+      if (!isRecord(candidate)) return null;
+      const name = String(candidate.name || candidate.label || candidate.title || "").trim();
+      const handle = String(candidate.handle || "").trim();
+      const relationship = String(candidate.relationship || "").trim();
+      const score = Number(candidate.score);
+      const laneHits = Array.isArray(candidate.laneHits)
+        ? candidate.laneHits
+            .map((lane) => String(lane || "").trim())
+            .filter(Boolean)
+            .slice(0, 3)
+        : [];
+      const labelParts = [
+        [name, handle ? `@${handle}` : ""].filter(Boolean).join(" "),
+        relationship ? humanizeToken(relationship) : "",
+        Number.isFinite(score) ? `score ${score.toFixed(2)}` : "",
+        laneHits.length ? `lanes: ${laneHits.join(", ")}` : "",
+      ].filter(Boolean);
+      const label = labelParts.join(" • ").trim();
+      if (!label) return null;
+      const url = String(candidate.profileUrl || candidate.url || candidate.href || "").trim();
+      return {
+        label,
+        ...(url ? { url } : {}),
+      };
+    })
+    .filter((entry): entry is { label: string; url?: string } => Boolean(entry))
+    .slice(0, max);
+}
+
+function extractV3RunDetail(
+  runId: string,
+  toolRuns: Array<Record<string, unknown>>,
+  normalizedEvents: NormalizedRuntimeEvent[]
+): ProcessRun["v3Detail"] | undefined {
+  const v3ToolRun = [...toolRuns]
+    .reverse()
+    .find((toolRun) => String(toolRun.toolName || "").trim().toLowerCase() === "competitors.discover_v3");
+  if (!v3ToolRun) return undefined;
+
+  const result = isRecord(v3ToolRun.resultJson) ? v3ToolRun.resultJson : null;
+  if (!result) return undefined;
+
+  const laneStats = laneStatsFromUnknown(result.laneStats);
+  const topCandidates = v3CandidatesFromUnknown(result.topCandidates, 10);
+  const evidenceLinks = previewItemsFromUnknown(result.evidence, 12);
+  const warnings = asArrayOfStrings(result.warnings, 12);
+  const approvals = extractRunApprovals(runId, normalizedEvents);
+  const stats = metricsFromDiscoverV3Result(result);
+  const mode = String(result.mode || "").trim().toLowerCase();
+
+  if (!laneStats.length && !topCandidates.length && !evidenceLinks.length && !warnings.length && !approvals.length) {
+    return undefined;
+  }
+
+  return {
+    ...(mode ? { mode } : {}),
+    ...(stats.length ? { stats } : {}),
+    laneStats,
+    topCandidates,
+    evidenceLinks,
+    warnings,
+    approvals,
+  };
 }
 
 function mapRecentRunsFromEvents(events: Array<Record<string, unknown>>): ProcessRun[] {
@@ -955,6 +1064,11 @@ function mapRuns(activeRuns: Array<Record<string, unknown>>, events: Array<Recor
     const insight = extractRunInsightsFromToolRuns(
       toolRuns.filter((entry): entry is Record<string, unknown> => isRecord(entry))
     );
+    const v3Detail = extractV3RunDetail(
+      runId,
+      toolRuns.filter((entry): entry is Record<string, unknown> => isRecord(entry)),
+      normalizedEvents
+    );
     for (const line of insight.details) {
       if (!details.includes(line)) details.push(line);
     }
@@ -973,6 +1087,7 @@ function mapRuns(activeRuns: Array<Record<string, unknown>>, events: Array<Recor
       details,
       ...(insight.metrics.length ? { metrics: insight.metrics } : {}),
       ...(insight.highlights.length ? { highlights: insight.highlights } : {}),
+      ...(v3Detail ? { v3Detail } : {}),
     };
   });
 
@@ -1015,8 +1130,12 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
 
   const pollerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const libraryPollerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const wsSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestEventCursorRef = useRef<Record<string, string>>({});
   const syncInFlightRef = useRef(false);
   const bootstrapAttemptedRef = useRef<Set<string>>(new Set());
+  const [wsConnectedByBranch, setWsConnectedByBranch] = useState<Record<string, boolean>>({});
 
   const activeThread = useMemo(
     () => threads.find((thread) => thread.id === activeThreadId) || null,
@@ -1028,6 +1147,10 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
     if (!activeBranchId) return [];
     return activeRunIdsByBranch[activeBranchId] || [];
   }, [activeBranchId, activeRunIdsByBranch]);
+  const isSocketConnected = useMemo(() => {
+    if (!activeBranchId) return false;
+    return Boolean(wsConnectedByBranch[activeBranchId]);
+  }, [activeBranchId, wsConnectedByBranch]);
 
   const setActiveThreadId = useCallback(
     (threadId: string) => {
@@ -1072,6 +1195,14 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
 
         const normalizedMessages = mapMessages(messagePayload.messages as Array<Record<string, unknown>>);
         const events = eventPayload.events as Array<Record<string, unknown>>;
+        const latestEvent = events[events.length - 1];
+        const latestEventId = String(latestEvent?.id || "").trim();
+        if (latestEventId) {
+          latestEventCursorRef.current = {
+            ...latestEventCursorRef.current,
+            [branchId]: latestEventId,
+          };
+        }
         const activeRuns = (statePayload.activeRuns || []) as Array<Record<string, unknown>>;
         const activeIds = activeRuns
           .map((run) => String(run.id || "").trim())
@@ -1304,10 +1435,12 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
       pollerRef.current = null;
     }
 
-    const intervalMs = isBranchHot ? ACTIVE_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS;
-    pollerRef.current = setInterval(() => {
-      void syncBranch(activeBranchId);
-    }, intervalMs);
+    if (!isSocketConnected) {
+      const intervalMs = isBranchHot ? ACTIVE_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS;
+      pollerRef.current = setInterval(() => {
+        void syncBranch(activeBranchId);
+      }, intervalMs);
+    }
 
     return () => {
       if (pollerRef.current) {
@@ -1315,7 +1448,116 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
         pollerRef.current = null;
       }
     };
-  }, [activeBranchId, isBranchHot, syncBranch]);
+  }, [activeBranchId, isBranchHot, isSocketConnected, syncBranch]);
+
+  useEffect(() => {
+    if (!activeBranchId) return;
+
+    let isCancelled = false;
+    const afterId = latestEventCursorRef.current[activeBranchId];
+    const socket = createRuntimeEventsSocket(workspaceId, activeBranchId, afterId);
+    wsRef.current = socket;
+    setWsConnectedByBranch((previous) => ({
+      ...previous,
+      [activeBranchId]: false,
+    }));
+
+    const scheduleSync = (delayMs = 80) => {
+      if (isCancelled) return;
+      if (wsSyncTimerRef.current) return;
+      wsSyncTimerRef.current = setTimeout(() => {
+        wsSyncTimerRef.current = null;
+        void syncBranch(activeBranchId);
+      }, Math.max(0, delayMs));
+    };
+
+    socket.onopen = () => {
+      if (isCancelled) return;
+      setWsConnectedByBranch((previous) => ({
+        ...previous,
+        [activeBranchId]: true,
+      }));
+    };
+
+    socket.onmessage = (event) => {
+      if (isCancelled) return;
+      let payload: RuntimeSocketMessage | null = null;
+      try {
+        payload = JSON.parse(String(event.data || "")) as RuntimeSocketMessage;
+      } catch {
+        payload = null;
+      }
+      if (!payload) return;
+
+      if (payload.type === "EVENT" && payload.event?.id) {
+        latestEventCursorRef.current = {
+          ...latestEventCursorRef.current,
+          [activeBranchId]: String(payload.event.id),
+        };
+        scheduleSync(40);
+        return;
+      }
+
+      if (payload.type === "EVENT_BATCH") {
+        const latest = Array.isArray(payload.events) ? payload.events[payload.events.length - 1] : null;
+        const latestId = String(latest?.id || "").trim();
+        if (latestId) {
+          latestEventCursorRef.current = {
+            ...latestEventCursorRef.current,
+            [activeBranchId]: latestId,
+          };
+        }
+        scheduleSync(0);
+        return;
+      }
+
+      if (payload.type === "ERROR") {
+        setError((previous) => previous || payload.details || payload.error || "Runtime websocket error");
+      }
+    };
+
+    socket.onclose = () => {
+      if (isCancelled) return;
+      setWsConnectedByBranch((previous) => ({
+        ...previous,
+        [activeBranchId]: false,
+      }));
+    };
+
+    socket.onerror = () => {
+      if (isCancelled) return;
+      setWsConnectedByBranch((previous) => ({
+        ...previous,
+        [activeBranchId]: false,
+      }));
+    };
+
+    const heartbeat = setInterval(() => {
+      if (socket.readyState !== WebSocket.OPEN) return;
+      socket.send(JSON.stringify({ type: "PING" }));
+    }, WS_HEARTBEAT_INTERVAL_MS);
+
+    return () => {
+      isCancelled = true;
+      clearInterval(heartbeat);
+      if (wsSyncTimerRef.current) {
+        clearTimeout(wsSyncTimerRef.current);
+        wsSyncTimerRef.current = null;
+      }
+      if (wsRef.current === socket) {
+        wsRef.current = null;
+      }
+      try {
+        socket.close();
+      } catch {
+        // no-op
+      }
+      setWsConnectedByBranch((previous) => ({
+        ...previous,
+        [activeBranchId]: false,
+      }));
+    };
+  }, [activeBranchId, syncBranch, workspaceId]);
 
   useEffect(() => {
     if (!activeBranchId) return;

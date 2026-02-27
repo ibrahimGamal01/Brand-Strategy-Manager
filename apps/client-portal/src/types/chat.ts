@@ -77,6 +77,29 @@ export interface ProcessPreviewItem {
   url?: string;
 }
 
+export interface DecisionItem {
+  id: string;
+  prompt: string;
+  options: string[];
+  runId?: string;
+}
+
+export interface ProcessRunV3LaneStat {
+  lane: string;
+  queries: number;
+  hits: number;
+}
+
+export interface ProcessRunV3Detail {
+  mode?: string;
+  stats?: ProcessMetric[];
+  laneStats: ProcessRunV3LaneStat[];
+  topCandidates: ProcessPreviewItem[];
+  evidenceLinks: ProcessPreviewItem[];
+  warnings: string[];
+  approvals: DecisionItem[];
+}
+
 export interface ProcessRun {
   id: string;
   label: string;
@@ -87,6 +110,7 @@ export interface ProcessRun {
   details?: string[];
   metrics?: ProcessMetric[];
   highlights?: ProcessPreviewItem[];
+  v3Detail?: ProcessRunV3Detail;
 }
 
 export interface ProcessFeedItem {
@@ -98,12 +122,6 @@ export interface ProcessFeedItem {
   toolName?: string;
   phase?: ProcessPhase;
   level?: "info" | "warn" | "error";
-}
-
-export interface DecisionItem {
-  id: string;
-  prompt: string;
-  options: string[];
 }
 
 export type LibraryCollection =

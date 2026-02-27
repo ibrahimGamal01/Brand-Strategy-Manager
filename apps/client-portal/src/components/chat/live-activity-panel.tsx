@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Clock3, Loader2, PauseCircle, XCircle } from "lucide-react";
+import { CheckCircle2, Clock3, Loader2, PauseCircle, X, XCircle } from "lucide-react";
 import { DecisionItem, ProcessFeedItem, ProcessRun } from "@/types/chat";
 
 type Tab = "running" | "feed" | "decisions";
@@ -54,19 +54,232 @@ function TypingDots() {
   );
 }
 
+function V3RunDetailDrawer({
+  run,
+  onClose,
+  onResolve,
+}: {
+  run: ProcessRun;
+  onClose: () => void;
+  onResolve: (id: string, option: string) => void;
+}) {
+  const v3 = run.v3Detail;
+  if (!v3) return null;
+
+  return (
+    <div className="absolute inset-0 z-30 flex justify-end bg-black/20">
+      <section
+        className="bat-surface bat-scrollbar flex h-full w-[92%] max-w-[28rem] flex-col overflow-y-auto border-l p-4"
+        style={{ borderColor: "var(--bat-border)" }}
+      >
+        <div className="sticky top-0 z-10 -mx-4 -mt-4 mb-3 border-b px-4 py-3 backdrop-blur"
+          style={{ borderColor: "var(--bat-border)", background: "color-mix(in srgb, var(--bat-surface) 92%, transparent)" }}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-[0.08em]" style={{ color: "var(--bat-text-muted)" }}>
+                V3 Run Details
+              </p>
+              <p className="mt-1 text-sm font-semibold">{run.label}</p>
+              <p className="text-xs" style={{ color: "var(--bat-text-muted)" }}>
+                {v3.mode ? `Mode: ${v3.mode}` : "Competitor discovery detail"}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full border p-1.5"
+              style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}
+              aria-label="Close V3 details"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        {v3.stats?.length ? (
+          <section className="mb-4">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em]" style={{ color: "var(--bat-text-muted)" }}>
+              Run Stats
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              {v3.stats.map((metric) => (
+                <div
+                  key={`${run.id}-v3-metric-${metric.key}-${metric.value}`}
+                  className="rounded-lg border px-2.5 py-2"
+                  style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}
+                >
+                  <p className="text-[10px] uppercase tracking-[0.08em]" style={{ color: "var(--bat-text-muted)" }}>
+                    {metric.key}
+                  </p>
+                  <p className="text-sm font-semibold">{metric.value}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {v3.laneStats.length ? (
+          <section className="mb-4">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em]" style={{ color: "var(--bat-text-muted)" }}>
+              Lane Performance
+            </p>
+            <div className="space-y-2">
+              {v3.laneStats.map((lane) => {
+                const ratio = lane.queries > 0 ? Math.min(100, Math.round((lane.hits / lane.queries) * 100)) : 0;
+                return (
+                  <div
+                    key={`${run.id}-lane-${lane.lane}`}
+                    className="rounded-lg border px-2.5 py-2"
+                    style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}
+                  >
+                    <div className="flex items-center justify-between gap-2 text-xs">
+                      <p className="font-semibold">{lane.lane}</p>
+                      <p style={{ color: "var(--bat-text-muted)" }}>
+                        {lane.hits} hit(s) / {lane.queries} query
+                      </p>
+                    </div>
+                    <div className="mt-1.5 h-1.5 rounded-full" style={{ background: "var(--bat-surface)" }}>
+                      <div className="h-1.5 rounded-full" style={{ width: `${ratio}%`, background: "var(--bat-accent)" }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
+
+        {v3.topCandidates.length ? (
+          <section className="mb-4">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em]" style={{ color: "var(--bat-text-muted)" }}>
+              Top Candidates
+            </p>
+            <div className="space-y-2">
+              {v3.topCandidates.map((candidate) =>
+                candidate.url ? (
+                  <a
+                    key={`${run.id}-candidate-${candidate.label}`}
+                    href={candidate.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block rounded-lg border px-2.5 py-2 text-xs hover:underline"
+                    style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}
+                  >
+                    {candidate.label}
+                  </a>
+                ) : (
+                  <p
+                    key={`${run.id}-candidate-${candidate.label}`}
+                    className="rounded-lg border px-2.5 py-2 text-xs"
+                    style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}
+                  >
+                    {candidate.label}
+                  </p>
+                )
+              )}
+            </div>
+          </section>
+        ) : null}
+
+        {v3.evidenceLinks.length ? (
+          <section className="mb-4">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em]" style={{ color: "var(--bat-text-muted)" }}>
+              Evidence Links
+            </p>
+            <div className="space-y-2">
+              {v3.evidenceLinks.map((link) =>
+                link.url ? (
+                  <a
+                    key={`${run.id}-evidence-${link.label}`}
+                    href={link.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block rounded-lg border px-2.5 py-2 text-xs hover:underline"
+                    style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}
+                  >
+                    {link.label}
+                  </a>
+                ) : (
+                  <p
+                    key={`${run.id}-evidence-${link.label}`}
+                    className="rounded-lg border px-2.5 py-2 text-xs"
+                    style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}
+                  >
+                    {link.label}
+                  </p>
+                )
+              )}
+            </div>
+          </section>
+        ) : null}
+
+        {v3.approvals.length ? (
+          <section className="mb-4">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em]" style={{ color: "var(--bat-text-muted)" }}>
+              Pending Approvals
+            </p>
+            <div className="space-y-2">
+              {v3.approvals.map((decision) => (
+                <article
+                  key={`${run.id}-approval-${decision.id}`}
+                  className="rounded-lg border px-2.5 py-2"
+                  style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}
+                >
+                  <p className="text-xs font-semibold">{decision.prompt}</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {decision.options.map((option) => (
+                      <button
+                        key={`${decision.id}-${option}`}
+                        type="button"
+                        onClick={() => onResolve(decision.id, option)}
+                        className="rounded-full border px-2.5 py-1 text-[11px]"
+                        style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}
+                      >
+                        {option}
+                      </button>
+                    ))}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {v3.warnings.length ? (
+          <section>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em]" style={{ color: "var(--bat-text-muted)" }}>
+              Warnings
+            </p>
+            <ul className="space-y-1 text-xs" style={{ color: "var(--bat-text-muted)" }}>
+              {v3.warnings.map((warning) => (
+                <li key={`${run.id}-warning-${warning}`}>• {warning}</li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
 function RunningTab({
   runs,
   feedItems,
+  decisions,
+  onResolve,
   onRunAudit,
   onSteer,
 }: {
   runs: ProcessRun[];
   feedItems: ProcessFeedItem[];
+  decisions: DecisionItem[];
+  onResolve: (id: string, option: string) => void;
   onRunAudit?: () => void;
   onSteer?: (instruction: string) => void;
 }) {
   const [manualSteer, setManualSteer] = useState("");
   const [insightIndex, setInsightIndex] = useState(0);
+  const [detailRunId, setDetailRunId] = useState<string | null>(null);
 
   const insightLines = useMemo(() => {
     const fromFeed = feedItems.map((item) => item.message).filter(Boolean).slice(0, 8);
@@ -110,9 +323,10 @@ function RunningTab({
     "Show evidence first, then recommendation.",
     "Be detailed and action-oriented.",
   ];
+  const detailRun = runs.find((run) => run.id === detailRunId && run.v3Detail) || null;
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
+    <div className="relative flex h-full min-h-0 flex-col gap-3">
       <article className="shrink-0 rounded-xl border p-3" style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}>
         <div className="flex items-center justify-between gap-2">
           <p className="text-sm font-semibold">BAT is actively working</p>
@@ -240,6 +454,16 @@ function RunningTab({
                 )}
               </div>
             ) : null}
+            {run.v3Detail ? (
+              <button
+                type="button"
+                onClick={() => setDetailRunId(run.id)}
+                className="mt-2 rounded-full border px-2.5 py-1 text-xs"
+                style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}
+              >
+                Open V3 details
+              </button>
+            ) : null}
             <div className="mt-2 h-2 rounded-full" style={{ background: "var(--bat-surface-muted)" }}>
               <div
                 className="h-2 rounded-full transition-all"
@@ -252,6 +476,23 @@ function RunningTab({
           </article>
         ))}
       </div>
+
+      {detailRun?.v3Detail ? (
+        <V3RunDetailDrawer
+          run={{
+            ...detailRun,
+            v3Detail: {
+              ...detailRun.v3Detail,
+              approvals:
+                detailRun.v3Detail.approvals.length > 0
+                  ? detailRun.v3Detail.approvals
+                  : decisions.filter((decision) => decision.runId === detailRun.id),
+            },
+          }}
+          onClose={() => setDetailRunId(null)}
+          onResolve={onResolve}
+        />
+      ) : null}
     </div>
   );
 }
@@ -380,7 +621,14 @@ export function LiveActivityPanel({
 
       <div className="min-h-0 flex-1 overflow-hidden">
         {tab === "running" ? (
-          <RunningTab runs={runs} feedItems={feedItems} onRunAudit={onRunAudit} onSteer={onSteer} />
+          <RunningTab
+            runs={runs}
+            feedItems={feedItems}
+            decisions={decisions}
+            onResolve={onResolve}
+            onRunAudit={onRunAudit}
+            onSteer={onSteer}
+          />
         ) : null}
         {tab === "feed" ? (
           <div className="bat-scrollbar h-full overflow-y-auto pr-1">

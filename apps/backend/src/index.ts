@@ -29,6 +29,7 @@ import chatRuntimeRouter from './routes/research-jobs-chat-runtime';
 import portalRouter from './routes/portal';
 import { STORAGE_ROOT } from './services/storage/storage-root';
 import { attachChatWebSocketServer } from './services/chat/chat-ws';
+import { attachRuntimeWebSocketServer } from './services/chat/runtime/runtime-ws';
 
 const envLoad = loadBackendEnv();
 console.log('[DEBUG] DATABASE_URL loaded:', process.env.DATABASE_URL?.replace(/:[^:@]*@/, ':***@'));
@@ -123,6 +124,7 @@ async function startServer(): Promise<void> {
 
   const server = http.createServer(app);
   attachChatWebSocketServer(server, () => Boolean(schemaReport?.schemaReady));
+  attachRuntimeWebSocketServer(server, () => Boolean(schemaReport?.schemaReady));
 
   server.listen(PORT, () => {
     console.log(`🚀 Backend server running on http://localhost:${PORT}`);

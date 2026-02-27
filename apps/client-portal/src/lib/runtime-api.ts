@@ -344,6 +344,59 @@ export type RuntimeEventDto = {
   };
 };
 
+export type RuntimeSocketMessage =
+  | {
+      type: "AUTH_OK";
+      workspaceId: string;
+      branchId: string;
+      hasBacklog?: boolean;
+    }
+  | {
+      type: "EVENT";
+      workspaceId: string;
+      branchId: string;
+      event: RuntimeEventDto;
+    }
+  | {
+      type: "EVENT_BATCH";
+      workspaceId: string;
+      branchId: string;
+      events: RuntimeEventDto[];
+    }
+  | {
+      type: "PONG";
+      ts: string;
+    }
+  | {
+      type: "ERROR";
+      error: string;
+      details?: string;
+    };
+
+function runtimeWsOrigin(): string {
+  const configured = String(process.env.NEXT_PUBLIC_API_ORIGIN || "").trim();
+  if (configured) {
+    return configured.replace(/^http/i, "ws").replace(/\/+$/, "");
+  }
+  if (typeof window === "undefined") {
+    return "ws://localhost:3001";
+  }
+  const current = window.location;
+  const localDev =
+    (current.hostname === "localhost" || current.hostname === "127.0.0.1") &&
+    (current.port === "3000" || current.port === "3002");
+  const origin = localDev ? `${current.protocol}//${current.hostname}:3001` : current.origin;
+  return origin.replace(/^http/i, "ws").replace(/\/+$/, "");
+}
+
+export function createRuntimeEventsSocket(workspaceId: string, branchId: string, afterId?: string): WebSocket {
+  const suffix = afterId ? `?afterId=${encodeURIComponent(afterId)}` : "";
+  const wsUrl = `${runtimeWsOrigin()}/api/ws/research-jobs/${encodeURIComponent(
+    workspaceId
+  )}/runtime/branches/${encodeURIComponent(branchId)}${suffix}`;
+  return new WebSocket(wsUrl);
+}
+
 export async function listRuntimeEvents(workspaceId: string, branchId: string) {
   const response = await fetch(`/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/events?limit=300`, {
     method: "GET",
