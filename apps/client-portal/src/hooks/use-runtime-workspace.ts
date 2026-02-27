@@ -669,7 +669,13 @@ function metricsFromDiscoverV3Result(result: Record<string, unknown>): Array<{ k
   const queries = readInt(stats.queriesExecuted);
   const searchResults = readInt(stats.searchResults);
   const enriched = readInt(stats.enriched);
+  const canonicalEntities = readInt(stats.canonicalEntities);
+  const canonicalSurfaces = readInt(stats.canonicalSurfaces);
+  const canonicalEvidenceRefs = readInt(stats.canonicalEvidenceRefs);
   if (persisted !== null) metrics.push({ key: "Candidates", value: String(persisted) });
+  if (canonicalEntities !== null) metrics.push({ key: "Entities", value: String(canonicalEntities) });
+  if (canonicalSurfaces !== null) metrics.push({ key: "Surfaces", value: String(canonicalSurfaces) });
+  if (canonicalEvidenceRefs !== null) metrics.push({ key: "Evidence refs", value: String(canonicalEvidenceRefs) });
   if (topPicks !== null) metrics.push({ key: "Top picks", value: String(topPicks) });
   if (shortlisted !== null) metrics.push({ key: "Shortlisted", value: String(shortlisted) });
   if (queries !== null) metrics.push({ key: "Queries", value: String(queries) });

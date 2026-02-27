@@ -1,9 +1,14 @@
 import {
   CompetitorAvailabilityStatus,
   CompetitorCandidateState,
+  CompetitorEntityType,
+  CompetitorRelationshipType,
+  CompetitorScrapeCapability,
   CompetitorSelectionState,
+  CompetitorSurfaceType,
   CompetitorType,
   DiscoveredCompetitorStatus,
+  EvidenceRefKind,
   Prisma,
 } from '@prisma/client';
 import { prisma } from '../../../lib/prisma';
@@ -228,6 +233,229 @@ function stateFromRank(index: number): CompetitorCandidateState {
   return CompetitorCandidateState.DISCOVERED;
 }
 
+function toRelationshipType(
+  label: CompetitorDiscoveryV3Candidate['relationshipLabel']
+): CompetitorRelationshipType {
+  if (label === 'direct') return CompetitorRelationshipType.DIRECT;
+  if (label === 'inspiration') return CompetitorRelationshipType.INSPIRATION;
+  if (label === 'community') return CompetitorRelationshipType.COMPLEMENT;
+  return CompetitorRelationshipType.INDIRECT;
+}
+
+function toEntityType(candidate: CompetitorDiscoveryV3Candidate): CompetitorEntityType {
+  if (candidate.competitorType === CompetitorType.INFLUENCER) return CompetitorEntityType.PERSON;
+  if (candidate.competitorType === CompetitorType.MARKETPLACE) return CompetitorEntityType.ORG;
+  return CompetitorEntityType.BUSINESS;
+}
+
+function toSurfaceType(platform: string): CompetitorSurfaceType {
+  const normalized = String(platform || '').trim().toLowerCase();
+  if (normalized === 'instagram') return CompetitorSurfaceType.INSTAGRAM;
+  if (normalized === 'tiktok') return CompetitorSurfaceType.TIKTOK;
+  if (normalized === 'youtube') return CompetitorSurfaceType.YOUTUBE;
+  if (normalized === 'linkedin') return CompetitorSurfaceType.LINKEDIN;
+  if (normalized === 'x') return CompetitorSurfaceType.X;
+  if (normalized === 'community') return CompetitorSurfaceType.DIRECTORY;
+  if (normalized === 'web') return CompetitorSurfaceType.WEBSITE;
+  return CompetitorSurfaceType.OTHER;
+}
+
+function normalizedSurfaceValue(candidate: CompetitorDiscoveryV3Candidate): string {
+  const platform = String(candidate.platform || '').trim().toLowerCase();
+  if (platform === 'web') return String(candidate.websiteDomain || hostOf(candidate.profileUrl) || candidate.normalizedHandle || '')
+    .trim()
+    .toLowerCase();
+  return String(candidate.normalizedHandle || candidate.handle || candidate.websiteDomain || '')
+    .trim()
+    .toLowerCase();
+}
+
+async function upsertCanonicalEntity(input: {
+  researchJobId: string;
+  runId: string;
+  candidate: CompetitorDiscoveryV3Candidate;
+  confidence: number;
+}) {
+  const { researchJobId, candidate, runId, confidence } = input;
+  const primaryDomain = candidate.websiteDomain || hostOf(candidate.profileUrl) || null;
+  const canonicalUrl = candidate.profileUrl || null;
+  const relationshipType = toRelationshipType(candidate.relationshipLabel);
+  const entityType = toEntityType(candidate);
+  const tags = uniqueStrings(
+    [candidate.platform, candidate.relationshipLabel, ...candidate.laneHits],
+    12
+  );
+
+  const existing = await prisma.competitorEntity.findFirst({
+    where: {
+      researchJobId,
+      OR: [
+        ...(canonicalUrl ? [{ canonicalUrl }] : []),
+        ...(primaryDomain ? [{ primaryDomain }] : []),
+        { name: candidate.name },
+      ],
+    },
+    select: { id: true },
+  });
+
+  if (existing) {
+    return prisma.competitorEntity.update({
+      where: { id: existing.id },
+      data: {
+        name: candidate.name,
+        entityType,
+        primaryDomain,
+        canonicalUrl,
+        relationshipType,
+        confidence,
+        tags: asJson(tags),
+        fingerprintJson: asJson({
+          source: 'discover_v3',
+          runId,
+          competitorType: candidate.competitorType,
+          relationship: candidate.relationshipLabel,
+          score: candidate.score,
+          scoreBreakdown: candidate.scoreBreakdown,
+          laneHits: candidate.laneHits,
+        }),
+      },
+      select: { id: true },
+    });
+  }
+
+  return prisma.competitorEntity.create({
+    data: {
+      researchJobId,
+      entityType,
+      name: candidate.name,
+      primaryDomain,
+      canonicalUrl,
+      relationshipType,
+      confidence,
+      tags: asJson(tags),
+      fingerprintJson: asJson({
+        source: 'discover_v3',
+        runId,
+        competitorType: candidate.competitorType,
+        relationship: candidate.relationshipLabel,
+        score: candidate.score,
+        scoreBreakdown: candidate.scoreBreakdown,
+        laneHits: candidate.laneHits,
+      }),
+      createdBy: 'AI',
+    },
+    select: { id: true },
+  });
+}
+
+async function upsertCanonicalSurface(input: {
+  researchJobId: string;
+  entityId: string;
+  candidate: CompetitorDiscoveryV3Candidate;
+  scrapeEligible: boolean;
+  blockerReasonCode: string | null;
+}) {
+  const { researchJobId, entityId, candidate, scrapeEligible, blockerReasonCode } = input;
+  const surfaceType = toSurfaceType(candidate.platform);
+  const normalizedValue = normalizedSurfaceValue(candidate);
+  if (!normalizedValue) {
+    throw new Error(`Missing normalized surface value for ${candidate.platform}:${candidate.handle}`);
+  }
+  const scrapeCapability = scrapeEligible
+    ? CompetitorScrapeCapability.SCRAPABLE_NOW
+    : CompetitorScrapeCapability.NOT_SCRAPABLE_YET;
+
+  return prisma.competitorSurface.upsert({
+    where: {
+      researchJobId_surfaceType_normalizedValue: {
+        researchJobId,
+        surfaceType,
+        normalizedValue,
+      },
+    },
+    create: {
+      researchJobId,
+      entityId,
+      surfaceType,
+      value: candidate.profileUrl || candidate.handle || candidate.name,
+      normalizedValue,
+      url: candidate.profileUrl || null,
+      scrapeCapability,
+      blockerReasonCode,
+      metadata: asJson({
+        platform: candidate.platform,
+        handle: candidate.handle,
+        score: candidate.score,
+      }),
+    },
+    update: {
+      entityId,
+      value: candidate.profileUrl || candidate.handle || candidate.name,
+      url: candidate.profileUrl || null,
+      scrapeCapability,
+      blockerReasonCode,
+      metadata: asJson({
+        platform: candidate.platform,
+        handle: candidate.handle,
+        score: candidate.score,
+      }),
+    },
+    select: { id: true },
+  });
+}
+
+async function createCanonicalEvidenceRefs(input: {
+  researchJobId: string;
+  runId: string;
+  entityId: string;
+  surfaceId: string;
+  candidate: CompetitorDiscoveryV3Candidate;
+}): Promise<number> {
+  const { researchJobId, runId, entityId, surfaceId, candidate } = input;
+  const rows = candidate.evidence
+    .slice(0, 12)
+    .map((entry) => {
+      const source = String(entry.source || '').trim().toLowerCase();
+      const kind =
+        source === 'web_snapshot'
+          ? EvidenceRefKind.WEB_SNAPSHOT
+          : source.includes('news')
+            ? EvidenceRefKind.NEWS_ITEM
+            : source.includes('reddit') || source.includes('community')
+              ? EvidenceRefKind.URL
+              : EvidenceRefKind.URL;
+      const url = String(entry.url || '').trim() || null;
+      const title = String(entry.title || '').trim();
+      const snippet = String(entry.snippet || '').trim();
+      const label = title || `${candidate.name} evidence`;
+      const refId = `v3:${runId}:${candidate.key}:${String(entry.query || '').slice(0, 80)}`;
+      return {
+        researchJobId,
+        entityId,
+        surfaceId,
+        kind,
+        refId,
+        url,
+        label: label.slice(0, 280),
+        metadata: asJson({
+          source: 'discover_v3',
+          lane: entry.lane,
+          query: entry.query,
+          rank: entry.rank,
+          snippet: snippet.slice(0, 800),
+          provider: entry.provider,
+        }),
+      };
+    })
+    .filter((entry) => Boolean(entry.label));
+
+  if (!rows.length) return 0;
+  const result = await prisma.evidenceRef.createMany({
+    data: rows,
+  });
+  return Number(result.count || 0);
+}
+
 async function findOrCreateIdentity(researchJobId: string, canonicalName: string, websiteDomain: string | null) {
   const existing = await prisma.competitorIdentity.findFirst({
     where: {
@@ -360,6 +588,9 @@ async function persistCandidates(input: {
   topPicks: number;
   shortlisted: number;
   discovered: number;
+  canonicalEntities: number;
+  canonicalSurfaces: number;
+  canonicalEvidenceRefs: number;
   artifacts: Array<{ kind: string; section?: string; id: string }>;
 }> {
   const artifacts: Array<{ kind: string; section?: string; id: string }> = [];
@@ -367,6 +598,9 @@ async function persistCandidates(input: {
   let topPicks = 0;
   let shortlisted = 0;
   let discovered = 0;
+  let canonicalEntities = 0;
+  let canonicalSurfaces = 0;
+  let canonicalEvidenceRefs = 0;
 
   const limited = input.candidates.slice(0, input.limit);
   for (let index = 0; index < limited.length; index += 1) {
@@ -447,6 +681,33 @@ async function persistCandidates(input: {
       id: profile.id,
     });
 
+    const canonicalEntity = await upsertCanonicalEntity({
+      researchJobId: input.researchJobId,
+      runId: input.runId,
+      candidate,
+      confidence: typeConfidence,
+    });
+    canonicalEntities += 1;
+    artifacts.push({
+      kind: 'competitor_entity',
+      section: 'competitor_entities',
+      id: canonicalEntity.id,
+    });
+
+    const canonicalSurface = await upsertCanonicalSurface({
+      researchJobId: input.researchJobId,
+      entityId: canonicalEntity.id,
+      candidate,
+      scrapeEligible,
+      blockerReasonCode,
+    });
+    canonicalSurfaces += 1;
+    artifacts.push({
+      kind: 'competitor_surface',
+      section: 'competitor_surfaces',
+      id: canonicalSurface.id,
+    });
+
     await prisma.competitorCandidateEvidence.deleteMany({
       where: { candidateProfileId: profile.id },
     });
@@ -462,6 +723,21 @@ async function persistCandidates(input: {
           signalScore: candidate.score,
         })),
       });
+      const createdEvidenceRefCount = await createCanonicalEvidenceRefs({
+        researchJobId: input.researchJobId,
+        runId: input.runId,
+        entityId: canonicalEntity.id,
+        surfaceId: canonicalSurface.id,
+        candidate,
+      });
+      canonicalEvidenceRefs += createdEvidenceRefCount;
+      if (createdEvidenceRefCount > 0) {
+        artifacts.push({
+          kind: 'evidence_ref',
+          section: 'evidence_refs',
+          id: canonicalSurface.id,
+        });
+      }
     }
 
     if (scrapeEligible && (state === CompetitorCandidateState.TOP_PICK || state === CompetitorCandidateState.SHORTLISTED)) {
@@ -511,7 +787,16 @@ async function persistCandidates(input: {
     }
   }
 
-  return { persisted, topPicks, shortlisted, discovered, artifacts };
+  return {
+    persisted,
+    topPicks,
+    shortlisted,
+    discovered,
+    canonicalEntities,
+    canonicalSurfaces,
+    canonicalEvidenceRefs,
+    artifacts,
+  };
 }
 
 function parseSeedCompetitors(input: DiscoverCompetitorsV3Input): DiscoverCompetitorsV3Seed[] {
@@ -555,6 +840,9 @@ export async function discoverCompetitorsV3(
     searchResults: number;
     candidatesRanked: number;
     candidatesPersisted: number;
+    canonicalEntities: number;
+    canonicalSurfaces: number;
+    canonicalEvidenceRefs: number;
     topPicks: number;
     shortlisted: number;
     discovered: number;
@@ -671,6 +959,9 @@ export async function discoverCompetitorsV3(
       searchResults: allHits.length,
       candidatesRanked: rankedCandidates.length,
       candidatesPersisted: persistence.persisted,
+      canonicalEntities: persistence.canonicalEntities,
+      canonicalSurfaces: persistence.canonicalSurfaces,
+      canonicalEvidenceRefs: persistence.canonicalEvidenceRefs,
       topPicks: persistence.topPicks,
       shortlisted: persistence.shortlisted,
       discovered: persistence.discovered,
