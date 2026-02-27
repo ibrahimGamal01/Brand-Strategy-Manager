@@ -241,30 +241,53 @@ export function ChatThread({
 
   if (!visibleMessages.length) {
     return (
-      <section className="flex min-h-0 flex-1 items-center justify-center bg-[#f7f7f8] p-8 text-center">
-        <div className="max-w-lg">
-          <p className="text-[28px] font-semibold tracking-tight text-zinc-900">How can I help with this workspace?</p>
-          <p className="mt-3 text-sm text-zinc-500">
-            Ask for analysis, debugging, implementation, or evidence review and responses will appear here.
+      <section className="flex min-h-0 flex-1 items-center justify-center bg-[linear-gradient(180deg,#f7f7f8_0%,#f2f4f7_100%)] p-5 text-center sm:p-10">
+        <div className="mx-auto w-full max-w-4xl">
+          <p className="text-[30px] font-semibold tracking-tight text-zinc-900 sm:text-[36px]">How can I help with this workspace?</p>
+          <p className="mt-3 text-base text-zinc-500 sm:text-lg">
+            Ask for analysis, implementation, debugging, or evidence review and I will run the right tools and respond here.
           </p>
+          <div className="mt-8 grid gap-3 text-left sm:grid-cols-3">
+            <article className="rounded-2xl border border-zinc-200 bg-white/92 p-4 shadow-[0_10px_24px_rgba(16,24,40,0.05)]">
+              <p className="text-xs font-semibold uppercase tracking-[0.1em] text-zinc-500">Audit</p>
+              <p className="mt-2 text-sm font-medium text-zinc-900">Run a full workspace audit</p>
+              <p className="mt-1 text-xs text-zinc-500">Web, competitors, social, community, and action priorities.</p>
+            </article>
+            <article className="rounded-2xl border border-zinc-200 bg-white/90 p-4 shadow-[0_10px_24px_rgba(16,24,40,0.05)]">
+              <p className="text-xs font-semibold uppercase tracking-[0.1em] text-zinc-500">Evidence</p>
+              <p className="mt-2 text-sm font-medium text-zinc-900">Ask with source constraints</p>
+              <p className="mt-1 text-xs text-zinc-500">Try “Use evidence from…” to ground output in specific data.</p>
+            </article>
+            <article className="rounded-2xl border border-zinc-200 bg-white/90 p-4 shadow-[0_10px_24px_rgba(16,24,40,0.05)]">
+              <p className="text-xs font-semibold uppercase tracking-[0.1em] text-zinc-500">Deliverable</p>
+              <p className="mt-2 text-sm font-medium text-zinc-900">Generate client-ready output</p>
+              <p className="mt-1 text-xs text-zinc-500">Briefs, audits, and PDFs from this branch context.</p>
+            </article>
+          </div>
         </div>
       </section>
     );
   }
 
   return (
-    <section ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto bg-[#f7f7f8]">
+    <section ref={scrollRef} className="bat-scrollbar min-h-0 flex-1 overflow-y-auto bg-[linear-gradient(180deg,#f7f7f8_0%,#f2f4f7_100%)]">
       <div className={`mx-auto w-full ${contentWidthClassName} px-4 pb-24 pt-8 sm:px-6`}>
         {visibleMessages.map((message) => {
           const isUser = message.role === "user";
           return (
-            <article key={message.id} className="group mb-9">
+            <article key={message.id} className="group mb-8">
               <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-                <div className={isUser ? "max-w-[84%] rounded-[26px] bg-[#303030] px-4 py-3 text-white sm:max-w-[78%]" : "w-full"}>
+                <div
+                  className={
+                    isUser
+                      ? "max-w-[90%] rounded-[26px] bg-[#2f2f32] px-4 py-3 text-white shadow-[0_12px_28px_rgba(15,23,42,0.2)] sm:max-w-[74%] 2xl:max-w-[68%]"
+                      : "max-w-[96%] rounded-[24px] border border-zinc-200 bg-white px-4 py-3 text-zinc-900 shadow-[0_12px_24px_rgba(16,24,40,0.06)] sm:max-w-[88%] 2xl:max-w-[80%]"
+                  }
+                >
                   {!isUser ? (
                     <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.08em] text-zinc-400">Assistant</p>
                   ) : null}
-                  <p className={`whitespace-pre-wrap text-[15px] leading-7 ${isUser ? "text-white" : "text-zinc-800"}`}>
+                  <p className={`whitespace-pre-wrap break-words text-[15px] leading-7 ${isUser ? "text-white" : "text-zinc-800"}`}>
                     {message.content}
                   </p>
                   <p className={`mt-2 text-[11px] ${isUser ? "text-zinc-300" : "text-zinc-400"}`}>{formatMessageTime(message.createdAt)}</p>

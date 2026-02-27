@@ -312,8 +312,8 @@ export function LiveActivityPanel({
   );
 
   return (
-    <aside className="bat-surface flex h-full min-h-0 flex-col p-4">
-      <div className="mb-3 flex items-center justify-between">
+    <aside className="bat-surface flex h-full min-h-0 flex-col p-3.5 sm:p-4">
+      <div className="mb-3 flex items-center justify-between gap-2">
         <h2 className="text-base font-semibold">Live Activity</h2>
         <span className="bat-chip">Client Friendly View</span>
       </div>
@@ -323,7 +323,7 @@ export function LiveActivityPanel({
             key={item.id}
             type="button"
             onClick={() => setTab(item.id)}
-            className="rounded-full px-2 py-1 text-xs"
+            className="rounded-full px-2 py-1 text-xs leading-tight"
             style={{
               background: tab === item.id ? "var(--bat-surface)" : "transparent",
               border: tab === item.id ? "1px solid var(--bat-border)" : "1px solid transparent"
@@ -334,7 +334,7 @@ export function LiveActivityPanel({
         ))}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+      <div className="bat-scrollbar min-h-0 flex-1 overflow-y-auto pr-1">
         {tab === "running" ? (
           <RunningTab runs={runs} feedItems={feedItems} onRunAudit={onRunAudit} onSteer={onSteer} />
         ) : null}

@@ -49,14 +49,17 @@ export function LibraryDrawer({
   }
 
   return (
-    <div className="fixed inset-0 z-40 flex">
+    <div className="fixed inset-0 z-50 flex">
       <button
         type="button"
         aria-label="close drawer"
         className="h-full flex-1 bg-black/25"
         onClick={onClose}
       />
-      <aside className="h-full w-full max-w-md border-l p-4" style={{ background: "var(--bat-surface)", borderColor: "var(--bat-border)" }}>
+      <aside
+        className="flex h-full w-full max-w-[min(100vw,520px)] min-w-[320px] flex-col border-l p-4 sm:min-w-[360px]"
+        style={{ background: "var(--bat-surface)", borderColor: "var(--bat-border)" }}
+      >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold">Library</h2>
           <button type="button" onClick={onClose} className="rounded-full border p-2" style={{ borderColor: "var(--bat-border)" }}>
@@ -93,7 +96,7 @@ export function LibraryDrawer({
           ))}
         </div>
 
-        <div className="space-y-2 overflow-y-auto pb-4" style={{ maxHeight: "calc(100vh - 220px)" }}>
+        <div className="bat-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto pb-4 pr-1">
           {filtered.map((item) => (
             <article key={item.id} className="rounded-xl border p-3" style={{ borderColor: "var(--bat-border)" }}>
               <div className="flex items-center justify-between gap-2">

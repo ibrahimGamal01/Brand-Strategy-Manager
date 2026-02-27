@@ -32,6 +32,23 @@ a {
   margin: 0 auto;
 }
 
+.bat-shell-app {
+  width: min(1880px, calc(100% - 1.25rem));
+  margin: 0 auto;
+}
+
+@media (max-width: 1536px) {
+  .bat-shell-app {
+    width: min(1500px, calc(100% - 1rem));
+  }
+}
+
+@media (max-width: 1024px) {
+  .bat-shell-app {
+    width: calc(100% - 0.75rem);
+  }
+}
+
 .bat-surface {
   background: var(--bat-surface);
   border: 1px solid var(--bat-border);
@@ -64,4 +81,23 @@ a {
 
 [data-animate="fade-up"] {
   animation: fade-up 360ms ease-out;
+}
+
+.bat-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--bat-text-muted) 30%, transparent) transparent;
+}
+
+.bat-scrollbar::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.bat-scrollbar::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bat-text-muted) 28%, transparent);
+}
+
+.bat-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
 }

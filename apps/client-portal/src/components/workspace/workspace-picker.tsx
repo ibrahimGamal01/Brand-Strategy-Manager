@@ -21,6 +21,13 @@ export function WorkspacePicker({
   error?: string | null;
   onRetry?: () => void;
 }) {
+  const formatLastActivity = (value?: string | null) => {
+    if (!value) return "No activity yet";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "No activity yet";
+    return `Updated ${date.toLocaleDateString()}`;
+  };
+
   return (
     <section className="space-y-4">
       <div>
@@ -63,29 +70,50 @@ export function WorkspacePicker({
           </article>
         ) : null}
         {workspaces.map((workspace) => (
-          <Link
-            key={workspace.id}
-            href={`/app/w/${workspace.id}`}
-            className="bat-surface block p-5 transition-transform hover:-translate-y-0.5"
-          >
-            <p className="text-lg font-semibold">{workspace.name}</p>
-            <p className="mt-1 text-sm" style={{ color: "var(--bat-text-muted)" }}>
-              {workspace.members} members • {workspace.plan}
+          <article key={workspace.id} className="bat-surface p-5 transition-transform hover:-translate-y-0.5">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="text-lg font-semibold">{workspace.name}</p>
+                <p className="mt-1 text-sm" style={{ color: "var(--bat-text-muted)" }}>
+                  {workspace.members} members • {workspace.plan}
+                </p>
+              </div>
+              {workspace.status ? (
+                <span className="bat-chip">{workspace.status.toLowerCase()}</span>
+              ) : null}
+            </div>
+
+            <p className="mt-2 text-xs uppercase tracking-[0.08em]" style={{ color: "var(--bat-text-muted)" }}>
+              {formatLastActivity(workspace.startedAt)}
             </p>
+
             {!workspace.intakeReady ? (
               <p className="mt-2 text-xs uppercase tracking-[0.07em]" style={{ color: "var(--bat-warning)" }}>
                 Setup needed before smart chat
               </p>
-            ) : null}
-            {workspace.status ? (
-              <p className="mt-1 text-xs uppercase tracking-[0.07em]" style={{ color: "var(--bat-text-muted)" }}>
-                Status: {workspace.status}
+            ) : (
+              <p className="mt-2 text-xs uppercase tracking-[0.07em]" style={{ color: "var(--bat-success)" }}>
+                Ready for chat intelligence
               </p>
-            ) : null}
-            <p className="mt-3 text-sm" style={{ color: "var(--bat-accent)" }}>
-              Open Chat Workspace →
-            </p>
-          </Link>
+            )}
+
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <Link
+                href={`/app/w/${workspace.id}`}
+                className="rounded-full px-3 py-1.5 text-sm font-semibold"
+                style={{ background: "var(--bat-accent)", color: "white" }}
+              >
+                Open Chat
+              </Link>
+              <Link
+                href={`/app/w/${workspace.id}/library`}
+                className="rounded-full border px-3 py-1.5 text-sm"
+                style={{ borderColor: "var(--bat-border)" }}
+              >
+                Open Library
+              </Link>
+            </div>
+          </article>
         ))}
       </div>
     </section>

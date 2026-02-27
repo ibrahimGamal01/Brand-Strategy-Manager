@@ -34,8 +34,14 @@ export default function AdminWorkspacesPage() {
   const cards = useMemo(() => workspaces.map((workspace) => ({ ...workspace, label: labelForWorkspace(workspace) })), [workspaces]);
 
   return (
-    <section className="space-y-4">
-      <h1 className="text-2xl font-semibold">Admin • Workspaces</h1>
+    <section className="space-y-5">
+      <div className="rounded-3xl border p-5 md:p-6" style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}>
+        <p className="bat-chip">Admin</p>
+        <h1 className="mt-3 text-2xl font-semibold md:text-3xl">Workspaces</h1>
+        <p className="mt-2 text-sm md:text-base" style={{ color: "var(--bat-text-muted)" }}>
+          Inspect status, intake readiness, and open each workspace quickly.
+        </p>
+      </div>
       {error ? (
         <div className="rounded-2xl border p-4 text-sm" style={{ borderColor: "#f4b8b4", background: "#fff5f4", color: "#9f2317" }}>
           <p>{error}</p>

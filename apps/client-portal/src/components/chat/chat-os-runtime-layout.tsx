@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Library, Menu, MessageSquarePlus, RefreshCcw, Search } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Library, Menu, MessageSquarePlus, PanelRight, RefreshCcw, Search, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRuntimeWorkspace } from "@/hooks/use-runtime-workspace";
 import { LibraryCollection, SessionPreferences } from "@/types/chat";
@@ -42,6 +42,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   const [activeLibraryCollection, setActiveLibraryCollection] = useState<LibraryCollection | "all">("all");
   const [actionError, setActionError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(false);
   const [nameDialog, setNameDialog] = useState<
     | { mode: "thread"; title: string }
     | { mode: "branch"; title: string; forkedFromMessageId?: string }
@@ -114,6 +115,30 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
         .slice(0, 6),
     [libraryItems]
   );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!(sidebarOpen || activityOpen)) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [sidebarOpen, activityOpen]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleResize = () => {
+      if (window.innerWidth >= 1024) {
+        setSidebarOpen(false);
+      }
+      if (window.innerWidth >= 1280) {
+        setActivityOpen(false);
+      }
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   const runAsync = (work: Promise<void>) => {
     setActionError(null);
@@ -265,11 +290,11 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
         </div>
       ) : null}
 
-      <div className="relative overflow-hidden rounded-[28px] border border-zinc-200 bg-[#f3f4f6] shadow-[0_20px_60px_rgba(16,24,40,0.08)]">
-        <div className="grid h-[calc(100vh-7.5rem)] min-h-[640px] grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)]">
+      <div className="relative overflow-hidden rounded-[22px] border border-zinc-200 bg-[#f3f4f6] shadow-[0_20px_60px_rgba(16,24,40,0.08)] sm:rounded-[28px]">
+        <div className="grid h-[calc(100dvh-7.5rem)] min-h-[560px] grid-cols-1 lg:h-[calc(100dvh-6.6rem)] lg:grid-cols-[320px_minmax(0,1fr)]">
           <aside
             className={`${
-              sidebarOpen ? "absolute inset-y-0 left-0 z-30 flex w-[300px]" : "hidden"
+              sidebarOpen ? "absolute inset-y-0 left-0 z-30 flex w-[min(88vw,340px)]" : "hidden"
             } flex-col border-r border-zinc-800/70 bg-[#171717] text-zinc-200 lg:static lg:z-auto lg:flex lg:w-auto`}
           >
             <div className="border-b border-zinc-800 px-3 py-3">
@@ -295,7 +320,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
               </label>
             </div>
 
-            <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-2 py-2">
+            <div className="bat-scrollbar min-h-0 flex-1 space-y-1 overflow-y-auto px-2 py-2">
               {filteredThreads.map((thread) => {
                 const active = thread.id === activeThreadId;
                 return (
@@ -429,6 +454,14 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                   <Library className="h-3.5 w-3.5" />
                   Library
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setActivityOpen(true)}
+                  className="inline-flex items-center gap-1 rounded-full border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 xl:hidden"
+                >
+                  <PanelRight className="h-3.5 w-3.5" />
+                  Activity
+                </button>
                 {queuedMessages.length > 0 ? (
                   <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-[11px] text-zinc-600">
                     Queue {queuedMessages.length}
@@ -447,7 +480,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
               </div>
             </header>
 
-            <div className="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[minmax(0,1fr)_390px] 2xl:grid-cols-[minmax(0,1fr)_450px]">
               <div className="flex min-h-0 flex-col border-zinc-200 xl:border-r">
                 <ChatThread
                   messages={messages}
@@ -457,7 +490,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                   showInlineReasoning={false}
                   isStreaming={isStreaming}
                   streamingInsight={streamingInsight}
-                  contentWidthClassName="max-w-5xl 2xl:max-w-6xl"
+                  contentWidthClassName="max-w-6xl"
                 />
 
                 <ChatComposer
@@ -477,7 +510,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                   onReorderQueue={(from, to) => runAsync(reorderQueue(from, to))}
                   onDeleteQueued={(id) => runAsync(removeQueued(id))}
                   onSteer={onSteer}
-                  contentWidthClassName="max-w-5xl 2xl:max-w-6xl"
+                  contentWidthClassName="max-w-6xl"
                 />
               </div>
 
@@ -502,6 +535,39 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
             onClick={() => setSidebarOpen(false)}
             aria-label="Close chats sidebar"
           />
+        ) : null}
+
+        {activityOpen ? (
+          <div className="absolute inset-0 z-40 flex justify-end bg-black/35 xl:hidden">
+            <div className="flex h-full w-[min(94vw,430px)] flex-col border-l border-zinc-200 bg-[#f8fafc] shadow-[0_20px_60px_rgba(16,24,40,0.22)]">
+              <div className="flex items-center justify-between border-b border-zinc-200 px-3 py-2">
+                <p className="text-sm font-semibold text-zinc-900">Live Activity</p>
+                <button
+                  type="button"
+                  onClick={() => setActivityOpen(false)}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-700"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <LiveActivityPanel
+                  runs={processRuns}
+                  feedItems={feedItems}
+                  decisions={decisions}
+                  onResolve={(decisionId, option) => runAsync(resolveDecision(decisionId, option))}
+                  onRunAudit={onRunAudit}
+                  onSteer={(instruction) => runAsync(steerRun(instruction))}
+                />
+              </div>
+            </div>
+            <button
+              type="button"
+              aria-label="Close activity panel"
+              className="h-full flex-1"
+              onClick={() => setActivityOpen(false)}
+            />
+          </div>
         ) : null}
       </div>
 

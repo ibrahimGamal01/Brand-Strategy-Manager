@@ -75,7 +75,7 @@ export function ChatComposer({
   };
 
   return (
-    <section className="border-t border-zinc-200 bg-gradient-to-t from-white via-white to-white/70 px-3 pb-4 pt-3 sm:px-5">
+    <section className="border-t border-zinc-200 bg-gradient-to-t from-white via-white/95 to-white/75 px-3 pb-3 pt-3 supports-[backdrop-filter]:backdrop-blur sm:px-5 sm:pb-4">
       <div className={`mx-auto w-full ${contentWidthClassName}`}>
         <div className="mb-2 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 text-xs text-zinc-500">
@@ -104,13 +104,13 @@ export function ChatComposer({
         </div>
 
         {showSteerChips ? (
-          <div className="mb-2.5 flex flex-wrap gap-1.5">
+          <div className="bat-scrollbar mb-2.5 flex gap-1.5 overflow-x-auto pb-1">
             {steerChipSet.map((chip) => (
               <button
                 key={chip}
                 type="button"
                 onClick={() => onSteer(chip)}
-                className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
+                className="whitespace-nowrap rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
               >
                 {chip}
               </button>
@@ -120,7 +120,7 @@ export function ChatComposer({
 
         {showQueue && queuedMessages.length > 0 ? (
           <div className="mb-2.5 rounded-2xl border border-zinc-200 bg-zinc-50/90 p-2.5">
-            <div className="space-y-1.5">
+            <div className="bat-scrollbar max-h-44 space-y-1.5 overflow-y-auto pr-1">
               {queuedMessages.map((item, index) => (
                 <div key={item.id} className="flex items-start gap-2 rounded-xl border border-zinc-200 bg-white p-2">
                   <p className="flex-1 text-sm text-zinc-700">{item.content}</p>
@@ -171,7 +171,7 @@ export function ChatComposer({
             onChange={(event) => setMessage(event.target.value)}
             onKeyDown={onComposerKeyDown}
             placeholder="Message BAT..."
-            className="min-h-[108px] w-full resize-none rounded-[30px] border border-zinc-300 bg-white px-4 pb-12 pt-3 text-[15px] text-zinc-900 outline-none transition focus:border-zinc-400 focus:ring-2 focus:ring-zinc-200"
+            className="min-h-[96px] w-full resize-none rounded-[28px] border border-zinc-300 bg-white px-4 pb-12 pt-3 text-[15px] text-zinc-900 outline-none transition focus:border-zinc-400 focus:ring-2 focus:ring-zinc-200 sm:min-h-[116px]"
           />
 
           <p className="pointer-events-none absolute bottom-3 left-4 text-[11px] text-zinc-400">

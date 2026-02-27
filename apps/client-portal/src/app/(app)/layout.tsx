@@ -5,7 +5,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <PortalAuthGate>
       <AppNav />
-      <main className="bat-shell py-6">{children}</main>
+      <main className="bat-shell-app py-3 sm:py-4 lg:py-5">{children}</main>
     </PortalAuthGate>
   );
 }
