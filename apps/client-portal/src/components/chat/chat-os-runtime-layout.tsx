@@ -290,11 +290,11 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
         </div>
       ) : null}
 
-      <div className="relative overflow-hidden rounded-[22px] border border-zinc-200 bg-[#f3f4f6] shadow-[0_20px_60px_rgba(16,24,40,0.08)] sm:rounded-[28px]">
-        <div className="grid h-[calc(100dvh-7.5rem)] min-h-[560px] grid-cols-1 lg:h-[calc(100dvh-6.6rem)] lg:grid-cols-[320px_minmax(0,1fr)]">
+      <div className="relative overflow-hidden rounded-3xl border border-zinc-200 bg-[#f3f4f6] shadow-2xl">
+        <div className="grid h-[calc(100dvh-6.25rem)] min-h-[70vh] grid-cols-1 lg:grid-cols-[22%_78%]">
           <aside
             className={`${
-              sidebarOpen ? "absolute inset-y-0 left-0 z-30 flex w-[min(88vw,340px)]" : "hidden"
+              sidebarOpen ? "absolute inset-y-0 left-0 z-30 flex w-11/12 max-w-sm" : "hidden"
             } flex-col border-r border-zinc-800/70 bg-[#171717] text-zinc-200 lg:static lg:z-auto lg:flex lg:w-auto`}
           >
             <div className="border-b border-zinc-800 px-3 py-3">
@@ -336,7 +336,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                     }`}
                   >
                     <p className="truncate text-sm font-medium">{thread.title}</p>
-                    <p className="mt-0.5 text-[11px] text-zinc-400">
+                    <p className="mt-0.5 text-xs text-zinc-400">
                       Updated {formatThreadTime(thread.updatedAt) || "recently"}
                     </p>
                   </button>
@@ -347,11 +347,11 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
             <div className="space-y-3 border-t border-zinc-800 px-3 py-3">
               <div>
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <p className="text-[11px] uppercase tracking-[0.08em] text-zinc-400">Branches</p>
+                  <p className="text-xs uppercase tracking-[0.08em] text-zinc-400">Branches</p>
                   <button
                     type="button"
                     onClick={() => onForkBranch()}
-                    className="rounded-full border border-zinc-700 px-2 py-1 text-[11px] hover:bg-zinc-800"
+                    className="rounded-full border border-zinc-700 px-2 py-1 text-xs hover:bg-zinc-800"
                   >
                     New
                   </button>
@@ -364,7 +364,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                         key={branch.id}
                         type="button"
                         onClick={() => runAsync(pinBranch(branch.id))}
-                        className={`rounded-full border px-2.5 py-1 text-[11px] ${
+                        className={`rounded-full border px-2.5 py-1 text-xs ${
                           active
                             ? "border-emerald-400/50 bg-emerald-400/10 text-emerald-200"
                             : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"
@@ -397,7 +397,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                     setActiveLibraryCollection("all");
                     setLibraryOpen(true);
                   }}
-                  className="mb-2 inline-flex items-center gap-1 rounded-full border border-zinc-700 px-2.5 py-1 text-[11px] text-zinc-200 hover:bg-zinc-800"
+                  className="mb-2 inline-flex items-center gap-1 rounded-full border border-zinc-700 px-2.5 py-1 text-xs text-zinc-200 hover:bg-zinc-800"
                 >
                   <Library className="h-3.5 w-3.5" />
                   Open library
@@ -408,7 +408,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                       key={item.id}
                       type="button"
                       onClick={() => onUseLibraryItem(item.title)}
-                      className="w-full rounded-lg border border-zinc-700/80 px-2 py-1.5 text-left text-[11px] text-zinc-300 hover:bg-zinc-800"
+                      className="w-full rounded-lg border border-zinc-700/80 px-2 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800"
                     >
                       <p className="line-clamp-1 font-medium text-zinc-200">{item.title}</p>
                       <p className="line-clamp-2 text-zinc-400">{item.summary}</p>
@@ -463,24 +463,24 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                   Activity
                 </button>
                 {queuedMessages.length > 0 ? (
-                  <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-[11px] text-zinc-600">
+                  <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs text-zinc-600">
                     Queue {queuedMessages.length}
                   </span>
                 ) : null}
                 {branchNeedsDecision ? (
-                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] text-amber-700">
+                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs text-amber-700">
                     Needs approval
                   </span>
                 ) : null}
                 {preferences.askQuestionsFirst ? (
-                  <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-[11px] text-zinc-600">
+                  <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs text-zinc-600">
                     Question first
                   </span>
                 ) : null}
               </div>
             </header>
 
-            <div className="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[minmax(0,1fr)_390px] 2xl:grid-cols-[minmax(0,1fr)_450px]">
+            <div className="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[68%_32%] 2xl:grid-cols-[70%_30%]">
               <div className="flex min-h-0 flex-col border-zinc-200 xl:border-r">
                 <ChatThread
                   messages={messages}
@@ -490,7 +490,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                   showInlineReasoning={false}
                   isStreaming={isStreaming}
                   streamingInsight={streamingInsight}
-                  contentWidthClassName="max-w-6xl"
+                  contentWidthClassName="max-w-[96%]"
                 />
 
                 <ChatComposer
@@ -510,7 +510,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                   onReorderQueue={(from, to) => runAsync(reorderQueue(from, to))}
                   onDeleteQueued={(id) => runAsync(removeQueued(id))}
                   onSteer={onSteer}
-                  contentWidthClassName="max-w-6xl"
+                  contentWidthClassName="max-w-[96%]"
                 />
               </div>
 
@@ -539,7 +539,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
 
         {activityOpen ? (
           <div className="absolute inset-0 z-40 flex justify-end bg-black/35 xl:hidden">
-            <div className="flex h-full w-[min(94vw,430px)] flex-col border-l border-zinc-200 bg-[#f8fafc] shadow-[0_20px_60px_rgba(16,24,40,0.22)]">
+            <div className="flex h-full w-11/12 max-w-lg flex-col border-l border-zinc-200 bg-[#f8fafc] shadow-2xl">
               <div className="flex items-center justify-between border-b border-zinc-200 px-3 py-2">
                 <p className="text-sm font-semibold text-zinc-900">Live Activity</p>
                 <button

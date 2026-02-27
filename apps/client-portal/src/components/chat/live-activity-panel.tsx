@@ -178,7 +178,7 @@ function RunningTab({
               <p className="truncate text-sm font-semibold">{run.label}</p>
               {phaseLabel(run.phase) ? (
                 <span
-                  className="mt-1 inline-flex rounded-full border px-2 py-0.5 text-[11px]"
+                  className="mt-1 inline-flex rounded-full border px-2 py-0.5 text-xs"
                   style={phaseChipStyle(run.phase)}
                 >
                   {phaseLabel(run.phase)}
@@ -225,7 +225,7 @@ function FeedTab({ feedItems }: { feedItems: ProcessFeedItem[] }) {
               {item.toolName ? <span className="bat-chip">{item.toolName}</span> : null}
               {item.runId ? <span className="bat-chip">Run {item.runId.slice(0, 8)}</span> : null}
               {phaseLabel(item.phase) ? (
-                <span className="rounded-full border px-2 py-0.5 text-[11px]" style={phaseChipStyle(item.phase)}>
+                <span className="rounded-full border px-2 py-0.5 text-xs" style={phaseChipStyle(item.phase)}>
                   {phaseLabel(item.phase)}
                 </span>
               ) : null}

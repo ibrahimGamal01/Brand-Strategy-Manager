@@ -33,19 +33,19 @@ a {
 }
 
 .bat-shell-app {
-  width: min(1880px, calc(100% - 1.25rem));
+  width: min(96%, 120rem);
   margin: 0 auto;
 }
 
 @media (max-width: 1536px) {
   .bat-shell-app {
-    width: min(1500px, calc(100% - 1rem));
+    width: min(97%, 96rem);
   }
 }
 
 @media (max-width: 1024px) {
   .bat-shell-app {
-    width: calc(100% - 0.75rem);
+    width: 98%;
   }
 }
 

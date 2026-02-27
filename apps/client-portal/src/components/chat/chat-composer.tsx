@@ -75,7 +75,7 @@ export function ChatComposer({
   };
 
   return (
-    <section className="border-t border-zinc-200 bg-gradient-to-t from-white via-white/95 to-white/75 px-3 pb-3 pt-3 supports-[backdrop-filter]:backdrop-blur sm:px-5 sm:pb-4">
+    <section className="sticky bottom-0 z-20 border-t border-zinc-200 bg-gradient-to-t from-white via-white/95 to-white/75 px-3 pb-3 pt-3 supports-[backdrop-filter]:backdrop-blur sm:px-5 sm:pb-4">
       <div className={`mx-auto w-full ${contentWidthClassName}`}>
         <div className="mb-2 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 text-xs text-zinc-500">
@@ -154,7 +154,7 @@ export function ChatComposer({
                       aria-label="Steer run with this queued message"
                       disabled={!isStreaming}
                       onClick={() => onSteerQueued(item.id, item.content)}
-                      className="rounded-full border border-zinc-200 px-2 py-1 text-[11px] text-zinc-600 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-55"
+                      className="rounded-full border border-zinc-200 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-55"
                     >
                       Steer
                     </button>
@@ -171,10 +171,10 @@ export function ChatComposer({
             onChange={(event) => setMessage(event.target.value)}
             onKeyDown={onComposerKeyDown}
             placeholder="Message BAT..."
-            className="min-h-[96px] w-full resize-none rounded-[28px] border border-zinc-300 bg-white px-4 pb-12 pt-3 text-[15px] text-zinc-900 outline-none transition focus:border-zinc-400 focus:ring-2 focus:ring-zinc-200 sm:min-h-[116px]"
+            className="min-h-24 w-full resize-none rounded-3xl border border-zinc-300 bg-white px-4 pb-12 pt-3 text-base text-zinc-900 outline-none transition focus:border-zinc-400 focus:ring-2 focus:ring-zinc-200 sm:min-h-28"
           />
 
-          <p className="pointer-events-none absolute bottom-3 left-4 text-[11px] text-zinc-400">
+          <p className="pointer-events-none absolute bottom-3 left-4 text-xs text-zinc-400">
             Enter to send, Shift+Enter for newline
           </p>
 
