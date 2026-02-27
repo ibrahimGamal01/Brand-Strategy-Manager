@@ -52,9 +52,40 @@ function parseJsonFromOutput<T>(stdout: string): T {
     throw new Error('No script output to parse');
   }
 
+  try {
+    return JSON.parse(trimmed) as T;
+  } catch {
+    // Continue to recovery parsing paths.
+  }
+
+  const firstObjectStart = trimmed.indexOf('{');
+  const lastObjectEnd = trimmed.lastIndexOf('}');
+  if (firstObjectStart >= 0 && lastObjectEnd > firstObjectStart) {
+    const candidate = trimmed.slice(firstObjectStart, lastObjectEnd + 1);
+    try {
+      return JSON.parse(candidate) as T;
+    } catch {
+      // Continue.
+    }
+  }
+
+  const firstArrayStart = trimmed.indexOf('[');
+  const lastArrayEnd = trimmed.lastIndexOf(']');
+  if (firstArrayStart >= 0 && lastArrayEnd > firstArrayStart) {
+    const candidate = trimmed.slice(firstArrayStart, lastArrayEnd + 1);
+    try {
+      return JSON.parse(candidate) as T;
+    } catch {
+      // Continue.
+    }
+  }
+
   const lines = trimmed.split('\n').map((line) => line.trim()).filter(Boolean);
   for (let i = lines.length - 1; i >= 0; i--) {
     const candidate = lines[i];
+    if (!candidate.startsWith('{') && !candidate.startsWith('[')) {
+      continue;
+    }
     try {
       return JSON.parse(candidate) as T;
     } catch {
