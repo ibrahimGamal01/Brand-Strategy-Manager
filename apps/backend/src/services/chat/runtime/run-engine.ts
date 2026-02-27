@@ -121,6 +121,17 @@ const INTEL_LIST_SECTIONS = new Set([
   'web_extraction_runs',
 ]);
 
+const RUNTIME_PROMPT_STAGE_TIMEOUT_MS = Number.isFinite(Number(process.env.RUNTIME_PROMPT_STAGE_TIMEOUT_MS))
+  ? Math.max(5_000, Math.min(120_000, Math.floor(Number(process.env.RUNTIME_PROMPT_STAGE_TIMEOUT_MS))))
+  : 30_000;
+const MAX_PROMPT_TOOL_RESULTS = 12;
+const MAX_PROMPT_ARRAY_ITEMS = 10;
+const MAX_PROMPT_OBJECT_KEYS = 18;
+const MAX_PROMPT_STRING_CHARS = 320;
+const SCHEDULED_RUN_PREEMPTION_ENABLED = String(process.env.RUNTIME_PREEMPT_SCHEDULED_RUNS || 'true')
+  .trim()
+  .toLowerCase() !== 'false';
+
 export function normalizePolicy(raw?: Partial<RunPolicy> | null): RunPolicy {
   const policy = {
     ...DEFAULT_POLICY,
@@ -152,6 +163,165 @@ export function normalizePolicy(raw?: Partial<RunPolicy> | null): RunPolicy {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
+
+function compactPromptString(value: unknown, maxChars = MAX_PROMPT_STRING_CHARS): string {
+  const normalized = String(value ?? '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxChars - 3))}...`;
+}
+
+function compactPromptValue(value: unknown, depth = 0): unknown {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string') return compactPromptString(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (Array.isArray(value)) {
+    if (depth >= 3) return [];
+    return value.slice(0, MAX_PROMPT_ARRAY_ITEMS).map((entry) => compactPromptValue(entry, depth + 1));
+  }
+  if (!isRecord(value)) {
+    return compactPromptString(value);
+  }
+  if (depth >= 3) return {};
+
+  const compacted: Record<string, unknown> = {};
+  const entries = Object.entries(value).slice(0, MAX_PROMPT_OBJECT_KEYS);
+  for (const [key, entry] of entries) {
+    if (typeof entry === 'string') {
+      compacted[key] = compactPromptString(entry);
+      continue;
+    }
+    compacted[key] = compactPromptValue(entry, depth + 1);
+  }
+  return compacted;
+}
+
+function compactToolResultsForPrompt(toolResults: RuntimeToolResult[]): RuntimeToolResult[] {
+  return toolResults.slice(0, MAX_PROMPT_TOOL_RESULTS).map((result) => ({
+    ok: Boolean(result.ok),
+    summary: compactPromptString(result.summary, 420),
+    artifacts: (Array.isArray(result.artifacts) ? result.artifacts : []).slice(0, 10).map((artifact) => ({
+      kind: compactPromptString(artifact?.kind, 80),
+      id: compactPromptString(artifact?.id, 120),
+      ...(artifact?.section ? { section: compactPromptString(artifact.section, 80) } : {}),
+    })),
+    evidence: (Array.isArray(result.evidence) ? result.evidence : []).slice(0, 12).map((entry) => ({
+      kind: compactPromptString(entry?.kind, 40),
+      label: compactPromptString(entry?.label, 220),
+      ...(entry?.url ? { url: compactPromptString(entry.url, 260) } : {}),
+    })),
+    continuations: (Array.isArray(result.continuations) ? result.continuations : []).slice(0, 6).map((entry) => ({
+      type: entry?.type === 'manual_continue' ? 'manual_continue' : 'auto_continue',
+      reason: compactPromptString(entry?.reason, 180),
+      ...(Array.isArray(entry?.suggestedNextTools)
+        ? {
+            suggestedNextTools: entry.suggestedNextTools
+              .map((tool) => compactPromptString(tool, 80))
+              .filter(Boolean)
+              .slice(0, 6),
+          }
+        : {}),
+    })),
+    decisions: (Array.isArray(result.decisions) ? result.decisions : []).slice(0, 6).map((decision) => ({
+      id: compactPromptString(decision?.id, 120),
+      title: compactPromptString(decision?.title, 220),
+      options: (Array.isArray(decision?.options) ? decision.options : []).slice(0, 6).map((option) => ({
+        value: compactPromptString(option?.value, 120),
+        ...(option?.label ? { label: compactPromptString(option.label, 160) } : {}),
+      })),
+      ...(decision?.default ? { default: compactPromptString(decision.default, 120) } : {}),
+      blocking: Boolean(decision?.blocking),
+    })),
+    warnings: (Array.isArray(result.warnings) ? result.warnings : [])
+      .map((warning) => compactPromptString(warning, 220))
+      .filter(Boolean)
+      .slice(0, 6),
+    ...(isRecord(result.raw) ? { raw: compactPromptValue(result.raw) as Record<string, unknown> } : {}),
+  }));
+}
+
+type RuntimeToolSummary = Awaited<ReturnType<typeof summarizeToolResults>>;
+type RuntimeWriterOutput = Awaited<ReturnType<typeof writeClientResponse>>;
+type RuntimeValidatorOutput = Awaited<ReturnType<typeof validateClientResponse>>;
+
+function fallbackToolSummary(toolResults: RuntimeToolResult[]): RuntimeToolSummary {
+  return {
+    highlights: toolResults.slice(0, 6).map((result) => compactPromptString(result.summary, 220)).filter(Boolean),
+    facts: toolResults
+      .flatMap((result) =>
+        result.evidence.slice(0, 2).map((evidence) => ({
+          claim: compactPromptString(result.summary, 220),
+          evidence: [compactPromptString(evidence.label, 220)].filter(Boolean),
+        }))
+      )
+      .slice(0, 10)
+      .filter((item) => item.claim),
+    openQuestions: [],
+    recommendedContinuations: toolResults
+      .flatMap((result) => result.continuations)
+      .flatMap((entry) => entry.suggestedNextTools || [])
+      .map((tool) => compactPromptString(tool, 80))
+      .filter(Boolean)
+      .slice(0, 8),
+  };
+}
+
+function fallbackWriterOutput(input: {
+  toolSummary: RuntimeToolSummary;
+  toolResults: RuntimeToolResult[];
+  plan: RuntimePlan;
+}): RuntimeWriterOutput {
+  const highlights = input.toolSummary.highlights.filter(Boolean).slice(0, 3);
+  const response = highlights.length
+    ? `${highlights[0]}\n\n${highlights
+        .slice(1)
+        .map((item, index) => `${index + 1}. ${item}`)
+        .join('\n')}`
+    : 'I reviewed the available workspace evidence and compiled the latest findings.';
+
+  return {
+    response,
+    reasoning: {
+      plan: input.plan.plan.slice(0, 8),
+      tools: input.plan.toolCalls.map((entry) => entry.tool).slice(0, 8),
+      assumptions: ['This response uses the most recent tool outputs available in this run.'],
+      nextSteps: ['Confirm whether to continue with a deeper pass on the same evidence.'],
+      evidence: input.toolResults
+        .flatMap((result) => result.evidence)
+        .slice(0, 8)
+        .map((entry, index) => ({
+          id: `e-${index + 1}`,
+          label: compactPromptString(entry.label, 220),
+          ...(entry.url ? { url: compactPromptString(entry.url, 260) } : {}),
+        })),
+    },
+    actions: [],
+    decisions: [],
+  };
+}
+
+function fallbackValidatorOutput(): RuntimeValidatorOutput {
+  return {
+    pass: true,
+    issues: [],
+    suggestedFixes: [],
+  };
 }
 
 function normalizeToolAliasKey(value: string): string {
@@ -1011,15 +1181,15 @@ export class RuntimeRunEngine {
     const current = new Promise<void>((resolve) => {
       releaseCurrent = resolve;
     });
-
-    this.branchLocks.set(branchId, previous.then(() => current));
+    const lockChain = previous.then(() => current);
+    this.branchLocks.set(branchId, lockChain);
 
     await previous;
     try {
       return await work();
     } finally {
       releaseCurrent();
-      if (this.branchLocks.get(branchId) === current) {
+      if (this.branchLocks.get(branchId) === lockChain) {
         this.branchLocks.delete(branchId);
       }
     }
@@ -1125,11 +1295,18 @@ export class RuntimeRunEngine {
     const activeRuns = await listActiveRuns(input.branchId);
     if (mode === 'send' && activeRuns.length > 0) {
       const allWaitingForInput = activeRuns.every((run) => run.status === AgentRunStatus.WAITING_USER);
+      const allScheduledRuns = activeRuns.every((run) => run.triggerType === AgentRunTriggerType.SCHEDULED_LOOP);
       if (allWaitingForInput) {
         await this.cancelBranchRuns({
           researchJobId: input.researchJobId,
           branchId: input.branchId,
           reason: 'Superseded by a new user message while waiting for input.',
+        });
+      } else if (allScheduledRuns && SCHEDULED_RUN_PREEMPTION_ENABLED) {
+        await this.cancelBranchRuns({
+          researchJobId: input.researchJobId,
+          branchId: input.branchId,
+          reason: 'Superseded by a direct user message while scheduled processing was running.',
         });
       } else {
         const queueItem = await enqueueMessage({
@@ -1655,10 +1832,41 @@ export class RuntimeRunEngine {
       return;
     }
 
-    const toolSummary = await summarizeToolResults({
-      userMessage: effectiveUserMessage,
-      plan,
-      toolResults,
+    const promptToolResults = compactToolResultsForPrompt(toolResults);
+    const isRunCancelled = async (stage: string): Promise<boolean> => {
+      const latest = await getAgentRun(run.id);
+      if (!latest || latest.status === AgentRunStatus.CANCELLED) {
+        await this.emitEvent({
+          branchId: run.branchId,
+          agentRunId: run.id,
+          type: ProcessEventType.PROCESS_CANCELLED,
+          level: ProcessEventLevel.WARN,
+          message: `Run cancelled during ${stage}.`,
+        });
+        return true;
+      }
+      return false;
+    };
+
+    if (await isRunCancelled('summarization')) return;
+
+    const toolSummary = await withTimeout(
+      summarizeToolResults({
+        userMessage: effectiveUserMessage,
+        plan,
+        toolResults: promptToolResults,
+      }),
+      RUNTIME_PROMPT_STAGE_TIMEOUT_MS,
+      'summarizeToolResults'
+    ).catch(async (error: any) => {
+      await this.emitEvent({
+        branchId: run.branchId,
+        agentRunId: run.id,
+        type: ProcessEventType.PROCESS_LOG,
+        level: ProcessEventLevel.WARN,
+        message: `Summarization fallback used: ${compactPromptString(error?.message || error, 220)}`,
+      });
+      return fallbackToolSummary(promptToolResults);
     });
 
     const continuationDepth = plan.runtime?.continuationDepth ?? 0;
@@ -1723,18 +1931,52 @@ export class RuntimeRunEngine {
       },
     });
 
-    const writerOutput = await writeClientResponse({
-      userMessage: effectiveUserMessage,
-      plan,
-      toolSummary,
-      toolResults,
+    if (await isRunCancelled('writing')) return;
+
+    const writerOutput = await withTimeout(
+      writeClientResponse({
+        userMessage: effectiveUserMessage,
+        plan,
+        toolSummary,
+        toolResults: promptToolResults,
+      }),
+      RUNTIME_PROMPT_STAGE_TIMEOUT_MS,
+      'writeClientResponse'
+    ).catch(async (error: any) => {
+      await this.emitEvent({
+        branchId: run.branchId,
+        agentRunId: run.id,
+        type: ProcessEventType.PROCESS_LOG,
+        level: ProcessEventLevel.WARN,
+        message: `Writer fallback used: ${compactPromptString(error?.message || error, 220)}`,
+      });
+      return fallbackWriterOutput({
+        toolSummary,
+        toolResults: promptToolResults,
+        plan,
+      });
     });
 
-    const validatorOutput = await validateClientResponse({
-      userMessage: effectiveUserMessage,
-      plan,
-      writerOutput,
-      toolResults,
+    if (await isRunCancelled('validation')) return;
+
+    const validatorOutput = await withTimeout(
+      validateClientResponse({
+        userMessage: effectiveUserMessage,
+        plan,
+        writerOutput,
+        toolResults: promptToolResults,
+      }),
+      RUNTIME_PROMPT_STAGE_TIMEOUT_MS,
+      'validateClientResponse'
+    ).catch(async (error: any) => {
+      await this.emitEvent({
+        branchId: run.branchId,
+        agentRunId: run.id,
+        type: ProcessEventType.PROCESS_LOG,
+        level: ProcessEventLevel.WARN,
+        message: `Validator fallback used: ${compactPromptString(error?.message || error, 220)}`,
+      });
+      return fallbackValidatorOutput();
     });
 
     const hasHighIssue = validatorOutput.issues.some((issue) => issue.severity === 'high');
@@ -1788,6 +2030,8 @@ export class RuntimeRunEngine {
         ...(libraryUpdates.collection ? { payload: { collection: libraryUpdates.collection } } : {}),
       });
     }
+
+    if (await isRunCancelled('response_persist')) return;
 
     await createBranchMessage({
       branchId: run.branchId,
