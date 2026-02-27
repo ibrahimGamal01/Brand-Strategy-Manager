@@ -1,5 +1,9 @@
 import { crawlAndPersistWebSources, fetchAndPersistWebSnapshot } from '../scraping/web-intelligence-service';
 import { publishPortalIntakeEvent } from './portal-intake-events';
+import {
+  createPortalIntakeScanRun,
+  updatePortalIntakeScanRun,
+} from './portal-intake-events-repository';
 
 export type PortalIntakeScanMode = 'quick' | 'standard' | 'deep';
 
@@ -132,6 +136,7 @@ function resolveCrawlSettings(mode: PortalIntakeScanMode): CrawlSettings {
 }
 
 export type PortalIntakeWebsiteScanSummary = {
+  scanRunId: string;
   started: boolean;
   mode: PortalIntakeScanMode;
   queuedTargets: string[];
@@ -149,19 +154,67 @@ export async function scanPortalIntakeWebsites(
     mode?: PortalIntakeScanMode;
     initiatedBy?: 'USER' | 'SYSTEM';
     skipIfRunning?: boolean;
+    scanRunId?: string;
   }
 ): Promise<PortalIntakeWebsiteScanSummary> {
   const mode = options?.mode || 'quick';
   const initiatedBy = options?.initiatedBy || 'USER';
   const skipIfRunning = options?.skipIfRunning !== false;
   const targets = parseWebsiteList(websites, 5);
+  const crawlSettings = resolveCrawlSettings(mode);
+  const scanRunId = String(options?.scanRunId || '').trim();
+  if (!scanRunId) {
+    const scanRun = await createPortalIntakeScanRun({
+      workspaceId,
+      mode,
+      status: 'RUNNING',
+      initiatedBy,
+      targets,
+      crawlSettings,
+    });
+    options = {
+      ...(options || {}),
+      scanRunId: scanRun.id,
+    };
+  }
+  const resolvedScanRunId = String(options?.scanRunId || '').trim();
+  if (!resolvedScanRunId) {
+    throw new Error('scanRunId is required for portal intake scan execution');
+  }
+
+  const publish = async (
+    type: Parameters<typeof publishPortalIntakeEvent>[1],
+    message: string,
+    payload?: Record<string, unknown>
+  ) =>
+    publishPortalIntakeEvent(
+      workspaceId,
+      type,
+      message,
+      {
+        ...(payload || {}),
+        scanRunId: resolvedScanRunId,
+      },
+      { scanRunId: resolvedScanRunId }
+    );
 
   if (!targets.length) {
-    publishPortalIntakeEvent(workspaceId, 'SCAN_WARNING', 'No valid websites found to scan.', {
+    await publish('SCAN_WARNING', 'No valid websites found to scan.', {
       mode,
       initiatedBy,
     });
+    await updatePortalIntakeScanRun(resolvedScanRunId, {
+      status: 'FAILED',
+      targetsCompleted: 0,
+      snapshotsSaved: 0,
+      pagesPersisted: 0,
+      warnings: 1,
+      failures: 1,
+      error: 'No valid websites found to scan.',
+      endedAt: new Date(),
+    });
     return {
+      scanRunId: resolvedScanRunId,
       started: false,
       mode,
       queuedTargets: [],
@@ -169,17 +222,28 @@ export async function scanPortalIntakeWebsites(
       snapshotsSaved: 0,
       pagesPersisted: 0,
       warnings: 1,
-      failures: 0,
+      failures: 1,
     };
   }
 
   if (activeScans.has(workspaceId) && skipIfRunning) {
-    publishPortalIntakeEvent(workspaceId, 'SCAN_WARNING', 'A scan is already running for this workspace.', {
+    await publish('SCAN_WARNING', 'A scan is already running for this workspace.', {
       mode,
       initiatedBy,
       targets,
     });
+    await updatePortalIntakeScanRun(resolvedScanRunId, {
+      status: 'CANCELLED',
+      targetsCompleted: 0,
+      snapshotsSaved: 0,
+      pagesPersisted: 0,
+      warnings: 1,
+      failures: 0,
+      error: 'Scan skipped because another scan is already running.',
+      endedAt: new Date(),
+    });
     return {
+      scanRunId: resolvedScanRunId,
       started: false,
       mode,
       queuedTargets: targets,
@@ -192,7 +256,6 @@ export async function scanPortalIntakeWebsites(
   }
 
   activeScans.add(workspaceId);
-  const crawlSettings = resolveCrawlSettings(mode);
   const allowedDomains = Array.from(
     new Set(
       targets
@@ -206,8 +269,9 @@ export async function scanPortalIntakeWebsites(
   let pagesPersisted = 0;
   let warnings = 0;
   let failures = 0;
+  let terminalError: string | null = null;
 
-  publishPortalIntakeEvent(workspaceId, 'SCAN_STARTED', `Starting ${mode} scan for ${targets.length} website(s).`, {
+  await publish('SCAN_STARTED', `Starting ${mode} scan for ${targets.length} website(s).`, {
     mode,
     initiatedBy,
     targets,
@@ -216,12 +280,12 @@ export async function scanPortalIntakeWebsites(
 
   try {
     for (const [index, target] of targets.entries()) {
-      publishPortalIntakeEvent(
-        workspaceId,
-        'SCAN_TARGET_STARTED',
-        `Scanning ${target} (${index + 1}/${targets.length}).`,
-        { mode, target, index: index + 1, total: targets.length }
-      );
+      await publish('SCAN_TARGET_STARTED', `Scanning ${target} (${index + 1}/${targets.length}).`, {
+        mode,
+        target,
+        index: index + 1,
+        total: targets.length,
+      });
 
       try {
         const snapshot = await fetchAndPersistWebSnapshot({
@@ -234,7 +298,7 @@ export async function scanPortalIntakeWebsites(
         });
         snapshotsSaved += 1;
 
-        publishPortalIntakeEvent(workspaceId, 'SNAPSHOT_SAVED', `Saved homepage snapshot for ${target}.`, {
+        await publish('SNAPSHOT_SAVED', `Saved homepage snapshot for ${target}.`, {
           target,
           snapshotId: snapshot.snapshotId,
           sourceId: snapshot.sourceId,
@@ -259,35 +323,25 @@ export async function scanPortalIntakeWebsites(
 
         if (crawl.fallbackReason) {
           warnings += 1;
-          publishPortalIntakeEvent(
-            workspaceId,
-            'SCAN_WARNING',
-            `Crawler used fallback mode for ${target}.`,
-            {
-              target,
-              fallbackReason: crawl.fallbackReason,
-              persisted: crawl.persisted,
-              runId: crawl.runId,
-            }
-          );
+          await publish('SCAN_WARNING', `Crawler used fallback mode for ${target}.`, {
+            target,
+            fallbackReason: crawl.fallbackReason,
+            persisted: crawl.persisted,
+            runId: crawl.runId,
+          });
         }
 
         if (Array.isArray(crawl.failures) && crawl.failures.length > 0) {
           warnings += crawl.failures.length;
-          publishPortalIntakeEvent(
-            workspaceId,
-            'SCAN_WARNING',
-            `Crawl completed for ${target} with ${crawl.failures.length} warning(s).`,
-            {
-              target,
-              warnings: crawl.failures.slice(0, 5),
-              persisted: crawl.persisted,
-              runId: crawl.runId,
-            }
-          );
+          await publish('SCAN_WARNING', `Crawl completed for ${target} with ${crawl.failures.length} warning(s).`, {
+            target,
+            warnings: crawl.failures.slice(0, 5),
+            persisted: crawl.persisted,
+            runId: crawl.runId,
+          });
         }
 
-        publishPortalIntakeEvent(workspaceId, 'CRAWL_COMPLETED', `Crawl completed for ${target}.`, {
+        await publish('CRAWL_COMPLETED', `Crawl completed for ${target}.`, {
           target,
           persisted: crawl.persisted,
           runId: crawl.runId,
@@ -297,18 +351,24 @@ export async function scanPortalIntakeWebsites(
       } catch (error) {
         failures += 1;
         const message = (error as Error)?.message || String(error);
-        publishPortalIntakeEvent(workspaceId, 'SCAN_FAILED', `Scan failed for ${target}: ${message}`, {
+        terminalError = message;
+        await publish('SCAN_FAILED', `Scan failed for ${target}: ${message}`, {
           target,
           error: message,
         });
       }
     }
+  } catch (error) {
+    failures += 1;
+    terminalError = (error as Error)?.message || String(error);
+    await publish('SCAN_FAILED', `Scan failed unexpectedly: ${terminalError}`, {
+      error: terminalError,
+    });
   } finally {
     activeScans.delete(workspaceId);
   }
 
-  publishPortalIntakeEvent(
-    workspaceId,
+  await publish(
     'SCAN_DONE',
     `Scan finished. ${targetsCompleted}/${targets.length} sites processed, ${pagesPersisted} page snapshots added.`,
     {
@@ -322,7 +382,21 @@ export async function scanPortalIntakeWebsites(
     }
   );
 
+  const finalStatus: 'COMPLETED' | 'FAILED' =
+    failures > 0 && targetsCompleted === 0 ? 'FAILED' : 'COMPLETED';
+  await updatePortalIntakeScanRun(resolvedScanRunId, {
+    status: finalStatus,
+    targetsCompleted,
+    snapshotsSaved,
+    pagesPersisted,
+    warnings,
+    failures,
+    error: finalStatus === 'FAILED' ? terminalError || 'Scan failed.' : null,
+    endedAt: new Date(),
+  });
+
   return {
+    scanRunId: resolvedScanRunId,
     started: true,
     mode,
     queuedTargets: targets,
@@ -331,6 +405,59 @@ export async function scanPortalIntakeWebsites(
     pagesPersisted,
     warnings,
     failures,
+  };
+}
+
+export async function queuePortalIntakeWebsiteScan(
+  workspaceId: string,
+  websites: string[],
+  options?: {
+    mode?: PortalIntakeScanMode;
+    initiatedBy?: 'USER' | 'SYSTEM';
+    skipIfRunning?: boolean;
+  }
+): Promise<{
+  scanRunId: string;
+  mode: PortalIntakeScanMode;
+  websites: string[];
+}> {
+  const mode = options?.mode || 'quick';
+  const initiatedBy = options?.initiatedBy || 'USER';
+  const normalizedWebsites = parseWebsiteList(websites, 5);
+  const crawlSettings = resolveCrawlSettings(mode);
+
+  const scanRun = await createPortalIntakeScanRun({
+    workspaceId,
+    mode,
+    status: 'RUNNING',
+    initiatedBy,
+    targets: normalizedWebsites,
+    crawlSettings,
+  });
+
+  void scanPortalIntakeWebsites(workspaceId, normalizedWebsites, {
+    ...options,
+    mode,
+    initiatedBy,
+    scanRunId: scanRun.id,
+  }).catch(async (error) => {
+    const message = (error as Error)?.message || String(error);
+    try {
+      await updatePortalIntakeScanRun(scanRun.id, {
+        status: 'FAILED',
+        failures: 1,
+        error: message,
+        endedAt: new Date(),
+      });
+    } catch {
+      // Best effort; run-level failure logging handled by caller/event stream.
+    }
+  });
+
+  return {
+    scanRunId: scanRun.id,
+    mode,
+    websites: normalizedWebsites,
   };
 }
 

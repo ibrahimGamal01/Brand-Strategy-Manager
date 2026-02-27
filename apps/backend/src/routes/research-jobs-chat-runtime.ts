@@ -173,10 +173,12 @@ router.get('/:id/runtime/branches/:branchId/events', async (req, res) => {
     await runtimeRunEngine.getBranchState({ researchJobId, branchId });
 
     const afterId = typeof req.query.afterId === 'string' ? req.query.afterId : undefined;
+    const afterSeq = typeof req.query.afterSeq === 'string' ? req.query.afterSeq : undefined;
     const limit = Number(req.query.limit || 100);
 
     const events = await listProcessEvents(branchId, {
       afterId,
+      afterSeq,
       limit: Number.isFinite(limit) ? limit : 100,
     });
 

@@ -58,6 +58,7 @@ export type RuntimePlan = {
   };
   runtime?: {
     continuationDepth: number;
+    contextSnapshot?: Record<string, unknown>;
   };
 };
 

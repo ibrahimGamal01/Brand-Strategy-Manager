@@ -6,6 +6,7 @@ type PlannerInput = {
   researchJobId: string;
   branchId: string;
   userMessage: string;
+  runtimeContext?: Record<string, unknown>;
   policy: {
     allowMutationTools: boolean;
     maxToolRuns: number;
@@ -35,6 +36,7 @@ type WriterInput = {
   plan: RuntimePlan;
   toolSummary: SummarizerOutput;
   toolResults: RuntimeToolResult[];
+  runtimeContext?: Record<string, unknown>;
 };
 
 type WriterOutput = {
@@ -612,9 +614,33 @@ function fallbackWriter(input: WriterInput): WriterOutput {
     )
   ).slice(0, concise ? 2 : 4);
   const hasToolResults = input.toolResults.length > 0;
+  const runtimeContext = isRecord(input.runtimeContext) ? input.runtimeContext : {};
+  const contextSummary: string[] = [];
+  const clientName = String(runtimeContext.clientName || '').trim();
+  const websites = Array.isArray(runtimeContext.websites)
+    ? runtimeContext.websites.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 4)
+    : [];
+  const competitorsCount = Number(runtimeContext.competitorsCount || 0);
+  const candidateCompetitorsCount = Number(runtimeContext.candidateCompetitorsCount || 0);
+  const webSnapshotsCount = Number(runtimeContext.webSnapshotsCount || 0);
+
+  if (clientName) contextSummary.push(`Workspace: ${clientName}.`);
+  if (websites.length) contextSummary.push(`Known website(s): ${websites.join(', ')}.`);
+  if (Number.isFinite(webSnapshotsCount) && webSnapshotsCount > 0) {
+    contextSummary.push(`Stored web snapshots: ${webSnapshotsCount}.`);
+  }
+  if (Number.isFinite(competitorsCount) && competitorsCount > 0) {
+    contextSummary.push(`Discovered competitors: ${competitorsCount}.`);
+  }
+  if (Number.isFinite(candidateCompetitorsCount) && candidateCompetitorsCount > 0) {
+    contextSummary.push(`Candidate competitors pending review: ${candidateCompetitorsCount}.`);
+  }
 
   const responseSections: string[] = [];
   if (!hasToolResults) {
+    if (contextSummary.length) {
+      responseSections.push(`Grounded workspace snapshot:\n${contextSummary.map((line, idx) => `${idx + 1}. ${line}`).join('\n')}`);
+    }
     if (concise) {
       responseSections.push(
         'I do not have fresh tool output attached to this message yet, so I cannot verify claims from this run.'
@@ -758,6 +784,7 @@ export async function generatePlannerPlan(input: PlannerInput): Promise<RuntimeP
     `ResearchJob: ${input.researchJobId}`,
     `Branch: ${input.branchId}`,
     `Policy: ${JSON.stringify(input.policy)}`,
+    `Runtime context snapshot: ${JSON.stringify(input.runtimeContext || {})}`,
     `User message: ${input.userMessage}`,
     `Recent branch messages: ${JSON.stringify(input.previousMessages.slice(-12))}`,
   ].join('\n\n');
@@ -892,6 +919,7 @@ export async function writeClientResponse(input: WriterInput): Promise<WriterOut
     'Only be concise when the user explicitly asks for concise/brief output.',
     `Concise mode for this request: ${conciseRequested ? 'true' : 'false'}.`,
     'Synthesize evidence into clear narrative and recommendations; do not just output sparse bullet points.',
+    'Use the runtime workspace context to ground baseline facts before asking for missing information.',
     'Never include scaffolding labels like "Fork from here", "How BAT got here", "Tools used", "Assumptions", or "Evidence".',
     'Must include recommendation, evidence-backed why, and next steps.',
     'JSON schema:',
@@ -911,6 +939,7 @@ export async function writeClientResponse(input: WriterInput): Promise<WriterOut
 
   const writerPayload = {
     userMessage: input.userMessage,
+    runtimeContext: input.runtimeContext || {},
     plan: input.plan,
     toolSummary: input.toolSummary,
     toolResults: input.toolResults,

@@ -398,13 +398,30 @@ export async function createProcessEvent(input: {
   });
 }
 
-export async function listProcessEvents(branchId: string, options?: { afterId?: string; limit?: number }) {
+export async function listProcessEvents(
+  branchId: string,
+  options?: { afterId?: string; afterSeq?: string; limit?: number }
+) {
   const limit = Math.max(1, Math.min(500, options?.limit ?? 100));
+  const afterSeqRaw = String(options?.afterSeq || '').trim();
+  const hasAfterSeq = /^\d+$/.test(afterSeqRaw);
+  const afterSeq = hasAfterSeq ? BigInt(afterSeqRaw) : null;
+
+  if (afterSeq !== null) {
+    return prisma.processEvent.findMany({
+      where: {
+        branchId,
+        eventSeq: { gt: afterSeq },
+      },
+      orderBy: { eventSeq: 'asc' },
+      take: limit,
+    });
+  }
 
   if (!options?.afterId) {
     const rows = await prisma.processEvent.findMany({
       where: { branchId },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { eventSeq: 'desc' },
       take: limit,
     });
     return rows.reverse();
@@ -412,8 +429,19 @@ export async function listProcessEvents(branchId: string, options?: { afterId?: 
 
   const after = await prisma.processEvent.findUnique({
     where: { id: options.afterId },
-    select: { createdAt: true },
+    select: { createdAt: true, eventSeq: true },
   });
+
+  if (after?.eventSeq !== null && after?.eventSeq !== undefined) {
+    return prisma.processEvent.findMany({
+      where: {
+        branchId,
+        eventSeq: { gt: after.eventSeq },
+      },
+      orderBy: { eventSeq: 'asc' },
+      take: limit,
+    });
+  }
 
   return prisma.processEvent.findMany({
     where: {

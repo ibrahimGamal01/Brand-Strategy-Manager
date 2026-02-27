@@ -8,15 +8,32 @@ import { TOOL_REGISTRY, getTool } from './tools/tool-registry';
 import { inferHeuristicToolCalls, type PlannerToolCall } from './tool-hints';
 import { formatUserContextsForLLM } from './context/format-user-context';
 
-const TOOL_TIMEOUT_MS = 10_000;
-const TOTAL_TOOL_TIMEOUT_MS = 20_000;
-const MAX_TOOL_LOOP_ITERATIONS = 2;
+function envNumber(name: string, fallback: number, min: number, max: number): number {
+  const parsed = Number(process.env[name]);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(parsed)));
+}
+
+const CHAT_TOOL_TIMEOUT_MS = envNumber('CHAT_TOOL_TIMEOUT_MS', 45_000, 2_000, 300_000);
+const CHAT_TOTAL_TOOL_TIMEOUT_MS = envNumber('CHAT_TOTAL_TOOL_TIMEOUT_MS', 180_000, 5_000, 900_000);
+const CHAT_MAX_TOOL_LOOP_ITERATIONS = envNumber('CHAT_MAX_TOOL_LOOP_ITERATIONS', 6, 1, 12);
+const CHAT_TOOL_MAX_RETRIES = envNumber('CHAT_TOOL_MAX_RETRIES', 2, 0, 5);
+
+const TOOL_TIMEOUT_OVERRIDES_MS: Record<string, number> = {
+  'web.crawl': 120_000,
+  'web.fetch': 45_000,
+  'search.web': 25_000,
+  'document.generate': 180_000,
+  'intel.list': 12_000,
+  'intel.get': 12_000,
+};
 
 export type ToolExecutionResult = {
   name: string;
   args: Record<string, unknown>;
   result?: Record<string, unknown>;
   error?: string;
+  retryAttempts?: number;
 };
 
 type PlannerPayload = {
@@ -154,6 +171,65 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   });
 }
 
+function resolveToolTimeoutMs(toolName: string): number {
+  const override = TOOL_TIMEOUT_OVERRIDES_MS[String(toolName || '').trim()];
+  if (typeof override === 'number' && Number.isFinite(override)) {
+    return override;
+  }
+  return CHAT_TOOL_TIMEOUT_MS;
+}
+
+function isTransientToolError(error: unknown): boolean {
+  const message = String((error as Error)?.message || error || '')
+    .trim()
+    .toLowerCase();
+  if (!message) return false;
+  if (
+    message.includes('timed out') ||
+    message.includes('timeout') ||
+    message.includes('econnreset') ||
+    message.includes('too many requests') ||
+    message.includes('rate limit') ||
+    /\b429\b/.test(message)
+  ) {
+    return true;
+  }
+  return /\b5\d\d\b/.test(message);
+}
+
+function retryDelayMs(attempt: number): number {
+  const base = Math.min(4_000, 400 * 2 ** Math.max(0, attempt - 1));
+  const jitter = Math.floor(Math.random() * 180);
+  return base + jitter;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+}
+
+async function executeToolWithRetry(
+  toolName: string,
+  execute: () => Promise<Record<string, unknown>>
+): Promise<{ result?: Record<string, unknown>; error?: string; attempts: number }> {
+  let attempt = 0;
+  while (attempt <= CHAT_TOOL_MAX_RETRIES) {
+    attempt += 1;
+    try {
+      const result = await execute();
+      return { result, attempts: attempt };
+    } catch (error) {
+      if (attempt > CHAT_TOOL_MAX_RETRIES || !isTransientToolError(error)) {
+        return {
+          error: (error as Error)?.message || 'Tool execution failed.',
+          attempts: attempt,
+        };
+      }
+      await sleep(retryDelayMs(attempt));
+    }
+  }
+  return { error: 'Tool execution failed.', attempts: CHAT_TOOL_MAX_RETRIES + 1 };
+}
+
 function summarizeToolResults(results: ToolExecutionResult[]): string {
   if (!results.length) return 'No tool calls executed.';
   return results
@@ -228,11 +304,11 @@ async function executeReadOnlyTools(context: AgentContext, calls: PlannerToolCal
   const results: ToolExecutionResult[] = [];
 
   for (const call of calls) {
-    if (Date.now() - startedAt > TOTAL_TOOL_TIMEOUT_MS) {
+    if (Date.now() - startedAt > CHAT_TOTAL_TOOL_TIMEOUT_MS) {
       results.push({
         name: call.name,
         args: call.args,
-        error: `Tool budget exceeded (${TOTAL_TOOL_TIMEOUT_MS}ms).`,
+        error: `Tool budget exceeded (${CHAT_TOTAL_TOOL_TIMEOUT_MS}ms).`,
       });
       break;
     }
@@ -252,16 +328,27 @@ async function executeReadOnlyTools(context: AgentContext, calls: PlannerToolCal
       continue;
     }
 
-    try {
-      const result = await withTimeout(tool.execute(context, normalizedArgs), TOOL_TIMEOUT_MS, `Tool ${tool.name}`);
-      results.push({ name: call.name, args: normalizedArgs, result });
-    } catch (error) {
+    const timeoutMs = resolveToolTimeoutMs(tool.name);
+    const execution = await executeToolWithRetry(tool.name, () =>
+      withTimeout(tool.execute(context, normalizedArgs), timeoutMs, `Tool ${tool.name}`)
+    );
+
+    if (execution.error) {
       results.push({
         name: call.name,
         args: call.args,
-        error: (error as Error).message || 'Tool execution failed.',
+        error: execution.error,
+        retryAttempts: execution.attempts - 1,
       });
+      continue;
     }
+
+    results.push({
+      name: call.name,
+      args: normalizedArgs,
+      result: execution.result,
+      retryAttempts: execution.attempts - 1,
+    });
   }
 
   return results;
@@ -312,7 +399,7 @@ export async function runPlannerToolLoop(params: {
   agentContext: AgentContext;
 }): Promise<ToolExecutionResult[]> {
   const toolResults: ToolExecutionResult[] = [];
-  for (let iteration = 0; iteration < MAX_TOOL_LOOP_ITERATIONS; iteration += 1) {
+  for (let iteration = 0; iteration < CHAT_MAX_TOOL_LOOP_ITERATIONS; iteration += 1) {
     const planner = await runPlanner({
       contextText: params.contextText,
       userMessage: params.userMessage,

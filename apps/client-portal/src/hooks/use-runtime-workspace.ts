@@ -123,6 +123,7 @@ type RuntimeEventStatus = "info" | "warn" | "error";
 
 type NormalizedRuntimeEvent = {
   id: string;
+  eventSeq?: string;
   type: string;
   level: RuntimeEventStatus;
   message: string;
@@ -237,9 +238,11 @@ function normalizeRuntimeEvent(event: Record<string, unknown>): NormalizedRuntim
   const normalizedEvent = String(eventV2?.event || "").trim().toLowerCase() || fallback.event;
   const level = normalizeEventLevel(eventV2?.status || event.level);
   const timestamp = toIso(eventV2?.createdAt || createdAt);
+  const eventSeq = String(event.eventSeq || "").trim() || undefined;
 
   return {
     id: String(event.id || `${timestamp}-${Math.random()}`),
+    ...(eventSeq ? { eventSeq } : {}),
     type,
     level,
     message,
@@ -1202,11 +1205,11 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
         const normalizedMessages = mapMessages(messagePayload.messages as Array<Record<string, unknown>>);
         const events = eventPayload.events as Array<Record<string, unknown>>;
         const latestEvent = events[events.length - 1];
-        const latestEventId = String(latestEvent?.id || "").trim();
-        if (latestEventId) {
+        const latestCursor = String(latestEvent?.eventSeq || latestEvent?.id || "").trim();
+        if (latestCursor) {
           latestEventCursorRef.current = {
             ...latestEventCursorRef.current,
-            [branchId]: latestEventId,
+            [branchId]: latestCursor,
           };
         }
         const activeRuns = (statePayload.activeRuns || []) as Array<Record<string, unknown>>;
@@ -1496,9 +1499,11 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
       if (!payload) return;
 
       if (payload.type === "EVENT" && payload.event?.id) {
+        const cursor = String(payload.event.eventSeq || payload.event.id || "").trim();
+        if (!cursor) return;
         latestEventCursorRef.current = {
           ...latestEventCursorRef.current,
-          [activeBranchId]: String(payload.event.id),
+          [activeBranchId]: cursor,
         };
         scheduleSync(40);
         return;
@@ -1506,11 +1511,11 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
 
       if (payload.type === "EVENT_BATCH") {
         const latest = Array.isArray(payload.events) ? payload.events[payload.events.length - 1] : null;
-        const latestId = String(latest?.id || "").trim();
-        if (latestId) {
+        const latestCursor = String(latest?.eventSeq || latest?.id || "").trim();
+        if (latestCursor) {
           latestEventCursorRef.current = {
             ...latestEventCursorRef.current,
-            [activeBranchId]: latestId,
+            [activeBranchId]: latestCursor,
           };
         }
         scheduleSync(0);

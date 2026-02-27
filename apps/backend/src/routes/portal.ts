@@ -36,9 +36,10 @@ import {
 import {
   parseWebsiteList,
   PortalIntakeScanMode,
-  scanPortalIntakeWebsites,
+  queuePortalIntakeWebsiteScan,
 } from '../services/portal/portal-intake-websites';
 import { listPortalWorkspaceLibrary } from '../services/portal/portal-library';
+import { getPortalIntakeScanRun } from '../services/portal/portal-intake-events-repository';
 
 const router = Router();
 
@@ -415,22 +416,50 @@ router.post(
         return res.status(400).json({ ok: false, error: 'At least one valid website is required to scan' });
       }
 
-      void scanPortalIntakeWebsites(workspaceId, websites, {
+      const queued = await queuePortalIntakeWebsiteScan(workspaceId, websites, {
         mode,
         initiatedBy: 'USER',
-      }).catch((error) => {
-        console.error(`[PortalIntake] Website scan failed for ${workspaceId}:`, error);
       });
 
       return res.status(202).json({
         ok: true,
         workspaceId,
-        mode,
-        websites,
+        mode: queued.mode,
+        websites: queued.websites,
+        scanRunId: queued.scanRunId,
+        status: 'accepted',
       });
     } catch (error: any) {
       const message = String(error?.message || '');
       return res.status(500).json({ ok: false, error: message || 'Failed to start website scan' });
+    }
+  }
+);
+
+router.get(
+  '/workspaces/:workspaceId/intake/websites/scan-runs/:scanRunId',
+  requirePortalAuth,
+  requireWorkspaceMembership,
+  async (req, res) => {
+    try {
+      const workspaceId = safeString(req.params.workspaceId);
+      const scanRunId = safeString(req.params.scanRunId);
+      if (!workspaceId || !scanRunId) {
+        return res.status(400).json({ error: 'workspaceId and scanRunId are required' });
+      }
+
+      const run = await getPortalIntakeScanRun(workspaceId, scanRunId);
+      if (!run) {
+        return res.status(404).json({ error: 'Scan run not found' });
+      }
+
+      return res.json({
+        ok: true,
+        scanRun: run,
+      });
+    } catch (error: any) {
+      const message = String(error?.message || '');
+      return res.status(500).json({ error: message || 'Failed to load intake scan run' });
     }
   }
 );
@@ -452,6 +481,8 @@ router.get(
         undefined;
       const afterIdParsed = afterIdRaw ? Number.parseInt(String(afterIdRaw), 10) : undefined;
       const afterId = Number.isFinite(afterIdParsed as number) ? (afterIdParsed as number) : undefined;
+      const scanRunIdRaw = Array.isArray(req.query.scanRunId) ? req.query.scanRunId[0] : req.query.scanRunId;
+      const scanRunId = safeString(scanRunIdRaw);
 
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -460,15 +491,17 @@ router.get(
       res.flushHeaders?.();
       res.write('retry: 3000\n\n');
 
-      const backlog = listPortalIntakeEvents(workspaceId, {
+      const backlog = await listPortalIntakeEvents(workspaceId, {
         afterId,
         limit: 200,
+        ...(scanRunId ? { scanRunId } : {}),
       });
       for (const event of backlog) {
         res.write(serializePortalIntakeEventSse(event));
       }
 
       const unsubscribe = subscribePortalIntakeEvents(workspaceId, (event) => {
+        if (scanRunId && event.scanRunId !== scanRunId) return;
         res.write(serializePortalIntakeEventSse(event));
       });
 

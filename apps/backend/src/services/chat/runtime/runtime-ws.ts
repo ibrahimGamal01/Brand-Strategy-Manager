@@ -66,6 +66,7 @@ export function attachRuntimeWebSocketServer(server: http.Server, isSchemaReady:
     const researchJobId = String(match?.[1] || '').trim();
     const branchId = String(match?.[2] || '').trim();
     const afterId = String(url.searchParams.get('afterId') || '').trim() || undefined;
+    const afterSeq = String(url.searchParams.get('afterSeq') || '').trim() || undefined;
 
     if (!researchJobId || !branchId) {
       safeSend(socket, { type: 'ERROR', error: 'INVALID_PATH', details: 'Missing workspace or branch id.' });
@@ -114,6 +115,7 @@ export function attachRuntimeWebSocketServer(server: http.Server, isSchemaReady:
 
         const backlog = await listProcessEvents(branchId, {
           afterId,
+          afterSeq,
           limit: 160,
         });
 

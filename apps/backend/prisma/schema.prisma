@@ -117,6 +117,8 @@ model ResearchJob {
   webExtractionRuns           WebExtractionRun[]
   adaptiveSelectorMemories    AdaptiveSelectorMemory[]
   portalMemberships           PortalWorkspaceMembership[]
+  portalIntakeScanRuns        PortalIntakeScanRun[]
+  portalIntakeScanEvents      PortalIntakeScanEvent[]
 
   @@map("research_jobs")
 }
@@ -195,6 +197,50 @@ model PortalEmailToken {
   @@index([userId, type, createdAt(sort: Desc)])
   @@index([expiresAt, usedAt])
   @@map("portal_email_tokens")
+}
+
+model PortalIntakeScanRun {
+  id               String                 @id @default(uuid())
+  workspaceId      String                 @map("workspace_id")
+  mode             String
+  status           String
+  initiatedBy      String                 @map("initiated_by")
+  targetsJson      Json                   @map("targets_json")
+  crawlSettingsJson Json?                 @map("crawl_settings_json")
+  targetsCompleted Int                    @default(0) @map("targets_completed")
+  snapshotsSaved   Int                    @default(0) @map("snapshots_saved")
+  pagesPersisted   Int                    @default(0) @map("pages_persisted")
+  warnings         Int                    @default(0)
+  failures         Int                    @default(0)
+  error            String?
+  startedAt        DateTime               @default(now()) @map("started_at")
+  endedAt          DateTime?              @map("ended_at")
+  createdAt        DateTime               @default(now()) @map("created_at")
+  updatedAt        DateTime               @updatedAt @map("updated_at")
+
+  workspace ResearchJob             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  events    PortalIntakeScanEvent[]
+
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@index([workspaceId, status, createdAt(sort: Desc)])
+  @@map("portal_intake_scan_runs")
+}
+
+model PortalIntakeScanEvent {
+  id         Int      @id @default(autoincrement())
+  scanRunId  String   @map("scan_run_id")
+  workspaceId String  @map("workspace_id")
+  type       String
+  message    String
+  payloadJson Json?   @map("payload_json")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  scanRun   PortalIntakeScanRun @relation(fields: [scanRunId], references: [id], onDelete: Cascade)
+  workspace ResearchJob         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, id])
+  @@index([scanRunId, id])
+  @@map("portal_intake_scan_events")
 }
 
 model ResearchJobEvent {
@@ -2050,6 +2096,7 @@ model ProcessEvent {
   agentRunId String?           @map("agent_run_id")
   toolRunId  String?           @map("tool_run_id")
   branchId   String            @map("branch_id")
+  eventSeq   BigInt            @default(autoincrement()) @map("event_seq")
   level      ProcessEventLevel @default(INFO)
   type       ProcessEventType
   message    String
@@ -2061,6 +2108,7 @@ model ProcessEvent {
   toolRun  ToolRun?    @relation(fields: [toolRunId], references: [id], onDelete: SetNull)
 
   @@index([branchId, createdAt])
+  @@index([branchId, eventSeq])
   @@index([agentRunId, createdAt])
   @@index([toolRunId, createdAt])
   @@map("process_events")

@@ -253,8 +253,20 @@ export function attachRuntimeEventV2Payload(input: {
 }
 
 export function serializeRuntimeProcessEvent(event: ProcessEvent) {
+  const eventSeqRaw = (event as ProcessEvent & { eventSeq?: bigint | number | null }).eventSeq;
+  const eventSeq =
+    typeof eventSeqRaw === 'bigint'
+      ? eventSeqRaw.toString()
+      : typeof eventSeqRaw === 'number'
+        ? String(eventSeqRaw)
+        : undefined;
+  const { eventSeq: _ignoredEventSeq, ...eventWithoutSeq } = event as ProcessEvent & {
+    eventSeq?: bigint | number | null;
+  };
+
   return {
-    ...event,
+    ...eventWithoutSeq,
+    ...(eventSeq ? { eventSeq } : {}),
     eventV2: normalizeRuntimeEventV2({
       type: event.type,
       level: event.level,

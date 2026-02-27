@@ -37,6 +37,8 @@ import {
 } from './prompt-suite';
 import type { RunPolicy, RuntimeDecision, RuntimePlan, RuntimeToolCall, RuntimeToolResult, SendMessageMode } from './types';
 import { TOOL_REGISTRY } from '../../ai/chat/tools/tool-registry';
+import { buildRuntimeAgentContext } from './context-assembler';
+import type { RuntimeAgentContext } from './agent-context';
 
 type SendMessageInput = {
   researchJobId: string;
@@ -55,13 +57,19 @@ type SendMessageResult = {
   userMessageId?: string;
 };
 
+function envRuntimeNumber(name: string, fallback: number, min: number, max: number): number {
+  const parsed = Number(process.env[name]);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(parsed)));
+}
+
 const DEFAULT_POLICY: RunPolicy = {
   autoContinue: true,
-  maxAutoContinuations: 1,
+  maxAutoContinuations: envRuntimeNumber('RUNTIME_MAX_AUTO_CONTINUATIONS', 1, 0, 8),
   maxToolRuns: 4,
   toolConcurrency: 3,
   allowMutationTools: false,
-  maxToolMs: 30_000,
+  maxToolMs: envRuntimeNumber('CHAT_TOOL_TIMEOUT_MS', 45_000, 2_000, 300_000),
 };
 
 const BOOTSTRAP_PROMPT =
@@ -137,6 +145,7 @@ const MAX_PROMPT_STRING_CHARS = 320;
 const SCHEDULED_RUN_PREEMPTION_ENABLED = String(process.env.RUNTIME_PREEMPT_SCHEDULED_RUNS || 'true')
   .trim()
   .toLowerCase() !== 'false';
+const TOOL_TRANSIENT_MAX_RETRIES = envRuntimeNumber('CHAT_TOOL_MAX_RETRIES', 2, 0, 5);
 
 export function normalizePolicy(raw?: Partial<RunPolicy> | null): RunPolicy {
   const policy = {
@@ -184,6 +193,54 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
         reject(error);
       });
   });
+}
+
+function isTransientToolError(error: unknown): boolean {
+  const message = String((error as Error)?.message || error || '')
+    .trim()
+    .toLowerCase();
+  if (!message) return false;
+  if (
+    message.includes('timed out') ||
+    message.includes('timeout') ||
+    message.includes('econnreset') ||
+    message.includes('too many requests') ||
+    message.includes('rate limit') ||
+    /\b429\b/.test(message)
+  ) {
+    return true;
+  }
+  return /\b5\d\d\b/.test(message);
+}
+
+function isTransientToolContractFailure(result: RuntimeToolResult): boolean {
+  if (result.ok) return false;
+  const text = [result.summary, ...(Array.isArray(result.warnings) ? result.warnings : [])]
+    .map((entry) => String(entry || '').trim().toLowerCase())
+    .filter(Boolean)
+    .join(' | ');
+  if (!text) return false;
+  if (
+    text.includes('timed out') ||
+    text.includes('timeout') ||
+    text.includes('econnreset') ||
+    text.includes('too many requests') ||
+    text.includes('rate limit') ||
+    /\b429\b/.test(text)
+  ) {
+    return true;
+  }
+  return /\b5\d\d\b/.test(text);
+}
+
+function retryBackoffMs(attempt: number): number {
+  const base = Math.min(4_000, 350 * 2 ** Math.max(0, attempt - 1));
+  const jitter = Math.floor(Math.random() * 220);
+  return base + jitter;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 }
 
 function compactPromptString(value: unknown, maxChars = MAX_PROMPT_STRING_CHARS): string {
@@ -299,14 +356,32 @@ function fallbackWriterOutput(input: {
   toolResults: RuntimeToolResult[];
   plan: RuntimePlan;
   userMessage?: string;
+  runtimeContext?: Record<string, unknown>;
 }): RuntimeWriterOutput {
   const concise = prefersConciseOutput(input.userMessage || '');
+  const hasToolResults = input.toolResults.length > 0;
   const highlights = input.toolSummary.highlights.filter(Boolean).slice(0, concise ? 4 : 8);
   const evidenceLines = input.toolResults
     .flatMap((result) => result.evidence)
     .slice(0, concise ? 5 : 10)
     .map((entry, index) => `${index + 1}. ${compactPromptString(entry.label, 220)}`);
+  const runtimeContext = isRecord(input.runtimeContext) ? input.runtimeContext : {};
+  const baselineSummary: string[] = [];
+  const clientName = String(runtimeContext.clientName || '').trim();
+  if (clientName) baselineSummary.push(`Workspace: ${clientName}.`);
+  const websites = Array.isArray(runtimeContext.websites)
+    ? runtimeContext.websites.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 4)
+    : [];
+  if (websites.length) baselineSummary.push(`Known website(s): ${websites.join(', ')}.`);
+  const webSnapshotsCount = Number(runtimeContext.webSnapshotsCount || 0);
+  if (Number.isFinite(webSnapshotsCount) && webSnapshotsCount > 0) {
+    baselineSummary.push(`Stored web snapshots: ${webSnapshotsCount}.`);
+  }
   const responseSections: string[] = [];
+
+  if (!hasToolResults && baselineSummary.length) {
+    responseSections.push(`Grounded workspace snapshot:\n${baselineSummary.map((line, idx) => `${idx + 1}. ${line}`).join('\n')}`);
+  }
 
   if (highlights.length > 0) {
     responseSections.push(highlights[0]);
@@ -319,7 +394,11 @@ function fallbackWriterOutput(input: {
       );
     }
   } else {
-    responseSections.push('I reviewed the available workspace evidence and compiled the latest findings.');
+    responseSections.push(
+      hasToolResults
+        ? 'I reviewed the available workspace evidence and compiled the latest findings.'
+        : 'I do not have fresh tool output for this run yet, so this response is grounded in the current workspace snapshot.'
+    );
   }
 
   if (evidenceLines.length > 0) {
@@ -460,15 +539,6 @@ function parseSlashCommand(message: string): { command: string; argsText: string
   return { command, argsText, argsJson: null };
 }
 
-function shouldIncludeOperationalTrace(message: string): boolean {
-  const normalized = String(message || '').toLowerCase();
-  return (
-    /\b(tool execution trace|execution trace|run trace|validation note|debug log|debug info|internal trace)\b/.test(
-      normalized
-    ) || /\bshow\b.*\btrace\b/.test(normalized)
-  );
-}
-
 export function stripLegacyBoilerplateResponse(content: string): string {
   const raw = String(content || '').trim();
   if (!raw) return '';
@@ -493,6 +563,94 @@ export function stripLegacyBoilerplateResponse(content: string): string {
   cleaned = cleaned.replace(/\n{2,}no tools executed in this run\.[\s\S]*$/i, '').trim();
   cleaned = cleaned.replace(/\n{2,}validation note:[\s\S]*$/i, '').trim();
   return cleaned;
+}
+
+const CLIENT_META_BLOCKLIST = [
+  /\btool execution trace\b/gi,
+  /\bexecution trace\b/gi,
+  /\bvalidation note\b/gi,
+  /\bno tools executed in this run\b/gi,
+  /\bhow bat got here\b/gi,
+  /\bfork from here\b/gi,
+  /^tools used\s*$/gim,
+  /^assumptions\s*$/gim,
+];
+
+function sanitizeClientResponse(content: string): string {
+  let cleaned = stripLegacyBoilerplateResponse(content);
+  for (const pattern of CLIENT_META_BLOCKLIST) {
+    cleaned = cleaned.replace(pattern, '');
+  }
+  cleaned = cleaned
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .trim();
+  return cleaned;
+}
+
+function buildRuntimeContextSnapshot(context: RuntimeAgentContext): Record<string, unknown> {
+  const websitesRaw = Array.isArray(context.workspace.inputData?.websites)
+    ? context.workspace.inputData.websites
+    : [];
+  const website = String(context.workspace.inputData?.website || '').trim();
+  const websites = [
+    ...(website ? [website] : []),
+    ...websitesRaw.map((entry) => String(entry || '').trim()).filter(Boolean),
+  ].slice(0, 6);
+
+  return {
+    clientName: context.workspace.clientName || null,
+    websites,
+    competitorsCount: Number(context.evidence.competitors?.discovered || 0),
+    candidateCompetitorsCount: Number(context.evidence.competitors?.candidates || 0),
+    webSnapshotsCount: Array.isArray(context.evidence.webSnapshots) ? context.evidence.webSnapshots.length : 0,
+    pendingDecisionsCount: Array.isArray(context.runtime.pendingDecisions) ? context.runtime.pendingDecisions.length : 0,
+    queuedMessagesCount: Array.isArray(context.runtime.queuedMessages) ? context.runtime.queuedMessages.length : 0,
+    topCompetitors: Array.isArray(context.evidence.competitors?.topPicks)
+      ? context.evidence.competitors.topPicks
+          .map((entry) => String((entry as Record<string, unknown>).handle || '').trim())
+          .filter(Boolean)
+          .slice(0, 5)
+      : [],
+  };
+}
+
+function buildGroundedFailureResponse(input: {
+  contextSnapshot: Record<string, unknown>;
+}): string {
+  const context = input.contextSnapshot;
+  const lines: string[] = [];
+  const clientName = String(context.clientName || '').trim();
+  const websites = Array.isArray(context.websites)
+    ? context.websites.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 4)
+    : [];
+  const competitorsCount = Number(context.competitorsCount || 0);
+  const candidateCount = Number(context.candidateCompetitorsCount || 0);
+  const webSnapshotsCount = Number(context.webSnapshotsCount || 0);
+
+  lines.push('I hit a tool/runtime issue while preparing this response, but I can still ground you in your workspace state now.');
+
+  const baseline: string[] = [];
+  if (clientName) baseline.push(`Workspace: ${clientName}.`);
+  if (websites.length) baseline.push(`Known websites: ${websites.join(', ')}.`);
+  if (Number.isFinite(webSnapshotsCount) && webSnapshotsCount > 0) {
+    baseline.push(`Stored web snapshots: ${webSnapshotsCount}.`);
+  }
+  if (Number.isFinite(competitorsCount) && competitorsCount > 0) {
+    baseline.push(`Discovered competitors: ${competitorsCount}.`);
+  }
+  if (Number.isFinite(candidateCount) && candidateCount > 0) {
+    baseline.push(`Candidate competitors: ${candidateCount}.`);
+  }
+
+  if (baseline.length > 0) {
+    lines.push(`Grounded baseline:\n${baseline.map((item, index) => `${index + 1}. ${item}`).join('\n')}`);
+  }
+
+  lines.push(
+    'Next actions:\n1. Retry this run now.\n2. Run a narrower step first (for example `intel.list` or `web.fetch`) and then continue.\n3. Tell me if you want concise output for this specific reply.'
+  );
+  return lines.join('\n\n');
 }
 
 function normalizeUrlCandidate(value: unknown): string | null {
@@ -873,11 +1031,15 @@ function normalizeRunPlan(value: unknown): RuntimePlan | null {
       depth,
       tone,
     },
-    runtime: isRecord(value.runtime) && typeof value.runtime.continuationDepth === 'number'
-      ? {
-          continuationDepth: Math.max(0, Math.floor(value.runtime.continuationDepth)),
-        }
-      : { continuationDepth: 0 },
+    runtime:
+      isRecord(value.runtime) && typeof value.runtime.continuationDepth === 'number'
+        ? {
+            continuationDepth: Math.max(0, Math.floor(value.runtime.continuationDepth)),
+            ...(isRecord(value.runtime.contextSnapshot)
+              ? { contextSnapshot: value.runtime.contextSnapshot }
+              : {}),
+          }
+        : { continuationDepth: 0 },
   };
 }
 
@@ -1113,41 +1275,6 @@ export function buildPlanFromMessage(message: string): RuntimePlan {
   };
 
   return plan;
-}
-
-function buildExecutedToolsSection(
-  toolRuns: Array<{
-    toolName: string;
-    status: ToolRunStatus;
-    resultJson: unknown;
-  }>
-): string {
-  if (!toolRuns.length) return 'No tools executed in this run.';
-  const lines = toolRuns.map((run, index) => {
-    const result = isRecord(run.resultJson) ? run.resultJson : null;
-    const summary = String(result?.summary || '').trim();
-    const artifactCount = Array.isArray(result?.artifacts) ? result.artifacts.length : 0;
-    const evidenceCount = Array.isArray(result?.evidence) ? result.evidence.length : 0;
-    const warningCount = Array.isArray(result?.warnings) ? result.warnings.length : 0;
-    const statusRaw = String(run.status || '').toUpperCase();
-    const statusLabel =
-      statusRaw === 'DONE'
-        ? 'done'
-        : statusRaw === 'FAILED'
-          ? 'failed'
-          : statusRaw === 'CANCELLED'
-            ? 'cancelled'
-            : statusRaw.toLowerCase();
-    const details = [
-      summary,
-      artifactCount ? `${artifactCount} artifact(s)` : '',
-      evidenceCount ? `${evidenceCount} evidence link(s)` : '',
-      warningCount ? `${warningCount} warning(s)` : '',
-    ].filter(Boolean);
-    return `${index + 1}. ${run.toolName} (${statusLabel})${details.length ? ` — ${details.join(' • ')}` : ''}`;
-  });
-
-  return `Tool execution trace:\n${lines.join('\n')}`;
 }
 
 function toNumber(value: unknown): number | null {
@@ -1987,28 +2114,113 @@ export class RuntimeRunEngine {
 
     const args = isRecord(toolRun.argsJson) ? toolRun.argsJson : {};
     const userMessage = run.triggerMessage?.content || '';
+    let contract: RuntimeToolResult | null = null;
+    let attempt = 0;
 
-    const contract = await executeToolWithContract({
-      researchJobId: run.branch.thread.researchJobId,
-      syntheticSessionId: `runtime-${run.branchId}`,
-      userMessage,
-      toolName: toolRun.toolName,
-      args,
-      policy,
-    });
+    while (attempt <= TOOL_TRANSIENT_MAX_RETRIES) {
+      attempt += 1;
+      try {
+        const nextContract = await executeToolWithContract({
+          researchJobId: run.branch.thread.researchJobId,
+          syntheticSessionId: `runtime-${run.branchId}`,
+          userMessage,
+          toolName: toolRun.toolName,
+          args,
+          policy,
+        });
+        contract = nextContract;
+
+        if (nextContract.ok || !isTransientToolContractFailure(nextContract) || attempt > TOOL_TRANSIENT_MAX_RETRIES) {
+          break;
+        }
+
+        const delayMs = retryBackoffMs(attempt);
+        await this.emitEvent({
+          branchId: run.branchId,
+          agentRunId: runId,
+          toolRunId,
+          type: ProcessEventType.PROCESS_LOG,
+          level: ProcessEventLevel.WARN,
+          message: `Retrying ${toolRun.toolName} after transient failure (${attempt}/${TOOL_TRANSIENT_MAX_RETRIES}).`,
+          payload: {
+            toolName: toolRun.toolName,
+            retryAttempt: attempt,
+            maxRetries: TOOL_TRANSIENT_MAX_RETRIES,
+            delayMs,
+            reason: nextContract.warnings.slice(0, 3),
+          },
+        });
+        await sleep(delayMs);
+      } catch (error) {
+        if (!isTransientToolError(error) || attempt > TOOL_TRANSIENT_MAX_RETRIES) {
+          contract = {
+            ok: false,
+            summary: `Tool ${toolRun.toolName} failed.`,
+            artifacts: [],
+            evidence: [],
+            continuations: [],
+            decisions: [],
+            warnings: [String((error as Error)?.message || error || 'Unknown tool execution error')],
+          };
+          break;
+        }
+
+        const delayMs = retryBackoffMs(attempt);
+        await this.emitEvent({
+          branchId: run.branchId,
+          agentRunId: runId,
+          toolRunId,
+          type: ProcessEventType.PROCESS_LOG,
+          level: ProcessEventLevel.WARN,
+          message: `Retrying ${toolRun.toolName} after transient runtime error (${attempt}/${TOOL_TRANSIENT_MAX_RETRIES}).`,
+          payload: {
+            toolName: toolRun.toolName,
+            retryAttempt: attempt,
+            maxRetries: TOOL_TRANSIENT_MAX_RETRIES,
+            delayMs,
+            error: String((error as Error)?.message || error || 'unknown error'),
+          },
+        });
+        await sleep(delayMs);
+      }
+    }
+
+    if (!contract) {
+      contract = {
+        ok: false,
+        summary: `Tool ${toolRun.toolName} failed.`,
+        artifacts: [],
+        evidence: [],
+        continuations: [],
+        decisions: [],
+        warnings: ['Tool execution returned no result.'],
+      };
+    }
+    const retryAttempts = Math.max(0, attempt - 1);
+    const contractWithRetryMeta: RuntimeToolResult = {
+      ...contract,
+      ...(retryAttempts > 0
+        ? {
+            raw: {
+              ...(isRecord(contract.raw) ? contract.raw : {}),
+              retryAttempts,
+            },
+          }
+        : {}),
+    };
 
     await updateToolRun(toolRunId, {
-      status: contract.ok ? ToolRunStatus.DONE : ToolRunStatus.FAILED,
-      result: contract,
+      status: contractWithRetryMeta.ok ? ToolRunStatus.DONE : ToolRunStatus.FAILED,
+      result: contractWithRetryMeta,
       endedAt: new Date(),
-      producedArtifacts: contract.artifacts,
+      producedArtifacts: contractWithRetryMeta.artifacts,
     });
 
     await createBranchMessage({
       branchId: run.branchId,
       role: ChatBranchMessageRole.TOOL,
-      content: `${toolRun.toolName}: ${contract.summary}`,
-      citationsJson: contract.evidence,
+      content: `${toolRun.toolName}: ${contractWithRetryMeta.summary}`,
+      citationsJson: contractWithRetryMeta.evidence,
       clientVisible: false,
     });
 
@@ -2016,13 +2228,16 @@ export class RuntimeRunEngine {
       branchId: run.branchId,
       agentRunId: runId,
       toolRunId,
-      type: contract.ok ? ProcessEventType.PROCESS_RESULT : ProcessEventType.FAILED,
-      level: contract.ok ? ProcessEventLevel.INFO : ProcessEventLevel.WARN,
-      message: contract.summary,
-      payload: buildToolOutputEventPayload(toolRun.toolName, contract),
+      type: contractWithRetryMeta.ok ? ProcessEventType.PROCESS_RESULT : ProcessEventType.FAILED,
+      level: contractWithRetryMeta.ok ? ProcessEventLevel.INFO : ProcessEventLevel.WARN,
+      message: contractWithRetryMeta.summary,
+      payload: {
+        ...buildToolOutputEventPayload(toolRun.toolName, contractWithRetryMeta),
+        retryAttempts,
+      },
     });
 
-    for (const warning of contract.warnings) {
+    for (const warning of contractWithRetryMeta.warnings) {
       await this.emitEvent({
         branchId: run.branchId,
         agentRunId: runId,
@@ -2059,6 +2274,9 @@ export class RuntimeRunEngine {
 
     const triggerMessage = run.triggerMessage?.content || 'Continue with available results.';
     const plan = normalizeRunPlan(run.planJson) || buildPlanFromMessage(triggerMessage);
+    const runtimeContextSnapshot = isRecord(plan.runtime?.contextSnapshot)
+      ? (plan.runtime.contextSnapshot as Record<string, unknown>)
+      : {};
     const runStartedAt = run.startedAt || run.createdAt || new Date(0);
     const runMessages = await listBranchMessages(run.branchId, 180);
     const steerNotes = extractRunSteerNotes(
@@ -2194,6 +2412,7 @@ export class RuntimeRunEngine {
         ...plan,
         runtime: {
           continuationDepth: continuationDepth + 1,
+          ...(isRecord(plan.runtime?.contextSnapshot) ? { contextSnapshot: plan.runtime?.contextSnapshot } : {}),
         },
         toolCalls: continuationCalls,
       };
@@ -2238,6 +2457,7 @@ export class RuntimeRunEngine {
       writeClientResponse({
         userMessage: effectiveUserMessage,
         plan,
+        runtimeContext: runtimeContextSnapshot,
         toolSummary,
         toolResults: promptToolResults,
       }),
@@ -2256,6 +2476,7 @@ export class RuntimeRunEngine {
         toolResults: promptToolResults,
         plan,
         userMessage: effectiveUserMessage,
+        runtimeContext: runtimeContextSnapshot,
       });
     });
 
@@ -2281,11 +2502,6 @@ export class RuntimeRunEngine {
       return fallbackValidatorOutput();
     });
 
-    const hasHighIssue = validatorOutput.issues.some((issue) => issue.severity === 'high');
-    const validatorNote = hasHighIssue
-      ? `Validation note: ${validatorOutput.issues.map((issue) => issue.message).join(' | ')}`
-      : '';
-
     const plannerBlockingDecisions = plan.decisionRequests.filter((decision) => decision.blocking);
     const writerBlockingDecisions = writerOutput.decisions.filter((decision) => decision.blocking);
     const plannerDecisionIds = new Set(plannerBlockingDecisions.map((decision) => decision.id));
@@ -2297,16 +2513,6 @@ export class RuntimeRunEngine {
         ? mergeBlockingDecisions([plannerBlockingDecisions, writerAlignedBlockingDecisions])
         : [];
 
-    const includeOperationalTrace = shouldIncludeOperationalTrace(effectiveUserMessage);
-    const toolTraceSection = includeOperationalTrace
-      ? buildExecutedToolsSection(
-          toolRuns.map((toolRun) => ({
-            toolName: toolRun.toolName,
-            status: toolRun.status,
-            resultJson: toolRun.resultJson,
-          }))
-        )
-      : '';
     const libraryUpdates = buildLibraryUpdatesSection(
       toolRuns.map((toolRun) => ({
         toolName: toolRun.toolName,
@@ -2315,14 +2521,26 @@ export class RuntimeRunEngine {
       }))
     );
 
-    const finalResponseContent = [
-      stripLegacyBoilerplateResponse(writerOutput.response),
-      includeOperationalTrace ? toolTraceSection : '',
-      includeOperationalTrace ? validatorNote : '',
+    const toolFailures = toolRuns.filter(
+      (toolRun) => toolRun.status === ToolRunStatus.FAILED || toolRun.status === ToolRunStatus.CANCELLED
+    );
+    const allToolsFailed = toolRuns.length > 0 && toolFailures.length === toolRuns.length;
+    let finalResponseContent = [
+      sanitizeClientResponse(writerOutput.response),
       libraryUpdates.hasUpdates ? libraryUpdates.text : '',
     ]
       .filter((section) => String(section || '').trim().length > 0)
       .join('\n\n');
+    finalResponseContent = sanitizeClientResponse(finalResponseContent);
+
+    if (!finalResponseContent || allToolsFailed) {
+      finalResponseContent = buildGroundedFailureResponse({
+        contextSnapshot: runtimeContextSnapshot,
+      });
+      if (libraryUpdates.hasUpdates) {
+        finalResponseContent = `${finalResponseContent}\n\n${libraryUpdates.text}`;
+      }
+    }
 
     const actionButtons = [...writerOutput.actions];
     if (libraryUpdates.hasUpdates && !actionButtons.some((action) => action.action === 'open_library')) {
@@ -2436,6 +2654,60 @@ export class RuntimeRunEngine {
       }
 
       let plan = normalizeRunPlan(fresh.planJson);
+      let runtimeContextSnapshot =
+        isRecord(plan?.runtime?.contextSnapshot) ? (plan?.runtime?.contextSnapshot as Record<string, unknown>) : null;
+      const shouldLoadContextAtRunStart =
+        fresh.triggerType === AgentRunTriggerType.USER_MESSAGE || fresh.triggerType === AgentRunTriggerType.TOOL_RESULT;
+
+      if (shouldLoadContextAtRunStart && !runtimeContextSnapshot) {
+        try {
+          const runtimeContext = await buildRuntimeAgentContext({
+            researchJobId: fresh.branch.thread.researchJobId,
+            branchId: fresh.branchId,
+            syntheticSessionId: `runtime-${fresh.branchId}`,
+            userMessage: fresh.triggerMessage?.content || 'Continue workflow',
+            runId: fresh.id,
+            actor: {
+              role: 'system',
+            },
+          });
+          runtimeContextSnapshot = buildRuntimeContextSnapshot(runtimeContext);
+
+          await this.emitEvent({
+            branchId: fresh.branchId,
+            agentRunId: fresh.id,
+            type: ProcessEventType.PROCESS_LOG,
+            message: 'Runtime context loaded for grounding.',
+            payload: {
+              event: 'run.context.loaded',
+              competitorsCount: Number(runtimeContextSnapshot.competitorsCount || 0),
+              candidateCompetitorsCount: Number(runtimeContextSnapshot.candidateCompetitorsCount || 0),
+              webSnapshotsCount: Number(runtimeContextSnapshot.webSnapshotsCount || 0),
+              pendingDecisionsCount: Number(runtimeContextSnapshot.pendingDecisionsCount || 0),
+            },
+          });
+        } catch (error) {
+          await this.emitEvent({
+            branchId: fresh.branchId,
+            agentRunId: fresh.id,
+            type: ProcessEventType.PROCESS_LOG,
+            level: ProcessEventLevel.WARN,
+            message: `Failed to load runtime context: ${compactPromptString((error as Error)?.message || error, 200)}`,
+          });
+        }
+      }
+
+      if (plan && runtimeContextSnapshot && !isRecord(plan.runtime?.contextSnapshot)) {
+        plan = {
+          ...plan,
+          runtime: {
+            continuationDepth: plan.runtime?.continuationDepth ?? 0,
+            contextSnapshot: runtimeContextSnapshot,
+          },
+        };
+        await updateAgentRun(fresh.id, { plan });
+      }
+
       if (!plan) {
         await this.emitEvent({
           branchId: fresh.branchId,
@@ -2452,6 +2724,7 @@ export class RuntimeRunEngine {
           researchJobId: fresh.branch.thread.researchJobId,
           branchId: fresh.branchId,
           userMessage: fresh.triggerMessage?.content || 'Continue workflow',
+          ...(runtimeContextSnapshot ? { runtimeContext: runtimeContextSnapshot } : {}),
           policy: {
             allowMutationTools: policy.allowMutationTools,
             maxToolRuns: policy.maxToolRuns,
@@ -2462,6 +2735,16 @@ export class RuntimeRunEngine {
             content: message.content,
           })),
         });
+
+        if (runtimeContextSnapshot) {
+          plan = {
+            ...plan,
+            runtime: {
+              continuationDepth: plan.runtime?.continuationDepth ?? 0,
+              contextSnapshot: runtimeContextSnapshot,
+            },
+          };
+        }
         await updateAgentRun(fresh.id, { plan });
       }
 

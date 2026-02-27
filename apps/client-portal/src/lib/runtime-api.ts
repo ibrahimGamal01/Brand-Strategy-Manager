@@ -150,6 +150,7 @@ export type WorkspaceIntakeLiveEvent = {
   type: string;
   message: string;
   payload?: Record<string, unknown>;
+  scanRunId?: string;
   createdAt: string;
 };
 
@@ -226,11 +227,52 @@ export async function scanWorkspaceIntakeWebsites(
     workspaceId: string;
     mode: WorkspaceIntakeScanMode;
     websites: string[];
+    scanRunId: string;
+    status: "accepted";
   }>(response);
 }
 
-export function createWorkspaceIntakeEventsSource(workspaceId: string, afterId?: number) {
-  const suffix = typeof afterId === "number" ? `?afterId=${encodeURIComponent(String(afterId))}` : "";
+export async function fetchWorkspaceIntakeScanRun(workspaceId: string, scanRunId: string) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/intake/websites/scan-runs/${scanRunId}`, {
+    method: "GET",
+    cache: "no-store",
+    credentials: "include",
+  });
+  return parseJson<{
+    ok: boolean;
+    scanRun: {
+      id: string;
+      workspaceId: string;
+      mode: string;
+      status: string;
+      initiatedBy: string;
+      targetsJson: unknown;
+      crawlSettingsJson?: unknown;
+      targetsCompleted: number;
+      snapshotsSaved: number;
+      pagesPersisted: number;
+      warnings: number;
+      failures: number;
+      error?: string | null;
+      startedAt: string;
+      endedAt?: string | null;
+      createdAt: string;
+      updatedAt: string;
+    };
+  }>(response);
+}
+
+export function createWorkspaceIntakeEventsSource(
+  workspaceId: string,
+  afterId?: number,
+  options?: { scanRunId?: string }
+) {
+  const params = new URLSearchParams();
+  if (typeof afterId === "number") params.set("afterId", String(afterId));
+  if (typeof options?.scanRunId === "string" && options.scanRunId.trim()) {
+    params.set("scanRunId", options.scanRunId.trim());
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
   return new EventSource(`/api/portal/workspaces/${workspaceId}/intake/events${suffix}`, {
     withCredentials: true,
   });
@@ -325,6 +367,7 @@ export async function listRuntimeMessages(workspaceId: string, branchId: string)
 
 export type RuntimeEventDto = {
   id: string;
+  eventSeq?: string;
   type: string;
   level: string;
   message: string;
@@ -390,7 +433,15 @@ function runtimeWsOrigin(): string {
 }
 
 export function createRuntimeEventsSocket(workspaceId: string, branchId: string, afterId?: string): WebSocket {
-  const suffix = afterId ? `?afterId=${encodeURIComponent(afterId)}` : "";
+  const params = new URLSearchParams();
+  if (afterId) {
+    params.set("afterId", afterId);
+  }
+  const afterSeq = String(afterId || "").trim();
+  if (afterSeq) {
+    params.set("afterSeq", afterSeq);
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
   const wsUrl = `${runtimeWsOrigin()}/api/ws/research-jobs/${encodeURIComponent(
     workspaceId
   )}/runtime/branches/${encodeURIComponent(branchId)}${suffix}`;

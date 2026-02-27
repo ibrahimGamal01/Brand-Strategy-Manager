@@ -11,6 +11,15 @@ const CONFIRMATION_REQUIRED_MUTATION_TOOLS = new Set([
   'intel.undoMutation',
 ]);
 
+const TOOL_TIMEOUT_OVERRIDES_MS: Record<string, number> = {
+  'web.crawl': 120_000,
+  'web.fetch': 45_000,
+  'search.web': 25_000,
+  'document.generate': 180_000,
+  'intel.list': 12_000,
+  'intel.get': 12_000,
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -41,6 +50,10 @@ function requiresMutationConfirmation(toolName: string): boolean {
 }
 
 function resolveToolTimeoutMs(toolName: string, policyTimeoutMs: number): number {
+  const override = TOOL_TIMEOUT_OVERRIDES_MS[String(toolName || '').trim()];
+  if (typeof override === 'number' && Number.isFinite(override)) {
+    return Math.max(policyTimeoutMs, override);
+  }
   // Deep discovery tools can require longer wall time due to DDG subprocesses and multi-page crawls.
   if (toolName === 'research.gather') {
     return Math.max(policyTimeoutMs, 180_000);
