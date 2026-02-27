@@ -58,7 +58,137 @@ export interface ScrapeResult {
   scraper_used?: 'apify' | 'camoufox' | 'graphql' | 'python' | 'puppeteer' | 'web_profile';
 }
 
-/** Returns true when profile metadata is missing or zero (needs GraphQL enrichment). */
+type InstagramMetadataPatch = Partial<
+  Pick<
+    InstagramProfileData,
+    'follower_count' | 'following_count' | 'bio' | 'is_verified' | 'is_private' | 'profile_pic' | 'total_posts'
+  >
+>;
+
+function applyMetadataPatch(data: InstagramProfileData, patch: InstagramMetadataPatch): void {
+  if (Number.isFinite(Number(patch.follower_count)) && Number(patch.follower_count) > 0) {
+    data.follower_count = Number(patch.follower_count);
+  }
+  if (Number.isFinite(Number(patch.following_count)) && Number(patch.following_count) >= 0) {
+    data.following_count = Number(patch.following_count);
+  }
+  if (Number.isFinite(Number(patch.total_posts)) && Number(patch.total_posts) > 0) {
+    data.total_posts = Number(patch.total_posts);
+  }
+  if (typeof patch.bio === 'string' && patch.bio.trim()) {
+    data.bio = patch.bio.trim();
+  }
+  if (typeof patch.profile_pic === 'string' && patch.profile_pic.trim()) {
+    data.profile_pic = patch.profile_pic.trim();
+  }
+  if (typeof patch.is_verified === 'boolean') {
+    data.is_verified = Boolean(patch.is_verified);
+  }
+  if (typeof patch.is_private === 'boolean') {
+    data.is_private = Boolean(patch.is_private);
+  }
+}
+
+function decodeEscapedJsonString(value: string): string {
+  try {
+    return JSON.parse(`"${value}"`);
+  } catch {
+    return String(value || '')
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, '\\')
+      .replace(/\\n/g, '\n')
+      .replace(/\\u0026/gi, '&');
+  }
+}
+
+function extractNumberFromHtml(html: string, patterns: RegExp[]): number | null {
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    const raw = match?.[1];
+    if (!raw) continue;
+    const parsed = Number(String(raw).replace(/,/g, ''));
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function extractBooleanFromHtml(html: string, patterns: RegExp[]): boolean | null {
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    const raw = String(match?.[1] || '').toLowerCase();
+    if (raw === 'true') return true;
+    if (raw === 'false') return false;
+  }
+  return null;
+}
+
+function extractStringFromHtml(html: string, patterns: RegExp[]): string | null {
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    const raw = match?.[1];
+    if (!raw) continue;
+    const decoded = decodeEscapedJsonString(raw).trim();
+    if (decoded) return decoded;
+  }
+  return null;
+}
+
+async function scrapeMetadataViaPublicHtml(username: string): Promise<InstagramMetadataPatch> {
+  const url = `https://www.instagram.com/${encodeURIComponent(username)}/`;
+  const response = await axios.get(url, {
+    timeout: 20_000,
+    responseType: 'text',
+    headers: {
+      'User-Agent':
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
+      Referer: 'https://www.instagram.com/',
+    },
+    validateStatus: () => true,
+  });
+
+  if (!Number.isFinite(response.status) || response.status >= 400) {
+    throw new Error(`Public profile HTML returned status ${response.status}`);
+  }
+
+  const html = String(response.data || '');
+  if (!html.trim()) {
+    throw new Error('Public profile HTML was empty');
+  }
+
+  const follower_count = extractNumberFromHtml(html, [
+    /"edge_followed_by"\s*:\s*\{\s*"count"\s*:\s*([0-9]+)/,
+    /"followers"\s*:\s*\{\s*"count"\s*:\s*([0-9]+)/,
+    /"follower_count"\s*:\s*([0-9]+)/,
+  ]);
+  const following_count = extractNumberFromHtml(html, [
+    /"edge_follow"\s*:\s*\{\s*"count"\s*:\s*([0-9]+)/,
+    /"following_count"\s*:\s*([0-9]+)/,
+  ]);
+  const total_posts = extractNumberFromHtml(html, [
+    /"edge_owner_to_timeline_media"\s*:\s*\{\s*"count"\s*:\s*([0-9]+)/,
+    /"posts_count"\s*:\s*([0-9]+)/,
+  ]);
+  const is_verified = extractBooleanFromHtml(html, [/"is_verified"\s*:\s*(true|false)/]);
+  const is_private = extractBooleanFromHtml(html, [/"is_private"\s*:\s*(true|false)/]);
+  const bio = extractStringFromHtml(html, [/"biography"\s*:\s*"((?:\\.|[^"\\])*)"/]);
+  const profile_pic =
+    extractStringFromHtml(html, [/"profile_pic_url_hd"\s*:\s*"((?:\\.|[^"\\])*)"/]) ||
+    extractStringFromHtml(html, [/"profile_pic_url"\s*:\s*"((?:\\.|[^"\\])*)"/]);
+
+  return {
+    follower_count: follower_count ?? undefined,
+    following_count: following_count ?? undefined,
+    total_posts: total_posts ?? undefined,
+    is_verified: typeof is_verified === 'boolean' ? is_verified : undefined,
+    is_private: typeof is_private === 'boolean' ? is_private : undefined,
+    bio: bio || undefined,
+    profile_pic: profile_pic || undefined,
+  };
+}
+
+/** Returns true when profile metadata is missing or zero (needs enrichment). */
 function isProfileMetadataIncomplete(data: InstagramProfileData): boolean {
   const missingFollower = data.follower_count == null || data.follower_count === 0;
   const missingFollowing = data.following_count == null || data.following_count === 0;
@@ -67,26 +197,46 @@ function isProfileMetadataIncomplete(data: InstagramProfileData): boolean {
   return missingFollower || missingFollowing || missingBio || missingTotalPosts;
 }
 
-/** Enrich profile data with GraphQL when follower count, bio, etc. are missing. Mutates and returns data. */
+/** Enrich profile data with best-effort sources when metadata is incomplete. Mutates and returns data. */
 async function enrichProfileMetadataIfNeeded(
   cleanHandle: string,
   data: InstagramProfileData
 ): Promise<InstagramProfileData> {
   if (!isProfileMetadataIncomplete(data)) return data;
+
+  // First attempt: GraphQL profile stats (fast when session/cookie supports it).
   try {
     const graphqlScraper = createGraphQLScraper();
     const profile = await graphqlScraper.scrapeProfile(cleanHandle);
-    data.follower_count = profile.follower_count ?? data.follower_count ?? 0;
-    data.following_count = profile.following_count ?? data.following_count ?? 0;
-    data.bio = (profile.biography ?? data.bio ?? '').trim() || data.bio || '';
-    data.is_verified = profile.is_verified ?? data.is_verified;
-    data.is_private = profile.is_private ?? data.is_private;
-    data.profile_pic = profile.profile_pic_url || data.profile_pic || '';
-    data.total_posts = profile.edge_owner_to_timeline_media?.count ?? data.total_posts ?? 0;
+    applyMetadataPatch(data, {
+      follower_count: profile.follower_count,
+      following_count: profile.following_count,
+      bio: profile.biography,
+      is_verified: profile.is_verified,
+      is_private: profile.is_private,
+      profile_pic: profile.profile_pic_url,
+      total_posts: profile.edge_owner_to_timeline_media?.count,
+    });
     console.log('[Instagram] ✓ Enriched with GraphQL profile stats');
   } catch (err: any) {
     console.warn('[Instagram] GraphQL enrichment failed:', err?.message);
   }
+
+  // Second attempt: public profile HTML parsing (works without cookies in many cases).
+  if (isProfileMetadataIncomplete(data)) {
+    try {
+      const htmlPatch = await scrapeMetadataViaPublicHtml(cleanHandle);
+      applyMetadataPatch(data, htmlPatch);
+      if (!isProfileMetadataIncomplete(data)) {
+        console.log('[Instagram] ✓ Enriched metadata from public profile HTML');
+      } else {
+        console.log('[Instagram] Public profile HTML enrichment was partial');
+      }
+    } catch (err: any) {
+      console.warn('[Instagram] Public profile HTML enrichment failed:', err?.message);
+    }
+  }
+
   return data;
 }
 
@@ -229,6 +379,7 @@ export async function scrapeInstagramProfile(
     const result = await scrapeViaWebProfile(cleanHandle, postsLimit);
     if (result && result.posts.length > 0) {
       console.log(`[Instagram] ✓ Web profile scraper succeeded with ${result.posts.length} posts`);
+      await enrichProfileMetadataIfNeeded(cleanHandle, result);
       return {
         success: true,
         data: result,
@@ -289,6 +440,7 @@ export async function scrapeInstagramProfile(
     }
 
     console.log(`[Instagram] Python scraper succeeded: ${profileData.posts.length} posts scraped, ${profileData.discovered_competitors?.length || 0} competitors found.`);
+    await enrichProfileMetadataIfNeeded(cleanHandle, profileData);
 
     return {
       success: true,
@@ -310,6 +462,7 @@ export async function scrapeInstagramProfile(
     try {
       console.log(`[Instagram] Attempting Puppeteer scraper as fallback...`);
       const puppeteerResult = await scrapeWithPuppeteer(cleanHandle, postsLimit);
+      await enrichProfileMetadataIfNeeded(cleanHandle, puppeteerResult);
 
       console.log(`[Instagram] Puppeteer scraper succeeded`);
 
