@@ -448,12 +448,27 @@ export function createRuntimeEventsSocket(workspaceId: string, branchId: string,
   return new WebSocket(wsUrl);
 }
 
-export async function listRuntimeEvents(workspaceId: string, branchId: string) {
-  const response = await fetch(`/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/events?limit=300`, {
-    method: "GET",
-    cache: "no-store",
-    credentials: "include",
-  });
+export async function listRuntimeEvents(
+  workspaceId: string,
+  branchId: string,
+  options?: { afterId?: string; afterSeq?: string; limit?: number }
+) {
+  const params = new URLSearchParams();
+  params.set("limit", String(Math.max(50, Math.min(500, Number(options?.limit || 300)))));
+  if (typeof options?.afterId === "string" && options.afterId.trim()) {
+    params.set("afterId", options.afterId.trim());
+  }
+  if (typeof options?.afterSeq === "string" && options.afterSeq.trim()) {
+    params.set("afterSeq", options.afterSeq.trim());
+  }
+  const response = await fetch(
+    `/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/events?${params.toString()}`,
+    {
+      method: "GET",
+      cache: "no-store",
+      credentials: "include",
+    }
+  );
   return parseJson<{ events: RuntimeEventDto[] }>(response);
 }
 

@@ -576,8 +576,12 @@ const CLIENT_META_BLOCKLIST = [
   /^assumptions\s*$/gim,
 ];
 
-function sanitizeClientResponse(content: string): string {
+export function sanitizeClientResponse(content: string): string {
   let cleaned = stripLegacyBoilerplateResponse(content);
+  cleaned = cleaned.replace(/\n{0,2}tool execution trace:[\s\S]*$/i, '').trim();
+  cleaned = cleaned.replace(/\n{0,2}validation note:[\s\S]*$/i, '').trim();
+  cleaned = cleaned.replace(/\n{0,2}no tools executed in this run\.[\s\S]*$/i, '').trim();
+  cleaned = cleaned.replace(/\n{0,2}how bat got here[\s\S]*$/i, '').trim();
   for (const pattern of CLIENT_META_BLOCKLIST) {
     cleaned = cleaned.replace(pattern, '');
   }
@@ -1266,7 +1270,7 @@ export function buildPlanFromMessage(message: string): RuntimePlan {
     needUserInput: false,
     decisionRequests: [],
     responseStyle: {
-      depth: concise ? 'fast' : toolCalls.length ? 'deep' : 'normal',
+      depth: concise ? 'fast' : 'deep',
       tone: 'friendly',
     },
     runtime: {

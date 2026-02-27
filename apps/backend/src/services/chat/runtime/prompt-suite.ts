@@ -569,7 +569,7 @@ function fallbackPlannerPlan(message: string): RuntimePlan {
     needUserInput: false,
     decisionRequests: [],
     responseStyle: {
-      depth: concise ? 'fast' : toolCalls.length ? 'deep' : 'normal',
+      depth: concise ? 'fast' : 'deep',
       tone: 'friendly',
     },
     runtime: {

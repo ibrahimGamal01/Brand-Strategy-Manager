@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, AlertTriangle, CheckCircle2, Globe, Loader2 } from "lucide-react";
 import {
   createWorkspaceIntakeEventsSource,
+  fetchWorkspaceIntakeScanRun,
   saveWorkspaceIntakeDraft,
   scanWorkspaceIntakeWebsites,
   submitWorkspaceIntake,
@@ -94,6 +95,7 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
   const [channelsConfirmed, setChannelsConfirmed] = useState(false);
   const [scanMode, setScanMode] = useState<WorkspaceIntakeScanMode>("quick");
   const [scanStatus, setScanStatus] = useState<ScanStatus>("idle");
+  const [activeScanRunId, setActiveScanRunId] = useState<string | null>(null);
   const [liveFeedUnavailable, setLiveFeedUnavailable] = useState(false);
   const [liveEvents, setLiveEvents] = useState<WorkspaceIntakeLiveEvent[]>([]);
 
@@ -119,7 +121,9 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
   useEffect(() => {
     if (phase !== "wizard") return;
 
-    const source = createWorkspaceIntakeEventsSource(workspaceId, lastEventIdRef.current || undefined);
+    const source = createWorkspaceIntakeEventsSource(workspaceId, lastEventIdRef.current || undefined, {
+      ...(activeScanRunId ? { scanRunId: activeScanRunId } : {}),
+    });
     let receivedAnyEvent = false;
     setLiveFeedUnavailable(false);
 
@@ -127,6 +131,7 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
       try {
         const parsed = JSON.parse(String(event.data || "{}")) as WorkspaceIntakeLiveEvent;
         if (!parsed || typeof parsed.id !== "number") return;
+        if (activeScanRunId && parsed.scanRunId && parsed.scanRunId !== activeScanRunId) return;
         receivedAnyEvent = true;
 
         lastEventIdRef.current = Math.max(lastEventIdRef.current, parsed.id);
@@ -160,7 +165,41 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
     return () => {
       source.close();
     };
-  }, [workspaceId, phase]);
+  }, [workspaceId, phase, activeScanRunId]);
+
+  useEffect(() => {
+    if (phase !== "wizard") return;
+    if (scanStatus !== "running") return;
+    if (!activeScanRunId) return;
+
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const result = await fetchWorkspaceIntakeScanRun(workspaceId, activeScanRunId);
+        if (cancelled || !result?.scanRun) return;
+        const status = String(result.scanRun.status || "").trim().toUpperCase();
+        if (status === "COMPLETED") {
+          setScanStatus("done");
+        } else if (status === "FAILED" || status === "CANCELLED") {
+          setScanStatus("error");
+        } else {
+          setScanStatus("running");
+        }
+      } catch {
+        // Best-effort polling for resumability.
+      }
+    };
+
+    void poll();
+    const timer = setInterval(() => {
+      void poll();
+    }, 3500);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [activeScanRunId, phase, scanStatus, workspaceId]);
 
   const filledHandles = useMemo(() => buildChannelsFromHandles(state.handles), [state.handles]);
   const hasWebsite = useMemo(() => hasWebsiteInput(state), [state]);
@@ -279,6 +318,7 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
       if (!result?.ok) {
         throw new Error("Failed to start website scan");
       }
+      setActiveScanRunId(result.scanRunId);
       setNotice(`Website scan started (${scanMode}). BAT is enriching your workspace now.`);
     } catch (scanError: unknown) {
       const message = String((scanError as Error)?.message || "Failed to start website scan");

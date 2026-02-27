@@ -24,6 +24,7 @@
         "test:scrapling-web-intelligence": "tsx src/scripts/test-scrapling-web-intelligence.ts",
         "test:model-router": "tsx src/scripts/test-model-router.ts",
         "test:chat-ws-contract": "tsx src/scripts/test-chat-ws-contract.ts",
+        "test:runtime-reliability-r1": "tsx src/scripts/test-runtime-reliability-r1.ts",
         "test:competitor-scoring": "tsx src/scripts/test-competitor-scorer-utils.ts",
         "test:competitor-quality-v3": "tsx src/scripts/test-competitor-quality-v3.ts",
         "test:competitor-pipeline-fixes": "tsx src/scripts/test-competitor-pipeline-fixes.ts",
