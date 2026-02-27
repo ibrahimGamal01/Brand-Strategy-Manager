@@ -207,6 +207,7 @@ export function ChatThread({
   onForkFromMessage,
   onResolveDecision,
   onRunAction,
+  onStarterAction,
   onInspectAssistantMessage,
   selectedAssistantMessageId,
   showInlineReasoning = false,
@@ -218,6 +219,7 @@ export function ChatThread({
   onForkFromMessage?: (messageId: string) => void;
   onResolveDecision?: (decisionId: string, option: string) => void;
   onRunAction?: (actionLabel: string, actionKey: string, payload?: Record<string, unknown>) => void;
+  onStarterAction?: (action: "audit" | "sources" | "deliverable" | "competitor_v3") => void;
   onInspectAssistantMessage?: (messageId: string) => void;
   selectedAssistantMessageId?: string | null;
   showInlineReasoning?: boolean;
@@ -248,21 +250,44 @@ export function ChatThread({
             Ask for analysis, implementation, debugging, or evidence review and I will run the right tools and respond here.
           </p>
           <div className="mt-8 grid gap-3 text-left sm:grid-cols-3">
-            <article className="rounded-2xl border border-zinc-200 bg-white/92 p-4 shadow-md">
+            <button
+              type="button"
+              onClick={() => onStarterAction?.("audit")}
+              className="rounded-2xl border border-zinc-200 bg-white/92 p-4 text-left shadow-md transition hover:-translate-y-0.5 hover:shadow-lg"
+            >
               <p className="text-xs font-semibold uppercase tracking-[0.1em] text-zinc-500">Audit</p>
               <p className="mt-2 text-sm font-medium text-zinc-900">Run a full workspace audit</p>
               <p className="mt-1 text-xs text-zinc-500">Web, competitors, social, community, and action priorities.</p>
-            </article>
-            <article className="rounded-2xl border border-zinc-200 bg-white/90 p-4 shadow-md">
+            </button>
+            <button
+              type="button"
+              onClick={() => onStarterAction?.("sources")}
+              className="rounded-2xl border border-zinc-200 bg-white/90 p-4 text-left shadow-md transition hover:-translate-y-0.5 hover:shadow-lg"
+            >
               <p className="text-xs font-semibold uppercase tracking-[0.1em] text-zinc-500">Evidence</p>
               <p className="mt-2 text-sm font-medium text-zinc-900">Ask with source constraints</p>
               <p className="mt-1 text-xs text-zinc-500">Try “Use evidence from…” to ground output in specific data.</p>
-            </article>
-            <article className="rounded-2xl border border-zinc-200 bg-white/90 p-4 shadow-md">
+            </button>
+            <button
+              type="button"
+              onClick={() => onStarterAction?.("deliverable")}
+              className="rounded-2xl border border-zinc-200 bg-white/90 p-4 text-left shadow-md transition hover:-translate-y-0.5 hover:shadow-lg"
+            >
               <p className="text-xs font-semibold uppercase tracking-[0.1em] text-zinc-500">Deliverable</p>
               <p className="mt-2 text-sm font-medium text-zinc-900">Generate client-ready output</p>
               <p className="mt-1 text-xs text-zinc-500">Briefs, audits, and PDFs from this branch context.</p>
-            </article>
+            </button>
+            <button
+              type="button"
+              onClick={() => onStarterAction?.("competitor_v3")}
+              className="rounded-2xl border border-zinc-200 bg-white/90 p-4 text-left shadow-md transition hover:-translate-y-0.5 hover:shadow-lg sm:col-span-3"
+            >
+              <p className="text-xs font-semibold uppercase tracking-[0.1em] text-zinc-500">Competitor Finder V3</p>
+              <p className="mt-2 text-sm font-medium text-zinc-900">Run wide competitor + adjacent discovery</p>
+              <p className="mt-1 text-xs text-zinc-500">
+                Multi-lane web/social/community search, enrichment, and ranked shortlist with evidence.
+              </p>
+            </button>
           </div>
         </div>
       </section>

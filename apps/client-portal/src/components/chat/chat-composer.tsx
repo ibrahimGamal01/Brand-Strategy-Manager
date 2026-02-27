@@ -5,6 +5,7 @@ import { ArrowDown, ArrowUp, ListOrdered, SendHorizontal, Sparkles, Square, X } 
 import { QueuedMessage } from "@/types/chat";
 
 const steerChipSet = [
+  "Run V3 finder",
   "Go deeper",
   "Show sources",
   "Make it a PDF",

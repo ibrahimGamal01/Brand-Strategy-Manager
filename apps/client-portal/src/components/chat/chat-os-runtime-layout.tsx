@@ -13,13 +13,33 @@ import { LibraryDrawer } from "@/components/library/library-drawer";
 
 const steerSystemPrompts: Record<
   string,
-  { pref?: [keyof SessionPreferences, SessionPreferences[keyof SessionPreferences]]; prompt?: string }
+  {
+    pref?: [keyof SessionPreferences, SessionPreferences[keyof SessionPreferences]];
+    composerText?: string;
+    steerPrompt?: string;
+  }
 > = {
-  "Go deeper": { pref: ["tone", "detailed"], prompt: "Go deeper with the current strategy and include lane-by-lane recommendations." },
-  "Show sources": { pref: ["transparency", true], prompt: "Show every claim with source evidence and confidence level." },
-  "Make it a PDF": { prompt: "Generate a client-ready PDF deliverable from this branch." },
-  "Focus on TikTok": { pref: ["sourceFocus", "social"], prompt: "Prioritize TikTok and social evidence in the next response." },
-  "Focus on Web evidence": { pref: ["sourceFocus", "web"], prompt: "Prioritize web evidence and cite pages directly." },
+  "Run V3 finder": {
+    composerText: '/competitors.discover_v3 {"mode":"standard","maxCandidates":140,"maxEnrich":10}',
+    steerPrompt: "Run a standard V3 competitor finder pass and summarize direct plus adjacent competitors.",
+  },
+  "Go deeper": {
+    pref: ["tone", "detailed"],
+    composerText: '/competitors.discover_v3 {"mode":"deep","maxCandidates":200,"maxEnrich":20}',
+    steerPrompt: "Go deeper with lane-by-lane recommendations and concrete competitor examples.",
+  },
+  "Show sources": { pref: ["transparency", true], composerText: "/show_sources" },
+  "Make it a PDF": { composerText: "/generate_pdf" },
+  "Focus on TikTok": {
+    pref: ["sourceFocus", "social"],
+    composerText: "Prioritize TikTok and social evidence in the next response.",
+    steerPrompt: "Prioritize TikTok and social evidence in this run.",
+  },
+  "Focus on Web evidence": {
+    pref: ["sourceFocus", "web"],
+    composerText: "Prioritize web evidence and cite page URLs first.",
+    steerPrompt: "Prioritize web evidence and cite page URLs first.",
+  },
   "Ask me questions first": { pref: ["askQuestionsFirst", true] },
 };
 
@@ -186,12 +206,13 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
       }
     }
 
-    if (mapping.prompt) {
-      if (isStreaming) {
-        runAsync(steerRun(mapping.prompt));
-      } else {
-        runAsync(sendMessage(mapping.prompt, "send"));
-      }
+    if (isStreaming && mapping.steerPrompt) {
+      runAsync(steerRun(mapping.steerPrompt));
+      return;
+    }
+
+    if (mapping.composerText) {
+      injectComposerText(mapping.composerText, "replace");
     }
   };
 
@@ -263,6 +284,30 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   };
 
   const onCommand = (command: string) => {
+    if (command === "Run V3 competitor finder (standard)") {
+      injectComposerText('/competitors.discover_v3 {"mode":"standard","maxCandidates":140,"maxEnrich":10}', "replace");
+      return;
+    }
+    if (command === "Run V3 competitor finder (deep)") {
+      injectComposerText('/competitors.discover_v3 {"mode":"deep","maxCandidates":220,"maxEnrich":20}', "replace");
+      return;
+    }
+    if (command === "Run competitor discovery (legacy)") {
+      injectComposerText("/orchestration.run", "replace");
+      return;
+    }
+    if (command === "Generate PDF deliverable") {
+      injectComposerText("/generate_pdf", "replace");
+      return;
+    }
+    if (command === "Show sources") {
+      injectComposerText("/show_sources", "replace");
+      return;
+    }
+    if (command === "Search web evidence") {
+      injectComposerText('/search.web {"query":"", "count":10, "provider":"auto"}', "replace");
+      return;
+    }
     if (command === "Open library: Web") {
       setLibraryOpen(true);
       setActiveLibraryCollection("web");
@@ -278,7 +323,12 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
       return;
     }
 
-    runAsync(sendMessage(command, "send"));
+    if (command === "Add constraint") {
+      injectComposerText("Add this new constraint to my workspace context: ", "replace");
+      return;
+    }
+
+    injectComposerText(command, "replace");
   };
 
   const onRunAudit = () => {
@@ -309,7 +359,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
       ) : null}
 
       <div className="relative overflow-hidden rounded-3xl border border-zinc-200 bg-[#f3f4f6] shadow-2xl">
-        <div className="grid h-[calc(100dvh-7.5rem)] min-h-[36rem] w-full grid-cols-1 lg:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[19rem_minmax(0,1fr)]">
+        <div className="grid h-[86dvh] min-h-[32rem] w-full grid-cols-1 lg:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[19rem_minmax(0,1fr)]">
           <aside
             className={`${
               sidebarOpen ? "absolute inset-y-0 left-0 z-30 flex w-11/12 max-w-sm" : "hidden"
@@ -509,6 +559,21 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                   onForkFromMessage={onForkBranch}
                   onResolveDecision={(decisionId, option) => runAsync(resolveDecision(decisionId, option))}
                   onRunAction={onRunMessageAction}
+                  onStarterAction={(action) => {
+                    if (action === "audit") {
+                      injectComposerText("/audit", "replace");
+                      return;
+                    }
+                    if (action === "sources") {
+                      injectComposerText("/show_sources", "replace");
+                      return;
+                    }
+                    if (action === "deliverable") {
+                      injectComposerText("/generate_pdf", "replace");
+                      return;
+                    }
+                    injectComposerText('/competitors.discover_v3 {"mode":"standard","maxCandidates":140,"maxEnrich":10}', "replace");
+                  }}
                   showInlineReasoning={false}
                   isStreaming={isStreaming}
                   streamingInsight={streamingInsight}

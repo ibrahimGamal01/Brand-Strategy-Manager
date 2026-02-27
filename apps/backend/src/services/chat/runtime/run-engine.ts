@@ -1263,6 +1263,141 @@ function flattenEvidence(results: RuntimeToolResult[]) {
   return results.flatMap((result) => result.evidence).slice(0, 20);
 }
 
+function sanitizePreviewText(value: unknown, maxChars = 180): string {
+  const normalized = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxChars - 3))}...`;
+}
+
+function buildListPreviewItems(value: unknown, maxItems = 6): Array<{ label: string; url?: string }> {
+  if (!Array.isArray(value)) return [];
+  const items: Array<{ label: string; url?: string }> = [];
+  for (const row of value) {
+    if (!isRecord(row)) continue;
+    const label = sanitizePreviewText(
+      row.title || row.name || row.handle || row.profileUrl || row.finalUrl || row.url || row.id || row.snippet,
+      160
+    );
+    if (!label) continue;
+    const url = sanitizePreviewText(row.url || row.finalUrl || row.profileUrl || row.permalink, 220);
+    items.push({
+      label,
+      ...(url ? { url } : {}),
+    });
+    if (items.length >= maxItems) break;
+  }
+  return items;
+}
+
+function buildToolOutputPreview(raw: Record<string, unknown>, toolName: string): Record<string, unknown> | null {
+  if (toolName === 'competitors.discover_v3') {
+    const statsRaw = isRecord(raw.stats) ? raw.stats : isRecord(raw.summary) ? raw.summary : null;
+    const laneStatsRaw = isRecord(raw.laneStats) ? raw.laneStats : null;
+    const topCandidates = buildListPreviewItems(raw.topCandidates, 6);
+    const lanes =
+      laneStatsRaw &&
+      Object.entries(laneStatsRaw)
+        .map(([lane, entry]) => {
+          if (!isRecord(entry)) return null;
+          const queries = toNumber(entry.queries);
+          const hits = toNumber(entry.hits);
+          return {
+            lane,
+            ...(queries !== null ? { queries: Math.max(0, Math.floor(queries)) } : {}),
+            ...(hits !== null ? { hits: Math.max(0, Math.floor(hits)) } : {}),
+          };
+        })
+        .filter(Boolean)
+        .slice(0, 8);
+
+    return {
+      ...(typeof raw.mode === 'string' ? { mode: sanitizePreviewText(raw.mode, 40) } : {}),
+      ...(statsRaw ? { stats: statsRaw } : {}),
+      ...(Array.isArray(lanes) ? { lanes } : {}),
+      ...(topCandidates.length ? { topCandidates } : {}),
+    };
+  }
+
+  if (toolName === 'search.web') {
+    const items = buildListPreviewItems(raw.items, 6);
+    return {
+      ...(typeof raw.query === 'string' ? { query: sanitizePreviewText(raw.query, 180) } : {}),
+      ...(typeof raw.provider === 'string' ? { provider: sanitizePreviewText(raw.provider, 40) } : {}),
+      ...(typeof raw.vertical === 'string' ? { vertical: sanitizePreviewText(raw.vertical, 40) } : {}),
+      ...(toNumber(raw.count) !== null ? { count: Math.max(0, Math.floor(Number(raw.count))) } : {}),
+      ...(items.length ? { items } : {}),
+    };
+  }
+
+  if (toolName === 'intel.list') {
+    const items = buildListPreviewItems(Array.isArray(raw.items) ? raw.items : raw.data, 6);
+    const count = toNumber(raw.count);
+    return {
+      ...(typeof raw.section === 'string' ? { section: sanitizePreviewText(raw.section, 80) } : {}),
+      ...(count !== null ? { count: Math.max(0, Math.floor(count)) } : {}),
+      ...(items.length ? { items } : {}),
+    };
+  }
+
+  if (toolName === 'web.crawl' || toolName === 'web.crawl.list_snapshots' || toolName === 'web.crawl.get_run') {
+    const items = buildListPreviewItems(raw.items, 6);
+    const persisted = toNumber(raw.persisted);
+    const count = toNumber(raw.count);
+    return {
+      ...(typeof raw.runId === 'string' ? { runId: sanitizePreviewText(raw.runId, 64) } : {}),
+      ...(persisted !== null ? { persisted: Math.max(0, Math.floor(persisted)) } : {}),
+      ...(count !== null ? { count: Math.max(0, Math.floor(count)) } : {}),
+      ...(items.length ? { items } : {}),
+    };
+  }
+
+  if (toolName === 'web.fetch') {
+    return {
+      ...(typeof raw.snapshotId === 'string' ? { snapshotId: sanitizePreviewText(raw.snapshotId, 80) } : {}),
+      ...(typeof raw.finalUrl === 'string' ? { finalUrl: sanitizePreviewText(raw.finalUrl, 220) } : {}),
+      ...(toNumber(raw.statusCode) !== null ? { statusCode: Math.floor(Number(raw.statusCode)) } : {}),
+    };
+  }
+
+  if (toolName === 'evidence.posts' || toolName === 'evidence.news' || toolName === 'evidence.videos') {
+    const items = buildListPreviewItems(raw.items, 6);
+    const count = toNumber(raw.count);
+    return {
+      ...(count !== null ? { count: Math.max(0, Math.floor(count)) } : {}),
+      ...(items.length ? { items } : {}),
+    };
+  }
+
+  const fallbackItems = buildListPreviewItems(raw.items, 4);
+  if (!fallbackItems.length && toNumber(raw.count) === null) {
+    return null;
+  }
+
+  return {
+    ...(toNumber(raw.count) !== null ? { count: Math.max(0, Math.floor(Number(raw.count))) } : {}),
+    ...(fallbackItems.length ? { items: fallbackItems } : {}),
+  };
+}
+
+function buildToolOutputEventPayload(toolName: string, contract: RuntimeToolResult): Record<string, unknown> {
+  const preview = isRecord(contract.raw) ? buildToolOutputPreview(contract.raw, toolName) : null;
+  return {
+    toolName,
+    warnings: contract.warnings,
+    decisions: contract.decisions,
+    toolOutput: {
+      summary: contract.summary,
+      artifactCount: contract.artifacts.length,
+      evidenceCount: contract.evidence.length,
+      warningCount: contract.warnings.length,
+      artifacts: contract.artifacts.slice(0, 8),
+      evidence: contract.evidence.slice(0, 10),
+      ...(preview ? { preview } : {}),
+    },
+  };
+}
+
 function collectBlockingDecisions(results: RuntimeToolResult[]): RuntimeDecision[] {
   const deduped = new Map<string, RuntimeDecision>();
 
@@ -1865,11 +2000,7 @@ export class RuntimeRunEngine {
       type: contract.ok ? ProcessEventType.PROCESS_RESULT : ProcessEventType.FAILED,
       level: contract.ok ? ProcessEventLevel.INFO : ProcessEventLevel.WARN,
       message: contract.summary,
-      payload: {
-        toolName: toolRun.toolName,
-        warnings: contract.warnings,
-        decisions: contract.decisions,
-      },
+      payload: buildToolOutputEventPayload(toolRun.toolName, contract),
     });
 
     for (const warning of contract.warnings) {

@@ -483,6 +483,8 @@ function readableToolName(toolName?: string): string {
   if (normalized === "document.plan") return "Document planner";
   if (normalized === "document.generate") return "Document generator";
   if (normalized === "research.gather") return "Deep research";
+  if (normalized === "search.web") return "Web search";
+  if (normalized === "competitors.discover_v3") return "V3 competitor finder";
   return humanizeToken(normalized.replace(/\./g, " "));
 }
 
@@ -502,19 +504,74 @@ function parseNumericResult(raw: string): { count: number; unit: string } | null
   return { count, unit: normalizedUnit };
 }
 
-function toValueFirstToolMessage(toolName: string | undefined, inputMessage: string): string {
+function previewItemsFromUnknown(value: unknown, max = 5): Array<{ label: string; url?: string }> {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (!isRecord(item)) return null;
+      const label = String(item.label || item.title || item.name || "").replace(/\s+/g, " ").trim();
+      if (!label) return null;
+      const url = String(item.url || item.href || "").trim();
+      return {
+        label,
+        ...(url ? { url } : {}),
+      };
+    })
+    .filter((item): item is { label: string; url?: string } => Boolean(item))
+    .slice(0, max);
+}
+
+function toolOutputPreviewPayload(payload: Record<string, unknown> | null): Record<string, unknown> | null {
+  if (!payload || !isRecord(payload.toolOutput)) return null;
+  const toolOutput = payload.toolOutput;
+  return isRecord(toolOutput.preview) ? toolOutput.preview : null;
+}
+
+function toValueFirstToolMessage(
+  toolName: string | undefined,
+  inputMessage: string,
+  payload?: Record<string, unknown> | null
+): string {
   const raw = String(inputMessage || "").trim();
   if (!raw) return `${readableToolName(toolName)} updated.`;
+  const preview = toolOutputPreviewPayload(payload || null);
+
+  if (toolName === "competitors.discover_v3" && preview) {
+    const stats = isRecord(preview.stats) ? preview.stats : null;
+    const persisted = Number(stats?.candidatesPersisted);
+    const topPicks = Number(stats?.topPicks);
+    const shortlisted = Number(stats?.shortlisted);
+    const topCandidates = previewItemsFromUnknown(preview.topCandidates, 3).map((item) => item.label);
+    const parts = [
+      Number.isFinite(persisted) ? `${Math.max(0, Math.floor(persisted))} candidates` : "",
+      Number.isFinite(topPicks) ? `${Math.max(0, Math.floor(topPicks))} top picks` : "",
+      Number.isFinite(shortlisted) ? `${Math.max(0, Math.floor(shortlisted))} shortlisted` : "",
+    ].filter(Boolean);
+    return parts.length
+      ? `V3 competitor finder ranked ${parts.join(", ")}${topCandidates.length ? `. Top signals: ${topCandidates.join(", ")}.` : "."}`
+      : "V3 competitor finder updated the competitor landscape.";
+  }
+
+  if (toolName === "search.web" && preview) {
+    const query = String(preview.query || "").trim();
+    const provider = String(preview.provider || "").trim();
+    const count = Number(preview.count);
+    const top = previewItemsFromUnknown(preview.items, 2).map((item) => item.label);
+    const countLabel = Number.isFinite(count) ? `${Math.max(0, Math.floor(count))} result(s)` : "search results";
+    return `Web search returned ${countLabel}${provider ? ` via ${provider}` : ""}${query ? ` for "${query}"` : ""}${top.length ? `. Top: ${top.join(", ")}` : "."}`;
+  }
 
   const numberResult = parseNumericResult(raw);
   if (toolName === "intel.list" && numberResult) {
     const sectionMatch = raw.match(/\bfrom\s+([a-z_]+)\b/i);
     const section = sectionMatch?.[1] ? humanizeToken(sectionMatch[1]) : "workspace section";
-    return `Loaded ${pluralize(numberResult.count, "record", "records")} from ${section}.`;
+    const sampleItems = preview ? previewItemsFromUnknown(preview.items, 3).map((item) => item.label) : [];
+    return `Loaded ${pluralize(numberResult.count, "record", "records")} from ${section}${sampleItems.length ? `. Examples: ${sampleItems.join(", ")}` : "."}`;
   }
 
   if (toolName === "evidence.posts" && numberResult) {
-    return `Found ${pluralize(numberResult.count, "social post", "social posts")} for review.`;
+    const sampleItems = preview ? previewItemsFromUnknown(preview.items, 3).map((item) => item.label) : [];
+    return `Found ${pluralize(numberResult.count, "social post", "social posts")} for review${sampleItems.length ? `: ${sampleItems.join(", ")}` : "."}`;
   }
 
   if (toolName === "evidence.news" && numberResult) {
@@ -552,7 +609,7 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
     } else if (event.event === "tool.started" && event.toolName) {
       message = `Running ${event.toolName}...`;
     } else if (event.event === "tool.output" && event.toolName) {
-      message = toValueFirstToolMessage(event.toolName, event.message);
+      message = toValueFirstToolMessage(event.toolName, event.message, event.payload);
     } else if (event.event === "tool.failed" && event.toolName) {
       const raw = String(event.message || "Failed").trim();
       message = `${readableToolName(event.toolName)} failed: ${raw}`;
@@ -593,6 +650,112 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
       level: event.level,
     };
   });
+}
+
+function metricsFromDiscoverV3Result(result: Record<string, unknown>): Array<{ key: string; value: string }> {
+  const stats = isRecord(result.stats) ? result.stats : isRecord(result.summary) ? result.summary : null;
+  if (!stats) return [];
+  const readInt = (value: unknown) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : null;
+  };
+  const metrics: Array<{ key: string; value: string }> = [];
+  const persisted = readInt(stats.candidatesPersisted);
+  const topPicks = readInt(stats.topPicks);
+  const shortlisted = readInt(stats.shortlisted);
+  const queries = readInt(stats.queriesExecuted);
+  const searchResults = readInt(stats.searchResults);
+  const enriched = readInt(stats.enriched);
+  if (persisted !== null) metrics.push({ key: "Candidates", value: String(persisted) });
+  if (topPicks !== null) metrics.push({ key: "Top picks", value: String(topPicks) });
+  if (shortlisted !== null) metrics.push({ key: "Shortlisted", value: String(shortlisted) });
+  if (queries !== null) metrics.push({ key: "Queries", value: String(queries) });
+  if (searchResults !== null) metrics.push({ key: "Search hits", value: String(searchResults) });
+  if (enriched !== null) metrics.push({ key: "Enriched", value: String(enriched) });
+  return metrics.slice(0, 8);
+}
+
+function extractRunInsightsFromToolRuns(toolRuns: Array<Record<string, unknown>>) {
+  const details: string[] = [];
+  const metrics: Array<{ key: string; value: string }> = [];
+  const highlights: Array<{ label: string; url?: string }> = [];
+
+  const pushDetail = (line: string) => {
+    const value = String(line || "").replace(/\s+/g, " ").trim();
+    if (!value) return;
+    if (!details.includes(value)) details.push(value);
+  };
+  const pushMetric = (entry: { key: string; value: string }) => {
+    if (!entry.key || !entry.value) return;
+    if (!metrics.some((item) => item.key === entry.key && item.value === entry.value)) {
+      metrics.push(entry);
+    }
+  };
+  const pushHighlight = (entry: { label: string; url?: string }) => {
+    const label = String(entry.label || "").trim();
+    if (!label) return;
+    if (!highlights.some((item) => item.label === label && item.url === entry.url)) {
+      highlights.push(entry);
+    }
+  };
+
+  for (const toolRun of toolRuns) {
+    const toolName = String(toolRun.toolName || "").trim().toLowerCase();
+    const result = isRecord(toolRun.resultJson) ? toolRun.resultJson : null;
+    if (!result) continue;
+
+    if (toolName === "competitors.discover_v3") {
+      for (const metric of metricsFromDiscoverV3Result(result)) {
+        pushMetric(metric);
+      }
+      const laneStats = isRecord(result.laneStats) ? result.laneStats : null;
+      if (laneStats) {
+        const activeLanes = Object.keys(laneStats).length;
+        if (activeLanes > 0) {
+          pushMetric({ key: "Lanes", value: String(activeLanes) });
+        }
+      }
+      const topCandidates = previewItemsFromUnknown(result.topCandidates, 5);
+      for (const candidate of topCandidates) {
+        pushHighlight(candidate);
+      }
+      if (topCandidates.length > 0) {
+        pushDetail(`Top competitors: ${topCandidates.map((item) => item.label).join(", ")}`);
+      }
+      continue;
+    }
+
+    if (toolName === "search.web") {
+      const query = String(result.query || "").trim();
+      const provider = String(result.provider || "").trim();
+      const count = Number(result.count);
+      if (Number.isFinite(count)) pushMetric({ key: "Search results", value: String(Math.floor(count)) });
+      if (provider) pushMetric({ key: "Provider", value: provider });
+      if (query) pushDetail(`Search query: ${query}`);
+      for (const item of previewItemsFromUnknown(result.items, 3)) {
+        pushHighlight(item);
+      }
+      continue;
+    }
+
+    if (toolName === "intel.list") {
+      const section = String(result.section || "").trim();
+      const count = Number(result.count);
+      if (section && Number.isFinite(count)) {
+        pushDetail(`Loaded ${Math.floor(count)} records from ${humanizeToken(section)}.`);
+      }
+      for (const item of previewItemsFromUnknown(Array.isArray(result.items) ? result.items : result.data, 3)) {
+        pushHighlight(item);
+      }
+      continue;
+    }
+  }
+
+  return {
+    details: details.slice(0, 8),
+    metrics: metrics.slice(0, 8),
+    highlights: highlights.slice(0, 8),
+  };
 }
 
 function mapDecisionsFromEvents(
@@ -765,7 +928,7 @@ function mapRuns(activeRuns: Array<Record<string, unknown>>, events: Array<Recor
                 : latestEvent?.phase || (statusRaw === "WAITING_TOOLS" ? "tools" : "planning");
 
     const latestToolSummary =
-      latestEvent?.toolName ? toValueFirstToolMessage(latestEvent.toolName, latestEvent.message) : latestEvent?.message;
+      latestEvent?.toolName ? toValueFirstToolMessage(latestEvent.toolName, latestEvent.message, latestEvent.payload) : latestEvent?.message;
 
     const stage = buildRunStage({
       phase,
@@ -784,8 +947,17 @@ function mapRuns(activeRuns: Array<Record<string, unknown>>, events: Array<Recor
               .join(", ")}${inFlightToolNames.length > 3 ? "..." : ""}`,
           ]
         : []),
-      ...(latestEvent?.toolName ? [`Latest update: ${toValueFirstToolMessage(latestEvent.toolName, latestEvent.message)}`] : []),
+      ...(latestEvent?.toolName
+        ? [`Latest update: ${toValueFirstToolMessage(latestEvent.toolName, latestEvent.message, latestEvent.payload)}`]
+        : []),
     ];
+
+    const insight = extractRunInsightsFromToolRuns(
+      toolRuns.filter((entry): entry is Record<string, unknown> => isRecord(entry))
+    );
+    for (const line of insight.details) {
+      if (!details.includes(line)) details.push(line);
+    }
 
     if (phase === "waiting_input") {
       details.unshift("Waiting for your approval to continue.");
@@ -799,6 +971,8 @@ function mapRuns(activeRuns: Array<Record<string, unknown>>, events: Array<Recor
       progress: phaseToProgress(phase, done, total),
       status: phaseToStatus(phase),
       details,
+      ...(insight.metrics.length ? { metrics: insight.metrics } : {}),
+      ...(insight.highlights.length ? { highlights: insight.highlights } : {}),
     };
   });
 

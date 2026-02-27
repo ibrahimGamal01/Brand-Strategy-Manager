@@ -8,8 +8,12 @@ interface CommandPaletteProps {
 }
 
 const commands = [
-  "Run competitor discovery",
+  "Run V3 competitor finder (standard)",
+  "Run V3 competitor finder (deep)",
+  "Run competitor discovery (legacy)",
   "Generate PDF deliverable",
+  "Show sources",
+  "Search web evidence",
   "Open library: Web",
   "Open library: Competitors",
   "Add constraint",
@@ -68,7 +72,7 @@ export function CommandPalette({ onSelect }: CommandPaletteProps) {
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="mt-2 space-y-1">
+            <div className="bat-scrollbar mt-2 max-h-[50vh] space-y-1 overflow-y-auto pr-1">
               {filtered.map((command) => (
                 <button
                   key={command}

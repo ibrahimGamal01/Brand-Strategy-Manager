@@ -67,6 +67,16 @@ export type ProcessPhase =
   | "failed"
   | "cancelled";
 
+export interface ProcessMetric {
+  key: string;
+  value: string;
+}
+
+export interface ProcessPreviewItem {
+  label: string;
+  url?: string;
+}
+
 export interface ProcessRun {
   id: string;
   label: string;
@@ -75,6 +85,8 @@ export interface ProcessRun {
   progress: number;
   status: ProcessStatus;
   details?: string[];
+  metrics?: ProcessMetric[];
+  highlights?: ProcessPreviewItem[];
 }
 
 export interface ProcessFeedItem {

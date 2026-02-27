@@ -198,6 +198,48 @@ function RunningTab({
                 ))}
               </ul>
             ) : null}
+            {run.metrics?.length ? (
+              <div className="mt-2 grid grid-cols-2 gap-1.5">
+                {run.metrics.map((metric) => (
+                  <div
+                    key={`${run.id}-metric-${metric.key}-${metric.value}`}
+                    className="rounded-lg border px-2 py-1.5"
+                    style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}
+                  >
+                    <p className="text-[10px] uppercase tracking-[0.08em]" style={{ color: "var(--bat-text-muted)" }}>
+                      {metric.key}
+                    </p>
+                    <p className="text-xs font-semibold">{metric.value}</p>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {run.highlights?.length ? (
+              <div className="mt-2 space-y-1">
+                {run.highlights.map((item) =>
+                  item.url ? (
+                    <a
+                      key={`${run.id}-highlight-${item.label}`}
+                      href={item.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block truncate rounded-lg border px-2 py-1 text-xs hover:underline"
+                      style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}
+                    >
+                      {item.label}
+                    </a>
+                  ) : (
+                    <p
+                      key={`${run.id}-highlight-${item.label}`}
+                      className="truncate rounded-lg border px-2 py-1 text-xs"
+                      style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}
+                    >
+                      {item.label}
+                    </p>
+                  )
+                )}
+              </div>
+            ) : null}
             <div className="mt-2 h-2 rounded-full" style={{ background: "var(--bat-surface-muted)" }}>
               <div
                 className="h-2 rounded-full transition-all"
