@@ -255,7 +255,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
         ? "show_sources"
         : action === "generate_pdf"
           ? "generate_pdf"
-          : action.replace(/[^a-z0-9_/-]+/g, "_");
+          : action.replace(/[^a-z0-9_./-]+/g, "_");
     const payloadText = payload ? ` ${JSON.stringify(payload)}` : "";
     injectComposerText(`/${normalizedCommand}${payloadText}`, "append");
   };

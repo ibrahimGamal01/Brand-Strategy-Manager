@@ -333,6 +333,25 @@ function fallbackWriterOutput(input: {
   }
 
   const response = responseSections.filter(Boolean).join('\n\n');
+  const hasCompetitorSignals = /\bcompetitor|adjacent|substitute|inspiration\b/i.test(String(input.userMessage || ''));
+
+  const actions: RuntimeWriterOutput['actions'] = [
+    { label: 'Show sources', action: 'show_sources' },
+    { label: 'Generate PDF', action: 'generate_pdf' },
+  ];
+  if (hasCompetitorSignals) {
+    actions.unshift({
+      label: 'Run V3 competitor finder',
+      action: 'competitors.discover_v3',
+      payload: { mode: 'standard', maxCandidates: 140, maxEnrich: 10 },
+    });
+  } else {
+    actions.unshift({
+      label: 'Search web evidence',
+      action: 'search.web',
+      payload: { query: String(input.userMessage || '').slice(0, 180), count: 10, provider: 'auto' },
+    });
+  }
 
   return {
     response,
@@ -352,7 +371,7 @@ function fallbackWriterOutput(input: {
           ...(entry.url ? { url: compactPromptString(entry.url, 260) } : {}),
         })),
     },
-    actions: [],
+    actions,
     decisions: [],
   };
 }
