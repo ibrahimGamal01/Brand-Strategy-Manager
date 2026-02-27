@@ -271,17 +271,17 @@ export function ChatThread({
 
   return (
     <section ref={scrollRef} className="bat-scrollbar min-h-0 flex-1 overflow-y-auto bg-[linear-gradient(180deg,#f7f7f8_0%,#f2f4f7_100%)]">
-      <div className={`mx-auto w-full ${contentWidthClassName} px-4 pb-24 pt-8 sm:px-6`}>
+      <div className={`mx-auto w-full ${contentWidthClassName} px-5 pb-24 pt-8 sm:px-8 xl:px-10`}>
         {visibleMessages.map((message) => {
           const isUser = message.role === "user";
           return (
-            <article key={message.id} className="group mb-8">
+            <article key={message.id} className="group mb-6">
               <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
                 <div
                   className={
                     isUser
-                      ? "max-w-[90%] rounded-3xl bg-[#2f2f32] px-4 py-3 text-white shadow-lg sm:max-w-[74%] 2xl:max-w-[68%]"
-                      : "max-w-[96%] rounded-3xl border border-zinc-200 bg-white px-4 py-3 text-zinc-900 shadow-md sm:max-w-[88%] 2xl:max-w-[80%]"
+                      ? "max-w-[96%] rounded-3xl bg-[#2f2f32] px-4 py-3 text-white shadow-lg sm:max-w-[88%] 2xl:max-w-[82%]"
+                      : "max-w-[98%] rounded-3xl border border-zinc-200 bg-white px-4 py-3 text-zinc-900 shadow-md sm:max-w-[94%] 2xl:max-w-[90%]"
                   }
                 >
                   {!isUser ? (

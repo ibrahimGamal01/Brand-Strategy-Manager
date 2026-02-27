@@ -90,8 +90,8 @@ export function ChatComposer({
   };
 
   return (
-    <section className="sticky bottom-0 z-20 border-t border-zinc-200 bg-gradient-to-t from-white via-white/95 to-white/75 px-3 pb-3 pt-3 supports-[backdrop-filter]:backdrop-blur sm:px-5 sm:pb-4">
-      <div className={`mx-auto w-full ${contentWidthClassName}`}>
+    <section className="sticky bottom-0 z-20 border-t border-zinc-200 bg-gradient-to-t from-white via-white/95 to-white/75 px-0 pb-3 pt-3 supports-[backdrop-filter]:backdrop-blur sm:pb-4">
+      <div className={`mx-auto w-full ${contentWidthClassName} px-5 sm:px-8 xl:px-10`}>
         <div className="mb-2 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 text-xs text-zinc-500">
             <span className={`rounded-full px-2 py-1 ${isStreaming ? "bg-emerald-50 text-emerald-700" : "bg-zinc-100 text-zinc-600"}`}>

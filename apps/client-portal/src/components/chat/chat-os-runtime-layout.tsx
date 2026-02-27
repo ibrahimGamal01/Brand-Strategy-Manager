@@ -309,7 +309,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
       ) : null}
 
       <div className="relative overflow-hidden rounded-3xl border border-zinc-200 bg-[#f3f4f6] shadow-2xl">
-        <div className="grid h-[88vh] min-h-[70vh] grid-cols-1 lg:grid-cols-[22%_78%]">
+        <div className="grid h-[calc(100dvh-7.5rem)] min-h-[36rem] w-full grid-cols-1 lg:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[19rem_minmax(0,1fr)]">
           <aside
             className={`${
               sidebarOpen ? "absolute inset-y-0 left-0 z-30 flex w-11/12 max-w-sm" : "hidden"
@@ -442,7 +442,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
           </aside>
 
           <section className="relative flex min-h-0 flex-col overflow-hidden bg-white">
-            <header className="flex items-center justify-between gap-2 border-b border-zinc-200 px-3 py-2.5">
+            <header className="flex items-center justify-between gap-2 border-b border-zinc-200 px-5 py-3 sm:px-8 xl:px-10">
               <div className="min-w-0">
                 <div className="mb-0.5 flex items-center gap-2">
                   <button
@@ -502,7 +502,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
               </div>
             </header>
 
-            <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden xl:grid-cols-[68%_32%] 2xl:grid-cols-[70%_30%]">
+            <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden xl:grid-cols-[minmax(0,1fr)_22rem] 2xl:grid-cols-[minmax(0,1fr)_24rem]">
               <div className="flex min-h-0 flex-col border-zinc-200 xl:border-r">
                 <ChatThread
                   messages={messages}
@@ -512,7 +512,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                   showInlineReasoning={false}
                   isStreaming={isStreaming}
                   streamingInsight={streamingInsight}
-                  contentWidthClassName="max-w-[96%]"
+                  contentWidthClassName="max-w-none"
                 />
 
                 <ChatComposer
@@ -535,7 +535,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                   onReorderQueue={(from, to) => runAsync(reorderQueue(from, to))}
                   onDeleteQueued={(id) => runAsync(removeQueued(id))}
                   onSteer={onSteer}
-                  contentWidthClassName="max-w-[96%]"
+                  contentWidthClassName="max-w-none"
                 />
               </div>
 
