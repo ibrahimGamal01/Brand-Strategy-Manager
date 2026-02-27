@@ -55,6 +55,20 @@ function testPlannerHeuristics() {
     'Expected deep DDG/Scraply investigation request to trigger research.gather.'
   );
 
+  const v3DiscoveryCalls = inferToolCallsFromMessage(
+    'Run a wide V3 competitor finder workflow using adjacent and substitute competitors.'
+  );
+  assert.ok(
+    v3DiscoveryCalls.some((entry) => entry.tool === 'competitors.discover_v3'),
+    'Expected V3 competitor finder phrasing to trigger competitors.discover_v3.'
+  );
+
+  const explicitSearchCalls = inferToolCallsFromMessage('Search the web for best biophoton energy programs.');
+  assert.ok(
+    explicitSearchCalls.some((entry) => entry.tool === 'search.web'),
+    'Expected explicit web search phrasing to trigger search.web.'
+  );
+
   const crawlRunReferenceCalls = inferToolCallsFromMessage('Use evidence from: Crawl run crawl-e8');
   const crawlRunListCall = crawlRunReferenceCalls.find((entry) => entry.tool === 'web.crawl.list_snapshots');
   assert.ok(crawlRunListCall, 'Expected crawl run evidence reference to trigger web.crawl.list_snapshots.');
@@ -100,6 +114,12 @@ function testPlannerHeuristics() {
   assert.ok(
     slashGeneratePdfCalls.some((entry) => entry.tool === 'document.plan'),
     'Expected /generate_pdf to trigger document.plan.'
+  );
+
+  const slashV3Calls = inferToolCallsFromMessage('/competitors.discover_v3 {"mode":"wide"}');
+  assert.ok(
+    slashV3Calls.some((entry) => entry.tool === 'competitors.discover_v3'),
+    'Expected explicit /competitors.discover_v3 command to trigger V3 competitor discovery.'
   );
 
   const mentionCrawlRunCalls = inferToolCallsFromMessage('Please use @library[item-1|Crawl run crawl-e8] in this answer.');

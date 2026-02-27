@@ -72,7 +72,20 @@ type ValidatorOutput = {
 };
 
 const ALLOWED_PLANNER_TOOL_NAMES = TOOL_REGISTRY.map((tool) => tool.name).sort();
+const SUPPORTED_TOOL_NAMES = new Set(TOOL_REGISTRY.map((tool) => tool.name));
 const PROMPT_STEP_TIMEOUT_MS = 30_000;
+
+const TOOL_NAME_ALIASES: Record<string, { tool: string; args: Record<string, unknown> }> = {
+  competitoranalysis: { tool: 'orchestration.run', args: { targetCount: 12, mode: 'append' } },
+  competitoraudit: { tool: 'orchestration.run', args: { targetCount: 12, mode: 'append' } },
+  competitorfinderv3: { tool: 'competitors.discover_v3', args: { mode: 'standard' } },
+  discovercompetitorsv3: { tool: 'competitors.discover_v3', args: { mode: 'standard' } },
+  widecompetitordiscovery: { tool: 'competitors.discover_v3', args: { mode: 'wide' } },
+  deepcompetitordiscovery: { tool: 'competitors.discover_v3', args: { mode: 'deep' } },
+  searchweb: { tool: 'search.web', args: { provider: 'auto', count: 10 } },
+  bravesearch: { tool: 'search.web', args: { provider: 'brave', count: 10 } },
+  scraplyscan: { tool: 'research.gather', args: { depth: 'deep', includeScrapling: true, includeAccountContext: true } },
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -335,6 +348,15 @@ function parseSlashCommand(message: string): { command: string; argsJson: Record
   return { command, argsJson: null };
 }
 
+function normalizeToolAliasKey(value: string): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^\/+/, '')
+    .replace(/[^a-z0-9._/-]/g, '')
+    .replace(/[./_-]+/g, '');
+}
+
 function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   const originalMessage = String(message || '');
   const messageWithMentions = withLibraryMentionHints(originalMessage);
@@ -368,9 +390,16 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
     /\b(form|intake|onboarding)\b/.test(normalized) &&
     /\b(response|submission|answers?)\b/.test(normalized);
   const hasRunIntent = /\b(run|start|continue|resume|expand|investigat(?:e|ing)|analy[sz]e)\b/.test(normalized);
+  const hasFindIntent = /\b(find|finder|discover|identify|map|search|look up)\b/.test(normalized);
   const hasCompetitorDiscoveryIntent =
     /\b(competitor discovery|discover competitors|competitor investigation|competitor set)\b/.test(normalized) ||
     (/\bcompetitor\b/.test(normalized) && /\b(discovery|discover|investigat|analy[sz]e)\b/.test(normalized));
+  const hasV3DiscoveryIntent =
+    /\b(v3|discover_v3|competitor finder|best competitor finder|wide competitor)\b/.test(normalized) ||
+    (/\b(adjacent|substitute|aspirational|complementary)\b/.test(normalized) && /\bcompetitor\b/.test(normalized));
+  const hasExplicitWebSearchIntent =
+    /\b(search (the )?(web|internet)|web search|find online|look up online)\b/.test(normalized) &&
+    !/\b(competitor|rival|alternative)\b/.test(normalized);
   const hasCompetitorStatusIntent =
     /\b(status|progress|started|update)\b/.test(normalized) && /\bcompetitor\b/.test(normalized);
   const hasDeepInvestigationIntent =
@@ -410,6 +439,16 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
       pushIfMissing('intel.list', { section: 'community_insights', limit: 10 });
       pushIfMissing('evidence.posts', { platform: 'any', sort: 'engagement', limit: 8 });
       pushIfMissing('evidence.news', { limit: 8 });
+    } else if (SUPPORTED_TOOL_NAMES.has(slashCommand.command as (typeof TOOL_REGISTRY)[number]['name'])) {
+      pushIfMissing(slashCommand.command, slashCommand.argsJson || {});
+    } else {
+      const alias = TOOL_NAME_ALIASES[normalizeToolAliasKey(slashCommand.command)];
+      if (alias) {
+        pushIfMissing(alias.tool, {
+          ...(slashCommand.argsJson || {}),
+          ...(alias.args || {}),
+        });
+      }
     }
   }
 
@@ -430,8 +469,16 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   if (hasIntakeReadIntent) {
     pushIfMissing('workspace.intake.get', {});
   }
-  if (hasRunIntent && hasCompetitorDiscoveryIntent) {
-    pushIfMissing('orchestration.run', { targetCount: 12, mode: 'append' });
+  if ((hasRunIntent && hasCompetitorDiscoveryIntent) || (hasFindIntent && /\bcompetitor\b/.test(normalized))) {
+    if (hasV3DiscoveryIntent) {
+      pushIfMissing('competitors.discover_v3', {
+        mode: hasDeepInvestigationIntent ? 'deep' : 'standard',
+        maxCandidates: hasDeepInvestigationIntent ? 200 : 120,
+        maxEnrich: hasDeepInvestigationIntent ? 18 : 10,
+      });
+    } else {
+      pushIfMissing('orchestration.run', { targetCount: 12, mode: 'append' });
+    }
   }
   if (hasCompetitorStatusIntent) {
     pushIfMissing('orchestration.status', {});
@@ -475,6 +522,9 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   }
   if (/community|reddit|forum|insight/.test(normalized)) {
     pushIfMissing('intel.list', { section: 'community_insights', limit: 10 });
+  }
+  if (hasExplicitWebSearchIntent) {
+    pushIfMissing('search.web', { query: originalMessage, count: 10, provider: 'auto' });
   }
   if (/news|press|mention/.test(normalized)) {
     pushIfMissing('evidence.news', { limit: 8 });

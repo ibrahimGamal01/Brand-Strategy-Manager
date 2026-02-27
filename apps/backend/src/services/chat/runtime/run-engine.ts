@@ -77,9 +77,15 @@ const TOOL_NAME_ALIASES: Record<string, { tool: string; args: Record<string, unk
   competitoranalysistool: { tool: 'orchestration.run', args: { targetCount: 12, mode: 'append' } },
   competitoraudit: { tool: 'orchestration.run', args: { targetCount: 12, mode: 'append' } },
   runcompetitordiscovery: { tool: 'orchestration.run', args: { targetCount: 12, mode: 'append' } },
+  competitorfinderv3: { tool: 'competitors.discover_v3', args: { mode: 'standard' } },
+  discovercompetitorsv3: { tool: 'competitors.discover_v3', args: { mode: 'standard' } },
+  widecompetitordiscovery: { tool: 'competitors.discover_v3', args: { mode: 'wide' } },
+  deepcompetitordiscovery: { tool: 'competitors.discover_v3', args: { mode: 'deep' } },
   rundeepresearch: { tool: 'research.gather', args: { depth: 'deep', includeScrapling: true, includeAccountContext: true } },
   deepresearch: { tool: 'research.gather', args: { depth: 'deep', includeScrapling: true, includeAccountContext: true } },
   ddgsearch: { tool: 'research.gather', args: { depth: 'standard', includeScrapling: false, includeAccountContext: true } },
+  searchweb: { tool: 'search.web', args: { provider: 'auto', count: 10 } },
+  bravesearch: { tool: 'search.web', args: { provider: 'brave', count: 10 } },
   scraplyscan: { tool: 'research.gather', args: { depth: 'deep', includeScrapling: true, includeAccountContext: true } },
   scraplingscan: { tool: 'research.gather', args: { depth: 'deep', includeScrapling: true, includeAccountContext: true } },
   addcompetitorlinks: { tool: 'competitors.add_links', args: {} },
@@ -889,9 +895,16 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
     /\b(form|intake|onboarding)\b/.test(normalized) &&
     /\b(response|submission|answers?)\b/.test(normalized);
   const hasRunIntent = /\b(run|start|continue|resume|expand|investigat(?:e|ing)|analy[sz]e)\b/.test(normalized);
+  const hasFindIntent = /\b(find|finder|discover|identify|map|search|look up)\b/.test(normalized);
   const hasCompetitorDiscoveryIntent =
     /\b(competitor discovery|discover competitors|competitor investigation|competitor set)\b/.test(normalized) ||
     (/\bcompetitor\b/.test(normalized) && /\b(discovery|discover|investigat|analy[sz]e)\b/.test(normalized));
+  const hasV3DiscoveryIntent =
+    /\b(v3|discover_v3|competitor finder|best competitor finder|wide competitor)\b/.test(normalized) ||
+    (/\b(adjacent|substitute|aspirational|complementary)\b/.test(normalized) && /\bcompetitor\b/.test(normalized));
+  const hasExplicitWebSearchIntent =
+    /\b(search (the )?(web|internet)|web search|find online|look up online)\b/.test(normalized) &&
+    !/\b(competitor|rival|alternative)\b/.test(normalized);
   const hasCompetitorStatusIntent =
     /\b(status|progress|started|update)\b/.test(normalized) && /\bcompetitor\b/.test(normalized);
   const hasDeepInvestigationIntent =
@@ -965,8 +978,16 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
     pushIfMissing('workspace.intake.get', {});
   }
 
-  if (hasRunIntent && hasCompetitorDiscoveryIntent) {
-    pushIfMissing('orchestration.run', { targetCount: 12, mode: 'append' });
+  if ((hasRunIntent && hasCompetitorDiscoveryIntent) || (hasFindIntent && /\bcompetitor\b/.test(normalized))) {
+    if (hasV3DiscoveryIntent) {
+      pushIfMissing('competitors.discover_v3', {
+        mode: hasDeepInvestigationIntent ? 'deep' : 'standard',
+        maxCandidates: hasDeepInvestigationIntent ? 200 : 120,
+        maxEnrich: hasDeepInvestigationIntent ? 18 : 10,
+      });
+    } else {
+      pushIfMissing('orchestration.run', { targetCount: 12, mode: 'append' });
+    }
   }
 
   if (hasCompetitorStatusIntent) {
@@ -1013,6 +1034,10 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
 
   if (/community|reddit|forum|insight/.test(normalized)) {
     pushIfMissing('intel.list', { section: 'community_insights', limit: 10 });
+  }
+
+  if (hasExplicitWebSearchIntent) {
+    pushIfMissing('search.web', { query: originalMessage, count: 10, provider: 'auto' });
   }
 
   if (/news|press|mention/.test(normalized)) {
