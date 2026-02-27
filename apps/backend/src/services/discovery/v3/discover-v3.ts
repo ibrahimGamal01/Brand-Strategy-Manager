@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import {
   CompetitorAvailabilityStatus,
   CompetitorCandidateState,
@@ -49,6 +50,22 @@ const MODE_BUDGETS: Record<
 const PERSON_HINT_RE = /\b(coach|founder|creator|influencer|speaker|author|mentor|personal brand)\b/i;
 const COMMUNITY_HINT_RE = /\b(community|forum|subreddit|reddit|discord|facebook group)\b/i;
 const MARKETPLACE_HINT_RE = /\b(directory|marketplace|list|top 10|best of|alternatives)\b/i;
+const TRACKING_QUERY_KEYS = new Set([
+  'utm_source',
+  'utm_medium',
+  'utm_campaign',
+  'utm_term',
+  'utm_content',
+  'gclid',
+  'fbclid',
+  'igshid',
+  'mc_cid',
+  'mc_eid',
+  'si',
+  'ref',
+  'ref_src',
+  'source',
+]);
 
 function asJson<T>(value: T): Prisma.InputJsonValue {
   return value as unknown as Prisma.InputJsonValue;
@@ -231,6 +248,64 @@ function stateFromRank(index: number): CompetitorCandidateState {
   if (index < 5) return CompetitorCandidateState.TOP_PICK;
   if (index < 20) return CompetitorCandidateState.SHORTLISTED;
   return CompetitorCandidateState.DISCOVERED;
+}
+
+function normalizeEvidenceUrl(url: string): string {
+  const raw = String(url || '').trim();
+  if (!raw) return '';
+  try {
+    const parsed = new URL(raw);
+    parsed.protocol = parsed.protocol.toLowerCase();
+    parsed.hostname = parsed.hostname.replace(/^www\./i, '').toLowerCase();
+    parsed.hash = '';
+    if ((parsed.protocol === 'https:' && parsed.port === '443') || (parsed.protocol === 'http:' && parsed.port === '80')) {
+      parsed.port = '';
+    }
+    const pairs = Array.from(parsed.searchParams.entries())
+      .filter(([key]) => {
+        const normalized = String(key || '').trim().toLowerCase();
+        if (!normalized) return false;
+        if (normalized.startsWith('utm_')) return false;
+        return !TRACKING_QUERY_KEYS.has(normalized);
+      })
+      .sort(([left], [right]) => left.localeCompare(right));
+    parsed.search = '';
+    for (const [key, value] of pairs) {
+      parsed.searchParams.append(key, value);
+    }
+    parsed.pathname = parsed.pathname.replace(/\/+$/g, '') || '/';
+    return parsed.toString();
+  } catch {
+    return raw;
+  }
+}
+
+function stableEvidenceRefId(input: {
+  candidate: CompetitorDiscoveryV3Candidate;
+  entry: CompetitorDiscoveryV3Evidence;
+  kind: EvidenceRefKind;
+  normalizedUrl: string;
+}): string {
+  const { candidate, entry, kind, normalizedUrl } = input;
+  const digest = crypto
+    .createHash('sha256')
+    .update(
+      [
+        'discover_v3',
+        kind,
+        candidate.platform,
+        candidate.normalizedHandle,
+        String(entry.lane || ''),
+        String(entry.query || ''),
+        String(entry.source || ''),
+        String(entry.provider || ''),
+        String(entry.rank || ''),
+        normalizedUrl || String(entry.title || '').trim() || String(entry.snippet || '').trim().slice(0, 180),
+      ].join('|')
+    )
+    .digest('hex')
+    .slice(0, 28);
+  return `v3_${digest}`;
 }
 
 function toRelationshipType(
@@ -424,21 +499,27 @@ async function createCanonicalEvidenceRefs(input: {
             : source.includes('reddit') || source.includes('community')
               ? EvidenceRefKind.URL
               : EvidenceRefKind.URL;
-      const url = String(entry.url || '').trim() || null;
+      const url = normalizeEvidenceUrl(String(entry.url || ''));
       const title = String(entry.title || '').trim();
       const snippet = String(entry.snippet || '').trim();
       const label = title || `${candidate.name} evidence`;
-      const refId = `v3:${runId}:${candidate.key}:${String(entry.query || '').slice(0, 80)}`;
+      const refId = stableEvidenceRefId({
+        candidate,
+        entry,
+        kind,
+        normalizedUrl: url,
+      });
       return {
         researchJobId,
         entityId,
         surfaceId,
         kind,
         refId,
-        url,
+        url: url || null,
         label: label.slice(0, 280),
         metadata: asJson({
           source: 'discover_v3',
+          runId,
           lane: entry.lane,
           query: entry.query,
           rank: entry.rank,
@@ -452,6 +533,7 @@ async function createCanonicalEvidenceRefs(input: {
   if (!rows.length) return 0;
   const result = await prisma.evidenceRef.createMany({
     data: rows,
+    skipDuplicates: true,
   });
   return Number(result.count || 0);
 }

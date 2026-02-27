@@ -983,6 +983,7 @@ model EvidenceRef {
   @@index([researchJobId, kind, createdAt(sort: Desc)], map: "evidence_refs_job_kind_created_idx")
   @@index([entityId, kind], map: "evidence_refs_entity_kind_idx")
   @@index([surfaceId], map: "evidence_refs_surface_idx")
+  @@unique([researchJobId, kind, refId], map: "evidence_refs_job_kind_ref_key")
   @@map("evidence_refs")
 }
 
