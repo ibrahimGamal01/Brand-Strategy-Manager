@@ -149,6 +149,9 @@ function testContinuationCollection() {
           type: 'auto_continue',
           reason: 'Continue with evidence read',
           suggestedNextTools: ['intel.list', 'evidence.news'],
+          suggestedToolCalls: [
+            { tool: 'web.crawl.list_snapshots', args: { runId: 'crawl-e8', limit: 20 } },
+          ],
         },
       ],
     },
@@ -170,7 +173,12 @@ function testContinuationCollection() {
   ];
 
   const continuationTools = collectContinuationTools(results);
-  assert.deepEqual(continuationTools, ['intel.list', 'evidence.news', 'evidence.posts']);
+  assert.deepEqual(continuationTools, [
+    'intel.list',
+    'evidence.news',
+    'evidence.posts',
+    'web.crawl.list_snapshots',
+  ]);
 }
 
 function testPolicyNormalization() {

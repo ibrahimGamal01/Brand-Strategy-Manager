@@ -973,16 +973,16 @@ export async function orchestrateCompetitorsForJob(
     }
 
     const pruneResult = await pruneFilteredDiscoveredCompetitors(researchJobId);
-    if (pruneResult.deleted > 0) {
+    if (pruneResult.archived > 0) {
       emitResearchJobEvent({
         researchJobId,
         runId: run.id,
         source: 'competitor-orchestrator-v2',
         code: 'competitor.orchestration.filtered_pruned',
         level: 'info',
-        message: `Pruned ${pruneResult.deleted} non-actionable filtered discovered competitors`,
+        message: `Archived ${pruneResult.archived} filtered discovered competitors under retention policy`,
         metrics: {
-          deleted: pruneResult.deleted,
+          archived: pruneResult.archived,
         },
       });
     }
@@ -997,7 +997,38 @@ export async function orchestrateCompetitorsForJob(
       metrics: summary,
     });
 
-    for (const degraded of connectorHealth.snapshot().filter((item) => item.status === 'degraded')) {
+    const connectorSnapshots = connectorHealth.snapshot();
+    if (connectorSnapshots.length > 0) {
+      await prisma.connectorRun.createMany({
+        data: connectorSnapshots.map((snapshot) => ({
+          researchJobId,
+          platform: snapshot.name.includes('instagram')
+            ? 'instagram'
+            : snapshot.name.includes('tiktok')
+              ? 'tiktok'
+              : 'web',
+          provider: snapshot.name,
+          target: context.brandName || 'workspace',
+          ok: snapshot.status === 'ok',
+          confidence: snapshot.status === 'ok' ? 0.8 : 0.35,
+          coverage: snapshot.status === 'ok' ? 1 : 0.5,
+          ...(snapshot.status === 'degraded' ? { error: snapshot.reason || null } : {}),
+          ...(snapshot.status === 'degraded'
+            ? {
+                warnings: {
+                  reason: snapshot.reason || 'connector degraded',
+                } as Prisma.InputJsonValue,
+              }
+            : {}),
+          meta: {
+            runId: run.id,
+            occurredAt: snapshot.occurredAt,
+          } as Prisma.InputJsonValue,
+        })),
+      });
+    }
+
+    for (const degraded of connectorSnapshots.filter((item) => item.status === 'degraded')) {
       emitResearchJobEvent({
         researchJobId,
         runId: run.id,

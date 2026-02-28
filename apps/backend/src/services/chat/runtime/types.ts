@@ -21,12 +21,24 @@ export type RuntimeEvidenceItem = {
   kind: string;
   label: string;
   url?: string;
+  refId?: string;
+  status?: 'RAW' | 'PARTIAL' | 'BLOCKED' | 'VERIFIED';
+  provider?: string;
+  confidence?: number;
+  contentHash?: string;
+  runId?: string;
+};
+
+export type RuntimeSuggestedToolCall = {
+  tool: string;
+  args: Record<string, unknown>;
 };
 
 export type RuntimeContinuation = {
   type: 'auto_continue' | 'manual_continue';
   reason: string;
   suggestedNextTools?: string[];
+  suggestedToolCalls?: RuntimeSuggestedToolCall[];
 };
 
 export type RuntimeToolResult = {

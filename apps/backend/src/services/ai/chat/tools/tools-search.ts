@@ -252,6 +252,11 @@ export const searchTools: ToolDefinition<Record<string, unknown>, Record<string,
             type: 'auto_continue',
             reason: 'V3 competitor discovery completed; synthesize direct and adjacent landscape with evidence.',
             suggestedNextTools: ['intel.list', 'orchestration.status', 'evidence.posts'],
+            suggestedToolCalls: [
+              { tool: 'intel.list', args: { section: 'competitors', limit: 20 } },
+              { tool: 'orchestration.status', args: {} },
+              { tool: 'evidence.posts', args: { platform: 'any', sort: 'engagement', limit: 8 } },
+            ],
           },
         ],
       };

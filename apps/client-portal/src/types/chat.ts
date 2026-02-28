@@ -18,6 +18,8 @@ export interface ChatMessage {
     assumptions: string[];
     nextSteps: string[];
     evidence: MessageCitation[];
+    runId?: string;
+    ledgerVersionId?: string;
   };
 }
 

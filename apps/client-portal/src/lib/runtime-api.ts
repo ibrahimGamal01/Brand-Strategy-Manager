@@ -482,6 +482,86 @@ export async function listRuntimeEvents(
   return parseJson<{ events: RuntimeEventDto[] }>(response);
 }
 
+export type RuntimeEvidenceRefDto = {
+  id: string;
+  researchJobId: string;
+  kind: string;
+  refId?: string | null;
+  url?: string | null;
+  label?: string | null;
+  snippet?: string | null;
+  contentHash?: string | null;
+  provider?: string | null;
+  runId?: string | null;
+  status: "RAW" | "PARTIAL" | "BLOCKED" | "VERIFIED";
+  confidence: number;
+  metadata?: unknown;
+  fetchedAt: string;
+  createdAt: string;
+  updatedAt: string;
+  links: Array<{
+    id: string;
+    entityType: string;
+    entityId: string;
+    role: string;
+    createdAt: string;
+  }>;
+};
+
+export type RuntimeLedgerDto = {
+  id: string;
+  researchJobId: string;
+  runId?: string | null;
+  source: string;
+  payloadJson: unknown;
+  createdAt: string;
+};
+
+export async function fetchRuntimeEvidence(
+  workspaceId: string,
+  branchId: string,
+  options?: { runId?: string; limit?: number }
+) {
+  const params = new URLSearchParams();
+  if (typeof options?.runId === "string" && options.runId.trim()) {
+    params.set("runId", options.runId.trim());
+  }
+  if (Number.isFinite(Number(options?.limit))) {
+    params.set("limit", String(Math.max(10, Math.min(300, Number(options?.limit)))));
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(
+    `/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/evidence${suffix}`,
+    {
+      method: "GET",
+      cache: "no-store",
+      credentials: "include",
+    }
+  );
+  return parseJson<{ evidence: RuntimeEvidenceRefDto[] }>(response);
+}
+
+export async function fetchRuntimeLatestLedger(
+  workspaceId: string,
+  branchId: string,
+  options?: { runId?: string }
+) {
+  const params = new URLSearchParams();
+  if (typeof options?.runId === "string" && options.runId.trim()) {
+    params.set("runId", options.runId.trim());
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(
+    `/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/ledger/latest${suffix}`,
+    {
+      method: "GET",
+      cache: "no-store",
+      credentials: "include",
+    }
+  );
+  return parseJson<{ ledger: RuntimeLedgerDto | null }>(response);
+}
+
 export type RuntimeQueueDto = {
   id: string;
   content: string;

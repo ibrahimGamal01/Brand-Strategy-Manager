@@ -3,6 +3,7 @@ import { getTool } from '../../ai/chat/tools/tool-registry';
 import { buildRuntimeAgentContext } from './context-assembler';
 import { createRuntimeMutationAuditEntry } from './mutations/mutation-audit';
 import { buildRuntimeMutationOperationsFromIntelToolCall, evaluateRuntimeMutationGuard } from './mutations/mutation-guard';
+import { persistRuntimeEvidenceRefs } from '../../evidence/workspace-evidence-service';
 import type { RunPolicy, RuntimeContinuation, RuntimeDecision, RuntimeEvidenceItem, RuntimeToolArtifact, RuntimeToolResult } from './types';
 
 const CONFIRMATION_REQUIRED_MUTATION_TOOLS = new Set([
@@ -19,6 +20,10 @@ const TOOL_TIMEOUT_OVERRIDES_MS: Record<string, number> = {
   'intel.list': 12_000,
   'intel.get': 12_000,
 };
+
+const RUNTIME_EVIDENCE_LEDGER_ENABLED = String(process.env.RUNTIME_EVIDENCE_LEDGER_ENABLED || 'false')
+  .trim()
+  .toLowerCase() === 'true';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -177,6 +182,12 @@ function normalizeEvidence(raw: Record<string, unknown>): RuntimeEvidenceItem[] 
         kind,
         label,
         ...(typeof item.url === 'string' ? { url: item.url } : {}),
+        ...(typeof item.refId === 'string' ? { refId: item.refId } : {}),
+        ...(typeof item.status === 'string' ? { status: item.status as RuntimeEvidenceItem['status'] } : {}),
+        ...(typeof item.provider === 'string' ? { provider: item.provider } : {}),
+        ...(Number.isFinite(Number(item.confidence)) ? { confidence: Number(item.confidence) } : {}),
+        ...(typeof item.contentHash === 'string' ? { contentHash: item.contentHash } : {}),
+        ...(typeof item.runId === 'string' ? { runId: item.runId } : {}),
       });
     }
   }
@@ -198,6 +209,8 @@ function normalizeEvidence(raw: Record<string, unknown>): RuntimeEvidenceItem[] 
         kind: 'item',
         label,
         ...(url ? { url } : {}),
+        ...(typeof item.id === 'string' ? { refId: item.id } : {}),
+        ...(typeof item.contentHash === 'string' ? { contentHash: item.contentHash } : {}),
       });
     }
   }
@@ -248,11 +261,25 @@ function normalizeContinuations(raw: Record<string, unknown>): RuntimeContinuati
             .map((entry) => String(entry || '').trim())
             .filter(Boolean)
         : undefined;
+      const suggestedToolCalls = Array.isArray(item.suggestedToolCalls)
+        ? item.suggestedToolCalls
+            .map((entry) => {
+              if (!isRecord(entry)) return null;
+              const tool = String(entry.tool || '').trim();
+              if (!tool) return null;
+              return {
+                tool,
+                args: isRecord(entry.args) ? entry.args : {},
+              };
+            })
+            .filter((entry): entry is { tool: string; args: Record<string, unknown> } => Boolean(entry))
+        : undefined;
 
       return {
         type,
         reason,
-        suggestedNextTools,
+        ...(suggestedNextTools && suggestedNextTools.length ? { suggestedNextTools } : {}),
+        ...(suggestedToolCalls && suggestedToolCalls.length ? { suggestedToolCalls } : {}),
       } as RuntimeContinuation;
     })
     .filter((item): item is RuntimeContinuation => Boolean(item));
@@ -412,6 +439,7 @@ export async function executeToolWithContract(input: {
   toolName: string;
   args: Record<string, unknown>;
   policy: RunPolicy;
+  runId?: string;
 }): Promise<RuntimeToolResult> {
   const tool = getTool(input.toolName);
   if (!tool) {
@@ -542,12 +570,35 @@ export async function executeToolWithContract(input: {
       decisions.unshift(mutationGuardDecision);
     }
     const warnings = mergeWarnings(normalizeWarnings(asRecord), mutationGuardWarnings);
-    const raw = mutationGuardAudit
+    let raw: Record<string, unknown> = mutationGuardAudit
       ? {
           ...asRecord,
           runtimeMutationAudit: mutationGuardAudit,
         }
       : asRecord;
+
+    if (RUNTIME_EVIDENCE_LEDGER_ENABLED) {
+      try {
+        const persistedEvidence = await persistRuntimeEvidenceRefs({
+          researchJobId: input.researchJobId,
+          toolName: input.toolName,
+          defaultRunId: input.runId || null,
+          evidence,
+          rawEvidenceRefs: isRecord(asRecord) ? asRecord.evidenceRefs : undefined,
+          artifacts,
+        });
+        if (persistedEvidence.evidenceRefIds.length > 0) {
+          raw = {
+            ...raw,
+            runtimeEvidenceRefIds: persistedEvidence.evidenceRefIds,
+          };
+        }
+      } catch (evidenceError) {
+        warnings.push(
+          `Runtime evidence persistence failed: ${normalizeFailureWarning(evidenceError)}`
+        );
+      }
+    }
 
     return {
       ok: true,

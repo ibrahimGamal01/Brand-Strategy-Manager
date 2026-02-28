@@ -37,6 +37,44 @@ type WriterInput = {
   toolSummary: SummarizerOutput;
   toolResults: RuntimeToolResult[];
   runtimeContext?: Record<string, unknown>;
+  evidenceLedger?: EvidenceLedgerOutput;
+};
+
+type EvidenceLedgerInput = {
+  userMessage: string;
+  plan: RuntimePlan;
+  toolSummary: SummarizerOutput;
+  toolResults: RuntimeToolResult[];
+  runtimeContext?: Record<string, unknown>;
+};
+
+export type EvidenceLedgerOutput = {
+  entities: Array<{
+    id: string;
+    type: string;
+    name: string;
+    aliases?: string[];
+  }>;
+  facts: Array<{
+    id: string;
+    type: string;
+    value: Record<string, unknown>;
+    confidence: number;
+    evidenceRefIds: string[];
+    freshnessISO: string;
+  }>;
+  relations: Array<{
+    from: string;
+    rel: string;
+    to: string;
+    evidenceRefIds: string[];
+  }>;
+  gaps: Array<{
+    gap: string;
+    severity: 'low' | 'medium' | 'high';
+    recommendedSources: string[];
+  }>;
+  suggestedToolCalls: Array<{ tool: string; args: Record<string, unknown> }>;
 };
 
 type WriterOutput = {
@@ -280,8 +318,113 @@ function fallbackSummarizer(input: SummarizerInput): SummarizerOutput {
     openQuestions: [],
     recommendedContinuations: input.toolResults
       .flatMap((result) => result.continuations)
-      .flatMap((continuation) => continuation.suggestedNextTools || [])
+      .flatMap((continuation) => [
+        ...(continuation.suggestedNextTools || []),
+        ...((continuation.suggestedToolCalls || []).map((call) => String(call.tool || '').trim()).filter(Boolean)),
+      ])
       .slice(0, 6),
+  };
+}
+
+function fallbackEvidenceLedger(input: EvidenceLedgerInput): EvidenceLedgerOutput {
+  const nowIso = new Date().toISOString();
+  const context = isRecord(input.runtimeContext) ? input.runtimeContext : {};
+  const entities: EvidenceLedgerOutput['entities'] = [];
+  const relations: EvidenceLedgerOutput['relations'] = [];
+
+  const clientName = String(context.clientName || '').trim();
+  if (clientName) {
+    entities.push({ id: 'entity:workspace:client', type: 'brand', name: clientName });
+  }
+
+  const websites = Array.isArray(context.websites)
+    ? context.websites.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 6)
+    : [];
+  for (let index = 0; index < websites.length; index += 1) {
+    const id = `entity:workspace:website:${index + 1}`;
+    entities.push({ id, type: 'website', name: websites[index] });
+    if (clientName) {
+      relations.push({ from: 'entity:workspace:client', rel: 'HAS_SURFACE', to: id, evidenceRefIds: [] });
+    }
+  }
+
+  const facts: EvidenceLedgerOutput['facts'] = input.toolResults.slice(0, 24).map((result, index) => {
+    const raw = isRecord(result.raw) ? result.raw : {};
+    const evidenceRefIds = Array.isArray(raw.runtimeEvidenceRefIds)
+      ? raw.runtimeEvidenceRefIds.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 20)
+      : [];
+    return {
+      id: `fact:tool:${index + 1}`,
+      type: result.ok ? 'tool_result' : 'tool_failure',
+      value: {
+        summary: String(result.summary || '').trim(),
+      },
+      confidence: result.ok ? 0.75 : 0.35,
+      evidenceRefIds,
+      freshnessISO: nowIso,
+    };
+  });
+
+  for (let index = 0; index < Math.min(20, input.toolSummary.facts.length); index += 1) {
+    const item = input.toolSummary.facts[index];
+    facts.push({
+      id: `fact:summary:${index + 1}`,
+      type: 'summary_fact',
+      value: {
+        claim: String(item.claim || '').trim(),
+        evidence: Array.isArray(item.evidence)
+          ? item.evidence.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 8)
+          : [],
+      },
+      confidence: 0.7,
+      evidenceRefIds: [],
+      freshnessISO: nowIso,
+    });
+  }
+
+  const gaps: EvidenceLedgerOutput['gaps'] = input.toolSummary.openQuestions
+    .map((question) => String(question || '').trim())
+    .filter(Boolean)
+    .slice(0, 10)
+    .map((gap) => ({
+      gap,
+      severity: 'medium' as const,
+      recommendedSources: ['workspace evidence', 'web snapshots', 'competitor records'],
+    }));
+
+  const suggestedToolCalls: EvidenceLedgerOutput['suggestedToolCalls'] = [];
+  const seen = new Set<string>();
+  const pushSuggestedCall = (toolRaw: unknown, argsRaw: unknown) => {
+    const tool = String(toolRaw || '').trim();
+    if (!tool) return;
+    const args = isRecord(argsRaw) ? argsRaw : {};
+    const key = `${tool}:${JSON.stringify(args)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    suggestedToolCalls.push({ tool, args });
+  };
+
+  for (const result of input.toolResults) {
+    for (const continuation of result.continuations || []) {
+      if (continuation.type !== 'auto_continue') continue;
+      for (const call of continuation.suggestedToolCalls || []) {
+        pushSuggestedCall(call.tool, call.args);
+      }
+      for (const name of continuation.suggestedNextTools || []) {
+        pushSuggestedCall(name, {});
+      }
+    }
+  }
+  for (const name of input.toolSummary.recommendedContinuations || []) {
+    pushSuggestedCall(name, {});
+  }
+
+  return {
+    entities,
+    facts,
+    relations,
+    gaps,
+    suggestedToolCalls: suggestedToolCalls.slice(0, 20),
   };
 }
 
@@ -905,6 +1048,171 @@ export async function summarizeToolResults(input: SummarizerInput): Promise<Summ
   }
 }
 
+export async function buildEvidenceLedger(input: EvidenceLedgerInput): Promise<EvidenceLedgerOutput> {
+  if (!input.toolResults.length) {
+    return fallbackEvidenceLedger(input);
+  }
+
+  const systemPrompt = [
+    'You are BAT Evidence Builder.',
+    'Return strict JSON only.',
+    'Use only provided runtime context and tool outputs.',
+    'Every high-value fact must include evidenceRefIds when available.',
+    'JSON schema:',
+    '{',
+    '  "entities": [{"id":"...","type":"...","name":"...","aliases":["..."]}],',
+    '  "facts": [{"id":"...","type":"...","value":{},"confidence":0.0,"evidenceRefIds":["..."],"freshnessISO":"..."}],',
+    '  "relations": [{"from":"...","rel":"...","to":"...","evidenceRefIds":["..."]}],',
+    '  "gaps": [{"gap":"...","severity":"low|medium|high","recommendedSources":["..."]}],',
+    '  "suggestedToolCalls": [{"tool":"tool.name","args":{}}]',
+    '}',
+  ].join('\\n');
+
+  const payload = {
+    userMessage: input.userMessage,
+    runtimeContext: input.runtimeContext || {},
+    plan: input.plan,
+    toolSummary: input.toolSummary,
+    toolResults: input.toolResults,
+  };
+
+  try {
+    const parsed = await requestJson('analysis_fast', [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: JSON.stringify(payload) },
+    ], 2000);
+
+    if (!parsed) return fallbackEvidenceLedger(input);
+
+    const entities = Array.isArray(parsed.entities)
+      ? parsed.entities
+          .map((entry, index) => {
+            if (!isRecord(entry)) return null;
+            const id = String(entry.id || `entity:${index + 1}`).trim();
+            const type = String(entry.type || 'entity').trim();
+            const name = String(entry.name || '').trim();
+            if (!id || !type || !name) return null;
+            const aliases = normalizeStringArray(entry.aliases, 8);
+            return {
+              id,
+              type,
+              name,
+              ...(aliases.length ? { aliases } : {}),
+            };
+          })
+          .filter(
+            (entry): entry is { id: string; type: string; name: string; aliases?: string[] } => Boolean(entry)
+          )
+          .slice(0, 80)
+      : [];
+
+    const facts = Array.isArray(parsed.facts)
+      ? parsed.facts
+          .map((entry, index) => {
+            if (!isRecord(entry)) return null;
+            const id = String(entry.id || `fact:${index + 1}`).trim();
+            const type = String(entry.type || 'fact').trim();
+            const value = isRecord(entry.value) ? entry.value : {};
+            const confidence = Number(entry.confidence);
+            const evidenceRefIds = normalizeStringArray(entry.evidenceRefIds, 30);
+            const freshnessISO = String(entry.freshnessISO || new Date().toISOString()).trim();
+            if (!id || !type) return null;
+            return {
+              id,
+              type,
+              value,
+              confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0.5,
+              evidenceRefIds,
+              freshnessISO,
+            };
+          })
+          .filter(
+            (
+              entry
+            ): entry is {
+              id: string;
+              type: string;
+              value: Record<string, unknown>;
+              confidence: number;
+              evidenceRefIds: string[];
+              freshnessISO: string;
+            } => Boolean(entry)
+          )
+          .slice(0, 120)
+      : [];
+
+    const relations = Array.isArray(parsed.relations)
+      ? parsed.relations
+          .map((entry) => {
+            if (!isRecord(entry)) return null;
+            const from = String(entry.from || '').trim();
+            const rel = String(entry.rel || '').trim();
+            const to = String(entry.to || '').trim();
+            if (!from || !rel || !to) return null;
+            return {
+              from,
+              rel,
+              to,
+              evidenceRefIds: normalizeStringArray(entry.evidenceRefIds, 30),
+            };
+          })
+          .filter(
+            (entry): entry is { from: string; rel: string; to: string; evidenceRefIds: string[] } => Boolean(entry)
+          )
+          .slice(0, 120)
+      : [];
+
+    const gaps = Array.isArray(parsed.gaps)
+      ? parsed.gaps
+          .map((entry) => {
+            if (!isRecord(entry)) return null;
+            const gap = String(entry.gap || '').trim();
+            if (!gap) return null;
+            const severityRaw = String(entry.severity || 'medium').trim().toLowerCase();
+            const severity = severityRaw === 'low' || severityRaw === 'high' ? severityRaw : 'medium';
+            return {
+              gap,
+              severity: severity as 'low' | 'medium' | 'high',
+              recommendedSources: normalizeStringArray(entry.recommendedSources, 8),
+            };
+          })
+          .filter(
+            (
+              entry
+            ): entry is { gap: string; severity: 'low' | 'medium' | 'high'; recommendedSources: string[] } =>
+              Boolean(entry)
+          )
+          .slice(0, 40)
+      : [];
+
+    const suggestedToolCalls = Array.isArray(parsed.suggestedToolCalls)
+      ? parsed.suggestedToolCalls
+          .map((entry) => {
+            if (!isRecord(entry)) return null;
+            const tool = String(entry.tool || '').trim();
+            if (!tool) return null;
+            return {
+              tool,
+              args: isRecord(entry.args) ? entry.args : {},
+            };
+          })
+          .filter((entry): entry is { tool: string; args: Record<string, unknown> } => Boolean(entry))
+          .slice(0, 20)
+      : [];
+
+    return {
+      entities,
+      facts,
+      relations,
+      gaps,
+      suggestedToolCalls,
+    };
+  } catch (error) {
+    console.warn('[Runtime PromptSuite] Evidence ledger builder failed, using fallback:', (error as Error).message);
+    return fallbackEvidenceLedger(input);
+  }
+}
+
 export async function writeClientResponse(input: WriterInput): Promise<WriterOutput> {
   const fallback = fallbackWriter(input);
   const conciseRequested = prefersConciseOutput(input.userMessage);
@@ -920,6 +1228,7 @@ export async function writeClientResponse(input: WriterInput): Promise<WriterOut
     `Concise mode for this request: ${conciseRequested ? 'true' : 'false'}.`,
     'Synthesize evidence into clear narrative and recommendations; do not just output sparse bullet points.',
     'Use the runtime workspace context to ground baseline facts before asking for missing information.',
+    'Use the evidenceLedger as the primary 3D fact source before writing the 2D response.',
     'If runtime context contains websites/snapshots/competitors, do not claim that data is unavailable or inaccessible.',
     'Never include scaffolding labels like "Fork from here", "How BAT got here", "Tools used", "Assumptions", or "Evidence".',
     'Must include recommendation, evidence-backed why, and next steps.',
@@ -941,6 +1250,7 @@ export async function writeClientResponse(input: WriterInput): Promise<WriterOut
   const writerPayload = {
     userMessage: input.userMessage,
     runtimeContext: input.runtimeContext || {},
+    evidenceLedger: input.evidenceLedger || null,
     plan: input.plan,
     toolSummary: input.toolSummary,
     toolResults: input.toolResults,

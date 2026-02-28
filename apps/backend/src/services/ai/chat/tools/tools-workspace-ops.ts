@@ -590,6 +590,11 @@ export const workspaceOpsTools: ToolDefinition<Record<string, unknown>, Record<s
             type: 'auto_continue',
             reason: 'Intake context updated; refresh competitor and web intelligence summary.',
             suggestedNextTools: ['intel.list', 'orchestration.status'],
+            suggestedToolCalls: [
+              { tool: 'intel.list', args: { section: 'web_snapshots', limit: 20 } },
+              { tool: 'intel.list', args: { section: 'competitors', limit: 16 } },
+              { tool: 'orchestration.status', args: {} },
+            ],
           },
         ],
       };
@@ -657,6 +662,11 @@ export const workspaceOpsTools: ToolDefinition<Record<string, unknown>, Record<s
             type: 'auto_continue',
             reason: 'Competitor list changed; refresh benchmark analysis.',
             suggestedNextTools: ['intel.list', 'evidence.posts', 'orchestration.status'],
+            suggestedToolCalls: [
+              { tool: 'intel.list', args: { section: 'competitors', limit: 24 } },
+              { tool: 'evidence.posts', args: { platform: 'any', sort: 'engagement', limit: 8 } },
+              { tool: 'orchestration.status', args: {} },
+            ],
           },
         ],
       };
@@ -837,6 +847,12 @@ export const workspaceOpsTools: ToolDefinition<Record<string, unknown>, Record<s
             type: 'auto_continue',
             reason: 'Fresh DDG/Scrapling evidence is available; synthesize findings and cite sources.',
             suggestedNextTools: ['intel.list', 'evidence.posts', 'evidence.news', 'evidence.videos'],
+            suggestedToolCalls: [
+              { tool: 'intel.list', args: { section: 'web_snapshots', limit: 24 } },
+              { tool: 'evidence.posts', args: { platform: 'any', sort: 'engagement', limit: 8 } },
+              { tool: 'evidence.news', args: { limit: 8 } },
+              { tool: 'evidence.videos', args: { limit: 8 } },
+            ],
           },
         ],
       };

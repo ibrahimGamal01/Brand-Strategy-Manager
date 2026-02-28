@@ -30,6 +30,7 @@ import {
 } from './repository';
 import { executeToolWithContract } from './tool-contract';
 import {
+  buildEvidenceLedger,
   generatePlannerPlan,
   summarizeToolResults,
   validateClientResponse,
@@ -39,6 +40,7 @@ import type { RunPolicy, RuntimeDecision, RuntimePlan, RuntimeToolCall, RuntimeT
 import { TOOL_REGISTRY } from '../../ai/chat/tools/tool-registry';
 import { buildRuntimeAgentContext } from './context-assembler';
 import type { RuntimeAgentContext } from './agent-context';
+import { createKnowledgeLedgerVersion } from '../../knowledge/knowledge-ledger-service';
 
 type SendMessageInput = {
   researchJobId: string;
@@ -146,6 +148,13 @@ const SCHEDULED_RUN_PREEMPTION_ENABLED = String(process.env.RUNTIME_PREEMPT_SCHE
   .trim()
   .toLowerCase() !== 'false';
 const TOOL_TRANSIENT_MAX_RETRIES = envRuntimeNumber('CHAT_TOOL_MAX_RETRIES', 2, 0, 5);
+const RUNTIME_CONTINUATION_CALLS_V2 = String(process.env.RUNTIME_CONTINUATION_CALLS_V2 || 'true')
+  .trim()
+  .toLowerCase() === 'true';
+const RUNTIME_LEDGER_BUILDER_ENABLED = String(process.env.RUNTIME_EVIDENCE_LEDGER_ENABLED || 'false')
+  .trim()
+  .toLowerCase() === 'true';
+const RUNTIME_LEDGER_BUILDER_ROLLOUT = envRuntimeNumber('RUNTIME_LEDGER_BUILDER_ROLLOUT', 100, 0, 100);
 
 export function normalizePolicy(raw?: Partial<RunPolicy> | null): RunPolicy {
   const policy = {
@@ -243,6 +252,20 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 }
 
+function shouldBuildLedgerForRun(runId: string): boolean {
+  if (!RUNTIME_LEDGER_BUILDER_ENABLED) return false;
+  if (RUNTIME_LEDGER_BUILDER_ROLLOUT >= 100) return true;
+  if (RUNTIME_LEDGER_BUILDER_ROLLOUT <= 0) return false;
+  const source = String(runId || '').trim();
+  if (!source) return false;
+  let hash = 0;
+  for (let index = 0; index < source.length; index += 1) {
+    hash = (hash * 31 + source.charCodeAt(index)) % 10_000;
+  }
+  const bucket = Math.abs(hash % 100);
+  return bucket < RUNTIME_LEDGER_BUILDER_ROLLOUT;
+}
+
 function compactPromptString(value: unknown, maxChars = MAX_PROMPT_STRING_CHARS): string {
   const normalized = String(value ?? '').replace(/\s+/g, ' ').trim();
   if (!normalized) return '';
@@ -300,6 +323,22 @@ function compactToolResultsForPrompt(toolResults: RuntimeToolResult[]): RuntimeT
               .slice(0, 6),
           }
         : {}),
+      ...(Array.isArray(entry?.suggestedToolCalls)
+        ? {
+            suggestedToolCalls: entry.suggestedToolCalls
+              .map((call) => {
+                if (!call || typeof call !== 'object') return null;
+                const tool = compactPromptString((call as { tool?: unknown }).tool, 90);
+                if (!tool) return null;
+                const args = isRecord((call as { args?: unknown }).args)
+                  ? (compactPromptValue((call as { args?: unknown }).args) as Record<string, unknown>)
+                  : {};
+                return { tool, args };
+              })
+              .filter((call): call is { tool: string; args: Record<string, unknown> } => Boolean(call))
+              .slice(0, 6),
+          }
+        : {}),
     })),
     decisions: (Array.isArray(result.decisions) ? result.decisions : []).slice(0, 6).map((decision) => ({
       id: compactPromptString(decision?.id, 120),
@@ -320,6 +359,7 @@ function compactToolResultsForPrompt(toolResults: RuntimeToolResult[]): RuntimeT
 }
 
 type RuntimeToolSummary = Awaited<ReturnType<typeof summarizeToolResults>>;
+type RuntimeEvidenceLedger = Awaited<ReturnType<typeof buildEvidenceLedger>>;
 type RuntimeWriterOutput = Awaited<ReturnType<typeof writeClientResponse>>;
 type RuntimeValidatorOutput = Awaited<ReturnType<typeof validateClientResponse>>;
 
@@ -338,7 +378,10 @@ function fallbackToolSummary(toolResults: RuntimeToolResult[]): RuntimeToolSumma
     openQuestions: [],
     recommendedContinuations: toolResults
       .flatMap((result) => result.continuations)
-      .flatMap((entry) => entry.suggestedNextTools || [])
+      .flatMap((entry) => [
+        ...(entry.suggestedNextTools || []),
+        ...((entry.suggestedToolCalls || []).map((call) => String(call.tool || '').trim()).filter(Boolean)),
+      ])
       .map((tool) => compactPromptString(tool, 80))
       .filter(Boolean)
       .slice(0, 8),
@@ -468,6 +511,16 @@ function normalizeToolAliasKey(value: string): string {
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '');
+}
+
+function stableJson(value: unknown): string {
+  if (value === null || value === undefined) return 'null';
+  if (typeof value === 'number' || typeof value === 'boolean') return JSON.stringify(value);
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((entry) => stableJson(entry)).join(',')}]`;
+  if (!isRecord(value)) return JSON.stringify(String(value));
+  const keys = Object.keys(value).sort();
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`;
 }
 
 function findFirstUrl(message: string): string | null {
@@ -1022,7 +1075,7 @@ function sanitizeToolCalls(toolCalls: RuntimeToolCall[], userMessage: string, ma
     const normalizedArgs = normalizeToolArgs(toolName, mergedArgs, userMessage);
     if (!normalizedArgs) continue;
 
-    const key = `${toolName}:${JSON.stringify(normalizedArgs)}`;
+    const key = `${toolName}:${stableJson(normalizedArgs)}`;
     if (seen.has(key)) continue;
     seen.add(key);
 
@@ -1038,7 +1091,7 @@ function sanitizeToolCalls(toolCalls: RuntimeToolCall[], userMessage: string, ma
     if (!SUPPORTED_TOOL_NAMES.has(call.tool as (typeof TOOL_REGISTRY)[number]['name'])) continue;
     const normalizedArgs = normalizeToolArgs(call.tool, isRecord(call.args) ? call.args : {}, userMessage);
     if (!normalizedArgs) continue;
-    const key = `${call.tool}:${JSON.stringify(normalizedArgs)}`;
+    const key = `${call.tool}:${stableJson(normalizedArgs)}`;
     if (seen.has(key)) continue;
     seen.add(key);
     sanitized.push({ tool: call.tool, args: normalizedArgs });
@@ -1469,6 +1522,22 @@ function flattenEvidence(results: RuntimeToolResult[]) {
   return results.flatMap((result) => result.evidence).slice(0, 20);
 }
 
+function collectRuntimeEvidenceRefIds(results: RuntimeToolResult[]): string[] {
+  const ids = new Set<string>();
+  for (const result of results) {
+    const raw = isRecord(result.raw) ? result.raw : {};
+    if (!Array.isArray(raw.runtimeEvidenceRefIds)) continue;
+    for (const entry of raw.runtimeEvidenceRefIds) {
+      const id = String(entry || '').trim();
+      if (!id) continue;
+      ids.add(id);
+      if (ids.size >= 120) break;
+    }
+    if (ids.size >= 120) break;
+  }
+  return Array.from(ids);
+}
+
 function sanitizePreviewText(value: unknown, maxChars = 180): string {
   const normalized = String(value || '').replace(/\s+/g, ' ').trim();
   if (!normalized) return '';
@@ -1588,6 +1657,10 @@ function buildToolOutputPreview(raw: Record<string, unknown>, toolName: string):
 
 function buildToolOutputEventPayload(toolName: string, contract: RuntimeToolResult): Record<string, unknown> {
   const preview = isRecord(contract.raw) ? buildToolOutputPreview(contract.raw, toolName) : null;
+  const runtimeEvidenceRefIds =
+    isRecord(contract.raw) && Array.isArray(contract.raw.runtimeEvidenceRefIds)
+      ? contract.raw.runtimeEvidenceRefIds.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 60)
+      : [];
   return {
     toolName,
     warnings: contract.warnings,
@@ -1599,6 +1672,7 @@ function buildToolOutputEventPayload(toolName: string, contract: RuntimeToolResu
       warningCount: contract.warnings.length,
       artifacts: contract.artifacts.slice(0, 8),
       evidence: contract.evidence.slice(0, 10),
+      ...(runtimeEvidenceRefIds.length ? { evidenceRefIds: runtimeEvidenceRefIds } : {}),
       ...(preview ? { preview } : {}),
     },
   };
@@ -1637,12 +1711,46 @@ function mergeBlockingDecisions(groups: RuntimeDecision[][]): RuntimeDecision[] 
 }
 
 export function collectContinuationTools(results: RuntimeToolResult[]): string[] {
-  const next = results
+  const nextFromNames = results
     .flatMap((result) => result.continuations)
     .filter((item) => item.type === 'auto_continue')
     .flatMap((item) => item.suggestedNextTools || []);
+  const nextFromCalls = results
+    .flatMap((result) => result.continuations)
+    .filter((item) => item.type === 'auto_continue')
+    .flatMap((item) => (item.suggestedToolCalls || []).map((entry) => String(entry.tool || '').trim()))
+    .filter(Boolean);
 
-  return Array.from(new Set(next.map((tool) => tool.trim()).filter(Boolean)));
+  return Array.from(new Set([...nextFromNames, ...nextFromCalls].map((tool) => tool.trim()).filter(Boolean)));
+}
+
+function collectContinuationToolCalls(results: RuntimeToolResult[]): RuntimeToolCall[] {
+  const out: RuntimeToolCall[] = [];
+  const seen = new Set<string>();
+
+  const push = (toolRaw: unknown, argsRaw: unknown) => {
+    const tool = String(toolRaw || '').trim();
+    if (!tool) return;
+    const args = isRecord(argsRaw) ? argsRaw : {};
+    const key = `${tool}:${stableJson(args)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ tool, args });
+  };
+
+  for (const result of results) {
+    for (const continuation of result.continuations || []) {
+      if (continuation.type !== 'auto_continue') continue;
+      for (const call of continuation.suggestedToolCalls || []) {
+        push(call.tool, call.args);
+      }
+      for (const name of continuation.suggestedNextTools || []) {
+        push(name, {});
+      }
+    }
+  }
+
+  return out;
 }
 
 function compactSteerNote(value: string, maxChars = 140): string {
@@ -2211,6 +2319,7 @@ export class RuntimeRunEngine {
           toolName: toolRun.toolName,
           args,
           policy,
+          runId,
         });
         contract = nextContract;
 
@@ -2472,17 +2581,90 @@ export class RuntimeRunEngine {
       return fallbackToolSummary(promptToolResults);
     });
 
+    let evidenceLedger: RuntimeEvidenceLedger | null = null;
+    let ledgerVersionId: string | null = null;
+    if (shouldBuildLedgerForRun(run.id)) {
+      evidenceLedger = await withTimeout(
+        buildEvidenceLedger({
+          userMessage: effectiveUserMessage,
+          plan,
+          runtimeContext: runtimeContextSnapshot,
+          toolSummary,
+          toolResults: promptToolResults,
+        }),
+        RUNTIME_PROMPT_STAGE_TIMEOUT_MS,
+        'buildEvidenceLedger'
+      ).catch(async (error: any) => {
+        await this.emitEvent({
+          branchId: run.branchId,
+          agentRunId: run.id,
+          type: ProcessEventType.PROCESS_LOG,
+          level: ProcessEventLevel.WARN,
+          message: `Evidence ledger fallback used: ${compactPromptString(error?.message || error, 220)}`,
+        });
+        return null;
+      });
+
+      if (evidenceLedger) {
+        try {
+          const savedLedger = await createKnowledgeLedgerVersion({
+            researchJobId: run.branch.thread.researchJobId,
+            runId: run.id,
+            source: 'runtime',
+            payload: evidenceLedger,
+          });
+          ledgerVersionId = savedLedger.id;
+          await this.emitEvent({
+            branchId: run.branchId,
+            agentRunId: run.id,
+            type: ProcessEventType.PROCESS_LOG,
+            message: 'Evidence ledger version created.',
+            payload: {
+              ledgerVersionId,
+              entities: evidenceLedger.entities.length,
+              facts: evidenceLedger.facts.length,
+              relations: evidenceLedger.relations.length,
+              gaps: evidenceLedger.gaps.length,
+            },
+          });
+        } catch (ledgerPersistError: any) {
+          await this.emitEvent({
+            branchId: run.branchId,
+            agentRunId: run.id,
+            type: ProcessEventType.PROCESS_LOG,
+            level: ProcessEventLevel.WARN,
+            message: `Ledger persistence failed: ${compactPromptString(ledgerPersistError?.message || ledgerPersistError, 220)}`,
+          });
+        }
+      }
+    }
+
     const continuationDepth = plan.runtime?.continuationDepth ?? 0;
-    const continuationTools = collectContinuationTools(toolResults);
+    const continuationCallsFromResults = RUNTIME_CONTINUATION_CALLS_V2
+      ? collectContinuationToolCalls(toolResults)
+      : collectContinuationTools(toolResults).map((tool) => ({ tool, args: {} }));
+    const continuationCallsFromLedger =
+      RUNTIME_CONTINUATION_CALLS_V2 && evidenceLedger
+        ? (Array.isArray(evidenceLedger.suggestedToolCalls)
+            ? evidenceLedger.suggestedToolCalls.map((entry) => ({
+                tool: String(entry.tool || '').trim(),
+                args: isRecord(entry.args) ? entry.args : {},
+              }))
+            : []
+          ).filter((entry) => entry.tool)
+        : [];
     const continuationFromSummary = toolSummary.recommendedContinuations
       .map((tool) => tool.trim())
       .filter((tool) => /^[a-z_]+\.[a-z_]+$/i.test(tool));
-    const nextToolSuggestions = Array.from(new Set([...continuationTools, ...continuationFromSummary]));
+    const continuationFromSummaryCalls: RuntimeToolCall[] = continuationFromSummary.map((tool) => ({
+      tool,
+      args: {},
+    }));
     const continuationCalls = sanitizeToolCalls(
-      nextToolSuggestions.slice(0, policy.maxToolRuns).map((tool) => ({
-        tool,
-        args: {},
-      })),
+      [...continuationCallsFromResults, ...continuationCallsFromLedger, ...continuationFromSummaryCalls].slice(
+        0,
+        policy.maxToolRuns
+      ),
       triggerMessage,
       policy.maxToolRuns
     );
@@ -2543,6 +2725,7 @@ export class RuntimeRunEngine {
         plan,
         runtimeContext: runtimeContextSnapshot,
         toolSummary,
+        ...(evidenceLedger ? { evidenceLedger } : {}),
         toolResults: promptToolResults,
       }),
       RUNTIME_PROMPT_STAGE_TIMEOUT_MS,
@@ -2637,6 +2820,16 @@ export class RuntimeRunEngine {
 
     if (await isRunCancelled('response_persist')) return;
 
+    const runtimeEvidenceRefIds = collectRuntimeEvidenceRefIds(toolResults);
+    const citationsPayload =
+      runtimeEvidenceRefIds.length > 0 || ledgerVersionId
+        ? {
+            evidenceRefIds: runtimeEvidenceRefIds,
+            ...(ledgerVersionId ? { ledgerVersionId } : {}),
+            reasoningEvidence: writerOutput.reasoning.evidence,
+          }
+        : writerOutput.reasoning.evidence;
+
     await this.persistAssistantMessage({
       branchId: run.branchId,
       content: finalResponseContent,
@@ -2648,8 +2841,12 @@ export class RuntimeRunEngine {
               decisions: finalDecisions,
             }
           : undefined,
-      reasoningJson: writerOutput.reasoning,
-      citationsJson: writerOutput.reasoning.evidence,
+      reasoningJson: {
+        ...writerOutput.reasoning,
+        runId: run.id,
+        ...(ledgerVersionId ? { ledgerVersionId } : {}),
+      },
+      citationsJson: citationsPayload,
       clientVisible: true,
       contextSnapshot: runtimeContextSnapshot,
     });
@@ -2696,6 +2893,7 @@ export class RuntimeRunEngine {
       type: ProcessEventType.DONE,
       message: `Run completed: ${toolRuns.length} tool(s) executed.`,
       payload: {
+        ...(ledgerVersionId ? { ledgerVersionId } : {}),
         toolRuns: toolRuns.map((item) => {
           const result = isRecord(item.resultJson) ? item.resultJson : null;
           return {

@@ -209,6 +209,7 @@ export function ChatThread({
   onRunAction,
   onStarterAction,
   onInspectAssistantMessage,
+  onOpenEvidence,
   selectedAssistantMessageId,
   showInlineReasoning = false,
   isStreaming,
@@ -221,6 +222,7 @@ export function ChatThread({
   onRunAction?: (actionLabel: string, actionKey: string, payload?: Record<string, unknown>) => void;
   onStarterAction?: (action: "audit" | "sources" | "deliverable" | "competitor_v3") => void;
   onInspectAssistantMessage?: (messageId: string) => void;
+  onOpenEvidence?: (messageId: string) => void;
   selectedAssistantMessageId?: string | null;
   showInlineReasoning?: boolean;
   isStreaming?: boolean;
@@ -337,6 +339,15 @@ export function ChatThread({
                       className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
                     >
                       Fork from here
+                    </button>
+                  ) : null}
+                  {onOpenEvidence ? (
+                    <button
+                      type="button"
+                      onClick={() => onOpenEvidence(message.id)}
+                      className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
+                    >
+                      Sources
                     </button>
                   ) : null}
                 </div>

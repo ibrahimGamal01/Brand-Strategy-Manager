@@ -20,6 +20,8 @@ import {
   requireWorkspaceMembership,
 } from '../services/portal/portal-auth-middleware';
 import { serializeRuntimeProcessEvent } from '../services/chat/runtime/event-contract';
+import { listWorkspaceEvidence } from '../services/evidence/workspace-evidence-service';
+import { getLatestKnowledgeLedgerVersion } from '../services/knowledge/knowledge-ledger-service';
 
 const router = Router();
 
@@ -186,6 +188,83 @@ router.get('/:id/runtime/branches/:branchId/events', async (req, res) => {
   } catch (error: any) {
     const status = String(error?.message || '').includes('not found') ? 404 : 500;
     return res.status(status).json({ error: 'Failed to list process events', details: error?.message || String(error) });
+  }
+});
+
+router.get('/:id/runtime/branches/:branchId/evidence', async (req, res) => {
+  try {
+    const researchJobId = String(req.params.id || '').trim();
+    const branchId = String(req.params.branchId || '').trim();
+    await runtimeRunEngine.getBranchState({ researchJobId, branchId });
+
+    const runId = typeof req.query.runId === 'string' ? req.query.runId.trim() : '';
+    const limit = Number(req.query.limit || 120);
+    const rows = await listWorkspaceEvidence({
+      researchJobId,
+      ...(runId ? { runId } : {}),
+      limit: Number.isFinite(limit) ? limit : 120,
+    });
+
+    return res.json({
+      evidence: rows.map((row: any) => ({
+        id: row.id,
+        researchJobId: row.researchJobId,
+        kind: row.kind,
+        refId: row.refId,
+        url: row.url,
+        label: row.label,
+        snippet: row.snippet,
+        contentHash: row.contentHash,
+        provider: row.provider,
+        runId: row.runId,
+        status: row.status,
+        confidence: row.confidence,
+        metadata: row.metadata,
+        fetchedAt: row.fetchedAt,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+        links: row.links.map((link: any) => ({
+          id: link.id,
+          entityType: link.entityType,
+          entityId: link.entityId,
+          role: link.role,
+          createdAt: link.createdAt,
+        })),
+      })),
+    });
+  } catch (error: any) {
+    const status = String(error?.message || '').includes('not found') ? 404 : 500;
+    return res.status(status).json({ error: 'Failed to list runtime evidence', details: error?.message || String(error) });
+  }
+});
+
+router.get('/:id/runtime/branches/:branchId/ledger/latest', async (req, res) => {
+  try {
+    const researchJobId = String(req.params.id || '').trim();
+    const branchId = String(req.params.branchId || '').trim();
+    await runtimeRunEngine.getBranchState({ researchJobId, branchId });
+
+    const runId = typeof req.query.runId === 'string' ? req.query.runId.trim() : '';
+    const ledger = await getLatestKnowledgeLedgerVersion({
+      researchJobId,
+      ...(runId ? { runId } : {}),
+    });
+
+    return res.json({
+      ledger: ledger
+        ? {
+            id: ledger.id,
+            researchJobId: ledger.researchJobId,
+            runId: ledger.runId,
+            source: ledger.source,
+            payloadJson: ledger.payloadJson,
+            createdAt: ledger.createdAt,
+          }
+        : null,
+    });
+  } catch (error: any) {
+    const status = String(error?.message || '').includes('not found') ? 404 : 500;
+    return res.status(status).json({ error: 'Failed to fetch latest runtime ledger', details: error?.message || String(error) });
   }
 });
 

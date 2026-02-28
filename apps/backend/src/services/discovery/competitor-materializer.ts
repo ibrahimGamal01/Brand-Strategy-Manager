@@ -161,18 +161,12 @@ async function materializeCandidateToDiscovered(
     existing?.status === 'SCRAPED' ||
     existing?.status === 'SCRAPING' ||
     existing?.status === 'CONFIRMED';
-
-  // Keep discovered competitors focused on execution-ready or historically scraped rows.
-  if (
+  const shouldArchive =
     (selectionState === 'FILTERED_OUT' || selectionState === 'REJECTED') &&
     !keepForHistory &&
-    !options?.preserveFiltered
-  ) {
-    if (existing?.id) {
-      await prisma.discoveredCompetitor.deleteMany({ where: { id: existing.id } });
-    }
-    return null;
-  }
+    !options?.preserveFiltered;
+  const archivedAt = shouldArchive ? new Date() : null;
+  const archivedBy = shouldArchive ? 'system:retention-policy' : null;
 
   const persisted = await prisma.discoveredCompetitor.upsert({
     where: {
@@ -201,6 +195,9 @@ async function materializeCandidateToDiscovered(
       typeConfidence: candidate.typeConfidence,
       entityFlags: toJson(candidate.entityFlags),
       status: selectDiscoveredStatus(selectionState, existing?.status),
+      isActive: !shouldArchive,
+      ...(archivedAt ? { archivedAt } : {}),
+      ...(archivedBy ? { archivedBy } : {}),
     },
     update: {
       orchestrationRunId: runId,
@@ -218,6 +215,9 @@ async function materializeCandidateToDiscovered(
       typeConfidence: candidate.typeConfidence,
       entityFlags: toJson(candidate.entityFlags),
       status: selectDiscoveredStatus(selectionState, existing?.status),
+      isActive: !shouldArchive,
+      archivedAt,
+      archivedBy,
     },
     select: { id: true },
   });
@@ -335,6 +335,19 @@ export async function persistOrchestrationCandidates(input: {
       platformOrInputType: row.platform,
       availabilityStatus: row.availabilityStatus,
     });
+    const hardOutOfScope =
+      row.availabilityStatus === 'INVALID_HANDLE' ||
+      row.availabilityStatus === 'PROFILE_UNAVAILABLE' ||
+      row.state === 'REJECTED';
+    if (nextState === 'FILTERED_OUT' && hardOutOfScope) {
+      nextState = 'REJECTED';
+      nextReason =
+        row.availabilityStatus === 'INVALID_HANDLE'
+          ? 'Rejected by retention policy: invalid handle'
+          : row.availabilityStatus === 'PROFILE_UNAVAILABLE'
+            ? 'Rejected by retention policy: profile unavailable'
+            : nextReason || 'Rejected by retention policy';
+    }
 
     const profile = await prisma.competitorCandidateProfile.upsert({
       where: {
@@ -459,16 +472,26 @@ export async function persistOrchestrationCandidates(input: {
   return summary;
 }
 
-export async function pruneFilteredDiscoveredCompetitors(researchJobId: string): Promise<{ deleted: number }> {
-  const deletion = await prisma.discoveredCompetitor.deleteMany({
+export async function pruneFilteredDiscoveredCompetitors(
+  researchJobId: string
+): Promise<{ archived: number; deleted: number }> {
+  const update = await prisma.discoveredCompetitor.updateMany({
     where: {
       researchJobId,
       selectionState: { in: ['FILTERED_OUT', 'REJECTED'] },
       status: { in: ['SUGGESTED', 'FAILED', 'REJECTED'] },
+      isActive: true,
+    },
+    data: {
+      isActive: false,
+      archivedAt: new Date(),
+      archivedBy: 'system:retention-policy',
     },
   });
+  const count = update.count || 0;
   return {
-    deleted: deletion.count || 0,
+    archived: count,
+    deleted: count,
   };
 }
 

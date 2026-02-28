@@ -119,6 +119,10 @@ model ResearchJob {
   portalMemberships           PortalWorkspaceMembership[]
   portalIntakeScanRuns        PortalIntakeScanRun[]
   portalIntakeScanEvents      PortalIntakeScanEvent[]
+  workspaceEvidenceRefs       WorkspaceEvidenceRef[]
+  workspaceEvidenceLinks      WorkspaceEvidenceLink[]
+  connectorRuns               ConnectorRun[]
+  knowledgeLedgerVersions     KnowledgeLedgerVersion[]
 
   @@map("research_jobs")
 }
@@ -1033,6 +1037,84 @@ model EvidenceRef {
   @@map("evidence_refs")
 }
 
+model WorkspaceEvidenceRef {
+  id          String                @id @default(uuid())
+  researchJobId String              @map("research_job_id")
+  kind        String
+  refId       String?               @map("ref_id")
+  url         String?
+  label       String?
+  snippet     String?
+  contentHash String?               @map("content_hash")
+  provider    String?
+  runId       String?               @map("run_id")
+  status      WorkspaceEvidenceStatus @default(RAW)
+  confidence  Float                 @default(0)
+  metadata    Json?
+  fetchedAt   DateTime              @default(now()) @map("fetched_at")
+  createdAt   DateTime              @default(now()) @map("created_at")
+  updatedAt   DateTime              @updatedAt @map("updated_at")
+  links       WorkspaceEvidenceLink[]
+  researchJob ResearchJob           @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+
+  @@index([researchJobId, kind, createdAt(sort: Desc)], map: "workspace_evidence_refs_job_kind_created_idx")
+  @@index([researchJobId, runId], map: "workspace_evidence_refs_job_run_idx")
+  @@unique([researchJobId, kind, refId], map: "workspace_evidence_refs_job_kind_ref_key")
+  @@map("workspace_evidence_refs")
+}
+
+model WorkspaceEvidenceLink {
+  id            String               @id @default(uuid())
+  researchJobId String               @map("research_job_id")
+  evidenceRefId String               @map("evidence_ref_id")
+  entityType    String               @map("entity_type")
+  entityId      String               @map("entity_id")
+  role          String
+  createdAt     DateTime             @default(now()) @map("created_at")
+  evidenceRef   WorkspaceEvidenceRef @relation(fields: [evidenceRefId], references: [id], onDelete: Cascade)
+  researchJob   ResearchJob          @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+
+  @@index([researchJobId, entityType, entityId], map: "workspace_evidence_links_job_entity_idx")
+  @@index([evidenceRefId], map: "workspace_evidence_links_ref_idx")
+  @@unique([researchJobId, evidenceRefId, entityType, entityId, role], map: "workspace_evidence_links_unique_link_key")
+  @@map("workspace_evidence_links")
+}
+
+model ConnectorRun {
+  id            String     @id @default(uuid())
+  researchJobId String     @map("research_job_id")
+  platform      String
+  provider      String
+  target        String
+  ok            Boolean
+  confidence    Float      @default(0)
+  coverage      Float      @default(0)
+  error         String?
+  warnings      Json?
+  meta          Json?
+  createdAt     DateTime   @default(now()) @map("created_at")
+  researchJob   ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+
+  @@index([researchJobId, platform, target, createdAt(sort: Desc)], map: "connector_runs_job_platform_target_created_idx")
+  @@index([researchJobId, provider, createdAt(sort: Desc)], map: "connector_runs_job_provider_created_idx")
+  @@map("connector_runs")
+}
+
+model KnowledgeLedgerVersion {
+  id            String     @id @default(uuid())
+  researchJobId String     @map("research_job_id")
+  runId         String?    @map("run_id")
+  source        String     @default("runtime")
+  payloadJson   Json       @map("payload_json")
+  createdAt     DateTime   @default(now()) @map("created_at")
+  researchJob   ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+
+  @@index([researchJobId, createdAt(sort: Desc)], map: "knowledge_ledger_versions_job_created_idx")
+  @@index([researchJobId, runId], map: "knowledge_ledger_versions_job_run_idx")
+  @@index([researchJobId, source], map: "knowledge_ledger_versions_job_source_idx")
+  @@map("knowledge_ledger_versions")
+}
+
 model ClientAccount {
   id              String       @id @default(uuid())
   clientId        String       @map("client_id")
@@ -1622,6 +1704,13 @@ enum CompetitorScrapeCapability {
   SCRAPABLE_NOW
   NOT_SCRAPABLE_YET
   HARD_BLOCKED
+}
+
+enum WorkspaceEvidenceStatus {
+  RAW
+  PARTIAL
+  BLOCKED
+  VERIFIED
 }
 
 enum EvidenceRefKind {

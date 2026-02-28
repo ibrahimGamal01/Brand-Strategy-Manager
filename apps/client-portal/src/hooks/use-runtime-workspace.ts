@@ -497,6 +497,12 @@ function mapMessages(messages: Array<Record<string, unknown>>): ChatMessage[] {
                 assumptions: asArrayOfStrings(reasoningRaw.assumptions),
                 nextSteps: asArrayOfStrings(reasoningRaw.nextSteps),
                 evidence,
+                ...(typeof reasoningRaw.runId === "string" && reasoningRaw.runId.trim()
+                  ? { runId: reasoningRaw.runId.trim() }
+                  : {}),
+                ...(typeof reasoningRaw.ledgerVersionId === "string" && reasoningRaw.ledgerVersionId.trim()
+                  ? { ledgerVersionId: reasoningRaw.ledgerVersionId.trim() }
+                  : {}),
               },
             }
           : {}),

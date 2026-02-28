@@ -5,6 +5,12 @@ import { Library, Menu, MessageSquarePlus, PanelRight, RefreshCcw, Search, X } f
 import { useRouter } from "next/navigation";
 import { useRuntimeWorkspace } from "@/hooks/use-runtime-workspace";
 import { LibraryCollection, SessionPreferences } from "@/types/chat";
+import {
+  fetchRuntimeEvidence,
+  fetchRuntimeLatestLedger,
+  RuntimeEvidenceRefDto,
+  RuntimeLedgerDto,
+} from "@/lib/runtime-api";
 import { ChatComposer } from "./chat-composer";
 import { ChatThread } from "./chat-thread";
 import { CommandPalette } from "./command-palette";
@@ -65,6 +71,12 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   const [activityOpen, setActivityOpen] = useState(false);
   const [composerDraft, setComposerDraft] = useState("");
   const [composerFocusSignal, setComposerFocusSignal] = useState(0);
+  const [evidenceDrawerOpen, setEvidenceDrawerOpen] = useState(false);
+  const [evidenceDrawerLoading, setEvidenceDrawerLoading] = useState(false);
+  const [evidenceDrawerError, setEvidenceDrawerError] = useState<string | null>(null);
+  const [evidenceRows, setEvidenceRows] = useState<RuntimeEvidenceRefDto[]>([]);
+  const [evidenceLedger, setEvidenceLedger] = useState<RuntimeLedgerDto | null>(null);
+  const [evidenceMessageId, setEvidenceMessageId] = useState<string | null>(null);
   const [nameDialog, setNameDialog] = useState<
     | { mode: "thread"; title: string }
     | { mode: "branch"; title: string; forkedFromMessageId?: string }
@@ -258,6 +270,37 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
           : action.replace(/[^a-z0-9_./-]+/g, "_");
     const payloadText = payload ? ` ${JSON.stringify(payload)}` : "";
     injectComposerText(`/${normalizedCommand}${payloadText}`, "append");
+  };
+
+  const onOpenEvidence = (messageId: string) => {
+    if (!activeBranchId) return;
+    const message = messages.find((entry) => entry.id === messageId) || null;
+    const runId = message?.reasoning?.runId;
+
+    setEvidenceMessageId(messageId);
+    setEvidenceDrawerOpen(true);
+    setEvidenceDrawerLoading(true);
+    setEvidenceDrawerError(null);
+
+    void Promise.all([
+      fetchRuntimeEvidence(workspaceId, activeBranchId, {
+        ...(runId ? { runId } : {}),
+        limit: 120,
+      }),
+      fetchRuntimeLatestLedger(workspaceId, activeBranchId, runId ? { runId } : undefined),
+    ])
+      .then(([evidencePayload, ledgerPayload]) => {
+        setEvidenceRows(Array.isArray(evidencePayload.evidence) ? evidencePayload.evidence : []);
+        setEvidenceLedger(ledgerPayload.ledger || null);
+      })
+      .catch((error) => {
+        setEvidenceRows([]);
+        setEvidenceLedger(null);
+        setEvidenceDrawerError(String((error as Error)?.message || "Failed to load evidence."));
+      })
+      .finally(() => {
+        setEvidenceDrawerLoading(false);
+      });
   };
 
   const onNewThread = () => {
@@ -557,6 +600,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                 <ChatThread
                   messages={messages}
                   onForkFromMessage={onForkBranch}
+                  onOpenEvidence={onOpenEvidence}
                   onResolveDecision={(decisionId, option) => runAsync(resolveDecision(decisionId, option))}
                   onRunAction={onRunMessageAction}
                   onStarterAction={(action) => {
@@ -669,6 +713,100 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
         onCollectionChange={setActiveLibraryCollection}
         onUseInChat={(item) => onUseLibraryItem(item)}
       />
+
+      {evidenceDrawerOpen ? (
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/35">
+          <section className="bat-scrollbar flex h-full w-full max-w-2xl flex-col overflow-y-auto border-l border-zinc-200 bg-white shadow-2xl">
+            <div className="sticky top-0 z-10 border-b border-zinc-200 bg-white px-4 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.08em] text-zinc-500">Evidence Drawer</p>
+                  <p className="text-sm font-semibold text-zinc-900">
+                    {evidenceMessageId ? `Assistant message ${evidenceMessageId.slice(0, 8)}` : "Assistant evidence"}
+                  </p>
+                  {evidenceLedger ? (
+                    <p className="mt-1 text-xs text-zinc-500">
+                      Ledger {evidenceLedger.id.slice(0, 8)} • {new Date(evidenceLedger.createdAt).toLocaleString()}
+                    </p>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEvidenceDrawerOpen(false)}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-700"
+                  aria-label="Close evidence drawer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-3 px-4 py-4">
+              {evidenceDrawerLoading ? (
+                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-600">
+                  Loading evidence...
+                </div>
+              ) : null}
+
+              {evidenceDrawerError ? (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                  {evidenceDrawerError}
+                </div>
+              ) : null}
+
+              {!evidenceDrawerLoading && !evidenceRows.length && !evidenceDrawerError ? (
+                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-600">
+                  No persisted evidence found for this run yet.
+                </div>
+              ) : null}
+
+              {evidenceRows.map((row) => (
+                <article key={row.id} className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] text-zinc-600">
+                      {row.kind}
+                    </span>
+                    <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] text-zinc-600">
+                      {row.status}
+                    </span>
+                    <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] text-zinc-600">
+                      confidence {Math.round((Number(row.confidence || 0) || 0) * 100)}%
+                    </span>
+                    {row.provider ? (
+                      <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] text-zinc-600">
+                        {row.provider}
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="mt-2 text-sm font-semibold text-zinc-900">{row.label || "Evidence item"}</p>
+                  {row.snippet ? <p className="mt-1 text-xs text-zinc-600">{row.snippet}</p> : null}
+                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-zinc-500">
+                    {row.runId ? <span>run {row.runId.slice(0, 12)}</span> : null}
+                    {row.refId ? <span>ref {row.refId.slice(0, 12)}</span> : null}
+                    <span>{new Date(row.createdAt).toLocaleString()}</span>
+                  </div>
+                  {row.url ? (
+                    <a
+                      href={row.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-2 inline-flex rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+                    >
+                      Open source
+                    </a>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          </section>
+          <button
+            type="button"
+            className="h-full flex-1"
+            onClick={() => setEvidenceDrawerOpen(false)}
+            aria-label="Close evidence backdrop"
+          />
+        </div>
+      ) : null}
 
       {nameDialog ? (
         <div className="fixed inset-0 z-50 grid place-items-start bg-black/40 pt-[18vh]">
