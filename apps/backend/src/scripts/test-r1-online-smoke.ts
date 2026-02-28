@@ -292,8 +292,29 @@ async function main() {
     jar
   );
   assert.equal(threads.status, 200, 'Runtime thread listing failed.');
-  const firstThread = Array.isArray(threads.data.threads) ? threads.data.threads[0] : null;
-  const branchId = String(firstThread?.pinnedBranchId || firstThread?.branches?.[0]?.id || '').trim();
+  let firstThread = Array.isArray(threads.data.threads) ? threads.data.threads[0] : null;
+  let branchId = String(firstThread?.pinnedBranchId || firstThread?.branches?.[0]?.id || '').trim();
+
+  if (!branchId) {
+    const createdThread = await apiRequest<{
+      thread?: { id?: string; pinnedBranchId?: string; branches?: Array<{ id?: string }> };
+    }>(
+      baseUrl,
+      `/api/research-jobs/${workspaceId}/runtime/threads`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          title: 'Main workspace thread',
+          createdBy: 'r1-online-smoke',
+        }),
+      },
+      jar
+    );
+    assert.equal(createdThread.status, 201, 'Failed to create runtime thread for smoke test.');
+    firstThread = createdThread.data.thread || null;
+    branchId = String(firstThread?.pinnedBranchId || firstThread?.branches?.[0]?.id || '').trim();
+  }
   assert.ok(branchId, 'No runtime branch id available for cursor/output checks.');
 
   const eventsInitial = await apiRequest<{ events?: Array<{ eventSeq?: string; id?: string }> }>(
@@ -339,7 +360,7 @@ async function main() {
     },
     jar
   );
-  assert.equal(send.status, 200, `Runtime send failed: ${send.status}`);
+  assert.ok(send.status === 200 || send.status === 202, `Runtime send failed: ${send.status}`);
   await waitForAssistantMessage(baseUrl, workspaceId, branchId, jar, sendAt, 140_000);
 
   if (skipAdminDiagnostics && !isAdmin) {

@@ -1,0 +1,32 @@
+# Keep Vercel uploads lean in monorepo deployments
+node_modules
+
+# Generated/backend runtime artifacts
+apps/backend/storage
+apps/backend/sessions
+apps/backend/reports
+apps/backend/reproduction_output.json
+apps/backend/coverage
+apps/backend/test-results
+
+# Local logs and diagnostics
+logs.txt
+server.log
+curl_diag.log
+
+# Workspace/archive artifacts
+archive
+storage
+sessions
+
+# Heavy binary artifacts
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.webm
+
+# Build outputs
+apps/client-portal/.next
+apps/frontend/.next
+apps/backend/dist
