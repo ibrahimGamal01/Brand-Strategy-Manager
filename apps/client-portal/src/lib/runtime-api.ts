@@ -144,10 +144,24 @@ export type WorkspaceIntakeSuggestion = {
 
 export type WorkspaceIntakeScanMode = "quick" | "standard" | "deep";
 
+export type WorkspaceIntakeEventType =
+  | "SCAN_STARTED"
+  | "SCAN_TARGET_STARTED"
+  | "SNAPSHOT_SAVED"
+  | "CRAWL_COMPLETED"
+  | "SCAN_WARNING"
+  | "SCAN_FAILED"
+  | "SCAN_DONE"
+  | "ENRICHMENT_STARTED"
+  | "DDG_STARTED"
+  | "DDG_COMPLETED"
+  | "ENRICHMENT_WARNING"
+  | "ENRICHMENT_DONE";
+
 export type WorkspaceIntakeLiveEvent = {
   id: number;
   workspaceId: string;
-  type: string;
+  type: WorkspaceIntakeEventType | string;
   message: string;
   payload?: Record<string, unknown>;
   scanRunId?: string;

@@ -223,6 +223,84 @@ async function buildWebsiteEvidenceSummary(
   return compactText(lines.join('\n\n'), 5000);
 }
 
+async function buildDdgEvidenceSummary(
+  workspaceId: string,
+  payload: Record<string, unknown>
+): Promise<string> {
+  const websites = parseWebsiteList([payload.website, payload.websites], 5);
+  const hostnames = new Set(
+    websites
+      .map((entry) => getHostname(entry))
+      .filter(Boolean)
+  );
+
+  const rawRows = await prisma.rawSearchResult.findMany({
+    where: { researchJobId: workspaceId },
+    orderBy: { createdAt: 'desc' },
+    take: 80,
+    select: {
+      query: true,
+      title: true,
+      href: true,
+      body: true,
+      createdAt: true,
+      source: true,
+    },
+  });
+
+  const filteredRaw = rawRows
+    .filter((row) => {
+      if (!hostnames.size) return true;
+      const hrefHost = getHostname(String(row.href || ''));
+      const query = String(row.query || '').toLowerCase();
+      return hrefHost ? hostnames.has(hrefHost) : Array.from(hostnames).some((host) => query.includes(host));
+    })
+    .slice(0, 10);
+
+  const newsRows = await prisma.ddgNewsResult.findMany({
+    where: { researchJobId: workspaceId },
+    orderBy: { createdAt: 'desc' },
+    take: 30,
+    select: {
+      title: true,
+      body: true,
+      url: true,
+      query: true,
+      source: true,
+    },
+  });
+
+  const filteredNews = newsRows
+    .filter((row) => {
+      if (!hostnames.size) return true;
+      const hrefHost = getHostname(String(row.url || ''));
+      const query = String(row.query || '').toLowerCase();
+      return hrefHost ? hostnames.has(hrefHost) : Array.from(hostnames).some((host) => query.includes(host));
+    })
+    .slice(0, 8);
+
+  if (!filteredRaw.length && !filteredNews.length) return '';
+
+  const rawLines = filteredRaw.map((row, index) => {
+    const title = compactText(row.title || '', 180);
+    const href = String(row.href || '').trim();
+    const body = compactText(row.body || '', 300);
+    return `Raw ${index + 1}: ${title}\nURL: ${href}\n${body}`;
+  });
+
+  const newsLines = filteredNews.map((row, index) => {
+    const title = compactText(row.title || '', 180);
+    const href = String(row.url || '').trim();
+    const body = compactText(row.body || '', 300);
+    return `News ${index + 1}: ${title}\nURL: ${href}\n${body}`;
+  });
+
+  return compactText(
+    [`DDG raw context:`, ...rawLines, '', 'DDG news context:', ...newsLines].join('\n'),
+    5000
+  );
+}
+
 function stripUndefinedFromJson(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value
@@ -385,16 +463,21 @@ export async function getPortalWorkspaceIntakeStatus(
   if (!workspace) return null;
 
   const prefill = buildPrefill(workspace);
-  const completed = hasRequiredIntakeData(prefill);
-  const pendingSets = completed ? await evaluatePendingQuestionSets(workspaceId) : [];
   const input = asRecord(workspace.inputData);
+  const source = stringify(input.source) || 'portal_intro_form';
+  const explicitCompletion =
+    source === 'portal_intro_form' ||
+    source === 'portal_intro_form_v2' ||
+    Boolean(stringify(input.intakeCompletedAt));
+  const completed = hasRequiredIntakeData(prefill) && explicitCompletion;
+  const pendingSets = completed ? await evaluatePendingQuestionSets(workspaceId) : [];
 
   return {
     workspaceId,
     required: !completed,
     completed,
     readyForChat: completed,
-    source: stringify(input.source) || 'portal_intro_form',
+    source,
     updatedAt: workspace.client.updatedAt.toISOString(),
     prefill,
     pendingQuestionSets: summarizeQuestionSets(pendingSets),
@@ -426,12 +509,19 @@ export async function suggestPortalWorkspaceIntakeCompletion(
     );
     return '';
   });
-  const payloadWithEvidence = websiteEvidence
-    ? {
-        ...payload,
-        _websiteEvidence: websiteEvidence,
-      }
-    : payload;
+  const ddgEvidence = await buildDdgEvidenceSummary(workspaceId, payload).catch((error) => {
+    console.warn(
+      `[PortalIntake] Failed to build DDG evidence summary for ${workspaceId}:`,
+      (error as Error)?.message || String(error)
+    );
+    return '';
+  });
+
+  const payloadWithEvidence = {
+    ...payload,
+    ...(websiteEvidence ? { _websiteEvidence: websiteEvidence } : {}),
+    ...(ddgEvidence ? { _ddgEvidence: ddgEvidence } : {}),
+  };
 
   try {
     return await suggestIntakeCompletion(payloadWithEvidence);
@@ -583,6 +673,7 @@ export async function submitPortalWorkspaceIntake(
     ...inputData,
     source: 'portal_intro_form',
     intakeVersion: 'portal-v1',
+    intakeCompletedAt: new Date().toISOString(),
     brandName: mergedName,
     niche: stringify(nextPayload.niche),
     businessType: stringify(nextPayload.businessType),

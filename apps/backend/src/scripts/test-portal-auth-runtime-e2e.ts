@@ -100,6 +100,35 @@ async function waitForAssistantMessage(baseUrl: string, workspaceId: string, bra
   return false;
 }
 
+async function waitForSignupScanRun(baseUrl: string, workspaceId: string, jar: CookieJar) {
+  const attempts = 12;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const diagnostics = await apiRequest<{
+      scanRuns?: Array<{ workspaceId?: string; mode?: string; initiatedBy?: string; status?: string }>;
+    }>(
+      baseUrl,
+      `/api/portal/admin/intake/scan-runs?workspaceId=${encodeURIComponent(workspaceId)}&limit=20`,
+      { method: 'GET' },
+      jar
+    );
+    if (diagnostics.status === 403) {
+      return 'forbidden' as const;
+    }
+    if (diagnostics.status === 200 && Array.isArray(diagnostics.data.scanRuns)) {
+      const match = diagnostics.data.scanRuns.find(
+        (row) =>
+          String(row.workspaceId || '') === workspaceId &&
+          String(row.initiatedBy || '').toUpperCase() === 'SYSTEM'
+      );
+      if (match) {
+        return match;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
+  return null;
+}
+
 async function main() {
   const baseUrl = String(process.env.PORTAL_E2E_BASE_URL || process.env.BACKEND_BASE_URL || 'http://localhost:3001').replace(/\/+$/, '');
   const timestamp = Date.now();
@@ -111,9 +140,12 @@ async function main() {
   assert.equal(unauthenticatedMe.status, 401, 'Expected /auth/me to require auth before signup');
 
   const signup = await apiRequest<{
-    user?: { id?: string; email?: string };
-    workspaces?: Array<{ id?: string }>;
+    ok?: boolean;
+    email?: string;
+    workspaceId?: string;
+    requiresEmailVerification?: boolean;
     emailDelivery?: { provider?: string };
+    debugVerificationCode?: string;
     debugVerificationToken?: string;
   }>(
     baseUrl,
@@ -126,19 +158,102 @@ async function main() {
         password,
         fullName: 'Portal E2E',
         companyName: 'Portal QA',
+        website: 'https://portal-qa.example.com',
+        websites: ['https://www.portal-qa.example.com/about'],
       }),
     },
     jar
   );
 
   assert.equal(signup.status, 201, `Signup failed: ${signup.status}`);
-  assert.equal(signup.data.user?.email, email, 'Signup returned unexpected user email');
-  assert.ok(Array.isArray(signup.data.workspaces) && signup.data.workspaces.length > 0, 'Signup did not provision a workspace');
+  assert.equal(signup.data.email, email, 'Signup returned unexpected user email');
+  assert.equal(Boolean(signup.data.requiresEmailVerification), true, 'Signup should require email verification');
+  assert.equal(Boolean(signup.data.ok), true, 'Signup should return ok=true');
   assert.ok(signup.data.emailDelivery?.provider, 'Signup did not return email provider info');
-  assert.ok(signup.data.debugVerificationToken, 'Expected debug verification token in non-production mode');
+  if (String(process.env.NODE_ENV || '').toLowerCase() !== 'production') {
+    assert.ok(
+      signup.data.debugVerificationCode || signup.data.debugVerificationToken,
+      'Expected debug verification details in non-production mode'
+    );
+  }
 
-  const workspaceId = String(signup.data.workspaces?.[0]?.id || '');
+  const workspaceId = String(signup.data.workspaceId || '');
   assert.ok(workspaceId, 'Workspace id missing after signup');
+
+  const meAfterSignup = await apiRequest(baseUrl, '/api/portal/auth/me', { method: 'GET' }, jar);
+  assert.equal(meAfterSignup.status, 401, 'Signup should not auto-create authenticated session');
+
+  const loginBeforeVerify = await apiRequest(
+    baseUrl,
+    '/api/portal/auth/login',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    },
+    jar
+  );
+  assert.equal(loginBeforeVerify.status, 403, 'Unverified user should be blocked from login');
+  assert.equal((loginBeforeVerify.data as any)?.error, 'EMAIL_NOT_VERIFIED', 'Expected EMAIL_NOT_VERIFIED before code verification');
+
+  const resend = await apiRequest<{ debugVerificationCode?: string; debugVerificationToken?: string; alreadyVerified?: boolean }>(
+    baseUrl,
+    '/api/portal/auth/resend-verification',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email,
+      }),
+    },
+    jar
+  );
+  assert.equal(resend.status, 200, 'Resend verification endpoint failed');
+  assert.ok(!resend.data.alreadyVerified, 'New account should not already be verified');
+
+  const verifyCode = await apiRequest<{ ok?: boolean }>(
+    baseUrl,
+    '/api/portal/auth/verify-email-code',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email,
+        code: '00000',
+      }),
+    },
+    jar
+  );
+  assert.equal(verifyCode.status, 200, 'Email code verification failed');
+  assert.equal(Boolean(verifyCode.data.ok), true, 'Email code verification should return ok=true');
+
+  const login = await apiRequest<{ user?: { email?: string } }>(
+    baseUrl,
+    '/api/portal/auth/login',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    },
+    jar
+  );
+  assert.equal(login.status, 200, 'Login failed after verification');
+  assert.equal(login.data.user?.email, email, 'Login returned unexpected user');
+
+  const workspaces = await apiRequest<{ workspaces?: Array<{ id?: string }> }>(
+    baseUrl,
+    '/api/portal/workspaces',
+    { method: 'GET' },
+    jar
+  );
+  assert.equal(workspaces.status, 200, 'Workspace listing failed');
+  assert.ok(Array.isArray(workspaces.data.workspaces) && workspaces.data.workspaces.length > 0, 'Workspace listing returned empty array');
+
+  const signupScanRun = await waitForSignupScanRun(baseUrl, workspaceId, jar);
+  if (signupScanRun && signupScanRun !== 'forbidden') {
+    assert.equal(String(signupScanRun?.mode || '').toLowerCase(), 'deep', 'Signup scan should run in deep mode by default');
+    assert.equal(String(signupScanRun?.initiatedBy || '').toUpperCase(), 'SYSTEM', 'Signup scan should be SYSTEM initiated');
+  }
 
   const intakeBefore = await apiRequest<{ completed?: boolean }>(
     baseUrl,
@@ -159,9 +274,6 @@ async function main() {
         name: 'Portal QA',
         website: 'https://portal-qa.example.com',
         primaryGoal: 'Increase qualified leads',
-        handles: {
-          instagram: 'portalqa',
-        },
       }),
     },
     jar
@@ -207,51 +319,6 @@ async function main() {
   assert.equal(intakeAfter.status, 200, 'Workspace intake status endpoint failed after setup');
   assert.equal(Boolean(intakeAfter.data.completed), true, 'Workspace intake should be completed after submit');
   assert.equal(Boolean(intakeAfter.data.readyForChat), true, 'Workspace should be chat-ready after intake submit');
-
-  const meBeforeVerify = await apiRequest<{ user?: { emailVerified?: boolean } }>(
-    baseUrl,
-    '/api/portal/auth/me',
-    { method: 'GET' },
-    jar
-  );
-  assert.equal(meBeforeVerify.status, 200, 'Expected authenticated /auth/me to succeed after signup');
-  assert.equal(Boolean(meBeforeVerify.data.user?.emailVerified), false, 'Email should be unverified immediately after signup');
-
-  const resend = await apiRequest<{ debugVerificationToken?: string; alreadyVerified?: boolean }>(
-    baseUrl,
-    '/api/portal/auth/resend-verification',
-    { method: 'POST' },
-    jar
-  );
-  assert.equal(resend.status, 200, 'Resend verification endpoint failed');
-  assert.ok(!resend.data.alreadyVerified, 'New account should not already be verified');
-  assert.ok(resend.data.debugVerificationToken, 'Resend did not return debug verification token');
-
-  const verify = await apiRequest(
-    baseUrl,
-    `/api/portal/auth/verify-email?token=${encodeURIComponent(String(signup.data.debugVerificationToken))}`,
-    { method: 'GET' },
-    jar
-  );
-  assert.equal(verify.status, 200, 'Email verification endpoint failed');
-
-  const meAfterVerify = await apiRequest<{ user?: { emailVerified?: boolean } }>(
-    baseUrl,
-    '/api/portal/auth/me',
-    { method: 'GET' },
-    jar
-  );
-  assert.equal(meAfterVerify.status, 200, 'Expected authenticated /auth/me to succeed after verification');
-  assert.equal(Boolean(meAfterVerify.data.user?.emailVerified), true, 'Email should be verified after using token');
-
-  const workspaces = await apiRequest<{ workspaces?: Array<{ id?: string }> }>(
-    baseUrl,
-    '/api/portal/workspaces',
-    { method: 'GET' },
-    jar
-  );
-  assert.equal(workspaces.status, 200, 'Workspace listing failed');
-  assert.ok(Array.isArray(workspaces.data.workspaces) && workspaces.data.workspaces.length > 0, 'Workspace listing returned empty array');
 
   const createThread = await apiRequest<{
     mainBranch?: { id?: string };
@@ -311,7 +378,7 @@ async function main() {
   const meAfterLogout = await apiRequest(baseUrl, '/api/portal/auth/me', { method: 'GET' }, jar);
   assert.equal(meAfterLogout.status, 401, 'Session should be revoked after logout');
 
-  const login = await apiRequest<{ user?: { email?: string } }>(
+  const relogin = await apiRequest<{ user?: { email?: string } }>(
     baseUrl,
     '/api/portal/auth/login',
     {
@@ -321,8 +388,8 @@ async function main() {
     },
     jar
   );
-  assert.equal(login.status, 200, 'Login failed');
-  assert.equal(login.data.user?.email, email, 'Login returned unexpected user');
+  assert.equal(relogin.status, 200, 'Login failed');
+  assert.equal(relogin.data.user?.email, email, 'Login returned unexpected user');
 
   const meAfterLogin = await apiRequest(baseUrl, '/api/portal/auth/me', { method: 'GET' }, jar);
   assert.equal(meAfterLogin.status, 200, 'Session should be restored after login');
@@ -337,10 +404,13 @@ async function main() {
         emailProvider: signup.data.emailDelivery?.provider || 'unknown',
         checks: [
           'auth_required_before_signup',
-          'signup_creates_user_session_workspace',
-          'workspace_intake_status_suggest_submit',
-          'resend_verification',
-          'verify_email',
+          'signup_creates_workspace_without_session',
+          'login_blocked_until_email_verified',
+          'resend_verification_prelogin',
+          'verify_email_code',
+          'login_after_verification',
+          'signup_deep_scan_system_initiated',
+          'workspace_intake_status_suggest_submit_after_login',
           'workspace_access',
           'runtime_thread_and_message',
           'runtime_event_stream',

@@ -10,6 +10,7 @@ export const PORTAL_SESSION_COOKIE_NAME = 'portal_session';
 
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14; // 14 days
 const VERIFY_EMAIL_TTL_MS = 1000 * 60 * 60 * 48; // 48 hours
+const PORTAL_VERIFY_CODE = String(process.env.PORTAL_EMAIL_VERIFY_CODE || '00000').trim() || '00000';
 
 type PortalUserWithMemberships = {
   id: string;
@@ -62,6 +63,10 @@ function makeToken(bytes = 32): string {
 
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
+}
+
+export function getPortalEmailVerifyCode(): string {
+  return PORTAL_VERIFY_CODE;
 }
 
 function getBasePortalUrl(req?: Request): string {
@@ -300,6 +305,7 @@ export async function touchPortalSession(sessionId: string) {
 export async function createWorkspaceForNewSignup(input: {
   companyName?: string | null;
   fallbackEmail: string;
+  seedInputData?: Record<string, unknown>;
 }, db: Pick<Prisma.TransactionClient, 'client' | 'researchJob'> = prisma) {
   const companyName = String(input.companyName || '').trim();
   const fallbackName = input.fallbackEmail.split('@')[0] || 'New Workspace';
@@ -316,6 +322,7 @@ export async function createWorkspaceForNewSignup(input: {
       startedAt: new Date(),
       inputData: {
         source: 'portal_signup',
+        ...(input.seedInputData && typeof input.seedInputData === 'object' ? input.seedInputData : {}),
       },
     },
     include: {
@@ -341,6 +348,21 @@ export async function issuePortalEmailVerificationToken(userId: string) {
   });
 
   return { token, expiresAt };
+}
+
+export async function findPortalUserByEmail(email: string) {
+  return prisma.portalUser.findUnique({
+    where: { email: normalizeEmail(email) },
+    include: {
+      memberships: {
+        include: {
+          researchJob: {
+            include: { client: true },
+          },
+        },
+      },
+    },
+  });
 }
 
 export async function consumeEmailVerificationToken(token: string): Promise<string | null> {
@@ -369,6 +391,67 @@ export async function consumeEmailVerificationToken(token: string): Promise<stri
   return tokenRow.userId;
 }
 
+export async function verifyPortalEmailCode(input: {
+  email: string;
+  code: string;
+}): Promise<{ ok: boolean; userId?: string; alreadyVerified?: boolean; error?: string }> {
+  const email = normalizeEmail(input.email);
+  const code = String(input.code || '').trim();
+
+  if (!isValidEmail(email)) {
+    return { ok: false, error: 'INVALID_EMAIL' };
+  }
+
+  if (!code || code !== PORTAL_VERIFY_CODE) {
+    return { ok: false, error: 'INVALID_VERIFICATION_CODE' };
+  }
+
+  const user = await prisma.portalUser.findUnique({
+    where: { email },
+    select: {
+      id: true,
+      emailVerifiedAt: true,
+    },
+  });
+
+  if (!user) {
+    return { ok: false, error: 'INVALID_VERIFICATION_CODE' };
+  }
+
+  if (user.emailVerifiedAt) {
+    return { ok: true, userId: user.id, alreadyVerified: true };
+  }
+
+  const challenge = await prisma.portalEmailToken.findFirst({
+    where: {
+      userId: user.id,
+      type: 'VERIFY_EMAIL',
+      usedAt: null,
+      expiresAt: { gt: new Date() },
+    },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true },
+  });
+
+  if (!challenge) {
+    return { ok: false, error: 'VERIFICATION_CHALLENGE_EXPIRED' };
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.portalEmailToken.update({
+      where: { id: challenge.id },
+      data: { usedAt: new Date() },
+    });
+
+    await tx.portalUser.update({
+      where: { id: user.id },
+      data: { emailVerifiedAt: new Date() },
+    });
+  });
+
+  return { ok: true, userId: user.id };
+}
+
 export async function sendVerificationEmail(input: {
   email: string;
   token: string;
@@ -378,9 +461,17 @@ export async function sendVerificationEmail(input: {
   const base = getBasePortalUrl(input.req);
   const verifyUrl = `${base}/verify-email?token=${encodeURIComponent(input.token)}`;
   const salutation = input.fullName ? `Hi ${input.fullName},` : 'Hi there,';
-  const subject = 'Verify your BAT account';
-  const text = `${salutation}\n\nVerify your account by opening this link:\n${verifyUrl}\n\nIf you did not create this account, you can ignore this email.`;
-  const html = `<p>${salutation}</p><p>Verify your account by clicking the link below:</p><p><a href=\"${verifyUrl}\">${verifyUrl}</a></p><p>If you did not create this account, you can ignore this email.</p>`;
+  const subject = 'Your BAT verification code';
+  const text = `${salutation}
+
+Use this verification code to activate your BAT account:
+${PORTAL_VERIFY_CODE}
+
+If your app still expects a verification link, you can also open:
+${verifyUrl}
+
+If you did not create this account, you can ignore this email.`;
+  const html = `<p>${salutation}</p><p>Use this verification code to activate your BAT account:</p><p style="font-size:24px;font-weight:700;letter-spacing:2px;">${PORTAL_VERIFY_CODE}</p><p>If your app still expects a verification link, you can also open:</p><p><a href="${verifyUrl}">${verifyUrl}</a></p><p>If you did not create this account, you can ignore this email.</p>`;
 
   return sendPortalEmail({
     to: input.email,

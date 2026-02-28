@@ -5,6 +5,9 @@ import {
   consumeEmailVerificationToken,
   createPortalSession,
   createWorkspaceForNewSignup,
+  findPortalUserByEmail,
+  getPortalEmailVerifyCode,
+  getPortalSessionFromRequest,
   hashPassword,
   isValidEmail,
   isValidPassword,
@@ -15,6 +18,7 @@ import {
   setSessionCookie,
   toPortalUserPayload,
   toPortalWorkspacePayload,
+  verifyPortalEmailCode,
   verifyPassword,
 } from '../services/portal/portal-auth';
 import {
@@ -44,8 +48,25 @@ import {
   getPortalIntakeScanRun,
   listPortalIntakeScanRunsWithEventCounts,
 } from '../services/portal/portal-intake-events-repository';
+import { startPortalSignupEnrichment } from '../services/portal/portal-signup-enrichment';
 
 const router = Router();
+const authRateLimitStore = new Map<string, { count: number; resetAt: number }>();
+
+function consumeRateLimit(key: string, limit: number, windowMs: number): boolean {
+  const now = Date.now();
+  const current = authRateLimitStore.get(key);
+  if (!current || current.resetAt <= now) {
+    authRateLimitStore.set(key, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+  if (current.count >= limit) {
+    return false;
+  }
+  current.count += 1;
+  authRateLimitStore.set(key, current);
+  return true;
+}
 
 function getRequestIp(req: Request): string | null {
   const forwarded = req.headers['x-forwarded-for'];
@@ -101,12 +122,16 @@ router.post('/auth/signup', async (req, res) => {
     const password = safeString(req.body?.password);
     const fullName = safeString(req.body?.fullName);
     const companyName = safeString(req.body?.companyName);
+    const websites = parseWebsiteList([req.body?.website, req.body?.websites], 5);
 
     if (!isValidEmail(email)) {
       return res.status(400).json({ error: 'INVALID_EMAIL' });
     }
     if (!isValidPassword(password)) {
       return res.status(400).json({ error: 'INVALID_PASSWORD', details: 'Password must be at least 8 characters.' });
+    }
+    if (!websites.length) {
+      return res.status(400).json({ error: 'WEBSITE_REQUIRED' });
     }
 
     const existing = await prisma.portalUser.findUnique({
@@ -135,6 +160,11 @@ router.post('/auth/signup', async (req, res) => {
         {
           companyName: companyName || null,
           fallbackEmail: email,
+          seedInputData: {
+            website: websites[0] || '',
+            websites,
+            source: 'portal_signup',
+          },
         },
         tx
       );
@@ -147,7 +177,7 @@ router.post('/auth/signup', async (req, res) => {
         },
       });
 
-      return { userId: user.id };
+      return { userId: user.id, workspaceId: workspace.id };
     });
 
     const verifyToken = await issuePortalEmailVerificationToken(created.userId);
@@ -158,34 +188,25 @@ router.post('/auth/signup', async (req, res) => {
       req,
     });
 
-    const session = await createPortalSession({
-      userId: created.userId,
-      userAgent: safeString(req.headers['user-agent']) || null,
-      ipAddress: getRequestIp(req),
+    void startPortalSignupEnrichment({
+      workspaceId: created.workspaceId,
+      brandName: companyName || email.split('@')[0] || 'Brand',
+      website: websites[0],
+      websites,
+    }).catch((error) => {
+      console.warn(
+        `[PortalSignupEnrichment] Failed to start for workspace=${created.workspaceId}:`,
+        (error as Error)?.message || String(error)
+      );
     });
-    setSessionCookie(res, session.token, session.expiresAt);
-
-    const hydrated = await prisma.portalUser.findUnique({
-      where: { id: created.userId },
-      include: {
-        memberships: {
-          include: {
-            researchJob: {
-              include: { client: true },
-            },
-          },
-        },
-      },
-    });
-
-    if (!hydrated) {
-      return res.status(500).json({ error: 'SIGNUP_STATE_MISSING' });
-    }
 
     return res.status(201).json({
-      user: toPortalUserPayload(hydrated as any),
-      workspaces: toPortalWorkspacePayload(hydrated as any),
+      ok: true,
+      email,
+      workspaceId: created.workspaceId,
+      requiresEmailVerification: true,
       emailDelivery,
+      ...(process.env.NODE_ENV !== 'production' ? { debugVerificationCode: getPortalEmailVerifyCode() } : {}),
       ...(process.env.NODE_ENV !== 'production' ? { debugVerificationToken: verifyToken.token } : {}),
     });
   } catch (error: any) {
@@ -222,6 +243,10 @@ router.post('/auth/login', async (req, res) => {
     const valid = await verifyPassword(password, user.passwordHash);
     if (!valid) {
       return res.status(401).json({ error: 'INVALID_CREDENTIALS' });
+    }
+
+    if (!user.emailVerifiedAt) {
+      return res.status(403).json({ error: 'EMAIL_NOT_VERIFIED' });
     }
 
     const session = await createPortalSession({
@@ -279,23 +304,92 @@ router.get('/auth/verify-email', async (req, res) => {
   }
 });
 
-router.post('/auth/resend-verification', requirePortalAuth, async (req, res) => {
+router.post('/auth/verify-email-code', async (req, res) => {
   try {
-    const session = (req as AuthedPortalRequest).portalSession!;
-    if (session.user.emailVerifiedAt) {
-      return res.json({ ok: true, alreadyVerified: true });
+    const email = safeString(req.body?.email).toLowerCase();
+    const code = safeString(req.body?.code);
+    const ip = getRequestIp(req) || 'unknown';
+    if (!consumeRateLimit(`verify:${ip}:${email || 'unknown'}`, 10, 10 * 60 * 1000)) {
+      return res.status(429).json({ ok: false, error: 'RATE_LIMITED' });
     }
 
-    const token = await issuePortalEmailVerificationToken(session.user.id);
+    if (!email) {
+      return res.status(400).json({ error: 'EMAIL_REQUIRED' });
+    }
+    if (!code) {
+      return res.status(400).json({ error: 'CODE_REQUIRED' });
+    }
+
+    const result = await verifyPortalEmailCode({ email, code });
+    if (!result.ok) {
+      const message = String(result.error || '');
+      const status =
+        message === 'INVALID_EMAIL'
+          ? 400
+          : message === 'INVALID_VERIFICATION_CODE'
+            ? 401
+            : 410;
+      return res.status(status).json({ ok: false, error: message || 'VERIFY_CODE_FAILED' });
+    }
+
+    return res.json({
+      ok: true,
+      userId: result.userId,
+      alreadyVerified: Boolean(result.alreadyVerified),
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'VERIFY_EMAIL_CODE_FAILED', details: error?.message || String(error) });
+  }
+});
+
+router.post('/auth/resend-verification', async (req, res) => {
+  try {
+    const portalSession = await getPortalSessionFromRequest(req);
+    const ip = getRequestIp(req) || 'unknown';
+
+    let targetEmail = '';
+    let targetFullName: string | null = null;
+    let targetUserId = '';
+
+    if (portalSession?.user) {
+      if (portalSession.user.emailVerifiedAt) {
+        return res.json({ ok: true, alreadyVerified: true });
+      }
+      targetEmail = portalSession.user.email;
+      targetFullName = portalSession.user.fullName;
+      targetUserId = portalSession.user.id;
+    } else {
+      targetEmail = safeString(req.body?.email).toLowerCase();
+      if (!isValidEmail(targetEmail)) {
+        return res.status(400).json({ error: 'INVALID_EMAIL' });
+      }
+      const user = await findPortalUserByEmail(targetEmail);
+      if (!user) {
+        return res.status(404).json({ error: 'USER_NOT_FOUND' });
+      }
+      if (user.emailVerifiedAt) {
+        return res.json({ ok: true, alreadyVerified: true });
+      }
+      targetUserId = user.id;
+      targetFullName = user.fullName;
+    }
+
+    if (!consumeRateLimit(`resend:${ip}:${targetEmail}`, 5, 15 * 60 * 1000)) {
+      return res.status(429).json({ ok: false, error: 'RATE_LIMITED' });
+    }
+
+    const token = await issuePortalEmailVerificationToken(targetUserId);
     const delivery = await sendVerificationEmail({
-      email: session.user.email,
+      email: targetEmail,
       token: token.token,
-      fullName: session.user.fullName,
+      fullName: targetFullName,
       req,
     });
+
     return res.json({
       ok: true,
       delivery,
+      ...(process.env.NODE_ENV !== 'production' ? { debugVerificationCode: getPortalEmailVerifyCode() } : {}),
       ...(process.env.NODE_ENV !== 'production' ? { debugVerificationToken: token.token } : {}),
     });
   } catch (error: any) {

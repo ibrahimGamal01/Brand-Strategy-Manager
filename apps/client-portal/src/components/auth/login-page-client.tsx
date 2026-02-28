@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { getPortalMe, loginPortal } from "@/lib/auth-api";
+import { getPortalMe, loginPortal, resendPortalVerification } from "@/lib/auth-api";
 
 export function LoginPageClient() {
   const router = useRouter();
@@ -16,6 +16,9 @@ export function LoginPageClient() {
 
   const next = searchParams.get("next") || "/app";
   const verified = searchParams.get("verified");
+  const emailFromQuery = searchParams.get("email") || "";
+  const [resending, setResending] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -34,9 +37,16 @@ export function LoginPageClient() {
     };
   }, [router]);
 
+  useEffect(() => {
+    if (emailFromQuery) {
+      setEmail(emailFromQuery);
+    }
+  }, [emailFromQuery]);
+
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
+    setNotice(null);
     setLoading(true);
     try {
       await loginPortal({ email, password });
@@ -45,11 +55,39 @@ export function LoginPageClient() {
       const message = String(submitError?.message || "Login failed");
       if (message.includes("INVALID_CREDENTIALS")) {
         setError("Invalid email or password.");
+      } else if (message.includes("EMAIL_NOT_VERIFIED")) {
+        setError("Email not verified yet.");
+        setNotice("Verify your email code to continue.");
       } else {
         setError(message);
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResend = async () => {
+    if (!email.trim()) {
+      setError("Enter your email to resend verification.");
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+    setResending(true);
+    try {
+      const payload = await resendPortalVerification(email.trim());
+      if (payload.alreadyVerified) {
+        setNotice("Email is already verified. Try logging in again.");
+      } else if (payload.delivery?.provider === "console") {
+        setNotice("Verification email is in console mode. Use code 00000 in this environment.");
+      } else {
+        setNotice("Verification code sent. Check your inbox.");
+      }
+    } catch (resendError: any) {
+      setError(String(resendError?.message || "Failed to resend verification code."));
+    } finally {
+      setResending(false);
     }
   };
 
@@ -78,6 +116,11 @@ export function LoginPageClient() {
         {error ? (
           <p className="mt-3 rounded-xl border px-3 py-2 text-sm" style={{ borderColor: "#f4b8b4", background: "#fff5f4", color: "#9f2317" }}>
             {error}
+          </p>
+        ) : null}
+        {notice ? (
+          <p className="mt-3 rounded-xl border px-3 py-2 text-sm" style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}>
+            {notice}
           </p>
         ) : null}
         <form className="mt-6 space-y-3" onSubmit={onSubmit}>
@@ -114,6 +157,24 @@ export function LoginPageClient() {
             {loading ? "Logging in..." : "Log in"}
           </button>
         </form>
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+          <Link
+            href={`/verify-email-code${email.trim() ? `?email=${encodeURIComponent(email.trim())}` : ""}`}
+            className="rounded-full border px-4 py-2"
+            style={{ borderColor: "var(--bat-border)" }}
+          >
+            Verify email code
+          </Link>
+          <button
+            type="button"
+            className="rounded-full border px-4 py-2"
+            style={{ borderColor: "var(--bat-border)" }}
+            disabled={resending}
+            onClick={handleResend}
+          >
+            {resending ? "Sending..." : "Resend code"}
+          </button>
+        </div>
         <p className="mt-4 text-sm" style={{ color: "var(--bat-text-muted)" }}>
           No account? <Link href="/signup">Create one</Link>
         </p>

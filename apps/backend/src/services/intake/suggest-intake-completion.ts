@@ -374,6 +374,8 @@ function buildFallbackSuggestions(
   const missing = new Set<string>(missingKeys);
   const normalizedWebsite = website.trim();
   const websiteEvidence = String(partialPayload._websiteEvidence || partialPayload.websiteEvidence || '').trim();
+  const ddgEvidence = String(partialPayload._ddgEvidence || partialPayload.ddgEvidence || '').trim();
+  const evidenceContext = [websiteEvidence, ddgEvidence].filter(Boolean).join('\n').trim();
   const oneSentenceDescription = sanitizeSentence(
     String(
       partialPayload.oneSentenceDescription ||
@@ -384,13 +386,13 @@ function buildFallbackSuggestions(
   );
   const serviceCandidates = uniqueList(
     [
-      ...extractServiceCandidates(websiteEvidence),
+      ...extractServiceCandidates(evidenceContext),
       ...deriveServiceCandidatesFromDescription(oneSentenceDescription),
       ...parseLooseList(partialPayload.servicesList, 20),
     ],
     20
   );
-  const wellnessSignals = hasWellnessSignals(websiteEvidence);
+  const wellnessSignals = hasWellnessSignals(evidenceContext);
   const brandName = String(partialPayload.name || '').trim() || deriveBrandNameFromWebsite(normalizedWebsite);
   const mainOffer =
     String(partialPayload.mainOffer || '').trim() || deriveMainOfferFromDescription(oneSentenceDescription);
@@ -410,7 +412,7 @@ function buildFallbackSuggestions(
   }
 
   if (missing.has('oneSentenceDescription')) {
-    const extractedDescription = extractDescriptionFromEvidence(websiteEvidence, brandName);
+    const extractedDescription = extractDescriptionFromEvidence(evidenceContext, brandName);
     if (extractedDescription) {
       fallback.oneSentenceDescription = extractedDescription;
     } else if (brandName && (mainOffer || primaryGoal)) {
@@ -423,18 +425,18 @@ function buildFallbackSuggestions(
   }
 
   if (missing.has('niche')) {
-    const inferredNiche = inferNicheFromContext(websiteEvidence, oneSentenceDescription);
+    const inferredNiche = inferNicheFromContext(evidenceContext, oneSentenceDescription);
     if (inferredNiche) {
       fallback.niche = inferredNiche;
     }
   }
 
   if (missing.has('businessType')) {
-    if (/subscription|plan|membership|stream/i.test(websiteEvidence)) {
+    if (/subscription|plan|membership|stream/i.test(evidenceContext)) {
       fallback.businessType = 'Subscription business';
-    } else if (/shop|store|checkout|cart|product|device/i.test(`${websiteEvidence}\n${oneSentenceDescription}`)) {
+    } else if (/shop|store|checkout|cart|product|device/i.test(`${evidenceContext}\n${oneSentenceDescription}`)) {
       fallback.businessType = 'Product business';
-    } else if (/agency|consulting|services/i.test(websiteEvidence)) {
+    } else if (/agency|consulting|services/i.test(evidenceContext)) {
       fallback.businessType = 'Service business';
     }
   }
@@ -459,7 +461,7 @@ function buildFallbackSuggestions(
   }
 
   if (missing.has('primaryGoal')) {
-    const derivedPrimaryGoal = derivePrimaryGoal(websiteEvidence, oneSentenceDescription, mainOffer);
+    const derivedPrimaryGoal = derivePrimaryGoal(evidenceContext, oneSentenceDescription, mainOffer);
     if (derivedPrimaryGoal) {
       fallback.primaryGoal = derivedPrimaryGoal;
     }
@@ -590,7 +592,7 @@ function buildFallbackSuggestions(
     fallback.autonomyLevel = 'assist';
   }
 
-  if (missing.has('operateWhere') && /global|worldwide|remote|online/i.test(`${websiteEvidence}\n${oneSentenceDescription}`)) {
+  if (missing.has('operateWhere') && /global|worldwide|remote|online/i.test(`${evidenceContext}\n${oneSentenceDescription}`)) {
     fallback.operateWhere = 'Global (online)';
   }
 
@@ -656,8 +658,12 @@ export async function suggestIntakeCompletion(
   }
 
   const websiteEvidence = String(partialPayload._websiteEvidence || partialPayload.websiteEvidence || '').trim();
+  const ddgEvidence = String(partialPayload._ddgEvidence || partialPayload.ddgEvidence || '').trim();
   if (websiteEvidence) {
     contextParts.push(`websiteEvidence: ${websiteEvidence}`);
+  }
+  if (ddgEvidence) {
+    contextParts.push(`ddgEvidence: ${ddgEvidence}`);
   }
 
   if (contextParts.length === 0) {

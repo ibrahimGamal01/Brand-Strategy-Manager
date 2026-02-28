@@ -9,7 +9,12 @@ export type PortalIntakeEventType =
   | 'CRAWL_COMPLETED'
   | 'SCAN_WARNING'
   | 'SCAN_FAILED'
-  | 'SCAN_DONE';
+  | 'SCAN_DONE'
+  | 'ENRICHMENT_STARTED'
+  | 'DDG_STARTED'
+  | 'DDG_COMPLETED'
+  | 'ENRICHMENT_WARNING'
+  | 'ENRICHMENT_DONE';
 
 export type PortalIntakeEventStoreMode = 'memory' | 'dual' | 'db';
 

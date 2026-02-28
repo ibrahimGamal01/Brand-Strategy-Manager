@@ -15,6 +15,16 @@ export interface PortalMeResponse {
   workspaces: RuntimeWorkspace[];
 }
 
+export interface PortalSignupResponse {
+  ok: boolean;
+  email: string;
+  workspaceId: string;
+  requiresEmailVerification: boolean;
+  emailDelivery?: { provider: string; id?: string };
+  debugVerificationCode?: string;
+  debugVerificationToken?: string;
+}
+
 async function parseJson<T>(response: Response): Promise<T> {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -34,6 +44,8 @@ export async function signupPortal(input: {
   password: string;
   fullName?: string;
   companyName?: string;
+  website: string;
+  websites?: string[];
 }) {
   const response = await fetch("/api/portal/auth/signup", {
     method: "POST",
@@ -41,7 +53,7 @@ export async function signupPortal(input: {
     credentials: "include",
     body: JSON.stringify(input),
   });
-  return parseJson<PortalMeResponse & { emailDelivery?: { provider: string; id?: string } }>(response);
+  return parseJson<PortalSignupResponse>(response);
 }
 
 export async function loginPortal(input: { email: string; password: string }) {
@@ -80,10 +92,22 @@ export async function verifyPortalEmail(token: string) {
   return parseJson<{ ok: boolean; userId: string }>(response);
 }
 
-export async function resendPortalVerification() {
+export async function verifyPortalEmailCode(input: { email: string; code: string }) {
+  const response = await fetch("/api/portal/auth/verify-email-code", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(input),
+  });
+  return parseJson<{ ok: boolean; userId?: string; alreadyVerified?: boolean }>(response);
+}
+
+export async function resendPortalVerification(email?: string) {
   const response = await fetch("/api/portal/auth/resend-verification", {
     method: "POST",
+    headers: { "content-type": "application/json" },
     credentials: "include",
+    body: JSON.stringify(email ? { email } : {}),
   });
   return parseJson<{ ok: boolean; alreadyVerified?: boolean; delivery?: { provider: string; id?: string } }>(response);
 }

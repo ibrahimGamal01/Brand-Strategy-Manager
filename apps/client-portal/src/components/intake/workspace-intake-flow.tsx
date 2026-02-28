@@ -222,6 +222,14 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
   }, [hasWebsite, state]);
 
   const feedEvents = useMemo(() => [...liveEvents].reverse().slice(0, 14), [liveEvents]);
+  const hasPreScanEvidence = useMemo(
+    () =>
+      liveEvents.some((event) => {
+        const type = String(event.type || "").toUpperCase();
+        return type.startsWith("ENRICHMENT_") || type.startsWith("DDG_");
+      }),
+    [liveEvents]
+  );
 
   async function handleAutoFillStep(step: IntakeWizardStepId) {
     setLoading(true);
@@ -384,6 +392,14 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
                   style={{ borderColor: "#b9e6de", background: "#f0fffb", color: "#0f766e" }}
                 >
                   {notice}
+                </div>
+              ) : null}
+              {hasPreScanEvidence ? (
+                <div
+                  className="rounded-xl border px-3 py-2 text-sm"
+                  style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)", color: "var(--bat-text)" }}
+                >
+                  Pre-scan evidence is available from signup enrichment. Autofill can now use website and DDG context.
                 </div>
               ) : null}
 

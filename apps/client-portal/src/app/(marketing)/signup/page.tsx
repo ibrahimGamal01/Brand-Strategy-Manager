@@ -9,6 +9,8 @@ export default function SignupPage() {
   const router = useRouter();
   const [fullName, setFullName] = useState("");
   const [companyName, setCompanyName] = useState("");
+  const [website, setWebsite] = useState("");
+  const [additionalWebsites, setAdditionalWebsites] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -44,15 +46,21 @@ export default function SignupPage() {
         password,
         fullName,
         companyName,
+        website,
+        websites: additionalWebsites
+          .split(/[\n,]+/)
+          .map((entry) => entry.trim())
+          .filter(Boolean)
+          .slice(0, 5),
       });
 
       if (payload.emailDelivery?.provider === "console") {
-        setEmailNotice("Verification email is in console mode. Configure Resend to send real emails.");
+        setEmailNotice("Verification email is in console mode. Use code 00000 to continue in this environment.");
       } else {
-        setEmailNotice("Verification email sent. Please confirm it from your inbox.");
+        setEmailNotice("Verification code sent. Check your inbox and continue to verification.");
       }
 
-      router.push("/app");
+      router.push(`/verify-email-code?email=${encodeURIComponent(email)}`);
     } catch (submitError: any) {
       const message = String(submitError?.message || "Sign up failed");
       if (message.includes("EMAIL_ALREADY_EXISTS")) {
@@ -61,6 +69,8 @@ export default function SignupPage() {
         setError("Please enter a valid email.");
       } else if (message.includes("INVALID_PASSWORD")) {
         setError("Password must be at least 8 characters.");
+      } else if (message.includes("website")) {
+        setError("Please enter at least one valid website.");
       } else {
         setError(message);
       }
@@ -129,6 +139,29 @@ export default function SignupPage() {
               value={companyName}
               onChange={(event) => setCompanyName(event.target.value)}
               autoComplete="organization"
+            />
+          </label>
+          <label className="block text-sm">
+            Website
+            <input
+              className="mt-1 w-full rounded-xl border px-3 py-2"
+              style={{ borderColor: "var(--bat-border)" }}
+              type="url"
+              placeholder="https://yourcompany.com"
+              value={website}
+              onChange={(event) => setWebsite(event.target.value)}
+              required
+              autoComplete="url"
+            />
+          </label>
+          <label className="block text-sm">
+            Additional websites (optional)
+            <textarea
+              className="mt-1 w-full rounded-xl border px-3 py-2"
+              style={{ borderColor: "var(--bat-border)", minHeight: 76 }}
+              placeholder="One per line, e.g. https://subdomain.yourcompany.com"
+              value={additionalWebsites}
+              onChange={(event) => setAdditionalWebsites(event.target.value)}
             />
           </label>
           <label className="block text-sm">
