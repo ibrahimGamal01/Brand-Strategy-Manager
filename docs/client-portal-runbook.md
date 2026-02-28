@@ -59,6 +59,13 @@ Build checks:
 - `npm run lint --workspace=apps/client-portal`
 - `npm run build --workspace=apps/client-portal`
 
+R1 reliability checks:
+- `npm run test:runtime-reliability-r1 --workspace=apps/backend`
+
+Online smoke + cutover checks (against deployed backend):
+- `R1_BASE_URL=https://<backend-host> R1_ADMIN_EMAIL=<admin-email> R1_ADMIN_PASSWORD=<admin-password> R1_WORKSPACE_ID=<workspace-id> npm run test:r1-online-smoke --workspace=apps/backend`
+- `R1_BASE_URL=https://<backend-host> R1_ADMIN_EMAIL=<admin-email> R1_ADMIN_PASSWORD=<admin-password> R1_WORKSPACE_ID=<workspace-id> npm run report:r1-cutover --workspace=apps/backend`
+
 ## Payment Status
 Billing/payment pages remain intentionally deferred for future work.
 
@@ -69,4 +76,7 @@ Billing/payment pages remain intentionally deferred for future work.
   - `GET /api/portal/workspaces/:workspaceId/intake`
   - `POST /api/portal/workspaces/:workspaceId/intake/suggest`
   - `POST /api/portal/workspaces/:workspaceId/intake`
+  - `GET /api/portal/workspaces/:workspaceId/intake/websites/scan-runs/:scanRunId`
+- New admin diagnostics endpoint:
+  - `GET /api/portal/admin/intake/scan-runs?workspaceId=<id>&limit=<n>`
 - Client portal chat route now gates on intro intake completion before loading smart chat runtime.

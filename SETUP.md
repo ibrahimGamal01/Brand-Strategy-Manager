@@ -31,6 +31,12 @@ DATABASE_URL="postgresql://username:password@localhost:5432/brand_strategy_db"
 # Backend
 BACKEND_PORT=3001
 NODE_ENV=development
+PORTAL_INTAKE_EVENT_STORE_MODE=dual
+PORTAL_INTAKE_DB_FALLBACK_WARNING_MS=60000
+CHAT_TOOL_TIMEOUT_MS=45000
+CHAT_TOTAL_TOOL_TIMEOUT_MS=180000
+CHAT_MAX_TOOL_LOOP_ITERATIONS=6
+CHAT_TOOL_MAX_RETRIES=2
 
 # OpenAI
 OPENAI_API_KEY="OPENAI_API_KEY_FROM_SECRET_MANAGER"
@@ -126,6 +132,37 @@ curl http://localhost:3001/api/health
    - `openAiKeyPresent=true`
    - `openAiFormatValid=true`
    - `preflightPass=true`
+
+### R1 Online Rollout Validation
+
+Run local reliability checks:
+
+```bash
+npm run test:runtime-reliability-r1 --workspace=apps/backend
+```
+
+Run deployed-environment smoke checks:
+
+```bash
+R1_BASE_URL=https://<backend-host> \
+R1_ADMIN_EMAIL=<admin-email> \
+R1_ADMIN_PASSWORD=<admin-password> \
+R1_WORKSPACE_ID=<workspace-id> \
+npm run test:r1-online-smoke --workspace=apps/backend
+```
+
+Cutover monitoring:
+
+```bash
+R1_BASE_URL=https://<backend-host> \
+R1_ADMIN_EMAIL=<admin-email> \
+R1_ADMIN_PASSWORD=<admin-password> \
+R1_WORKSPACE_ID=<workspace-id> \
+npm run report:r1-cutover --workspace=apps/backend
+```
+
+Detailed cutover sequence:
+- `docs/deployment/r1-online-cutover.md`
 
 ---
 

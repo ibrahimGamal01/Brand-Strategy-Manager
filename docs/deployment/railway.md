@@ -29,11 +29,17 @@ The safest Railway setup is two services (one per app) plus a managed Postgres i
 - `AI_FALLBACK_MODE=off`
 - `APIFY_API_TOKEN`
 - `APIFY_MEDIA_DOWNLOADER_TOKEN`
+- `PORTAL_INTAKE_EVENT_STORE_MODE=dual` (for R1 rollout window; switch to `db` after cutover)
 
 ### Backend (optional)
 - `BACKEND_PORT` (not needed if `PORT` is set)
 - `RESEARCH_CONTINUITY_POLL_MS` (default is 60000)
 - `STORAGE_ROOT` (if using a custom mount path for persistent storage)
+- `PORTAL_INTAKE_DB_FALLBACK_WARNING_MS` (default: `60000`)
+- `CHAT_TOOL_TIMEOUT_MS` (default: `45000`)
+- `CHAT_TOTAL_TOOL_TIMEOUT_MS` (default: `180000`)
+- `CHAT_MAX_TOOL_LOOP_ITERATIONS` (default: `6`)
+- `CHAT_TOOL_MAX_RETRIES` (default: `2`)
 
 ### Frontend (required)
 - `NODE_ENV=production`
@@ -65,6 +71,9 @@ Backend:
 Frontend:
 - `/` should load the workspace UI.
 - API calls should resolve via `NEXT_PUBLIC_API_ORIGIN`.
+
+R1 rollout and cutover verification:
+- Follow `docs/deployment/r1-online-cutover.md`.
 
 ## Notes
 - The backend uses Puppeteer and Python-based scrapers; the backend Dockerfile installs runtime dependencies for these.
