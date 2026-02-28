@@ -185,7 +185,7 @@ async function generateStrategyDocChatReply(params: {
         {
           role: 'system',
           content:
-            'You are BAT Doc Copilot. Answer only from the provided strategy context. If context lacks a fact, say it is not present and suggest what to add. Keep answers clear, practical, and concise.',
+            'You are BAT Doc Copilot. Answer only from the provided strategy context. If context lacks a fact, say it is not present and suggest what to add. Keep answers clear, practical, and sufficiently detailed.',
         },
         {
           role: 'system',

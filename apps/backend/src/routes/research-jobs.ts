@@ -1282,11 +1282,11 @@ async function generateBrainCommandReply(instruction: string, commandType: strin
         {
           role: 'system',
           content:
-            'You are BAT Brain. Reply in one or two short, friendly sentences to the user. Acknowledge what they asked and what you will do (e.g. add a competitor, run a section, update context). Be concise.',
+            'You are BAT Brain. Reply in a friendly, clear update that confirms what the user asked and what you will do next (e.g. add a competitor, run a section, update context). Keep it practical and sufficiently detailed for confidence.',
         },
         {
           role: 'user',
-          content: `User instruction: "${instruction}" (command type: ${commandType}). Reply briefly.`,
+          content: `User instruction: "${instruction}" (command type: ${commandType}). Provide a clear execution update.`,
         },
       ],
       max_tokens: 120,
