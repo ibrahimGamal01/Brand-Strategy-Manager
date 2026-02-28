@@ -73,6 +73,11 @@ function requiredEnv(name: string): string {
   return value;
 }
 
+function boolEnv(name: string): boolean {
+  const raw = String(process.env[name] || '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+}
+
 async function readSseEvents(
   baseUrl: string,
   path: string,
@@ -214,6 +219,7 @@ async function main() {
   const adminPassword = requiredEnv('R1_ADMIN_PASSWORD');
   const workspaceId = requiredEnv('R1_WORKSPACE_ID');
   const scanWebsite = String(process.env.R1_TEST_SCAN_URL || 'https://example.com').trim();
+  const skipAdminDiagnostics = boolEnv('R1_SKIP_ADMIN_DIAGNOSTICS');
 
   const jar = new CookieJar();
 
@@ -231,7 +237,10 @@ async function main() {
     jar
   );
   assert.equal(login.status, 200, `Admin login failed: ${login.status}`);
-  assert.equal(Boolean(login.data.user?.isAdmin), true, 'R1 online smoke requires an admin account.');
+  const isAdmin = Boolean(login.data.user?.isAdmin);
+  if (!skipAdminDiagnostics) {
+    assert.equal(isAdmin, true, 'R1 online smoke requires admin account unless R1_SKIP_ADMIN_DIAGNOSTICS=true.');
+  }
 
   const workspaceStatus = await apiRequest(baseUrl, `/api/portal/workspaces/${workspaceId}/intake`, { method: 'GET' }, jar);
   assert.equal(workspaceStatus.status, 200, 'Workspace access/intake status failed.');
@@ -333,22 +342,26 @@ async function main() {
   assert.equal(send.status, 200, `Runtime send failed: ${send.status}`);
   await waitForAssistantMessage(baseUrl, workspaceId, branchId, jar, sendAt, 140_000);
 
-  const diagnostics = await apiRequest<{
-    diagnostics?: { counters?: Record<string, unknown> };
-    scanRuns?: Array<Record<string, unknown>>;
-  }>(
-    baseUrl,
-    `/api/portal/admin/intake/scan-runs?workspaceId=${encodeURIComponent(workspaceId)}&limit=10`,
-    { method: 'GET' },
-    jar
-  );
-  assert.equal(diagnostics.status, 200, 'Admin scan diagnostics endpoint failed.');
-  assert.ok(diagnostics.data.diagnostics && typeof diagnostics.data.diagnostics === 'object', 'Missing diagnostics object.');
-  assert.ok(
-    diagnostics.data.diagnostics?.counters && typeof diagnostics.data.diagnostics.counters === 'object',
-    'Missing diagnostics counters.'
-  );
-  assert.ok(Array.isArray(diagnostics.data.scanRuns), 'Diagnostics response missing scanRuns array.');
+  if (skipAdminDiagnostics && !isAdmin) {
+    console.log('[R1 Online Smoke] Skipping admin diagnostics check (non-admin session).');
+  } else {
+    const diagnostics = await apiRequest<{
+      diagnostics?: { counters?: Record<string, unknown> };
+      scanRuns?: Array<Record<string, unknown>>;
+    }>(
+      baseUrl,
+      `/api/portal/admin/intake/scan-runs?workspaceId=${encodeURIComponent(workspaceId)}&limit=10`,
+      { method: 'GET' },
+      jar
+    );
+    assert.equal(diagnostics.status, 200, 'Admin scan diagnostics endpoint failed.');
+    assert.ok(diagnostics.data.diagnostics && typeof diagnostics.data.diagnostics === 'object', 'Missing diagnostics object.');
+    assert.ok(
+      diagnostics.data.diagnostics?.counters && typeof diagnostics.data.diagnostics.counters === 'object',
+      'Missing diagnostics counters.'
+    );
+    assert.ok(Array.isArray(diagnostics.data.scanRuns), 'Diagnostics response missing scanRuns array.');
+  }
 
   console.log('[R1 Online Smoke] Passed.');
 }

@@ -46,6 +46,17 @@ R1_WORKSPACE_ID=<workspace-id> \
 npm run test:r1-online-smoke --workspace=apps/backend
 ```
 
+If you only have a non-admin account for quick verification, run:
+
+```bash
+R1_BASE_URL=https://<backend-host> \
+R1_ADMIN_EMAIL=<user-email> \
+R1_ADMIN_PASSWORD=<user-password> \
+R1_WORKSPACE_ID=<workspace-id> \
+R1_SKIP_ADMIN_DIAGNOSTICS=true \
+npm run test:r1-online-smoke --workspace=apps/backend
+```
+
 What this validates:
 - Intake scan start returns `scanRunId` + `status=accepted`.
 - SSE scan event stream can filter by `scanRunId`.
