@@ -9,6 +9,7 @@ import {
   PORTAL_SESSION_COOKIE_NAME,
   touchPortalSession,
 } from '../../portal/portal-auth';
+import { verifyRuntimeWsToken } from './runtime-ws-auth';
 
 type SchemaReadyProvider = () => boolean;
 
@@ -67,6 +68,7 @@ export function attachRuntimeWebSocketServer(server: http.Server, isSchemaReady:
     const branchId = String(match?.[2] || '').trim();
     const afterId = String(url.searchParams.get('afterId') || '').trim() || undefined;
     const afterSeq = String(url.searchParams.get('afterSeq') || '').trim() || undefined;
+    const wsToken = String(url.searchParams.get('wsToken') || '').trim() || undefined;
 
     if (!researchJobId || !branchId) {
       safeSend(socket, { type: 'ERROR', error: 'INVALID_PATH', details: 'Missing workspace or branch id.' });
@@ -83,24 +85,39 @@ export function attachRuntimeWebSocketServer(server: http.Server, isSchemaReady:
 
     const initialize = async () => {
       try {
-        const token = parseCookieValue(req.headers.cookie, PORTAL_SESSION_COOKIE_NAME);
-        if (!token) {
-          closeWithError('AUTH_REQUIRED');
-          return;
-        }
+        let session = null as Awaited<ReturnType<typeof getPortalSessionFromToken>> | null;
+        if (wsToken) {
+          const verified = verifyRuntimeWsToken({
+            token: wsToken,
+            researchJobId,
+            branchId,
+          });
+          if (!verified.ok) {
+            closeWithError('INVALID_WS_TOKEN', verified.reason);
+            return;
+          }
+        } else {
+          const token = parseCookieValue(req.headers.cookie, PORTAL_SESSION_COOKIE_NAME);
+          if (!token) {
+            closeWithError('AUTH_REQUIRED');
+            return;
+          }
 
-        const session = await getPortalSessionFromToken(token);
-        if (!session) {
-          closeWithError('AUTH_REQUIRED');
-          return;
-        }
+          session = await getPortalSessionFromToken(token);
+          if (!session) {
+            closeWithError('AUTH_REQUIRED');
+            return;
+          }
 
-        const hasAccess =
-          session.user.isAdmin ||
-          session.user.memberships.some((membership: { researchJobId: string }) => membership.researchJobId === researchJobId);
-        if (!hasAccess) {
-          closeWithError('FORBIDDEN_WORKSPACE');
-          return;
+          const hasAccess =
+            session.user.isAdmin ||
+            session.user.memberships.some(
+              (membership: { researchJobId: string }) => membership.researchJobId === researchJobId
+            );
+          if (!hasAccess) {
+            closeWithError('FORBIDDEN_WORKSPACE');
+            return;
+          }
         }
 
         const branch = await getBranch(branchId, researchJobId);
@@ -109,9 +126,11 @@ export function attachRuntimeWebSocketServer(server: http.Server, isSchemaReady:
           return;
         }
 
-        void touchPortalSession(session.id).catch(() => {
-          // Best-effort session touch for websocket connections.
-        });
+        if (session?.id) {
+          void touchPortalSession(session.id).catch(() => {
+            // Best-effort session touch for websocket connections.
+          });
+        }
 
         const backlog = await listProcessEvents(branchId, {
           afterId,

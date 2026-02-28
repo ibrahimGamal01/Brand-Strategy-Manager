@@ -22,6 +22,7 @@ import {
 import { serializeRuntimeProcessEvent } from '../services/chat/runtime/event-contract';
 import { listWorkspaceEvidence } from '../services/evidence/workspace-evidence-service';
 import { getLatestKnowledgeLedgerVersion } from '../services/knowledge/knowledge-ledger-service';
+import { issueRuntimeWsToken } from '../services/chat/runtime/runtime-ws-auth';
 
 const router = Router();
 
@@ -188,6 +189,38 @@ router.get('/:id/runtime/branches/:branchId/events', async (req, res) => {
   } catch (error: any) {
     const status = String(error?.message || '').includes('not found') ? 404 : 500;
     return res.status(status).json({ error: 'Failed to list process events', details: error?.message || String(error) });
+  }
+});
+
+router.post('/:id/runtime/branches/:branchId/ws-token', async (req, res) => {
+  try {
+    const researchJobId = String(req.params.id || '').trim();
+    const branchId = String(req.params.branchId || '').trim();
+    const portalReq = req as AuthedPortalRequest;
+    const userId = String(portalReq.portalSession?.user?.id || '').trim();
+
+    if (!userId) {
+      return res.status(401).json({ error: 'AUTH_REQUIRED' });
+    }
+
+    await runtimeRunEngine.getBranchState({ researchJobId, branchId });
+
+    const issued = issueRuntimeWsToken({
+      researchJobId,
+      branchId,
+      userId,
+    });
+
+    return res.json({
+      token: issued.token,
+      expiresAt: issued.expiresAt,
+    });
+  } catch (error: any) {
+    const status = String(error?.message || '').includes('not found') ? 404 : 500;
+    return res.status(status).json({
+      error: 'Failed to issue runtime websocket token',
+      details: error?.message || String(error),
+    });
   }
 });
 

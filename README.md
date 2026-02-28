@@ -7,8 +7,9 @@ A fullstack application for managing brand strategies, competitor analysis, and 
 ```
 brand-strategy-manager/
 ├── apps/
-│   ├── frontend/          # Next.js React app
-│   └── backend/           # Node.js API + Prisma
+│   ├── client-portal/     # Client-facing Next.js portal (runtime chat UI)
+│   ├── frontend/          # Legacy Next.js app (kept for compatibility)
+│   └── backend/           # Node.js API + Prisma + runtime websocket server
 │       ├── src/           # TypeScript source
 │       ├── prisma/        # Database schema
 │       └── scripts/       # Python automation scripts
@@ -50,8 +51,10 @@ brand-strategy-manager/
    npm run dev
    
    # Or separately
-   npm run dev:frontend  # http://localhost:3000
+   npm run dev:client-portal  # http://localhost:3000
    npm run dev:backend   # http://localhost:3001
+   # Legacy app (optional)
+   npm run dev:frontend
    ```
 
 ## Environment Variables
@@ -70,6 +73,10 @@ CHAT_TOOL_TIMEOUT_MS=45000
 CHAT_TOTAL_TOOL_TIMEOUT_MS=180000
 CHAT_MAX_TOOL_LOOP_ITERATIONS=6
 CHAT_TOOL_MAX_RETRIES=2
+RUNTIME_WS_SIGNING_SECRET=replace_with_long_random_secret
+RUNTIME_EVIDENCE_LEDGER_ENABLED=true
+RUNTIME_CONTINUATION_CALLS_V2=true
+RUNTIME_LEDGER_BUILDER_ROLLOUT=25
 
 # OpenAI (for AI analysis)
 OPENAI_API_KEY=OPENAI_API_KEY_FROM_SECRET_MANAGER
@@ -81,6 +88,9 @@ OPENAI_API_KEY=OPENAI_API_KEY_FROM_SECRET_MANAGER
 # Reliability regression suite
 npm run test:runtime-reliability-r1 --workspace=apps/backend
 
+# Runtime guard: no summarizer stage references
+npm run test:runtime-no-summarizer --workspace=apps/backend
+
 # Online smoke test (deployed backend)
 R1_BASE_URL=https://<backend-host> \
 R1_ADMIN_EMAIL=<admin-email> \
@@ -91,11 +101,9 @@ npm run test:r1-online-smoke --workspace=apps/backend
 
 Cutover runbook: `docs/deployment/r1-online-cutover.md`
 
-## Instagram Scraper Setup
+## Scraper Runtime Setup
 
-The system uses a multi-layer scraping strategy:
-1. **Python (Instaloader)** - Primary, most reliable
-2. **Puppeteer** - Fallback if Python fails
+The backend includes Python + Puppeteer runtime dependencies for supported connectors.
 
 ### Install Python dependencies:
 ```bash
@@ -103,28 +111,13 @@ cd apps/backend/scripts
 pip3 install -r requirements.txt
 ```
 
-### Camoufox (anti-detect browser fallback):
-```bash
-pip3 install camoufox[geoip]
-python3 -m camoufox fetch   # One-time: downloads browser binary (~200-400MB)
-```
-
 ### Test scrapers:
 ```bash
 # Test Python scraper directly
 python3 apps/backend/scripts/instagram_scraper.py ummahpreneur 10
 
-# Test Camoufox scrapers (after: pip install camoufox[geoip] && python3 -m camoufox fetch)
+# Test browser-backed scraper integration
 ./apps/backend/scripts/test-camoufox-smoke.sh
-```
-
-### Optional: Tor for IP rotation
-```bash
-brew install tor
-tor &  # Runs in background
-
-# Use with scraper
-python3 apps/backend/scripts/instagram_scraper.py ummahpreneur 10 "socks5h://127.0.0.1:9050"
 ```
 
 ## API Endpoints

@@ -61,6 +61,7 @@ Build checks:
 
 R1 reliability checks:
 - `npm run test:runtime-reliability-r1 --workspace=apps/backend`
+- `npm run test:runtime-no-summarizer --workspace=apps/backend`
 
 Online smoke + cutover checks (against deployed backend):
 - `R1_BASE_URL=https://<backend-host> R1_ADMIN_EMAIL=<admin-email> R1_ADMIN_PASSWORD=<admin-password> R1_WORKSPACE_ID=<workspace-id> npm run test:r1-online-smoke --workspace=apps/backend`
@@ -79,4 +80,7 @@ Billing/payment pages remain intentionally deferred for future work.
   - `GET /api/portal/workspaces/:workspaceId/intake/websites/scan-runs/:scanRunId`
 - New admin diagnostics endpoint:
   - `GET /api/portal/admin/intake/scan-runs?workspaceId=<id>&limit=<n>`
+- Runtime websocket token endpoint (portal-auth protected):
+  - `POST /api/research-jobs/:id/runtime/branches/:branchId/ws-token`
+  - client portal now prefers token-authenticated WS connects (`wsToken`), with cookie WS + polling fallback.
 - Client portal chat route now gates on intro intake completion before loading smart chat runtime.

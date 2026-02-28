@@ -15,13 +15,13 @@ type PlannerInput = {
   previousMessages: Array<{ role: string; content: string }>;
 };
 
-type SummarizerInput = {
+type ToolDigestInput = {
   userMessage: string;
   plan: RuntimePlan;
   toolResults: RuntimeToolResult[];
 };
 
-type SummarizerOutput = {
+export type ToolDigestOutput = {
   highlights: string[];
   facts: Array<{
     claim: string;
@@ -34,7 +34,7 @@ type SummarizerOutput = {
 type WriterInput = {
   userMessage: string;
   plan: RuntimePlan;
-  toolSummary: SummarizerOutput;
+  toolDigest: ToolDigestOutput;
   toolResults: RuntimeToolResult[];
   runtimeContext?: Record<string, unknown>;
   evidenceLedger?: EvidenceLedgerOutput;
@@ -43,7 +43,7 @@ type WriterInput = {
 type EvidenceLedgerInput = {
   userMessage: string;
   plan: RuntimePlan;
-  toolSummary: SummarizerOutput;
+  toolDigest: ToolDigestOutput;
   toolResults: RuntimeToolResult[];
   runtimeContext?: Record<string, unknown>;
 };
@@ -301,7 +301,7 @@ async function requestJson(task: Parameters<typeof openai.bat.chatCompletion>[0]
   return extractJsonObject(completionText(repairCompletion));
 }
 
-function fallbackSummarizer(input: SummarizerInput): SummarizerOutput {
+export function buildToolDigest(input: ToolDigestInput): ToolDigestOutput {
   const highlights = input.toolResults.slice(0, 6).map((result) => result.summary);
   const facts = input.toolResults
     .flatMap((result) =>
@@ -365,8 +365,8 @@ function fallbackEvidenceLedger(input: EvidenceLedgerInput): EvidenceLedgerOutpu
     };
   });
 
-  for (let index = 0; index < Math.min(20, input.toolSummary.facts.length); index += 1) {
-    const item = input.toolSummary.facts[index];
+  for (let index = 0; index < Math.min(20, input.toolDigest.facts.length); index += 1) {
+    const item = input.toolDigest.facts[index];
     facts.push({
       id: `fact:summary:${index + 1}`,
       type: 'summary_fact',
@@ -382,7 +382,7 @@ function fallbackEvidenceLedger(input: EvidenceLedgerInput): EvidenceLedgerOutpu
     });
   }
 
-  const gaps: EvidenceLedgerOutput['gaps'] = input.toolSummary.openQuestions
+  const gaps: EvidenceLedgerOutput['gaps'] = input.toolDigest.openQuestions
     .map((question) => String(question || '').trim())
     .filter(Boolean)
     .slice(0, 10)
@@ -415,7 +415,7 @@ function fallbackEvidenceLedger(input: EvidenceLedgerInput): EvidenceLedgerOutpu
       }
     }
   }
-  for (const name of input.toolSummary.recommendedContinuations || []) {
+  for (const name of input.toolDigest.recommendedContinuations || []) {
     pushSuggestedCall(name, {});
   }
 
@@ -732,11 +732,11 @@ function fallbackWriter(input: WriterInput): WriterOutput {
       ...(item.url ? { url: item.url } : {}),
     }));
 
-  const topHighlights = input.toolSummary.highlights
+  const topHighlights = input.toolDigest.highlights
     .map((item) => String(item || '').trim())
     .filter(Boolean)
     .slice(0, concise ? 4 : 8);
-  const topFacts = input.toolSummary.facts
+  const topFacts = input.toolDigest.facts
     .map((fact) => {
       const claim = String(fact.claim || '').trim();
       if (!claim) return '';
@@ -842,7 +842,7 @@ function fallbackWriter(input: WriterInput): WriterOutput {
     ? concise
       ? ['Tell me which finding to prioritize first.', 'Say "go deeper" if you want an expanded strategic pass.']
       : [
-          ...input.toolSummary.openQuestions.slice(0, 3).map((item) => String(item || '').trim()).filter(Boolean),
+          ...input.toolDigest.openQuestions.slice(0, 3).map((item) => String(item || '').trim()).filter(Boolean),
           'Tell me which angle to deepen first: strategy implications, content ideas, or execution plan.',
           'If helpful, I can draft the next output directly from this evidence (post prompt, campaign brief, or PDF).',
         ].slice(0, 5)
@@ -988,66 +988,6 @@ export async function generatePlannerPlan(input: PlannerInput): Promise<RuntimeP
   }
 }
 
-export async function summarizeToolResults(input: SummarizerInput): Promise<SummarizerOutput> {
-  if (!input.toolResults.length) {
-    return fallbackSummarizer(input);
-  }
-
-  const systemPrompt = [
-    'You are BAT Tool Result Summarizer.',
-    'Return strict JSON only.',
-    'No markdown.',
-    'Convert tool outputs into complete, specific, usable context for a writer.',
-    'Prefer precision and coverage over brevity.',
-    'JSON schema:',
-    '{',
-    '  "highlights": ["..."],',
-    '  "facts": [{"claim":"...","evidence":["..."]}],',
-    '  "openQuestions": ["..."],',
-    '  "recommendedContinuations": ["tool.name"]',
-    '}',
-  ].join('\n');
-
-  const payload = {
-    userMessage: input.userMessage,
-    plan: input.plan,
-    toolResults: input.toolResults,
-  };
-
-  try {
-    const parsed = await requestJson('analysis_fast', [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: JSON.stringify(payload) },
-    ], 900);
-
-    if (!parsed) return fallbackSummarizer(input);
-
-    const factsRaw = Array.isArray(parsed.facts) ? parsed.facts : [];
-    const facts = factsRaw
-      .map((fact) => {
-        if (!isRecord(fact)) return null;
-        const claim = String(fact.claim || '').trim();
-        if (!claim) return null;
-        return {
-          claim,
-          evidence: normalizeStringArray(fact.evidence, 8),
-        };
-      })
-      .filter((fact): fact is { claim: string; evidence: string[] } => Boolean(fact))
-      .slice(0, 12);
-
-    return {
-      highlights: normalizeStringArray(parsed.highlights, 12),
-      facts,
-      openQuestions: normalizeStringArray(parsed.openQuestions, 8),
-      recommendedContinuations: normalizeStringArray(parsed.recommendedContinuations, 8),
-    };
-  } catch (error) {
-    console.warn('[Runtime PromptSuite] Summarizer failed, using fallback:', (error as Error).message);
-    return fallbackSummarizer(input);
-  }
-}
-
 export async function buildEvidenceLedger(input: EvidenceLedgerInput): Promise<EvidenceLedgerOutput> {
   if (!input.toolResults.length) {
     return fallbackEvidenceLedger(input);
@@ -1072,7 +1012,7 @@ export async function buildEvidenceLedger(input: EvidenceLedgerInput): Promise<E
     userMessage: input.userMessage,
     runtimeContext: input.runtimeContext || {},
     plan: input.plan,
-    toolSummary: input.toolSummary,
+    toolDigest: input.toolDigest,
     toolResults: input.toolResults,
   };
 
@@ -1252,7 +1192,7 @@ export async function writeClientResponse(input: WriterInput): Promise<WriterOut
     runtimeContext: input.runtimeContext || {},
     evidenceLedger: input.evidenceLedger || null,
     plan: input.plan,
-    toolSummary: input.toolSummary,
+    toolDigest: input.toolDigest,
     toolResults: input.toolResults,
   };
 

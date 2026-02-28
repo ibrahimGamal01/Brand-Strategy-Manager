@@ -1,10 +1,14 @@
-# Railway Deployment (Backend + Frontend)
+# Railway Deployment (Backend + Client Portal)
 
-This repo is a monorepo with two services:
+This repo is a monorepo with:
 - Backend API in `apps/backend`
-- Frontend Next.js app in `apps/frontend`
+- Client portal Next.js app in `apps/client-portal`
+- Legacy frontend in `apps/frontend` (optional / compatibility only)
 
-The safest Railway setup is two services (one per app) plus a managed Postgres instance.
+Recommended production split:
+1. Backend on Railway.
+2. Client portal on Vercel (or Railway if preferred).
+3. Railway Postgres for backend state.
 
 ## 1. Create Services
 
@@ -15,9 +19,10 @@ The safest Railway setup is two services (one per app) plus a managed Postgres i
 4. Set health check to `/api/health`.
 5. Add a persistent volume (recommended) mounted to `/app/apps/backend/storage` (or set `STORAGE_ROOT` and mount there).
 
-### Frontend service
+### Client portal service (if hosting on Railway)
 1. Add another service from the same repo.
-2. Set the Dockerfile path to `apps/frontend/Dockerfile`.
+2. Use a Next.js build setup targeting `apps/client-portal`.
+3. Set `NEXT_PUBLIC_API_ORIGIN` to backend public URL.
 
 ## 2. Environment Variables
 
@@ -30,6 +35,10 @@ The safest Railway setup is two services (one per app) plus a managed Postgres i
 - `APIFY_API_TOKEN`
 - `APIFY_MEDIA_DOWNLOADER_TOKEN`
 - `PORTAL_INTAKE_EVENT_STORE_MODE=dual` (for R1 rollout window; switch to `db` after cutover)
+- `RUNTIME_WS_SIGNING_SECRET` (required for runtime WS token handshake)
+- `RUNTIME_EVIDENCE_LEDGER_ENABLED=true`
+- `RUNTIME_CONTINUATION_CALLS_V2=true`
+- `RUNTIME_LEDGER_BUILDER_ROLLOUT=25` (ramp to 100 after validation)
 
 ### Backend (optional)
 - `BACKEND_PORT` (not needed if `PORT` is set)
@@ -41,7 +50,7 @@ The safest Railway setup is two services (one per app) plus a managed Postgres i
 - `CHAT_MAX_TOOL_LOOP_ITERATIONS` (default: `6`)
 - `CHAT_TOOL_MAX_RETRIES` (default: `2`)
 
-### Frontend (required)
+### Client portal (required)
 - `NODE_ENV=production`
 - `NEXT_PUBLIC_API_ORIGIN` (set to the backend public URL, e.g. `https://<backend>.up.railway.app`)
 
@@ -68,7 +77,7 @@ If logs do not show `Running Prisma migrate deploy (schema: ...)`, Railway is no
 Backend:
 - `GET /api/health` should return `status: ok` and `schemaReady: true`.
 
-Frontend:
+Client portal:
 - `/` should load the workspace UI.
 - API calls should resolve via `NEXT_PUBLIC_API_ORIGIN`.
 

@@ -9,6 +9,7 @@ import {
   createRuntimeThread,
   fetchRuntimeBranchState,
   fetchWorkspaceLibrary,
+  issueRuntimeWsToken,
   listRuntimeEvents,
   listRuntimeMessages,
   listRuntimeQueue,
@@ -1466,8 +1467,8 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
   );
 
   const applyRealtimeEvents = useCallback(
-    (branchId: string, incoming: Array<Record<string, unknown>>) => {
-      if (!incoming.length) return;
+    (branchId: string, incoming: Array<Record<string, unknown>>): boolean => {
+      if (!incoming.length) return false;
       const existing = eventsByBranchRef.current[branchId] || [];
       const merged = mergeRuntimeEvents(existing, incoming);
       eventsByBranchRef.current = {
@@ -1484,7 +1485,26 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
         };
       }
 
-      if (branchId !== activeBranchId) return;
+      const normalizedIncoming = normalizeRuntimeEvents(incoming);
+      const hasRunDrift = (runs: ProcessRun[]): boolean => {
+        const trackedRunIds = new Set(
+          runs
+            .map((run) => String(run.id || "").trim())
+            .filter(Boolean)
+        );
+        return normalizedIncoming.some((event) => {
+          const runId = String(event.runId || "").trim();
+          if (!runId) return false;
+          if (!["planning", "tools", "writing", "waiting_input"].includes(event.phase)) return false;
+          return !trackedRunIds.has(runId);
+        });
+      };
+
+      if (branchId !== activeBranchId) {
+        const activeRuns = activeRunsByBranchRef.current[branchId] || [];
+        const inferredRuns = mapRuns(activeRuns, merged);
+        return hasRunDrift(inferredRuns);
+      }
 
       const activeRuns = activeRunsByBranchRef.current[branchId] || [];
       const nextRuns = mapRuns(activeRuns, merged);
@@ -1499,6 +1519,7 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
         ...previous,
         [branchId]: runningIds,
       }));
+      return hasRunDrift(nextRuns);
     },
     [activeBranchId]
   );
@@ -1552,12 +1573,7 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
     if (!activeBranchId) return;
 
     let isCancelled = false;
-    const afterSeq = String(latestEventCursorRef.current[activeBranchId] || "").trim();
-    const socket = createRuntimeEventsSocket(workspaceId, activeBranchId, {
-      ...(afterSeq ? { afterSeq } : {}),
-      ...(afterSeq ? { afterId: afterSeq } : {}),
-    });
-    wsRef.current = socket;
+    let socket: WebSocket | null = null;
     setWsConnectedByBranch((previous) => ({
       ...previous,
       [activeBranchId]: false,
@@ -1572,71 +1588,96 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
       }, Math.max(0, delayMs));
     };
 
-    socket.onopen = () => {
-      if (isCancelled) return;
-      setWsConnectedByBranch((previous) => ({
-        ...previous,
-        [activeBranchId]: true,
-      }));
-      // Always do one full refresh after (re)connect to avoid state drift.
-      scheduleSync(0);
-    };
+    const connectSocket = async () => {
+      const rawCursor = String(latestEventCursorRef.current[activeBranchId] || "").trim();
+      const cursor: { afterSeq?: string; afterId?: string; wsToken?: string } = {};
+      if (/^\d+$/.test(rawCursor)) {
+        cursor.afterSeq = rawCursor;
+      } else if (rawCursor) {
+        cursor.afterId = rawCursor;
+      }
 
-    socket.onmessage = (event) => {
-      if (isCancelled) return;
-      let payload: RuntimeSocketMessage | null = null;
       try {
-        payload = JSON.parse(String(event.data || "")) as RuntimeSocketMessage;
+        const issued = await issueRuntimeWsToken(workspaceId, activeBranchId);
+        const token = String(issued.token || "").trim();
+        if (token) cursor.wsToken = token;
       } catch {
-        payload = null;
-      }
-      if (!payload) return;
-
-      if (payload.type === "EVENT" && payload.event?.id) {
-        const rawEvent = payload.event as unknown as Record<string, unknown>;
-        applyRealtimeEvents(activeBranchId, [rawEvent]);
-        if (requiresStructuralSync(rawEvent)) {
-          scheduleSync(160);
-        }
-        return;
+        // Token issuance can fail transiently; fallback to cookie path + polling safety net.
       }
 
-      if (payload.type === "EVENT_BATCH") {
-        const batchEvents = Array.isArray(payload.events)
-          ? payload.events
-              .map((entry) => entry as unknown as Record<string, unknown>)
-          : [];
-        if (batchEvents.length) {
-          applyRealtimeEvents(activeBranchId, batchEvents);
-        }
-        // Backlog delivery on reconnect should reconcile against full branch state once.
+      if (isCancelled) return;
+
+      socket = createRuntimeEventsSocket(workspaceId, activeBranchId, cursor);
+      wsRef.current = socket;
+
+      socket.onopen = () => {
+        if (isCancelled) return;
+        setWsConnectedByBranch((previous) => ({
+          ...previous,
+          [activeBranchId]: true,
+        }));
+        // Always do one full refresh after (re)connect to avoid state drift.
         scheduleSync(0);
-        return;
-      }
+      };
 
-      if (payload.type === "ERROR") {
-        setError((previous) => previous || payload.details || payload.error || "Runtime websocket error");
-      }
+      socket.onmessage = (event) => {
+        if (isCancelled) return;
+        let payload: RuntimeSocketMessage | null = null;
+        try {
+          payload = JSON.parse(String(event.data || "")) as RuntimeSocketMessage;
+        } catch {
+          payload = null;
+        }
+        if (!payload) return;
+
+        if (payload.type === "EVENT" && payload.event?.id) {
+          const rawEvent = payload.event as unknown as Record<string, unknown>;
+          const drift = applyRealtimeEvents(activeBranchId, [rawEvent]);
+          if (requiresStructuralSync(rawEvent) || drift) {
+            scheduleSync(drift ? 0 : 160);
+          }
+          return;
+        }
+
+        if (payload.type === "EVENT_BATCH") {
+          const batchEvents = Array.isArray(payload.events)
+            ? payload.events
+                .map((entry) => entry as unknown as Record<string, unknown>)
+            : [];
+          if (batchEvents.length) {
+            applyRealtimeEvents(activeBranchId, batchEvents);
+          }
+          // Backlog delivery on reconnect should reconcile against full branch state once.
+          scheduleSync(0);
+          return;
+        }
+
+        if (payload.type === "ERROR") {
+          setError((previous) => previous || payload.details || payload.error || "Runtime websocket error");
+        }
+      };
+
+      socket.onclose = () => {
+        if (isCancelled) return;
+        setWsConnectedByBranch((previous) => ({
+          ...previous,
+          [activeBranchId]: false,
+        }));
+      };
+
+      socket.onerror = () => {
+        if (isCancelled) return;
+        setWsConnectedByBranch((previous) => ({
+          ...previous,
+          [activeBranchId]: false,
+        }));
+      };
     };
 
-    socket.onclose = () => {
-      if (isCancelled) return;
-      setWsConnectedByBranch((previous) => ({
-        ...previous,
-        [activeBranchId]: false,
-      }));
-    };
-
-    socket.onerror = () => {
-      if (isCancelled) return;
-      setWsConnectedByBranch((previous) => ({
-        ...previous,
-        [activeBranchId]: false,
-      }));
-    };
+    void connectSocket();
 
     const heartbeat = setInterval(() => {
-      if (socket.readyState !== WebSocket.OPEN) return;
+      if (!socket || socket.readyState !== WebSocket.OPEN) return;
       socket.send(JSON.stringify({ type: "PING" }));
     }, WS_HEARTBEAT_INTERVAL_MS);
 
@@ -1651,7 +1692,7 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
         wsRef.current = null;
       }
       try {
-        socket.close();
+        socket?.close();
       } catch {
         // no-op
       }

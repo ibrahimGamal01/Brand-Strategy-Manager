@@ -419,7 +419,20 @@ export type RuntimeSocketMessage =
 export type RuntimeEventCursor = {
   afterSeq?: string;
   afterId?: string;
+  wsToken?: string;
 };
+
+export async function issueRuntimeWsToken(workspaceId: string, branchId: string) {
+  const response = await fetch(
+    `/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/ws-token`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      credentials: "include",
+    }
+  );
+  return parseJson<{ token: string; expiresAt: string }>(response);
+}
 
 function runtimeWsOrigin(): string {
   const configured = String(process.env.NEXT_PUBLIC_API_ORIGIN || "").trim();
@@ -450,6 +463,10 @@ export function createRuntimeEventsSocket(
   }
   if (afterId) {
     params.set("afterId", afterId);
+  }
+  const wsToken = String(cursor?.wsToken || "").trim();
+  if (wsToken) {
+    params.set("wsToken", wsToken);
   }
   const suffix = params.toString() ? `?${params.toString()}` : "";
   const wsUrl = `${runtimeWsOrigin()}/api/ws/research-jobs/${encodeURIComponent(

@@ -30,9 +30,9 @@ import {
 } from './repository';
 import { executeToolWithContract } from './tool-contract';
 import {
+  buildToolDigest,
   buildEvidenceLedger,
   generatePlannerPlan,
-  summarizeToolResults,
   validateClientResponse,
   writeClientResponse,
 } from './prompt-suite';
@@ -106,7 +106,7 @@ const TOOL_NAME_ALIASES: Record<string, { tool: string; args: Record<string, unk
   webcrawler: { tool: 'web.crawl', args: { maxPages: 8, maxDepth: 1 } },
   websitecrawler: { tool: 'web.crawl', args: { maxPages: 8, maxDepth: 1 } },
   pageextractor: { tool: 'web.fetch', args: {} },
-  opportunitysummarizer: {
+  opportunityplanner: {
     tool: 'document.plan',
     args: {
       docType: 'STRATEGY_BRIEF',
@@ -358,30 +358,30 @@ function compactToolResultsForPrompt(toolResults: RuntimeToolResult[]): RuntimeT
   }));
 }
 
-type RuntimeToolSummary = Awaited<ReturnType<typeof summarizeToolResults>>;
+type RuntimeToolDigest = Awaited<ReturnType<typeof buildToolDigest>>;
 type RuntimeEvidenceLedger = Awaited<ReturnType<typeof buildEvidenceLedger>>;
 type RuntimeWriterOutput = Awaited<ReturnType<typeof writeClientResponse>>;
 type RuntimeValidatorOutput = Awaited<ReturnType<typeof validateClientResponse>>;
 
-function fallbackToolSummary(toolResults: RuntimeToolResult[]): RuntimeToolSummary {
+function fallbackToolDigest(toolResults: RuntimeToolResult[], plan: RuntimePlan, userMessage: string): RuntimeToolDigest {
+  const digest = buildToolDigest({
+    userMessage,
+    plan,
+    toolResults,
+  });
   return {
-    highlights: toolResults.slice(0, 8).map((result) => compactPromptString(result.summary, 220)).filter(Boolean),
-    facts: toolResults
-      .flatMap((result) =>
-        result.evidence.slice(0, 2).map((evidence) => ({
-          claim: compactPromptString(result.summary, 220),
-          evidence: [compactPromptString(evidence.label, 220)].filter(Boolean),
-        }))
-      )
-      .slice(0, 10)
+    highlights: digest.highlights.map((item) => compactPromptString(item, 220)).filter(Boolean),
+    facts: digest.facts
+      .map((fact) => ({
+        claim: compactPromptString(fact.claim, 220),
+        evidence: (Array.isArray(fact.evidence) ? fact.evidence : [])
+          .map((item) => compactPromptString(item, 220))
+          .filter(Boolean)
+          .slice(0, 8),
+      }))
       .filter((item) => item.claim),
-    openQuestions: [],
-    recommendedContinuations: toolResults
-      .flatMap((result) => result.continuations)
-      .flatMap((entry) => [
-        ...(entry.suggestedNextTools || []),
-        ...((entry.suggestedToolCalls || []).map((call) => String(call.tool || '').trim()).filter(Boolean)),
-      ])
+    openQuestions: digest.openQuestions.map((item) => compactPromptString(item, 220)).filter(Boolean).slice(0, 10),
+    recommendedContinuations: digest.recommendedContinuations
       .map((tool) => compactPromptString(tool, 80))
       .filter(Boolean)
       .slice(0, 8),
@@ -395,7 +395,7 @@ function prefersConciseOutput(message: string): boolean {
 }
 
 function fallbackWriterOutput(input: {
-  toolSummary: RuntimeToolSummary;
+  toolDigest: RuntimeToolDigest;
   toolResults: RuntimeToolResult[];
   plan: RuntimePlan;
   userMessage?: string;
@@ -403,7 +403,7 @@ function fallbackWriterOutput(input: {
 }): RuntimeWriterOutput {
   const concise = prefersConciseOutput(input.userMessage || '');
   const hasToolResults = input.toolResults.length > 0;
-  const highlights = input.toolSummary.highlights.filter(Boolean).slice(0, concise ? 4 : 8);
+  const highlights = input.toolDigest.highlights.filter(Boolean).slice(0, concise ? 4 : 8);
   const evidenceLines = input.toolResults
     .flatMap((result) => result.evidence)
     .slice(0, concise ? 5 : 10)
@@ -2560,26 +2560,9 @@ export class RuntimeRunEngine {
       return false;
     };
 
-    if (await isRunCancelled('summarization')) return;
+    if (await isRunCancelled('tool_digest')) return;
 
-    const toolSummary = await withTimeout(
-      summarizeToolResults({
-        userMessage: effectiveUserMessage,
-        plan,
-        toolResults: promptToolResults,
-      }),
-      RUNTIME_PROMPT_STAGE_TIMEOUT_MS,
-      'summarizeToolResults'
-    ).catch(async (error: any) => {
-      await this.emitEvent({
-        branchId: run.branchId,
-        agentRunId: run.id,
-        type: ProcessEventType.PROCESS_LOG,
-        level: ProcessEventLevel.WARN,
-        message: `Summarization fallback used: ${compactPromptString(error?.message || error, 220)}`,
-      });
-      return fallbackToolSummary(promptToolResults);
-    });
+    const toolDigest = fallbackToolDigest(promptToolResults, plan, effectiveUserMessage);
 
     let evidenceLedger: RuntimeEvidenceLedger | null = null;
     let ledgerVersionId: string | null = null;
@@ -2589,7 +2572,7 @@ export class RuntimeRunEngine {
           userMessage: effectiveUserMessage,
           plan,
           runtimeContext: runtimeContextSnapshot,
-          toolSummary,
+          toolDigest,
           toolResults: promptToolResults,
         }),
         RUNTIME_PROMPT_STAGE_TIMEOUT_MS,
@@ -2653,15 +2636,15 @@ export class RuntimeRunEngine {
             : []
           ).filter((entry) => entry.tool)
         : [];
-    const continuationFromSummary = toolSummary.recommendedContinuations
+    const continuationFromDigest = toolDigest.recommendedContinuations
       .map((tool) => tool.trim())
       .filter((tool) => /^[a-z_]+\.[a-z_]+$/i.test(tool));
-    const continuationFromSummaryCalls: RuntimeToolCall[] = continuationFromSummary.map((tool) => ({
+    const continuationFromDigestCalls: RuntimeToolCall[] = continuationFromDigest.map((tool) => ({
       tool,
       args: {},
     }));
     const continuationCalls = sanitizeToolCalls(
-      [...continuationCallsFromResults, ...continuationCallsFromLedger, ...continuationFromSummaryCalls].slice(
+      [...continuationCallsFromResults, ...continuationCallsFromLedger, ...continuationFromDigestCalls].slice(
         0,
         policy.maxToolRuns
       ),
@@ -2724,7 +2707,7 @@ export class RuntimeRunEngine {
         userMessage: effectiveUserMessage,
         plan,
         runtimeContext: runtimeContextSnapshot,
-        toolSummary,
+        toolDigest,
         ...(evidenceLedger ? { evidenceLedger } : {}),
         toolResults: promptToolResults,
       }),
@@ -2739,7 +2722,7 @@ export class RuntimeRunEngine {
         message: `Writer fallback used: ${compactPromptString(error?.message || error, 220)}`,
       });
       return fallbackWriterOutput({
-        toolSummary,
+        toolDigest,
         toolResults: promptToolResults,
         plan,
         userMessage: effectiveUserMessage,
