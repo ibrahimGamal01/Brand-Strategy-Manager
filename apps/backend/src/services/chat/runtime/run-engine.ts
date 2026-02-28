@@ -619,20 +619,61 @@ function buildRuntimeContextSnapshot(context: RuntimeAgentContext): Record<strin
   };
 }
 
+async function loadFallbackRuntimeContextSnapshot(researchJobId: string): Promise<Record<string, unknown>> {
+  const workspace = await prisma.researchJob.findUnique({
+    where: { id: researchJobId },
+    select: {
+      inputData: true,
+      client: {
+        select: {
+          name: true,
+        },
+      },
+    },
+  });
+
+  const inputData = isRecord(workspace?.inputData) ? workspace?.inputData : {};
+  const websites = extractWorkspaceWebsites(inputData);
+  return {
+    clientName: String(workspace?.client?.name || '').trim() || null,
+    websites,
+    competitorsCount: 0,
+    candidateCompetitorsCount: 0,
+    webSnapshotsCount: 0,
+    pendingDecisionsCount: 0,
+    queuedMessagesCount: 0,
+    topCompetitors: [],
+  };
+}
+
 function buildGroundedFailureResponse(input: {
   contextSnapshot: Record<string, unknown>;
 }): string {
   const context = input.contextSnapshot;
   const lines: string[] = [];
-  const clientName = String(context.clientName || '').trim();
-  const websites = Array.isArray(context.websites)
-    ? context.websites.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 4)
-    : [];
-  const competitorsCount = Number(context.competitorsCount || 0);
-  const candidateCount = Number(context.candidateCompetitorsCount || 0);
-  const webSnapshotsCount = Number(context.webSnapshotsCount || 0);
 
   lines.push('I hit a tool/runtime issue while preparing this response, but I can still ground you in your workspace state now.');
+
+  const baseline = buildGroundedBaselineLines(context);
+
+  if (baseline.length > 0) {
+    lines.push(`Grounded baseline:\n${baseline.map((item, index) => `${index + 1}. ${item}`).join('\n')}`);
+  }
+
+  lines.push(
+    'Next actions:\n1. Retry this run now.\n2. Run a narrower step first (for example `intel.list` or `web.fetch`) and then continue.\n3. Tell me if you want concise output for this specific reply.'
+  );
+  return lines.join('\n\n');
+}
+
+function buildGroundedBaselineLines(contextSnapshot: Record<string, unknown>): string[] {
+  const clientName = String(contextSnapshot.clientName || '').trim();
+  const websites = Array.isArray(contextSnapshot.websites)
+    ? contextSnapshot.websites.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 4)
+    : [];
+  const competitorsCount = Number(contextSnapshot.competitorsCount || 0);
+  const candidateCount = Number(contextSnapshot.candidateCompetitorsCount || 0);
+  const webSnapshotsCount = Number(contextSnapshot.webSnapshotsCount || 0);
 
   const baseline: string[] = [];
   if (clientName) baseline.push(`Workspace: ${clientName}.`);
@@ -646,15 +687,30 @@ function buildGroundedFailureResponse(input: {
   if (Number.isFinite(candidateCount) && candidateCount > 0) {
     baseline.push(`Candidate competitors: ${candidateCount}.`);
   }
+  return baseline;
+}
 
-  if (baseline.length > 0) {
-    lines.push(`Grounded baseline:\n${baseline.map((item, index) => `${index + 1}. ${item}`).join('\n')}`);
+function sanitizeFinalAssistantResponse(content: string, contextSnapshot: Record<string, unknown>): string {
+  let cleaned = sanitizeClientResponse(content);
+  const baseline = buildGroundedBaselineLines(contextSnapshot);
+  if (!baseline.length) {
+    return cleaned;
   }
 
-  lines.push(
-    'Next actions:\n1. Retry this run now.\n2. Run a narrower step first (for example `intel.list` or `web.fetch`) and then continue.\n3. Tell me if you want concise output for this specific reply.'
-  );
-  return lines.join('\n\n');
+  const missingDataPattern =
+    /\b(i\s+(?:cannot|can't|do not|don't)\s+(?:access|see|find|have)\b|no\s+(?:crawl artifacts?|artifacts?|evidence|data)\s+(?:provided|available)|not\s+provided\s+in\s+(?:this|the)\s+chat)\b/i;
+  if (!missingDataPattern.test(cleaned)) {
+    return cleaned;
+  }
+
+  const contextLead = `Grounded workspace context:\n${baseline.map((item, index) => `${index + 1}. ${item}`).join('\n')}`;
+  const filteredLines = cleaned
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter((line) => !missingDataPattern.test(line));
+  const trimmed = filteredLines.join('\n').trim();
+  cleaned = trimmed ? `${contextLead}\n\n${trimmed}` : `${contextLead}\n\nI can continue directly from this context now.`;
+  return sanitizeClientResponse(cleaned);
 }
 
 function normalizeUrlCandidate(value: unknown): string | null {
@@ -1659,6 +1715,30 @@ export class RuntimeRunEngine {
     return event;
   }
 
+  private async persistAssistantMessage(input: {
+    branchId: string;
+    content: string;
+    contextSnapshot?: Record<string, unknown>;
+    blocksJson?: Record<string, unknown>;
+    reasoningJson?: Record<string, unknown>;
+    citationsJson?: unknown;
+    clientVisible?: boolean;
+  }) {
+    const contextSnapshot = isRecord(input.contextSnapshot) ? input.contextSnapshot : {};
+    const sanitized = sanitizeFinalAssistantResponse(input.content, contextSnapshot);
+    const content = sanitized || buildGroundedFailureResponse({ contextSnapshot });
+
+    return createBranchMessage({
+      branchId: input.branchId,
+      role: ChatBranchMessageRole.ASSISTANT,
+      content,
+      ...(input.blocksJson !== undefined ? { blocksJson: input.blocksJson } : {}),
+      ...(input.reasoningJson !== undefined ? { reasoningJson: input.reasoningJson } : {}),
+      ...(input.citationsJson !== undefined ? { citationsJson: input.citationsJson } : {}),
+      clientVisible: input.clientVisible ?? true,
+    });
+  }
+
   private async handleRunFailure(input: {
     runId: string;
     branchId: string;
@@ -2302,9 +2382,8 @@ export class RuntimeRunEngine {
 
     const blockingDecisions = collectBlockingDecisions(toolResults);
     if (blockingDecisions.length > 0) {
-      await createBranchMessage({
+      await this.persistAssistantMessage({
         branchId: run.branchId,
-        role: ChatBranchMessageRole.ASSISTANT,
         content:
           'I reached a decision checkpoint before continuing. Please choose one option to proceed with the branch execution.',
         blocksJson: {
@@ -2324,6 +2403,7 @@ export class RuntimeRunEngine {
         },
         citationsJson: flattenEvidence(toolResults),
         clientVisible: true,
+        contextSnapshot: runtimeContextSnapshot,
       });
 
       await updateAgentRun(run.id, {
@@ -2557,9 +2637,8 @@ export class RuntimeRunEngine {
 
     if (await isRunCancelled('response_persist')) return;
 
-    await createBranchMessage({
+    await this.persistAssistantMessage({
       branchId: run.branchId,
-      role: ChatBranchMessageRole.ASSISTANT,
       content: finalResponseContent,
       blocksJson:
         actionButtons.length || finalDecisions.length
@@ -2572,6 +2651,7 @@ export class RuntimeRunEngine {
       reasoningJson: writerOutput.reasoning,
       citationsJson: writerOutput.reasoning.evidence,
       clientVisible: true,
+      contextSnapshot: runtimeContextSnapshot,
     });
 
     if (finalDecisions.length > 0) {
@@ -2660,10 +2740,8 @@ export class RuntimeRunEngine {
       let plan = normalizeRunPlan(fresh.planJson);
       let runtimeContextSnapshot =
         isRecord(plan?.runtime?.contextSnapshot) ? (plan?.runtime?.contextSnapshot as Record<string, unknown>) : null;
-      const shouldLoadContextAtRunStart =
-        fresh.triggerType === AgentRunTriggerType.USER_MESSAGE || fresh.triggerType === AgentRunTriggerType.TOOL_RESULT;
 
-      if (shouldLoadContextAtRunStart && !runtimeContextSnapshot) {
+      if (!runtimeContextSnapshot) {
         try {
           const runtimeContext = await buildRuntimeAgentContext({
             researchJobId: fresh.branch.thread.researchJobId,
@@ -2691,12 +2769,24 @@ export class RuntimeRunEngine {
             },
           });
         } catch (error) {
+          const fallbackSnapshot = await loadFallbackRuntimeContextSnapshot(fresh.branch.thread.researchJobId).catch(
+            () => ({})
+          );
+          runtimeContextSnapshot = isRecord(fallbackSnapshot) ? fallbackSnapshot : {};
           await this.emitEvent({
             branchId: fresh.branchId,
             agentRunId: fresh.id,
             type: ProcessEventType.PROCESS_LOG,
             level: ProcessEventLevel.WARN,
-            message: `Failed to load runtime context: ${compactPromptString((error as Error)?.message || error, 200)}`,
+            message: `Failed to load runtime context; using fallback snapshot: ${compactPromptString((error as Error)?.message || error, 200)}`,
+            payload: {
+              event: 'run.context.loaded',
+              fallback: true,
+              competitorsCount: Number(runtimeContextSnapshot.competitorsCount || 0),
+              candidateCompetitorsCount: Number(runtimeContextSnapshot.candidateCompetitorsCount || 0),
+              webSnapshotsCount: Number(runtimeContextSnapshot.webSnapshotsCount || 0),
+              pendingDecisionsCount: Number(runtimeContextSnapshot.pendingDecisionsCount || 0),
+            },
           });
         }
       }

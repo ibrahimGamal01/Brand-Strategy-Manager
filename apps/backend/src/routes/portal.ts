@@ -29,6 +29,7 @@ import {
 } from '../services/portal/portal-intake';
 import { savePortalWorkspaceIntakeDraft } from '../services/portal/portal-intake-draft';
 import {
+  getPortalIntakeEventStoreDiagnostics,
   listPortalIntakeEvents,
   PortalIntakeEvent,
   subscribePortalIntakeEvents,
@@ -39,7 +40,10 @@ import {
   queuePortalIntakeWebsiteScan,
 } from '../services/portal/portal-intake-websites';
 import { listPortalWorkspaceLibrary } from '../services/portal/portal-library';
-import { getPortalIntakeScanRun } from '../services/portal/portal-intake-events-repository';
+import {
+  getPortalIntakeScanRun,
+  listPortalIntakeScanRunsWithEventCounts,
+} from '../services/portal/portal-intake-events-repository';
 
 const router = Router();
 
@@ -520,6 +524,35 @@ router.get(
     }
   }
 );
+
+router.get('/admin/intake/scan-runs', requirePortalAuth, async (req, res) => {
+  try {
+    const authed = req as AuthedPortalRequest;
+    if (!authed.portalSession?.user?.isAdmin) {
+      return res.status(403).json({ error: 'ADMIN_REQUIRED' });
+    }
+
+    const workspaceIdRaw = Array.isArray(req.query.workspaceId) ? req.query.workspaceId[0] : req.query.workspaceId;
+    const workspaceId = safeString(workspaceIdRaw);
+    const limitRaw = Array.isArray(req.query.limit) ? req.query.limit[0] : req.query.limit;
+    const limitParsed = Number.parseInt(String(limitRaw || ''), 10);
+    const limit = Number.isFinite(limitParsed) ? Math.max(1, Math.min(200, limitParsed)) : 50;
+
+    const scanRuns = await listPortalIntakeScanRunsWithEventCounts({
+      ...(workspaceId ? { workspaceId } : {}),
+      limit,
+    });
+
+    return res.json({
+      ok: true,
+      diagnostics: getPortalIntakeEventStoreDiagnostics(),
+      scanRuns,
+    });
+  } catch (error: any) {
+    const message = String(error?.message || '');
+    return res.status(500).json({ error: message || 'Failed to load intake scan diagnostics' });
+  }
+});
 
 router.post('/workspaces/:workspaceId/intake', requirePortalAuth, requireWorkspaceMembership, async (req, res) => {
   try {

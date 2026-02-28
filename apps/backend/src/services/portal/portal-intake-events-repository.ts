@@ -14,6 +14,25 @@ export type PortalIntakeEventRecord = {
   createdAt: string;
 };
 
+export type PortalIntakeScanRunDiagnosticsRecord = {
+  id: string;
+  workspaceId: string;
+  mode: string;
+  status: string;
+  initiatedBy: string;
+  targetsCompleted: number;
+  snapshotsSaved: number;
+  pagesPersisted: number;
+  warnings: number;
+  failures: number;
+  error: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  eventCount: number;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -160,4 +179,59 @@ export async function listPortalIntakeScanEvents(
   });
 
   return rows.map((row) => toEventRecord(row));
+}
+
+export async function listPortalIntakeScanRunsWithEventCounts(options?: {
+  workspaceId?: string;
+  limit?: number;
+}): Promise<PortalIntakeScanRunDiagnosticsRecord[]> {
+  const workspaceId = String(options?.workspaceId || '').trim() || undefined;
+  const limit = Math.max(1, Math.min(200, Number(options?.limit || 50)));
+
+  const rows = await prisma.portalIntakeScanRun.findMany({
+    where: workspaceId ? { workspaceId } : undefined,
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+    select: {
+      id: true,
+      workspaceId: true,
+      mode: true,
+      status: true,
+      initiatedBy: true,
+      targetsCompleted: true,
+      snapshotsSaved: true,
+      pagesPersisted: true,
+      warnings: true,
+      failures: true,
+      error: true,
+      startedAt: true,
+      endedAt: true,
+      createdAt: true,
+      updatedAt: true,
+      _count: {
+        select: {
+          events: true,
+        },
+      },
+    },
+  });
+
+  return rows.map((row) => ({
+    id: row.id,
+    workspaceId: row.workspaceId,
+    mode: row.mode,
+    status: row.status,
+    initiatedBy: row.initiatedBy,
+    targetsCompleted: row.targetsCompleted,
+    snapshotsSaved: row.snapshotsSaved,
+    pagesPersisted: row.pagesPersisted,
+    warnings: row.warnings,
+    failures: row.failures,
+    error: row.error,
+    startedAt: row.startedAt.toISOString(),
+    endedAt: row.endedAt ? row.endedAt.toISOString() : null,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+    eventCount: row._count.events,
+  }));
 }

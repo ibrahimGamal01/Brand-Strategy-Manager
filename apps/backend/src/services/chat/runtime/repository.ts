@@ -398,14 +398,21 @@ export async function createProcessEvent(input: {
   });
 }
 
+export function normalizeProcessEventCursor(options?: { afterId?: string; afterSeq?: string; limit?: number }) {
+  const limit = Math.max(1, Math.min(500, options?.limit ?? 100));
+  const afterId = String(options?.afterId || '').trim() || undefined;
+  const afterSeqRaw = String(options?.afterSeq || '').trim();
+  const hasAfterSeq = /^\d+$/.test(afterSeqRaw);
+  const afterSeq = hasAfterSeq ? afterSeqRaw : undefined;
+  return { limit, afterId, afterSeq };
+}
+
 export async function listProcessEvents(
   branchId: string,
   options?: { afterId?: string; afterSeq?: string; limit?: number }
 ) {
-  const limit = Math.max(1, Math.min(500, options?.limit ?? 100));
-  const afterSeqRaw = String(options?.afterSeq || '').trim();
-  const hasAfterSeq = /^\d+$/.test(afterSeqRaw);
-  const afterSeq = hasAfterSeq ? BigInt(afterSeqRaw) : null;
+  const cursor = normalizeProcessEventCursor(options);
+  const afterSeq = cursor.afterSeq ? BigInt(cursor.afterSeq) : null;
 
   if (afterSeq !== null) {
     return prisma.processEvent.findMany({
@@ -414,21 +421,21 @@ export async function listProcessEvents(
         eventSeq: { gt: afterSeq },
       },
       orderBy: { eventSeq: 'asc' },
-      take: limit,
+      take: cursor.limit,
     });
   }
 
-  if (!options?.afterId) {
+  if (!cursor.afterId) {
     const rows = await prisma.processEvent.findMany({
       where: { branchId },
       orderBy: { eventSeq: 'desc' },
-      take: limit,
+      take: cursor.limit,
     });
     return rows.reverse();
   }
 
   const after = await prisma.processEvent.findUnique({
-    where: { id: options.afterId },
+    where: { id: cursor.afterId },
     select: { createdAt: true, eventSeq: true },
   });
 
@@ -439,7 +446,7 @@ export async function listProcessEvents(
         eventSeq: { gt: after.eventSeq },
       },
       orderBy: { eventSeq: 'asc' },
-      take: limit,
+      take: cursor.limit,
     });
   }
 
@@ -449,7 +456,7 @@ export async function listProcessEvents(
       ...(after ? { createdAt: { gt: after.createdAt } } : {}),
     },
     orderBy: { createdAt: 'asc' },
-    take: limit,
+    take: cursor.limit,
   });
 }
 

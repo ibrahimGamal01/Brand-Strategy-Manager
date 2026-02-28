@@ -6,7 +6,10 @@ import {
   sanitizeClientResponse,
   stripLegacyBoilerplateResponse,
 } from '../services/chat/runtime/run-engine';
+import { normalizeProcessEventCursor } from '../services/chat/runtime/repository';
 import {
+  __setPortalIntakeEventsRepositoryForTests,
+  getPortalIntakeEventStoreDiagnostics,
   listPortalIntakeEvents,
   publishPortalIntakeEvent,
   subscribePortalIntakeEvents,
@@ -108,11 +111,104 @@ async function testPortalIntakeMemoryMode() {
   }
 }
 
+async function testPortalIntakeDualModeDbFallback() {
+  const previousMode = process.env.PORTAL_INTAKE_EVENT_STORE_MODE;
+  process.env.PORTAL_INTAKE_EVENT_STORE_MODE = 'dual';
+  const workspaceId = `ws-r1-dual-${Date.now()}`;
+  const scanRunId = `scan-r1-dual-${Date.now()}`;
+
+  __setPortalIntakeEventsRepositoryForTests({
+    createPortalIntakeScanEvent: async () => {
+      throw new Error('simulated db write outage');
+    },
+    listPortalIntakeScanEvents: async () => {
+      throw new Error('simulated db read outage');
+    },
+  });
+
+  try {
+    const published = await publishPortalIntakeEvent(
+      workspaceId,
+      'SCAN_STARTED',
+      'dual mode publish should fallback to memory',
+      { simulated: true },
+      { scanRunId }
+    );
+    assert.equal(published.workspaceId, workspaceId, 'Dual mode should still publish event from fallback path.');
+
+    const listed = await listPortalIntakeEvents(workspaceId, { afterId: 0, limit: 30, scanRunId });
+    assert.ok(listed.length >= 1, 'Dual mode should list fallback memory events when DB reads fail.');
+
+    const diagnostics = getPortalIntakeEventStoreDiagnostics();
+    assert.ok(diagnostics.counters.dbWriteFailure >= 1, 'Expected DB write failures to be counted.');
+    assert.ok(diagnostics.counters.dbReadFailure >= 1, 'Expected DB read failures to be counted.');
+    assert.ok(
+      diagnostics.counters.dbReadFallbackToMemory >= 1,
+      'Expected DB read fallback count to increase in dual mode.'
+    );
+  } finally {
+    __setPortalIntakeEventsRepositoryForTests(null);
+    if (previousMode === undefined) {
+      delete process.env.PORTAL_INTAKE_EVENT_STORE_MODE;
+    } else {
+      process.env.PORTAL_INTAKE_EVENT_STORE_MODE = previousMode;
+    }
+  }
+}
+
+async function testPortalIntakeDbModeRequiresDb() {
+  const previousMode = process.env.PORTAL_INTAKE_EVENT_STORE_MODE;
+  process.env.PORTAL_INTAKE_EVENT_STORE_MODE = 'db';
+
+  __setPortalIntakeEventsRepositoryForTests({
+    createPortalIntakeScanEvent: async () => {
+      throw new Error('hard db outage');
+    },
+    listPortalIntakeScanEvents: async () => {
+      throw new Error('hard db outage');
+    },
+  });
+
+  try {
+    await assert.rejects(
+      publishPortalIntakeEvent(
+        `ws-r1-db-${Date.now()}`,
+        'SCAN_STARTED',
+        'db mode should throw when DB write fails',
+        {},
+        { scanRunId: `scan-r1-db-${Date.now()}` }
+      ),
+      /hard db outage/i
+    );
+  } finally {
+    __setPortalIntakeEventsRepositoryForTests(null);
+    if (previousMode === undefined) {
+      delete process.env.PORTAL_INTAKE_EVENT_STORE_MODE;
+    } else {
+      process.env.PORTAL_INTAKE_EVENT_STORE_MODE = previousMode;
+    }
+  }
+}
+
+function testCursorPrefersAfterSeq() {
+  const cursor = normalizeProcessEventCursor({
+    afterId: 'evt-id-123',
+    afterSeq: '456',
+    limit: 25,
+  });
+  assert.equal(cursor.afterSeq, '456', 'Expected afterSeq to be retained when provided.');
+  assert.equal(cursor.afterId, 'evt-id-123', 'Expected afterId fallback to remain available.');
+  assert.equal(cursor.limit, 25, 'Expected cursor limit to be preserved.');
+}
+
 async function main() {
   await testDetailedDefaultDepth();
   testClientSanitizer();
   testEventSeqSerialization();
   await testPortalIntakeMemoryMode();
+  await testPortalIntakeDualModeDbFallback();
+  await testPortalIntakeDbModeRequiresDb();
+  testCursorPrefersAfterSeq();
   console.log('[R1 Reliability] Core regression checks passed.');
 }
 

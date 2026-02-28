@@ -920,6 +920,7 @@ export async function writeClientResponse(input: WriterInput): Promise<WriterOut
     `Concise mode for this request: ${conciseRequested ? 'true' : 'false'}.`,
     'Synthesize evidence into clear narrative and recommendations; do not just output sparse bullet points.',
     'Use the runtime workspace context to ground baseline facts before asking for missing information.',
+    'If runtime context contains websites/snapshots/competitors, do not claim that data is unavailable or inaccessible.',
     'Never include scaffolding labels like "Fork from here", "How BAT got here", "Tools used", "Assumptions", or "Evidence".',
     'Must include recommendation, evidence-backed why, and next steps.',
     'JSON schema:',

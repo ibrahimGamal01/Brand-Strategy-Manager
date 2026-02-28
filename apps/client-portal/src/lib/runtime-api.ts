@@ -416,6 +416,11 @@ export type RuntimeSocketMessage =
       details?: string;
     };
 
+export type RuntimeEventCursor = {
+  afterSeq?: string;
+  afterId?: string;
+};
+
 function runtimeWsOrigin(): string {
   const configured = String(process.env.NEXT_PUBLIC_API_ORIGIN || "").trim();
   if (configured) {
@@ -432,14 +437,19 @@ function runtimeWsOrigin(): string {
   return origin.replace(/^http/i, "ws").replace(/\/+$/, "");
 }
 
-export function createRuntimeEventsSocket(workspaceId: string, branchId: string, afterId?: string): WebSocket {
+export function createRuntimeEventsSocket(
+  workspaceId: string,
+  branchId: string,
+  cursor?: RuntimeEventCursor
+): WebSocket {
   const params = new URLSearchParams();
-  if (afterId) {
-    params.set("afterId", afterId);
-  }
-  const afterSeq = String(afterId || "").trim();
+  const afterSeq = String(cursor?.afterSeq || "").trim();
+  const afterId = String(cursor?.afterId || "").trim();
   if (afterSeq) {
     params.set("afterSeq", afterSeq);
+  }
+  if (afterId) {
+    params.set("afterId", afterId);
   }
   const suffix = params.toString() ? `?${params.toString()}` : "";
   const wsUrl = `${runtimeWsOrigin()}/api/ws/research-jobs/${encodeURIComponent(

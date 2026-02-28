@@ -261,6 +261,41 @@ function normalizeRuntimeEvents(events: Array<Record<string, unknown>>): Normali
   return events.map((event) => normalizeRuntimeEvent(event));
 }
 
+function mergeRuntimeEvents(
+  existing: Array<Record<string, unknown>>,
+  incoming: Array<Record<string, unknown>>,
+  max = 320
+): Array<Record<string, unknown>> {
+  const byId = new Map<string, Record<string, unknown>>();
+  const push = (event: Record<string, unknown>) => {
+    const id = String(event.id || "").trim();
+    if (!id) return;
+    byId.set(id, event);
+  };
+  for (const event of existing) push(event);
+  for (const event of incoming) push(event);
+
+  const merged = Array.from(byId.values()).sort((a, b) => {
+    const aSeq = Number(String(a.eventSeq || "").trim());
+    const bSeq = Number(String(b.eventSeq || "").trim());
+    if (Number.isFinite(aSeq) && Number.isFinite(bSeq)) return aSeq - bSeq;
+    const aTime = Date.parse(toIso(a.createdAt));
+    const bTime = Date.parse(toIso(b.createdAt));
+    return aTime - bTime;
+  });
+  return merged.slice(Math.max(0, merged.length - max));
+}
+
+function requiresStructuralSync(event: Record<string, unknown>): boolean {
+  const normalized = normalizeRuntimeEvent(event);
+  if (normalized.event === "run.completed") return true;
+  if (normalized.event === "run.failed") return true;
+  if (normalized.event === "run.cancelled") return true;
+  if (normalized.event === "decision.required") return true;
+  if (normalized.event === "run.waiting_input") return true;
+  return false;
+}
+
 function phaseToStatus(phase: RuntimeEventPhase): ProcessRun["status"] {
   if (phase === "waiting_input") return "waiting_input";
   if (phase === "completed") return "done";
@@ -1142,6 +1177,8 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
   const wsRef = useRef<WebSocket | null>(null);
   const wsSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestEventCursorRef = useRef<Record<string, string>>({});
+  const eventsByBranchRef = useRef<Record<string, Array<Record<string, unknown>>>>({});
+  const activeRunsByBranchRef = useRef<Record<string, Array<Record<string, unknown>>>>({});
   const syncInFlightRef = useRef(false);
   const bootstrapAttemptedRef = useRef<Set<string>>(new Set());
   const [wsConnectedByBranch, setWsConnectedByBranch] = useState<Record<string, boolean>>({});
@@ -1204,6 +1241,10 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
 
         const normalizedMessages = mapMessages(messagePayload.messages as Array<Record<string, unknown>>);
         const events = eventPayload.events as Array<Record<string, unknown>>;
+        eventsByBranchRef.current = {
+          ...eventsByBranchRef.current,
+          [branchId]: events,
+        };
         const latestEvent = events[events.length - 1];
         const latestCursor = String(latestEvent?.eventSeq || latestEvent?.id || "").trim();
         if (latestCursor) {
@@ -1213,6 +1254,10 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
           };
         }
         const activeRuns = (statePayload.activeRuns || []) as Array<Record<string, unknown>>;
+        activeRunsByBranchRef.current = {
+          ...activeRunsByBranchRef.current,
+          [branchId]: activeRuns,
+        };
         const activeIds = activeRuns
           .map((run) => String(run.id || "").trim())
           .filter(Boolean);
@@ -1414,6 +1459,44 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
     [activeRunIds.length, queuedMessages.length]
   );
 
+  const applyRealtimeEvents = useCallback(
+    (branchId: string, incoming: Array<Record<string, unknown>>) => {
+      if (!incoming.length) return;
+      const existing = eventsByBranchRef.current[branchId] || [];
+      const merged = mergeRuntimeEvents(existing, incoming);
+      eventsByBranchRef.current = {
+        ...eventsByBranchRef.current,
+        [branchId]: merged,
+      };
+
+      const latest = merged[merged.length - 1];
+      const latestCursor = String(latest?.eventSeq || latest?.id || "").trim();
+      if (latestCursor) {
+        latestEventCursorRef.current = {
+          ...latestEventCursorRef.current,
+          [branchId]: latestCursor,
+        };
+      }
+
+      if (branchId !== activeBranchId) return;
+
+      const activeRuns = activeRunsByBranchRef.current[branchId] || [];
+      const nextRuns = mapRuns(activeRuns, merged);
+      setFeedItems(mapFeedItems(merged));
+      setDecisions(mapDecisionsFromEvents(merged, activeRuns));
+      setProcessRuns(nextRuns);
+      const runningIds = nextRuns
+        .filter((run) => run.status === "running" || run.status === "waiting_input")
+        .map((run) => String(run.id || "").trim())
+        .filter(Boolean);
+      setActiveRunIdsByBranch((previous) => ({
+        ...previous,
+        [branchId]: runningIds,
+      }));
+    },
+    [activeBranchId]
+  );
+
   useEffect(() => {
     let mounted = true;
     setLoading(true);
@@ -1463,8 +1546,11 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
     if (!activeBranchId) return;
 
     let isCancelled = false;
-    const afterId = latestEventCursorRef.current[activeBranchId];
-    const socket = createRuntimeEventsSocket(workspaceId, activeBranchId, afterId);
+    const afterSeq = String(latestEventCursorRef.current[activeBranchId] || "").trim();
+    const socket = createRuntimeEventsSocket(workspaceId, activeBranchId, {
+      ...(afterSeq ? { afterSeq } : {}),
+      ...(afterSeq ? { afterId: afterSeq } : {}),
+    });
     wsRef.current = socket;
     setWsConnectedByBranch((previous) => ({
       ...previous,
@@ -1486,6 +1572,8 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
         ...previous,
         [activeBranchId]: true,
       }));
+      // Always do one full refresh after (re)connect to avoid state drift.
+      scheduleSync(0);
     };
 
     socket.onmessage = (event) => {
@@ -1499,25 +1587,23 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
       if (!payload) return;
 
       if (payload.type === "EVENT" && payload.event?.id) {
-        const cursor = String(payload.event.eventSeq || payload.event.id || "").trim();
-        if (!cursor) return;
-        latestEventCursorRef.current = {
-          ...latestEventCursorRef.current,
-          [activeBranchId]: cursor,
-        };
-        scheduleSync(40);
+        const rawEvent = payload.event as unknown as Record<string, unknown>;
+        applyRealtimeEvents(activeBranchId, [rawEvent]);
+        if (requiresStructuralSync(rawEvent)) {
+          scheduleSync(160);
+        }
         return;
       }
 
       if (payload.type === "EVENT_BATCH") {
-        const latest = Array.isArray(payload.events) ? payload.events[payload.events.length - 1] : null;
-        const latestCursor = String(latest?.eventSeq || latest?.id || "").trim();
-        if (latestCursor) {
-          latestEventCursorRef.current = {
-            ...latestEventCursorRef.current,
-            [activeBranchId]: latestCursor,
-          };
+        const batchEvents = Array.isArray(payload.events)
+          ? payload.events
+              .map((entry) => entry as unknown as Record<string, unknown>)
+          : [];
+        if (batchEvents.length) {
+          applyRealtimeEvents(activeBranchId, batchEvents);
         }
+        // Backlog delivery on reconnect should reconcile against full branch state once.
         scheduleSync(0);
         return;
       }
@@ -1568,7 +1654,7 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
         [activeBranchId]: false,
       }));
     };
-  }, [activeBranchId, syncBranch, workspaceId]);
+  }, [activeBranchId, applyRealtimeEvents, syncBranch, workspaceId]);
 
   useEffect(() => {
     if (!activeBranchId) return;
