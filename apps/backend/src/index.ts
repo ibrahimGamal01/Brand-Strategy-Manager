@@ -46,6 +46,17 @@ const app = express();
 const PORT = process.env.PORT || process.env.BACKEND_PORT || 3001;
 let schemaReport: SchemaReadinessReport | null = null;
 
+function resolvePortalSignupScanMode(): string {
+  const raw = String(process.env.PORTAL_SIGNUP_SCAN_MODE || 'deep').trim().toLowerCase();
+  if (raw === 'quick' || raw === 'standard' || raw === 'deep') return raw;
+  return 'deep';
+}
+
+function resolvePortalDdgEnabled(): boolean {
+  const raw = String(process.env.PORTAL_SIGNUP_DDG_ENABLED || 'true').trim().toLowerCase();
+  return !['0', 'false', 'no', 'off'].includes(raw);
+}
+
 app.use(cors());
 app.use(express.json());
 
@@ -71,6 +82,14 @@ app.get('/api/health', (req, res) => {
       missingTables: [],
       missingColumns: {},
       checkedAt: null,
+    },
+    portalAuth: {
+      verifyCodeConfigured: Boolean(String(process.env.PORTAL_EMAIL_VERIFY_CODE || '00000').trim()),
+      verifyMode: 'static',
+    },
+    portalEnrichment: {
+      signupScanMode: resolvePortalSignupScanMode(),
+      ddgEnabled: resolvePortalDdgEnabled(),
     },
   });
 });

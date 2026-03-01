@@ -130,7 +130,10 @@ async function waitForSignupScanRun(baseUrl: string, workspaceId: string, jar: C
 }
 
 async function main() {
-  const baseUrl = String(process.env.PORTAL_E2E_BASE_URL || process.env.BACKEND_BASE_URL || 'http://localhost:3001').replace(/\/+$/, '');
+  const baseUrl = String(
+    process.env.PORTAL_E2E_BASE_URL || process.env.BACKEND_BASE_URL || 'http://localhost:3001'
+  ).replace(/\/+$/, '');
+  const mode = process.env.PORTAL_E2E_BASE_URL ? 'online' : 'local';
   const timestamp = Date.now();
   const email = `portal.e2e.${timestamp}@example.com`;
   const password = 'TestPass123!';
@@ -398,6 +401,7 @@ async function main() {
     JSON.stringify(
       {
         ok: true,
+        mode,
         baseUrl,
         workspaceId,
         branchId,

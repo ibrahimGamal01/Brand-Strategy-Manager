@@ -1,0 +1,64 @@
+name: portal-rollout-gate
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  rollout-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Backend lint/build
+        run: |
+          npm run lint --workspace=apps/backend
+          npm run build --workspace=apps/backend
+
+      - name: Portal lint/build
+        run: |
+          npm run lint --workspace=apps/client-portal
+          npm run build --workspace=apps/client-portal
+
+      - name: Local contract checks
+        run: |
+          npm run check:runtime-config --workspace=apps/backend
+          npm run test:portal-auth-runtime-e2e --workspace=apps/backend
+        env:
+          PORTAL_E2E_BASE_URL: ${{ secrets.PORTAL_E2E_BASE_URL }}
+
+      - name: Online portal auth smoke
+        run: npm run test:portal-ui-auth-flow:online --workspace=apps/backend
+        env:
+          PORTAL_UI_E2E_BASE_URL: ${{ secrets.PORTAL_UI_E2E_BASE_URL }}
+
+      - name: Rollout readiness preflight
+        run: npm run check:portal-rollout --workspace=apps/backend | tee portal-rollout-readiness.json
+        env:
+          BACKEND_BASE_URL: ${{ secrets.PORTAL_E2E_BASE_URL }}
+          PORTAL_E2E_BASE_URL: ${{ secrets.PORTAL_E2E_BASE_URL }}
+          PORTAL_UI_E2E_BASE_URL: ${{ secrets.PORTAL_UI_E2E_BASE_URL }}
+          PORTAL_EMAIL_VERIFY_CODE: ${{ secrets.PORTAL_EMAIL_VERIFY_CODE }}
+          PORTAL_SIGNUP_SCAN_MODE: ${{ vars.PORTAL_SIGNUP_SCAN_MODE }}
+          PORTAL_SIGNUP_DDG_ENABLED: ${{ vars.PORTAL_SIGNUP_DDG_ENABLED }}
+
+      - name: Upload readiness summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: portal-rollout-readiness
+          path: portal-rollout-readiness.json

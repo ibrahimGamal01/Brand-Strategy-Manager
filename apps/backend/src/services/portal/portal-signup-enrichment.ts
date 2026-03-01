@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma';
 import { searchBrandContextDDG, searchRawDDG } from '../discovery/duckduckgo-search';
 import { publishPortalIntakeEvent } from './portal-intake-events';
@@ -6,6 +7,39 @@ import {
   PortalIntakeScanMode,
   queuePortalIntakeWebsiteScan,
 } from './portal-intake-websites';
+
+function hashEmailForLogs(email?: string | null): string | null {
+  const normalized = String(email || '').trim().toLowerCase();
+  if (!normalized) return null;
+  return crypto.createHash('sha256').update(normalized).digest('hex').slice(0, 20);
+}
+
+function logPortalEnrichmentEvent(input: {
+  event:
+    | 'PORTAL_ENRICHMENT_STARTED'
+    | 'PORTAL_ENRICHMENT_SCAN_QUEUED'
+    | 'PORTAL_ENRICHMENT_DDG_COMPLETED'
+    | 'PORTAL_ENRICHMENT_WARNING'
+    | 'PORTAL_ENRICHMENT_DONE';
+  workspaceId: string;
+  status: string;
+  durationMs?: number;
+  errorCode?: string;
+  email?: string | null;
+}) {
+  const payload: Record<string, unknown> = {
+    event: input.event,
+    workspaceId: input.workspaceId,
+    emailHash: hashEmailForLogs(input.email),
+    status: input.status,
+    durationMs: Number.isFinite(input.durationMs as number) ? Math.max(0, Math.round(input.durationMs as number)) : 0,
+    timestamp: new Date().toISOString(),
+  };
+  if (input.errorCode) {
+    payload.errorCode = input.errorCode;
+  }
+  console.log(JSON.stringify(payload));
+}
 
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -87,6 +121,7 @@ export async function startPortalSignupEnrichment(input: {
   website?: string;
   websites?: string[];
 }): Promise<void> {
+  const startedAt = Date.now();
   const workspaceId = String(input.workspaceId || '').trim();
   if (!workspaceId) return;
 
@@ -97,6 +132,12 @@ export async function startPortalSignupEnrichment(input: {
   const ddgEnabled = isSignupDdgEnabled();
 
   let scanRunId: string | undefined;
+
+  logPortalEnrichmentEvent({
+    event: 'PORTAL_ENRICHMENT_STARTED',
+    workspaceId,
+    status: 'started',
+  });
 
   await publishPortalIntakeEvent(
     workspaceId,
@@ -124,7 +165,20 @@ export async function startPortalSignupEnrichment(input: {
         initiatedBy: 'SYSTEM',
       });
       scanRunId = queued.scanRunId;
+      logPortalEnrichmentEvent({
+        event: 'PORTAL_ENRICHMENT_SCAN_QUEUED',
+        workspaceId,
+        status: 'queued',
+        durationMs: Date.now() - startedAt,
+      });
     } catch (error) {
+      logPortalEnrichmentEvent({
+        event: 'PORTAL_ENRICHMENT_WARNING',
+        workspaceId,
+        status: 'warning',
+        durationMs: Date.now() - startedAt,
+        errorCode: 'SCAN_QUEUE_FAILED',
+      });
       await publishPortalIntakeEvent(
         workspaceId,
         'ENRICHMENT_WARNING',
@@ -136,6 +190,13 @@ export async function startPortalSignupEnrichment(input: {
       );
     }
   } else {
+    logPortalEnrichmentEvent({
+      event: 'PORTAL_ENRICHMENT_WARNING',
+      workspaceId,
+      status: 'warning',
+      durationMs: Date.now() - startedAt,
+      errorCode: 'WEBSITE_MISSING',
+    });
     await publishPortalIntakeEvent(
       workspaceId,
       'ENRICHMENT_WARNING',
@@ -147,6 +208,12 @@ export async function startPortalSignupEnrichment(input: {
   }
 
   if (!ddgEnabled) {
+    logPortalEnrichmentEvent({
+      event: 'PORTAL_ENRICHMENT_DONE',
+      workspaceId,
+      status: 'completed',
+      durationMs: Date.now() - startedAt,
+    });
     await publishPortalIntakeEvent(
       workspaceId,
       'ENRICHMENT_DONE',
@@ -193,6 +260,13 @@ export async function startPortalSignupEnrichment(input: {
       source: 'portal_signup_ddg_raw_query',
     });
 
+    logPortalEnrichmentEvent({
+      event: 'PORTAL_ENRICHMENT_DDG_COMPLETED',
+      workspaceId,
+      status: 'completed',
+      durationMs: Date.now() - startedAt,
+    });
+
     await publishPortalIntakeEvent(
       workspaceId,
       'DDG_COMPLETED',
@@ -217,6 +291,13 @@ export async function startPortalSignupEnrichment(input: {
       scanRunId: scanRunId || null,
     });
   } catch (error) {
+    logPortalEnrichmentEvent({
+      event: 'PORTAL_ENRICHMENT_WARNING',
+      workspaceId,
+      status: 'warning',
+      durationMs: Date.now() - startedAt,
+      errorCode: 'DDG_FAILED',
+    });
     await publishPortalIntakeEvent(
       workspaceId,
       'ENRICHMENT_WARNING',
@@ -245,4 +326,10 @@ export async function startPortalSignupEnrichment(input: {
     },
     scanRunId ? { scanRunId } : undefined
   );
+  logPortalEnrichmentEvent({
+    event: 'PORTAL_ENRICHMENT_DONE',
+    workspaceId,
+    status: 'completed',
+    durationMs: Date.now() - startedAt,
+  });
 }

@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { Router, Request } from 'express';
 import { prisma } from '../lib/prisma';
 import {
@@ -52,6 +53,40 @@ import { startPortalSignupEnrichment } from '../services/portal/portal-signup-en
 
 const router = Router();
 const authRateLimitStore = new Map<string, { count: number; resetAt: number }>();
+
+function hashEmailForLogs(email: string): string | null {
+  const normalized = safeString(email).toLowerCase();
+  if (!normalized) return null;
+  return crypto.createHash('sha256').update(normalized).digest('hex').slice(0, 20);
+}
+
+function logPortalAuthEvent(input: {
+  event:
+    | 'PORTAL_SIGNUP_REQUESTED'
+    | 'PORTAL_SIGNUP_CREATED'
+    | 'PORTAL_VERIFY_CODE_SUCCEEDED'
+    | 'PORTAL_VERIFY_CODE_FAILED'
+    | 'PORTAL_LOGIN_BLOCKED_UNVERIFIED'
+    | 'PORTAL_RESEND_VERIFICATION_REQUESTED';
+  workspaceId?: string | null;
+  email?: string | null;
+  status: string;
+  durationMs?: number;
+  errorCode?: string;
+}) {
+  const payload: Record<string, unknown> = {
+    event: input.event,
+    workspaceId: input.workspaceId || null,
+    emailHash: hashEmailForLogs(input.email || '') || null,
+    status: input.status,
+    durationMs: Number.isFinite(input.durationMs as number) ? Math.max(0, Math.round(input.durationMs as number)) : 0,
+    timestamp: new Date().toISOString(),
+  };
+  if (input.errorCode) {
+    payload.errorCode = input.errorCode;
+  }
+  console.log(JSON.stringify(payload));
+}
 
 function consumeRateLimit(key: string, limit: number, windowMs: number): boolean {
   const now = Date.now();
@@ -117,8 +152,16 @@ function serializePortalIntakeEventSse(event: PortalIntakeEvent): string {
 }
 
 router.post('/auth/signup', async (req, res) => {
+  const startedAt = Date.now();
+  const requestEmail = safeString(req.body?.email).toLowerCase();
+  logPortalAuthEvent({
+    event: 'PORTAL_SIGNUP_REQUESTED',
+    email: requestEmail,
+    status: 'received',
+  });
+
   try {
-    const email = safeString(req.body?.email).toLowerCase();
+    const email = requestEmail;
     const password = safeString(req.body?.password);
     const fullName = safeString(req.body?.fullName);
     const companyName = safeString(req.body?.companyName);
@@ -200,6 +243,14 @@ router.post('/auth/signup', async (req, res) => {
       );
     });
 
+    logPortalAuthEvent({
+      event: 'PORTAL_SIGNUP_CREATED',
+      workspaceId: created.workspaceId,
+      email,
+      status: 'success',
+      durationMs: Date.now() - startedAt,
+    });
+
     return res.status(201).json({
       ok: true,
       email,
@@ -210,11 +261,19 @@ router.post('/auth/signup', async (req, res) => {
       ...(process.env.NODE_ENV !== 'production' ? { debugVerificationToken: verifyToken.token } : {}),
     });
   } catch (error: any) {
+    logPortalAuthEvent({
+      event: 'PORTAL_SIGNUP_REQUESTED',
+      email: requestEmail,
+      status: 'failed',
+      durationMs: Date.now() - startedAt,
+      errorCode: 'SIGNUP_FAILED',
+    });
     return res.status(500).json({ error: 'SIGNUP_FAILED', details: error?.message || String(error) });
   }
 });
 
 router.post('/auth/login', async (req, res) => {
+  const startedAt = Date.now();
   try {
     const email = safeString(req.body?.email).toLowerCase();
     const password = safeString(req.body?.password);
@@ -246,6 +305,18 @@ router.post('/auth/login', async (req, res) => {
     }
 
     if (!user.emailVerifiedAt) {
+      const workspaceId =
+        Array.isArray(user.memberships) && user.memberships.length > 0
+          ? String(user.memberships[0]?.researchJobId || '')
+          : '';
+      logPortalAuthEvent({
+        event: 'PORTAL_LOGIN_BLOCKED_UNVERIFIED',
+        workspaceId: workspaceId || null,
+        email,
+        status: 'blocked',
+        durationMs: Date.now() - startedAt,
+        errorCode: 'EMAIL_NOT_VERIFIED',
+      });
       return res.status(403).json({ error: 'EMAIL_NOT_VERIFIED' });
     }
 
@@ -305,18 +376,41 @@ router.get('/auth/verify-email', async (req, res) => {
 });
 
 router.post('/auth/verify-email-code', async (req, res) => {
+  const startedAt = Date.now();
+  const requestEmail = safeString(req.body?.email).toLowerCase();
   try {
-    const email = safeString(req.body?.email).toLowerCase();
+    const email = requestEmail;
     const code = safeString(req.body?.code);
     const ip = getRequestIp(req) || 'unknown';
     if (!consumeRateLimit(`verify:${ip}:${email || 'unknown'}`, 10, 10 * 60 * 1000)) {
+      logPortalAuthEvent({
+        event: 'PORTAL_VERIFY_CODE_FAILED',
+        email,
+        status: 'rate_limited',
+        durationMs: Date.now() - startedAt,
+        errorCode: 'RATE_LIMITED',
+      });
       return res.status(429).json({ ok: false, error: 'RATE_LIMITED' });
     }
 
     if (!email) {
+      logPortalAuthEvent({
+        event: 'PORTAL_VERIFY_CODE_FAILED',
+        email: requestEmail,
+        status: 'invalid_request',
+        durationMs: Date.now() - startedAt,
+        errorCode: 'EMAIL_REQUIRED',
+      });
       return res.status(400).json({ error: 'EMAIL_REQUIRED' });
     }
     if (!code) {
+      logPortalAuthEvent({
+        event: 'PORTAL_VERIFY_CODE_FAILED',
+        email,
+        status: 'invalid_request',
+        durationMs: Date.now() - startedAt,
+        errorCode: 'CODE_REQUIRED',
+      });
       return res.status(400).json({ error: 'CODE_REQUIRED' });
     }
 
@@ -329,8 +423,23 @@ router.post('/auth/verify-email-code', async (req, res) => {
           : message === 'INVALID_VERIFICATION_CODE'
             ? 401
             : 410;
+      logPortalAuthEvent({
+        event: 'PORTAL_VERIFY_CODE_FAILED',
+        email,
+        status: 'failed',
+        durationMs: Date.now() - startedAt,
+        errorCode: message || 'VERIFY_CODE_FAILED',
+      });
       return res.status(status).json({ ok: false, error: message || 'VERIFY_CODE_FAILED' });
     }
+
+    logPortalAuthEvent({
+      event: 'PORTAL_VERIFY_CODE_SUCCEEDED',
+      workspaceId: null,
+      email,
+      status: result.alreadyVerified ? 'already_verified' : 'verified',
+      durationMs: Date.now() - startedAt,
+    });
 
     return res.json({
       ok: true,
@@ -338,11 +447,19 @@ router.post('/auth/verify-email-code', async (req, res) => {
       alreadyVerified: Boolean(result.alreadyVerified),
     });
   } catch (error: any) {
+    logPortalAuthEvent({
+      event: 'PORTAL_VERIFY_CODE_FAILED',
+      email: requestEmail,
+      status: 'error',
+      durationMs: Date.now() - startedAt,
+      errorCode: 'VERIFY_EMAIL_CODE_FAILED',
+    });
     return res.status(500).json({ error: 'VERIFY_EMAIL_CODE_FAILED', details: error?.message || String(error) });
   }
 });
 
 router.post('/auth/resend-verification', async (req, res) => {
+  const startedAt = Date.now();
   try {
     const portalSession = await getPortalSessionFromRequest(req);
     const ip = getRequestIp(req) || 'unknown';
@@ -373,6 +490,14 @@ router.post('/auth/resend-verification', async (req, res) => {
       targetUserId = user.id;
       targetFullName = user.fullName;
     }
+
+    logPortalAuthEvent({
+      event: 'PORTAL_RESEND_VERIFICATION_REQUESTED',
+      workspaceId: null,
+      email: targetEmail,
+      status: 'received',
+      durationMs: Date.now() - startedAt,
+    });
 
     if (!consumeRateLimit(`resend:${ip}:${targetEmail}`, 5, 15 * 60 * 1000)) {
       return res.status(429).json({ ok: false, error: 'RATE_LIMITED' });
