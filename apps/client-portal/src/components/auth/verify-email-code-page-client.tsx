@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { resendPortalVerification, verifyPortalEmailCode } from "@/lib/auth-api";
+import { getPortalMe, resendPortalVerification, verifyPortalEmailCode } from "@/lib/auth-api";
 
 export function VerifyEmailCodePageClient() {
   const router = useRouter();
@@ -20,6 +20,19 @@ export function VerifyEmailCodePageClient() {
     () => email.trim().length > 0 && code.trim().length > 0 && !submitting,
     [email, code, submitting]
   );
+
+  useEffect(() => {
+    let active = true;
+    getPortalMe()
+      .then(() => {
+        if (!active) return;
+        router.replace("/app");
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [router]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

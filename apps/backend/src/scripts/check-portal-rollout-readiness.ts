@@ -43,6 +43,14 @@ function getSetCookieHeaders(response: CookieHeaderResponse): string[] {
   return [...fromGetter, ...fromRaw];
 }
 
+function buildCookieHeaderFromSetCookies(setCookies: string[]): string {
+  return setCookies
+    .map((row) => String(row || '').split(';')[0] || '')
+    .map((pair) => pair.trim())
+    .filter(Boolean)
+    .join('; ');
+}
+
 async function runGitCheck(repoRoot: string): Promise<CheckResult> {
   try {
     const [{ stdout: branchRaw }, { stdout: shaRaw }, { stdout: dirtyRaw }] = await Promise.all([
@@ -323,6 +331,96 @@ async function runAuthContractCheck(backendBaseUrl: string): Promise<CheckResult
     const loginBlocked =
       loginResponse.status === 403 && String(loginPayload.error || '') === 'EMAIL_NOT_VERIFIED';
 
+    // Dirty-session regression: ensure signup clears/revokes an already-authenticated portal session.
+    const dirtyPrimaryEmail = `portal.preflight.primary.${Date.now()}@example.com`;
+    const dirtySecondaryEmail = `portal.preflight.secondary.${Date.now()}@example.com`;
+    const dirtyPassword = 'GuardrailPass123!';
+
+    const dirtyPrimarySignup = (await fetch(`${backendBaseUrl}/api/portal/auth/signup`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json',
+      },
+      body: JSON.stringify({
+        email: dirtyPrimaryEmail,
+        password: dirtyPassword,
+        fullName: 'Portal Guardrail Primary',
+        companyName: 'Guardrail QA',
+        website: 'https://guardrail-primary.example.com',
+      }),
+    })) as CookieHeaderResponse;
+    const dirtyPrimarySignupPayload = (await dirtyPrimarySignup.json().catch(() => ({}))) as Record<string, unknown>;
+
+    const dirtyPrimaryVerify = await fetch(`${backendBaseUrl}/api/portal/auth/verify-email-code`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json',
+      },
+      body: JSON.stringify({
+        email: dirtyPrimaryEmail,
+        code: '00000',
+      }),
+    });
+    const dirtyPrimaryVerifyPayload = (await dirtyPrimaryVerify.json().catch(() => ({}))) as Record<string, unknown>;
+
+    const dirtyPrimaryLogin = (await fetch(`${backendBaseUrl}/api/portal/auth/login`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json',
+      },
+      body: JSON.stringify({ email: dirtyPrimaryEmail, password: dirtyPassword }),
+    })) as CookieHeaderResponse;
+    const dirtyPrimaryLoginPayload = (await dirtyPrimaryLogin.json().catch(() => ({}))) as Record<string, unknown>;
+    const dirtyLoginCookieHeader = buildCookieHeaderFromSetCookies(getSetCookieHeaders(dirtyPrimaryLogin));
+
+    const dirtyMeBefore = await fetch(`${backendBaseUrl}/api/portal/auth/me`, {
+      method: 'GET',
+      headers: {
+        accept: 'application/json',
+        ...(dirtyLoginCookieHeader ? { cookie: dirtyLoginCookieHeader } : {}),
+      },
+    });
+
+    const dirtySecondarySignup = (await fetch(`${backendBaseUrl}/api/portal/auth/signup`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json',
+        ...(dirtyLoginCookieHeader ? { cookie: dirtyLoginCookieHeader } : {}),
+      },
+      body: JSON.stringify({
+        email: dirtySecondaryEmail,
+        password: dirtyPassword,
+        fullName: 'Portal Guardrail Secondary',
+        companyName: 'Guardrail QA',
+        website: 'https://guardrail-secondary.example.com',
+      }),
+    })) as CookieHeaderResponse;
+    const dirtySecondarySignupPayload = (await dirtySecondarySignup.json().catch(() => ({}))) as Record<string, unknown>;
+
+    const dirtyMeAfterSecondarySignup = await fetch(`${backendBaseUrl}/api/portal/auth/me`, {
+      method: 'GET',
+      headers: {
+        accept: 'application/json',
+        ...(dirtyLoginCookieHeader ? { cookie: dirtyLoginCookieHeader } : {}),
+      },
+    });
+
+    const dirtySecondaryLoginBeforeVerify = await fetch(`${backendBaseUrl}/api/portal/auth/login`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json',
+      },
+      body: JSON.stringify({ email: dirtySecondaryEmail, password: dirtyPassword }),
+    });
+    const dirtySecondaryLoginBeforeVerifyPayload = (await dirtySecondaryLoginBeforeVerify.json().catch(
+      () => ({})
+    )) as Record<string, unknown>;
+
     const errors: string[] = [];
     if (sessionCookieSet) errors.push('Signup unexpectedly set portal_session cookie.');
     if (!verifyEndpointAvailable) errors.push('verify-email-code endpoint returned 404.');
@@ -338,6 +436,39 @@ async function runAuthContractCheck(backendBaseUrl: string): Promise<CheckResult
         `login contract failed for unverified user (status=${loginResponse.status}, error=${String(loginPayload.error || '') || 'n/a'})`
       );
     }
+    if (dirtyPrimarySignup.status !== 201 || !Boolean(dirtyPrimarySignupPayload.ok)) {
+      errors.push(`Dirty-session primary signup failed (status=${dirtyPrimarySignup.status}).`);
+    }
+    if (dirtyPrimaryVerify.status !== 200 || !Boolean(dirtyPrimaryVerifyPayload.ok)) {
+      errors.push(`Dirty-session primary verify failed (status=${dirtyPrimaryVerify.status}).`);
+    }
+    if (dirtyPrimaryLogin.status !== 200 || String((dirtyPrimaryLoginPayload.user as Record<string, unknown> | undefined)?.email || '') !== dirtyPrimaryEmail) {
+      errors.push(`Dirty-session primary login failed (status=${dirtyPrimaryLogin.status}).`);
+    }
+    if (!dirtyLoginCookieHeader) {
+      errors.push('Dirty-session primary login did not return a session cookie header.');
+    }
+    if (dirtyMeBefore.status !== 200) {
+      errors.push(`Dirty-session /auth/me before secondary signup expected 200, got ${dirtyMeBefore.status}.`);
+    }
+    if (dirtySecondarySignup.status !== 201 || !Boolean(dirtySecondarySignupPayload.ok)) {
+      errors.push(`Dirty-session secondary signup failed (status=${dirtySecondarySignup.status}).`);
+    }
+    if (dirtyMeAfterSecondarySignup.status !== 401) {
+      errors.push(
+        `Dirty-session secondary signup did not clear prior auth session (/auth/me status=${dirtyMeAfterSecondarySignup.status}).`
+      );
+    }
+    if (
+      dirtySecondaryLoginBeforeVerify.status !== 403 ||
+      String(dirtySecondaryLoginBeforeVerifyPayload.error || '') !== 'EMAIL_NOT_VERIFIED'
+    ) {
+      errors.push(
+        `Dirty-session secondary user should remain unverified (status=${dirtySecondaryLoginBeforeVerify.status}, error=${String(
+          dirtySecondaryLoginBeforeVerifyPayload.error || ''
+        ) || 'n/a'}).`
+      );
+    }
 
     return {
       name: checkName,
@@ -351,6 +482,16 @@ async function runAuthContractCheck(backendBaseUrl: string): Promise<CheckResult
         verifyWrongCodeError: verifyWrongPayload.error,
         loginStatus: loginResponse.status,
         loginError: loginPayload.error,
+        dirtySession: {
+          primarySignupStatus: dirtyPrimarySignup.status,
+          primaryVerifyStatus: dirtyPrimaryVerify.status,
+          primaryLoginStatus: dirtyPrimaryLogin.status,
+          meBeforeSecondarySignupStatus: dirtyMeBefore.status,
+          secondarySignupStatus: dirtySecondarySignup.status,
+          meAfterSecondarySignupStatus: dirtyMeAfterSecondarySignup.status,
+          secondaryLoginBeforeVerifyStatus: dirtySecondaryLoginBeforeVerify.status,
+          secondaryLoginBeforeVerifyError: dirtySecondaryLoginBeforeVerifyPayload.error,
+        },
       },
     };
   } catch (error) {

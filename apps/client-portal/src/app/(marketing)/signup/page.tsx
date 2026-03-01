@@ -60,7 +60,7 @@ export default function SignupPage() {
         setEmailNotice("Verification code sent. Check your inbox and continue to verification.");
       }
 
-      router.push(`/verify-email-code?email=${encodeURIComponent(email)}`);
+      router.replace(`/verify-email-code?email=${encodeURIComponent(email)}`);
     } catch (submitError: any) {
       const message = String(submitError?.message || "Sign up failed");
       if (message.includes("EMAIL_ALREADY_EXISTS")) {

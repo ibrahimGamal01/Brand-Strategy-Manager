@@ -64,6 +64,7 @@ function logPortalAuthEvent(input: {
   event:
     | 'PORTAL_SIGNUP_REQUESTED'
     | 'PORTAL_SIGNUP_CREATED'
+    | 'PORTAL_SIGNUP_SESSION_CLEARED'
     | 'PORTAL_VERIFY_CODE_SUCCEEDED'
     | 'PORTAL_VERIFY_CODE_FAILED'
     | 'PORTAL_LOGIN_BLOCKED_UNVERIFIED'
@@ -161,6 +162,29 @@ router.post('/auth/signup', async (req, res) => {
   });
 
   try {
+    // Best-effort guard: if caller already has a portal session cookie, revoke and clear it.
+    const existingSessionToken = readSessionTokenFromRequest(req);
+    if (existingSessionToken) {
+      try {
+        await revokePortalSessionByToken(existingSessionToken);
+        logPortalAuthEvent({
+          event: 'PORTAL_SIGNUP_SESSION_CLEARED',
+          email: requestEmail,
+          status: 'revoked',
+          durationMs: Date.now() - startedAt,
+        });
+      } catch (error: any) {
+        logPortalAuthEvent({
+          event: 'PORTAL_SIGNUP_SESSION_CLEARED',
+          email: requestEmail,
+          status: 'revoke_failed',
+          durationMs: Date.now() - startedAt,
+          errorCode: String(error?.message || 'SESSION_REVOKE_FAILED').slice(0, 120),
+        });
+      }
+      clearSessionCookie(res);
+    }
+
     const email = requestEmail;
     const password = safeString(req.body?.password);
     const fullName = safeString(req.body?.fullName);

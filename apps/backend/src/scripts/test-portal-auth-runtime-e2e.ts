@@ -138,6 +138,7 @@ async function main() {
   const email = `portal.e2e.${timestamp}@example.com`;
   const password = 'TestPass123!';
   const jar = new CookieJar();
+  const dirtySessionJar = new CookieJar();
 
   const unauthenticatedMe = await apiRequest(baseUrl, '/api/portal/auth/me', { method: 'GET' }, jar);
   assert.equal(unauthenticatedMe.status, 401, 'Expected /auth/me to require auth before signup');
@@ -185,6 +186,153 @@ async function main() {
 
   const meAfterSignup = await apiRequest(baseUrl, '/api/portal/auth/me', { method: 'GET' }, jar);
   assert.equal(meAfterSignup.status, 401, 'Signup should not auto-create authenticated session');
+
+  // Dirty-session regression:
+  // if user A is already authenticated and signs up user B in the same cookie jar,
+  // signup should revoke/clear the existing session and enforce verify-code flow.
+  const dirtyPrimaryEmail = `portal.dirty.primary.${timestamp}@example.com`;
+  const dirtySecondaryEmail = `portal.dirty.secondary.${timestamp}@example.com`;
+  const dirtyPassword = 'DirtySessionPass123!';
+  const dirtySignupPrimary = await apiRequest<{ ok?: boolean; workspaceId?: string }>(
+    baseUrl,
+    '/api/portal/auth/signup',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: dirtyPrimaryEmail,
+        password: dirtyPassword,
+        fullName: 'Dirty Primary',
+        companyName: 'Dirty QA',
+        website: 'https://dirty-primary.example.com',
+      }),
+    },
+    dirtySessionJar
+  );
+  assert.equal(dirtySignupPrimary.status, 201, 'Dirty-session setup signup (primary) failed');
+  assert.equal(Boolean(dirtySignupPrimary.data.ok), true, 'Dirty-session setup signup should return ok=true');
+
+  const dirtyVerifyPrimary = await apiRequest<{ ok?: boolean }>(
+    baseUrl,
+    '/api/portal/auth/verify-email-code',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: dirtyPrimaryEmail,
+        code: '00000',
+      }),
+    },
+    dirtySessionJar
+  );
+  assert.equal(dirtyVerifyPrimary.status, 200, 'Dirty-session setup verify (primary) failed');
+  assert.equal(Boolean(dirtyVerifyPrimary.data.ok), true, 'Dirty-session setup verify should return ok=true');
+
+  const dirtyLoginPrimary = await apiRequest<{ user?: { email?: string } }>(
+    baseUrl,
+    '/api/portal/auth/login',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: dirtyPrimaryEmail,
+        password: dirtyPassword,
+      }),
+    },
+    dirtySessionJar
+  );
+  assert.equal(dirtyLoginPrimary.status, 200, 'Dirty-session setup login (primary) failed');
+  assert.equal(dirtyLoginPrimary.data.user?.email, dirtyPrimaryEmail, 'Dirty-session setup login returned wrong user');
+
+  const dirtyMeBeforeSecondarySignup = await apiRequest(baseUrl, '/api/portal/auth/me', { method: 'GET' }, dirtySessionJar);
+  assert.equal(dirtyMeBeforeSecondarySignup.status, 200, 'Dirty-session setup should have active session before secondary signup');
+
+  const dirtySignupSecondary = await apiRequest<{ ok?: boolean; requiresEmailVerification?: boolean }>(
+    baseUrl,
+    '/api/portal/auth/signup',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: dirtySecondaryEmail,
+        password: dirtyPassword,
+        fullName: 'Dirty Secondary',
+        companyName: 'Dirty QA',
+        website: 'https://dirty-secondary.example.com',
+      }),
+    },
+    dirtySessionJar
+  );
+  assert.equal(dirtySignupSecondary.status, 201, 'Dirty-session secondary signup failed');
+  assert.equal(Boolean(dirtySignupSecondary.data.ok), true, 'Dirty-session secondary signup should return ok=true');
+  assert.equal(
+    Boolean(dirtySignupSecondary.data.requiresEmailVerification),
+    true,
+    'Dirty-session secondary signup should require verification'
+  );
+
+  const dirtyMeAfterSecondarySignup = await apiRequest(baseUrl, '/api/portal/auth/me', { method: 'GET' }, dirtySessionJar);
+  assert.equal(
+    dirtyMeAfterSecondarySignup.status,
+    401,
+    'Signup with an existing session must clear authentication (no auto sign-in)'
+  );
+
+  const dirtySecondaryLoginBeforeVerify = await apiRequest<{ error?: string }>(
+    baseUrl,
+    '/api/portal/auth/login',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: dirtySecondaryEmail,
+        password: dirtyPassword,
+      }),
+    },
+    dirtySessionJar
+  );
+  assert.equal(dirtySecondaryLoginBeforeVerify.status, 403, 'Secondary unverified login should be blocked');
+  assert.equal(
+    String((dirtySecondaryLoginBeforeVerify.data as any)?.error || ''),
+    'EMAIL_NOT_VERIFIED',
+    'Expected EMAIL_NOT_VERIFIED for secondary user before verification'
+  );
+
+  const dirtyVerifySecondary = await apiRequest<{ ok?: boolean }>(
+    baseUrl,
+    '/api/portal/auth/verify-email-code',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: dirtySecondaryEmail,
+        code: '00000',
+      }),
+    },
+    dirtySessionJar
+  );
+  assert.equal(dirtyVerifySecondary.status, 200, 'Secondary verify failed');
+  assert.equal(Boolean(dirtyVerifySecondary.data.ok), true, 'Secondary verify should return ok=true');
+
+  const dirtySecondaryLoginAfterVerify = await apiRequest<{ user?: { email?: string } }>(
+    baseUrl,
+    '/api/portal/auth/login',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: dirtySecondaryEmail,
+        password: dirtyPassword,
+      }),
+    },
+    dirtySessionJar
+  );
+  assert.equal(dirtySecondaryLoginAfterVerify.status, 200, 'Secondary login after verify failed');
+  assert.equal(
+    dirtySecondaryLoginAfterVerify.data.user?.email,
+    dirtySecondaryEmail,
+    'Secondary login returned unexpected user'
+  );
 
   const loginBeforeVerify = await apiRequest(
     baseUrl,
@@ -409,6 +557,7 @@ async function main() {
         checks: [
           'auth_required_before_signup',
           'signup_creates_workspace_without_session',
+          'signup_clears_existing_session_cookie',
           'login_blocked_until_email_verified',
           'resend_verification_prelogin',
           'verify_email_code',
