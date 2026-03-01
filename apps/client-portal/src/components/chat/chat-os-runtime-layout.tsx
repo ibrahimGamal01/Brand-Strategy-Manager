@@ -629,6 +629,10 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                   onDraftChange={setComposerDraft}
                   focusSignal={composerFocusSignal}
                   isStreaming={isStreaming}
+                  responseMode={preferences.responseMode}
+                  sourceFocus={preferences.sourceFocus}
+                  onResponseModeChange={(mode) => setPreference("responseMode", mode)}
+                  onSourceFocusChange={(focus) => setPreference("sourceFocus", focus)}
                   queuedMessages={queuedMessages}
                   onSend={onSend}
                   onSteerRun={(note) => runAsync(steerRun(note))}

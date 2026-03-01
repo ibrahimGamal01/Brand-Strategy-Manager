@@ -19,6 +19,10 @@ interface ChatComposerProps {
   onDraftChange: (value: string) => void;
   focusSignal?: number;
   isStreaming: boolean;
+  responseMode: "fast" | "balanced" | "deep" | "pro";
+  sourceFocus: "mixed" | "web" | "social";
+  onResponseModeChange: (mode: "fast" | "balanced" | "deep" | "pro") => void;
+  onSourceFocusChange: (focus: "mixed" | "web" | "social") => void;
   queuedMessages: QueuedMessage[];
   onSend: (content: string, mode: "send" | "queue") => void;
   onSteerRun: (note: string) => void;
@@ -35,6 +39,10 @@ export function ChatComposer({
   onDraftChange,
   focusSignal,
   isStreaming,
+  responseMode,
+  sourceFocus,
+  onResponseModeChange,
+  onSourceFocusChange,
   queuedMessages,
   onSend,
   onSteerRun,
@@ -45,7 +53,6 @@ export function ChatComposer({
   onSteer,
   contentWidthClassName = "max-w-3xl",
 }: ChatComposerProps) {
-  const [showQueue, setShowQueue] = useState(false);
   const [showSteerChips, setShowSteerChips] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -64,7 +71,7 @@ export function ChatComposer({
       return false;
     }
 
-    onSend(content, "send");
+    onSend(content, isStreaming ? "queue" : "send");
     onDraftChange("");
     return true;
   };
@@ -77,7 +84,7 @@ export function ChatComposer({
   const onComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== "Enter") return;
     // Keep multiline typing predictable and avoid accidental sends while composing (IME).
-    if (event.shiftKey || event.altKey || event.nativeEvent.isComposing) return;
+    if (event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
     dispatchMessage();
   };
@@ -93,20 +100,52 @@ export function ChatComposer({
   return (
     <section className="sticky bottom-0 z-20 border-t border-zinc-200 bg-gradient-to-t from-white via-white/95 to-white/75 px-0 pb-3 pt-3 supports-[backdrop-filter]:backdrop-blur sm:pb-4">
       <div className={`mx-auto w-full ${contentWidthClassName} px-5 sm:px-8 xl:px-10`}>
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+          <div className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-1 py-1">
+            {(["fast", "balanced", "deep", "pro"] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => onResponseModeChange(mode)}
+                className={`rounded-full px-2.5 py-1 capitalize ${
+                  responseMode === mode ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"
+                }`}
+              >
+                {mode}
+              </button>
+            ))}
+          </div>
+          <div className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-1 py-1">
+            {(["mixed", "web", "social"] as const).map((focus) => (
+              <button
+                key={focus}
+                type="button"
+                onClick={() => onSourceFocusChange(focus)}
+                className={`rounded-full px-2.5 py-1 capitalize ${
+                  sourceFocus === focus ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"
+                }`}
+              >
+                {focus}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="mb-2 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 text-xs text-zinc-500">
             <span className={`rounded-full px-2 py-1 ${isStreaming ? "bg-emerald-50 text-emerald-700" : "bg-zinc-100 text-zinc-600"}`}>
               {isStreaming ? "Generating" : "Ready"}
             </span>
             {queuedMessages.length > 0 ? (
-              <button
-                type="button"
-                onClick={() => setShowQueue((prev) => !prev)}
-                className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-2 py-1 text-zinc-600 hover:bg-zinc-100"
-              >
+              <span className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-2 py-1 text-zinc-600">
                 <ListOrdered className="h-3.5 w-3.5" />
                 Queue {queuedMessages.length}
-              </button>
+              </span>
+            ) : null}
+            {isStreaming ? (
+              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-emerald-700">
+                Active run: send will queue
+              </span>
             ) : null}
           </div>
           <button
@@ -134,12 +173,15 @@ export function ChatComposer({
           </div>
         ) : null}
 
-        {showQueue && queuedMessages.length > 0 ? (
+        {queuedMessages.length > 0 ? (
           <div className="mb-2.5 rounded-2xl border border-zinc-200 bg-zinc-50/90 p-2.5">
             <div className="bat-scrollbar max-h-44 space-y-1.5 overflow-y-auto pr-1">
               {queuedMessages.map((item, index) => (
                 <div key={item.id} className="flex items-start gap-2 rounded-xl border border-zinc-200 bg-white p-2">
-                  <p className="flex-1 text-sm text-zinc-700">{item.content}</p>
+                  <div className="flex-1">
+                    <p className="mb-1 text-[11px] uppercase tracking-wide text-zinc-400">Queued {index + 1}</p>
+                    <p className="text-sm text-zinc-700">{item.content}</p>
+                  </div>
                   <div className="flex items-center gap-1">
                     <button
                       type="button"
@@ -220,7 +262,8 @@ export function ChatComposer({
               type="submit"
               disabled={!draft.trim()}
               className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-zinc-900 text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300"
-              aria-label="Send message"
+              aria-label={isStreaming ? "Queue message" : "Send message"}
+              title={isStreaming ? "Queue message" : "Send message"}
             >
               <SendHorizontal className="h-4 w-4" />
             </button>

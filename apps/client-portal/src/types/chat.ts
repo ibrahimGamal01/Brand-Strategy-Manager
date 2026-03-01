@@ -18,6 +18,12 @@ export interface ChatMessage {
     assumptions: string[];
     nextSteps: string[];
     evidence: MessageCitation[];
+    model?: {
+      requested: string;
+      used: string;
+      fallbackUsed: boolean;
+      fallbackFrom?: string;
+    };
     runId?: string;
     ledgerVersionId?: string;
   };
@@ -150,6 +156,7 @@ export interface LibraryItem {
 }
 
 export interface SessionPreferences {
+  responseMode: "fast" | "balanced" | "deep" | "pro";
   tone: "balanced" | "detailed" | "concise";
   sourceFocus: "mixed" | "web" | "social";
   transparency: boolean;

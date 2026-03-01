@@ -69,6 +69,7 @@ type UseRuntimeWorkspaceResult = {
 };
 
 const DEFAULT_PREFERENCES: SessionPreferences = {
+  responseMode: "balanced",
   tone: "detailed",
   sourceFocus: "mixed",
   transparency: true,
@@ -464,6 +465,7 @@ function mapMessages(messages: Array<Record<string, unknown>>): ChatMessage[] {
     )
     .map((message) => {
       const reasoningRaw = isRecord(message.reasoningJson) ? message.reasoningJson : null;
+      const modelRaw = reasoningRaw && isRecord(reasoningRaw.model) ? reasoningRaw.model : null;
       const blocks = normalizeMessageBlocks(message.blocksJson);
       const evidenceRaw = reasoningRaw && Array.isArray(reasoningRaw.evidence) ? reasoningRaw.evidence : [];
       const evidence = evidenceRaw
@@ -498,6 +500,22 @@ function mapMessages(messages: Array<Record<string, unknown>>): ChatMessage[] {
                 assumptions: asArrayOfStrings(reasoningRaw.assumptions),
                 nextSteps: asArrayOfStrings(reasoningRaw.nextSteps),
                 evidence,
+                ...(modelRaw &&
+                typeof modelRaw.requested === "string" &&
+                modelRaw.requested.trim() &&
+                typeof modelRaw.used === "string" &&
+                modelRaw.used.trim()
+                  ? {
+                      model: {
+                        requested: modelRaw.requested.trim(),
+                        used: modelRaw.used.trim(),
+                        fallbackUsed: Boolean(modelRaw.fallbackUsed),
+                        ...(typeof modelRaw.fallbackFrom === "string" && modelRaw.fallbackFrom.trim()
+                          ? { fallbackFrom: modelRaw.fallbackFrom.trim() }
+                          : {}),
+                      },
+                    }
+                  : {}),
                 ...(typeof reasoningRaw.runId === "string" && reasoningRaw.runId.trim()
                   ? { runId: reasoningRaw.runId.trim() }
                   : {}),
@@ -1148,15 +1166,23 @@ function mapRuns(activeRuns: Array<Record<string, unknown>>, events: Array<Recor
 
 function buildPolicyFromPreferences(preferences: SessionPreferences): Record<string, unknown> {
   const normalizedTone = preferences.tone === "concise" ? "balanced" : preferences.tone;
+  const mode = preferences.responseMode || "balanced";
+  const modeMaxToolRuns =
+    mode === "fast" ? 3 : mode === "pro" ? 10 : mode === "deep" ? 8 : normalizedTone === "detailed" ? 6 : 4;
+  const modeMaxAutoContinuations = mode === "fast" ? 0 : mode === "pro" ? 2 : mode === "deep" ? 2 : 1;
+  const modeTargetLength = mode === "fast" ? "short" : mode === "pro" ? "long" : mode === "deep" ? "long" : "medium";
   return {
     autoContinue: !preferences.askQuestionsFirst,
-    maxAutoContinuations: 1,
-    maxToolRuns: normalizedTone === "detailed" ? 6 : 4,
+    maxAutoContinuations: modeMaxAutoContinuations,
+    maxToolRuns: modeMaxToolRuns,
     toolConcurrency: preferences.sourceFocus === "mixed" ? 3 : 2,
     allowMutationTools: false,
-    maxToolMs: 30000,
+    maxToolMs: mode === "fast" ? 20000 : 30000,
     sourceFocus: preferences.sourceFocus,
     transparency: preferences.transparency,
+    mode,
+    targetLength: modeTargetLength,
+    strictValidation: mode === "pro",
   };
 }
 
