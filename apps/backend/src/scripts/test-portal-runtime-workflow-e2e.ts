@@ -88,7 +88,9 @@ async function main() {
   const password = 'TestPass123!';
 
   const signup = await apiRequest<{
-    workspaces?: Array<{ id?: string }>;
+    ok?: boolean;
+    workspaceId?: string;
+    requiresEmailVerification?: boolean;
   }>(
     baseUrl,
     '/api/portal/auth/signup',
@@ -100,13 +102,59 @@ async function main() {
         password,
         fullName: 'Portal Workflow E2E',
         companyName: 'Workflow QA',
+        website: 'https://workflow-qa.example.com',
+        websites: ['https://www.workflow-qa.example.com/about'],
       }),
     },
     jar
   );
   assert.equal(signup.status, 201, 'Signup failed');
-  const workspaceId = String(signup.data.workspaces?.[0]?.id || '');
+  assert.equal(Boolean(signup.data.ok), true, 'Signup should return ok=true');
+  assert.equal(Boolean(signup.data.requiresEmailVerification), true, 'Signup should require email verification');
+  const workspaceId = String(signup.data.workspaceId || '');
   assert.ok(workspaceId, 'Workspace missing after signup');
+
+  const loginBeforeVerify = await apiRequest<{ error?: string }>(
+    baseUrl,
+    '/api/portal/auth/login',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    },
+    jar
+  );
+  assert.equal(loginBeforeVerify.status, 403, 'Unverified login should be blocked');
+  assert.equal(String(loginBeforeVerify.data.error || ''), 'EMAIL_NOT_VERIFIED', 'Expected EMAIL_NOT_VERIFIED before verification');
+
+  const verifyCode = await apiRequest<{ ok?: boolean }>(
+    baseUrl,
+    '/api/portal/auth/verify-email-code',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email,
+        code: '00000',
+      }),
+    },
+    jar
+  );
+  assert.equal(verifyCode.status, 200, 'Email code verification failed');
+  assert.equal(Boolean(verifyCode.data.ok), true, 'Email code verification should return ok=true');
+
+  const login = await apiRequest<{ user?: { email?: string } }>(
+    baseUrl,
+    '/api/portal/auth/login',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    },
+    jar
+  );
+  assert.equal(login.status, 200, 'Login failed after verification');
+  assert.equal(String(login.data.user?.email || ''), email, 'Login returned unexpected user');
 
   const intakeSubmit = await apiRequest<{ success?: boolean }>(
     baseUrl,
@@ -320,7 +368,7 @@ async function main() {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        content: 'find competitors across web social and community, then summarize',
+        content: 'Summarize the current workspace intelligence in 3 concise bullets and include next action.',
         userId: 'workflow-e2e',
         mode: 'send',
       }),
@@ -336,7 +384,7 @@ async function main() {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        content: 'second message sent immediately after first',
+        content: 'Queued follow-up: keep it extra concise.',
         userId: 'workflow-e2e',
         mode: 'send',
       }),
@@ -420,7 +468,7 @@ async function main() {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        content: 'run deep competitor and report workflow now',
+        content: 'Run a website crawl for https://workflow-qa.example.com and report progress.',
         userId: 'workflow-e2e',
         mode: 'send',
       }),
