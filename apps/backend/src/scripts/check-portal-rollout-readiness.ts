@@ -28,8 +28,9 @@ function getBaseUrls() {
   const backendBaseUrl = String(
     process.env.BACKEND_BASE_URL || process.env.PORTAL_E2E_BASE_URL || 'http://localhost:3001'
   ).replace(/\/+$/, '');
+  const backendAuthBaseUrl = String(process.env.BACKEND_AUTH_BASE_URL || backendBaseUrl).replace(/\/+$/, '');
   const portalBaseUrl = String(process.env.PORTAL_UI_E2E_BASE_URL || 'http://localhost:3000').replace(/\/+$/, '');
-  return { backendBaseUrl, portalBaseUrl };
+  return { backendBaseUrl, backendAuthBaseUrl, portalBaseUrl };
 }
 
 function toErrorMessage(error: unknown): string {
@@ -505,7 +506,7 @@ async function runAuthContractCheck(backendBaseUrl: string): Promise<CheckResult
 
 async function main() {
   const repoRoot = process.cwd();
-  const { backendBaseUrl, portalBaseUrl } = getBaseUrls();
+  const { backendBaseUrl, backendAuthBaseUrl, portalBaseUrl } = getBaseUrls();
 
   const checks: CheckResult[] = [];
   checks.push(await runGitCheck(repoRoot));
@@ -513,13 +514,14 @@ async function main() {
   checks.push(runAliasCheck(portalBaseUrl));
   checks.push(await runHealthCheck(backendBaseUrl));
   checks.push(await runSignupHydrationCheck(portalBaseUrl));
-  checks.push(await runAuthContractCheck(backendBaseUrl));
+  checks.push(await runAuthContractCheck(backendAuthBaseUrl));
 
   const ok = checks.every((check) => check.ok);
   const summary = {
     ok,
     timestamp: new Date().toISOString(),
     backendBaseUrl,
+    backendAuthBaseUrl,
     portalBaseUrl,
     checks,
   };
