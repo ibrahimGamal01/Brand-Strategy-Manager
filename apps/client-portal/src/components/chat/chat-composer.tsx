@@ -1,8 +1,8 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, ListOrdered, SendHorizontal, Sparkles, Square, X } from "lucide-react";
-import { QueuedMessage } from "@/types/chat";
+import { ChatInputOptions, ChatInputSourceScope, QueuedMessage } from "@/types/chat";
 
 const steerChipSet = [
   "Run V3 finder",
@@ -11,7 +11,16 @@ const steerChipSet = [
   "Make it a PDF",
   "Focus on TikTok",
   "Focus on Web evidence",
-  "Ask me questions first"
+  "Ask me questions first",
+];
+
+const sourceScopeOptions: Array<{ key: keyof ChatInputSourceScope; label: string }> = [
+  { key: "workspaceData", label: "Workspace data" },
+  { key: "libraryPinned", label: "Library pinned" },
+  { key: "uploadedDocs", label: "Uploaded docs" },
+  { key: "webSearch", label: "Web search" },
+  { key: "liveWebsiteCrawl", label: "Live website crawl" },
+  { key: "socialIntel", label: "Social intelligence" },
 ];
 
 interface ChatComposerProps {
@@ -20,18 +29,40 @@ interface ChatComposerProps {
   focusSignal?: number;
   isStreaming: boolean;
   responseMode: "fast" | "balanced" | "deep" | "pro";
-  sourceFocus: "mixed" | "web" | "social";
+  sourceScope: ChatInputSourceScope;
   onResponseModeChange: (mode: "fast" | "balanced" | "deep" | "pro") => void;
-  onSourceFocusChange: (focus: "mixed" | "web" | "social") => void;
+  onSourceScopeChange: (key: keyof ChatInputSourceScope, value: boolean) => void;
   queuedMessages: QueuedMessage[];
-  onSend: (content: string, mode: "send" | "queue") => void;
+  onSend: (content: string, mode: "send" | "queue" | "interrupt") => void;
   onSteerRun: (note: string) => void;
-  onSteerQueued: (id: string, content: string) => void;
+  onSteerQueued: (id: string, input: {
+    content?: string;
+    inputOptions?: ChatInputOptions;
+    steerNote?: string;
+    runNow?: boolean;
+  }) => void;
   onStop: () => void;
   onReorderQueue: (from: number, to: number) => void;
   onDeleteQueued: (id: string) => void;
   onSteer: (chip: string) => void;
   contentWidthClassName?: string;
+}
+
+function defaultTargetLengthForMode(mode: "fast" | "balanced" | "deep" | "pro"): "short" | "medium" | "long" {
+  if (mode === "fast") return "short";
+  if (mode === "deep" || mode === "pro") return "long";
+  return "medium";
+}
+
+function compactScopeBadges(scope: ChatInputSourceScope): string[] {
+  const labels: string[] = [];
+  if (scope.webSearch) labels.push("Web");
+  if (scope.liveWebsiteCrawl) labels.push("Crawl");
+  if (scope.socialIntel) labels.push("Social");
+  if (scope.uploadedDocs) labels.push("Docs");
+  if (scope.libraryPinned) labels.push("Pinned");
+  if (scope.workspaceData) labels.push("Workspace");
+  return labels.slice(0, 4);
 }
 
 export function ChatComposer({
@@ -40,9 +71,9 @@ export function ChatComposer({
   focusSignal,
   isStreaming,
   responseMode,
-  sourceFocus,
+  sourceScope,
   onResponseModeChange,
-  onSourceFocusChange,
+  onSourceScopeChange,
   queuedMessages,
   onSend,
   onSteerRun,
@@ -54,7 +85,19 @@ export function ChatComposer({
   contentWidthClassName = "max-w-3xl",
 }: ChatComposerProps) {
   const [showSteerChips, setShowSteerChips] = useState(false);
+  const [expandedSteerId, setExpandedSteerId] = useState<string | null>(null);
+  const [steerEdits, setSteerEdits] = useState<Record<string, string>>({});
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const currentInputOptions = useMemo<ChatInputOptions>(
+    () => ({
+      modeLabel: responseMode,
+      sourceScope,
+      targetLength: defaultTargetLengthForMode(responseMode),
+      strictValidation: responseMode === "pro",
+    }),
+    [responseMode, sourceScope]
+  );
 
   useEffect(() => {
     if (typeof focusSignal !== "number") return;
@@ -65,13 +108,13 @@ export function ChatComposer({
     textarea.setSelectionRange(cursor, cursor);
   }, [focusSignal]);
 
-  const dispatchMessage = () => {
+  const dispatchMessage = (modeOverride?: "send" | "queue" | "interrupt") => {
     const content = draft.trim();
     if (!content) {
       return false;
     }
 
-    onSend(content, isStreaming ? "queue" : "send");
+    onSend(content, modeOverride || (isStreaming ? "queue" : "send"));
     onDraftChange("");
     return true;
   };
@@ -83,9 +126,14 @@ export function ChatComposer({
 
   const onComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== "Enter") return;
-    // Keep multiline typing predictable and avoid accidental sends while composing (IME).
     if (event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
+
+    if (event.metaKey || event.ctrlKey) {
+      dispatchMessage("interrupt");
+      return;
+    }
+
     dispatchMessage();
   };
 
@@ -95,6 +143,12 @@ export function ChatComposer({
     if (!content) return;
     onSteerRun(content);
     onDraftChange("");
+  };
+
+  const readSteerDraft = (item: QueuedMessage): string => {
+    const edited = steerEdits[item.id];
+    if (typeof edited === "string") return edited;
+    return item.steer?.note || "";
   };
 
   return (
@@ -115,19 +169,23 @@ export function ChatComposer({
               </button>
             ))}
           </div>
-          <div className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-1 py-1">
-            {(["mixed", "web", "social"] as const).map((focus) => (
-              <button
-                key={focus}
-                type="button"
-                onClick={() => onSourceFocusChange(focus)}
-                className={`rounded-full px-2.5 py-1 capitalize ${
-                  sourceFocus === focus ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"
-                }`}
-              >
-                {focus}
-              </button>
-            ))}
+
+          <div className="bat-scrollbar inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-full border border-zinc-200 bg-white px-1 py-1">
+            {sourceScopeOptions.map((option) => {
+              const active = sourceScope[option.key];
+              return (
+                <button
+                  key={option.key}
+                  type="button"
+                  onClick={() => onSourceScopeChange(option.key, !active)}
+                  className={`whitespace-nowrap rounded-full px-2.5 py-1 ${
+                    active ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -144,7 +202,7 @@ export function ChatComposer({
             ) : null}
             {isStreaming ? (
               <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-emerald-700">
-                Active run: send will queue
+                Active run: Enter queues, Cmd/Ctrl+Enter interrupts + sends
               </span>
             ) : null}
           </div>
@@ -175,50 +233,122 @@ export function ChatComposer({
 
         {queuedMessages.length > 0 ? (
           <div className="mb-2.5 rounded-2xl border border-zinc-200 bg-zinc-50/90 p-2.5">
-            <div className="bat-scrollbar max-h-44 space-y-1.5 overflow-y-auto pr-1">
-              {queuedMessages.map((item, index) => (
-                <div key={item.id} className="flex items-start gap-2 rounded-xl border border-zinc-200 bg-white p-2">
-                  <div className="flex-1">
-                    <p className="mb-1 text-[11px] uppercase tracking-wide text-zinc-400">Queued {index + 1}</p>
-                    <p className="text-sm text-zinc-700">{item.content}</p>
+            <div className="bat-scrollbar max-h-56 space-y-1.5 overflow-y-auto pr-1">
+              {queuedMessages.map((item, index) => {
+                const options = item.inputOptions || currentInputOptions;
+                const scopeBadges = compactScopeBadges(options.sourceScope);
+                const steerDraft = readSteerDraft(item);
+                const showSteerEditor = expandedSteerId === item.id;
+                return (
+                  <div key={item.id} className="rounded-xl border border-zinc-200 bg-white p-2">
+                    <div className="flex items-start gap-2">
+                      <div className="flex-1">
+                        <p className="mb-1 text-[11px] uppercase tracking-wide text-zinc-400">Queued {item.position || index + 1}</p>
+                        <p className="text-sm text-zinc-700">{item.content}</p>
+                        <div className="mt-1.5 flex flex-wrap gap-1">
+                          <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-600">
+                            {options.modeLabel}
+                          </span>
+                          <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-600">
+                            {options.targetLength}
+                          </span>
+                          {scopeBadges.map((badge) => (
+                            <span key={`${item.id}-${badge}`} className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-600">
+                              {badge}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          aria-label="Move up"
+                          onClick={() => onReorderQueue(index, index - 1)}
+                          className="rounded-full border border-zinc-200 p-1 text-zinc-600 hover:bg-zinc-100"
+                        >
+                          <ArrowUp className="h-3 w-3" />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="Move down"
+                          onClick={() => onReorderQueue(index, index + 1)}
+                          className="rounded-full border border-zinc-200 p-1 text-zinc-600 hover:bg-zinc-100"
+                        >
+                          <ArrowDown className="h-3 w-3" />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="Remove"
+                          onClick={() => onDeleteQueued(item.id)}
+                          className="rounded-full border border-zinc-200 p-1 text-zinc-600 hover:bg-zinc-100"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="Steer queued message"
+                          onClick={() => {
+                            setExpandedSteerId((current) => (current === item.id ? null : item.id));
+                            if (steerEdits[item.id] === undefined) {
+                              setSteerEdits((prev) => ({
+                                ...prev,
+                                [item.id]: item.steer?.note || "",
+                              }));
+                            }
+                          }}
+                          className="rounded-full border border-zinc-200 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
+                        >
+                          Steer
+                        </button>
+                      </div>
+                    </div>
+
+                    {showSteerEditor ? (
+                      <div className="mt-2 rounded-xl border border-zinc-200 bg-zinc-50 p-2">
+                        <textarea
+                          value={steerDraft}
+                          onChange={(event) =>
+                            setSteerEdits((prev) => ({
+                              ...prev,
+                              [item.id]: event.target.value,
+                            }))
+                          }
+                          placeholder="Add steer note for this queued message"
+                          className="min-h-16 w-full resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800 outline-none focus:border-zinc-400 focus:ring-2 focus:ring-zinc-200"
+                        />
+                        <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onSteerQueued(item.id, {
+                                steerNote: steerDraft,
+                                inputOptions: options,
+                              })
+                            }
+                            className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
+                          >
+                            Save steer
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onSteerQueued(item.id, {
+                                steerNote: steerDraft,
+                                inputOptions: options,
+                                runNow: true,
+                              })
+                            }
+                            className="rounded-full bg-zinc-900 px-3 py-1.5 text-xs text-white hover:bg-zinc-800"
+                          >
+                            Steer + run now
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      aria-label="Move up"
-                      onClick={() => onReorderQueue(index, index - 1)}
-                      className="rounded-full border border-zinc-200 p-1 text-zinc-600 hover:bg-zinc-100"
-                    >
-                      <ArrowUp className="h-3 w-3" />
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="Move down"
-                      onClick={() => onReorderQueue(index, index + 1)}
-                      className="rounded-full border border-zinc-200 p-1 text-zinc-600 hover:bg-zinc-100"
-                    >
-                      <ArrowDown className="h-3 w-3" />
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="Remove"
-                      onClick={() => onDeleteQueued(item.id)}
-                      className="rounded-full border border-zinc-200 p-1 text-zinc-600 hover:bg-zinc-100"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="Steer run with this queued message"
-                      disabled={!isStreaming}
-                      onClick={() => onSteerQueued(item.id, item.content)}
-                      className="rounded-full border border-zinc-200 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-55"
-                    >
-                      Steer
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         ) : null}
@@ -234,7 +364,7 @@ export function ChatComposer({
           />
 
           <p className="pointer-events-none absolute bottom-3 left-4 text-xs text-zinc-400">
-            Enter to send, Shift+Enter for newline
+            Enter to send/queue, Shift+Enter for newline, Cmd/Ctrl+Enter to interrupt + send
           </p>
 
           <div className="absolute bottom-2.5 right-2.5 flex items-center gap-2">

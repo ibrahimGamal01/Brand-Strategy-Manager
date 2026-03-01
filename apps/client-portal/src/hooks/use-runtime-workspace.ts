@@ -14,6 +14,7 @@ import {
   listRuntimeMessages,
   listRuntimeQueue,
   listRuntimeThreads,
+  patchRuntimeQueueItem,
   pinRuntimeBranch,
   resolveRuntimeDecision,
   reorderRuntimeQueue,
@@ -23,6 +24,8 @@ import {
   RuntimeSocketMessage,
 } from "@/lib/runtime-api";
 import {
+  ChatInputOptions,
+  ChatInputSourceScope,
   ChatMessageBlock,
   ChatMessage,
   DecisionItem,
@@ -58,10 +61,16 @@ type UseRuntimeWorkspaceResult = {
   createThread: (title: string) => Promise<void>;
   createBranch: (name: string, forkedFromMessageId?: string) => Promise<void>;
   pinBranch: (branchId: string) => Promise<void>;
-  sendMessage: (content: string, mode: "send" | "queue") => Promise<void>;
+  sendMessage: (content: string, mode: "send" | "queue" | "interrupt") => Promise<void>;
   interruptRun: () => Promise<void>;
   reorderQueue: (from: number, to: number) => Promise<void>;
   removeQueued: (id: string) => Promise<void>;
+  steerQueued: (id: string, input: {
+    content?: string;
+    inputOptions?: ChatInputOptions;
+    steerNote?: string;
+    runNow?: boolean;
+  }) => Promise<void>;
   resolveDecision: (decisionId: string, option: string) => Promise<void>;
   steerRun: (note: string) => Promise<void>;
   setPreference: <K extends keyof SessionPreferences>(key: K, value: SessionPreferences[K]) => void;
@@ -71,9 +80,17 @@ type UseRuntimeWorkspaceResult = {
 const DEFAULT_PREFERENCES: SessionPreferences = {
   responseMode: "balanced",
   tone: "detailed",
-  sourceFocus: "mixed",
+  sourceScope: {
+    workspaceData: true,
+    libraryPinned: true,
+    uploadedDocs: true,
+    webSearch: true,
+    liveWebsiteCrawl: true,
+    socialIntel: true,
+  },
   transparency: true,
   askQuestionsFirst: false,
+  targetLength: "medium",
 };
 
 const ACTIVE_POLL_INTERVAL_MS = 1200;
@@ -456,6 +473,27 @@ function normalizeMessageBlocks(value: unknown): ChatMessageBlock[] {
   ];
 }
 
+function normalizeMessageInputOptions(value: unknown): ChatInputOptions | undefined {
+  if (!isRecord(value)) return undefined;
+  const modeRaw = String(value.modeLabel || "").trim().toLowerCase();
+  const modeLabel: ChatInputOptions["modeLabel"] =
+    modeRaw === "fast" || modeRaw === "deep" || modeRaw === "pro" ? (modeRaw as ChatInputOptions["modeLabel"]) : "balanced";
+  const targetRaw = String(value.targetLength || "").trim().toLowerCase();
+  const targetLength: ChatInputOptions["targetLength"] =
+    targetRaw === "short" || targetRaw === "long" ? (targetRaw as ChatInputOptions["targetLength"]) : "medium";
+  const sourceScope = normalizeSourceScope(isRecord(value.sourceScope) ? (value.sourceScope as Partial<ChatInputSourceScope>) : {});
+  return {
+    modeLabel,
+    targetLength,
+    sourceScope,
+    ...(typeof value.steerNote === "string" && value.steerNote.trim()
+      ? { steerNote: value.steerNote.trim() }
+      : {}),
+    ...(typeof value.strictValidation === "boolean" ? { strictValidation: value.strictValidation } : {}),
+    ...(typeof value.pauseAfterPlanning === "boolean" ? { pauseAfterPlanning: value.pauseAfterPlanning } : {}),
+  };
+}
+
 function mapMessages(messages: Array<Record<string, unknown>>): ChatMessage[] {
   return messages
     .filter(
@@ -467,6 +505,7 @@ function mapMessages(messages: Array<Record<string, unknown>>): ChatMessage[] {
       const reasoningRaw = isRecord(message.reasoningJson) ? message.reasoningJson : null;
       const modelRaw = reasoningRaw && isRecord(reasoningRaw.model) ? reasoningRaw.model : null;
       const blocks = normalizeMessageBlocks(message.blocksJson);
+      const inputOptions = normalizeMessageInputOptions(message.inputOptionsJson);
       const evidenceRaw = reasoningRaw && Array.isArray(reasoningRaw.evidence) ? reasoningRaw.evidence : [];
       const evidence = evidenceRaw
         .map((item) => {
@@ -487,6 +526,7 @@ function mapMessages(messages: Array<Record<string, unknown>>): ChatMessage[] {
         role: toChatRole(String(message.role || "SYSTEM")),
         content: String(message.content || ""),
         createdAt: toIso(message.createdAt),
+        ...(inputOptions ? { inputOptions } : {}),
         ...(blocks.length
           ? {
               blocks,
@@ -1164,25 +1204,61 @@ function mapRuns(activeRuns: Array<Record<string, unknown>>, events: Array<Recor
   return mapRecentRunsFromEvents(events);
 }
 
+function normalizeSourceScope(scope: Partial<ChatInputSourceScope> | undefined): ChatInputSourceScope {
+  return {
+    workspaceData: scope?.workspaceData !== false,
+    libraryPinned: scope?.libraryPinned !== false,
+    uploadedDocs: scope?.uploadedDocs !== false,
+    webSearch: scope?.webSearch !== false,
+    liveWebsiteCrawl: scope?.liveWebsiteCrawl !== false,
+    socialIntel: scope?.socialIntel !== false,
+  };
+}
+
+function defaultTargetLengthForMode(mode: SessionPreferences["responseMode"]): SessionPreferences["targetLength"] {
+  if (mode === "fast") return "short";
+  if (mode === "deep" || mode === "pro") return "long";
+  return "medium";
+}
+
+function buildInputOptionsFromPreferences(
+  preferences: SessionPreferences,
+  options?: { steerNote?: string }
+): ChatInputOptions {
+  const mode = preferences.responseMode || "balanced";
+  const targetLength = preferences.targetLength || defaultTargetLengthForMode(mode);
+  return {
+    modeLabel: mode,
+    sourceScope: normalizeSourceScope(preferences.sourceScope),
+    targetLength,
+    strictValidation: mode === "pro",
+    ...(typeof options?.steerNote === "string" && options.steerNote.trim()
+      ? { steerNote: options.steerNote.trim().slice(0, 1000) }
+      : {}),
+  };
+}
+
 function buildPolicyFromPreferences(preferences: SessionPreferences): Record<string, unknown> {
   const normalizedTone = preferences.tone === "concise" ? "balanced" : preferences.tone;
   const mode = preferences.responseMode || "balanced";
+  const sourceScope = normalizeSourceScope(preferences.sourceScope);
+  const targetLength = preferences.targetLength || defaultTargetLengthForMode(mode);
   const modeMaxToolRuns =
     mode === "fast" ? 3 : mode === "pro" ? 10 : mode === "deep" ? 8 : normalizedTone === "detailed" ? 6 : 4;
   const modeMaxAutoContinuations = mode === "fast" ? 0 : mode === "pro" ? 2 : mode === "deep" ? 2 : 1;
-  const modeTargetLength = mode === "fast" ? "short" : mode === "pro" ? "long" : mode === "deep" ? "long" : "medium";
   return {
     autoContinue: !preferences.askQuestionsFirst,
     maxAutoContinuations: modeMaxAutoContinuations,
     maxToolRuns: modeMaxToolRuns,
-    toolConcurrency: preferences.sourceFocus === "mixed" ? 3 : 2,
+    toolConcurrency: sourceScope.webSearch && sourceScope.socialIntel ? 3 : 2,
     allowMutationTools: false,
     maxToolMs: mode === "fast" ? 20000 : 30000,
-    sourceFocus: preferences.sourceFocus,
     transparency: preferences.transparency,
-    mode,
-    targetLength: modeTargetLength,
+    responseMode: mode,
+    targetLength,
     strictValidation: mode === "pro",
+    sourceScope,
+    pauseAfterPlanning: false,
   };
 }
 
@@ -1204,6 +1280,33 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
   const [activeRunIdsByBranch, setActiveRunIdsByBranch] = useState<Record<string, string[]>>({});
 
   const [preferences, setPreferences] = useState<SessionPreferences>(DEFAULT_PREFERENCES);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const storageKey = `bat.runtime.preferences.${workspaceId}`;
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw) as Partial<SessionPreferences>;
+      setPreferences((previous) => ({
+        ...previous,
+        ...(parsed || {}),
+        sourceScope: normalizeSourceScope(parsed?.sourceScope),
+        targetLength:
+          parsed?.targetLength === "short" || parsed?.targetLength === "long" || parsed?.targetLength === "medium"
+            ? parsed.targetLength
+            : previous.targetLength,
+      }));
+    } catch {
+      // Ignore malformed local storage payloads.
+    }
+  }, [workspaceId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const storageKey = `bat.runtime.preferences.${workspaceId}`;
+    window.localStorage.setItem(storageKey, JSON.stringify(preferences));
+  }, [preferences, workspaceId]);
 
   const pollerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const libraryPollerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1303,11 +1406,24 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
         setDecisions(mapDecisionsFromEvents(events, activeRuns));
         setProcessRuns(mapRuns(activeRuns, events));
         setQueuedMessages(
-          (queuePayload.queue || []).map((item) => ({
-            id: String(item.id),
-            content: String(item.content),
-            createdAt: toIso(item.createdAt),
-          }))
+          (queuePayload.queue || []).map((item) => {
+            const inputOptions = normalizeMessageInputOptions(item.inputOptionsJson);
+            return {
+              id: String(item.id),
+              content: String(item.content),
+              createdAt: toIso(item.createdAt),
+              position: Number.isFinite(Number(item.position)) ? Number(item.position) : undefined,
+              ...(inputOptions ? { inputOptions } : {}),
+              ...(isRecord(item.steerJson)
+                ? {
+                    steer: {
+                      ...(typeof item.steerJson.note === "string" ? { note: item.steerJson.note } : {}),
+                      ...(typeof item.steerJson.updatedAt === "string" ? { updatedAt: item.steerJson.updatedAt } : {}),
+                    },
+                  }
+                : {}),
+            };
+          })
         );
         setError(null);
       } catch (fetchError: any) {
@@ -1362,16 +1478,18 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
   }, [activeBranchId, syncBranch, syncLibrary]);
 
   const sendMessage = useCallback(
-    async (content: string, mode: "send" | "queue") => {
+    async (content: string, mode: "send" | "queue" | "interrupt") => {
       if (!activeBranchId) return;
       const trimmed = content.trim();
       if (!trimmed) return;
 
+      const inputOptions = buildInputOptionsFromPreferences(preferences);
       await sendRuntimeMessage(workspaceId, activeBranchId, {
         content: trimmed,
         userId: "portal-user",
         mode,
         policy: buildPolicyFromPreferences(preferences),
+        inputOptions,
       });
 
       await syncBranch(activeBranchId);
@@ -1420,6 +1538,66 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
       await syncBranch(activeBranchId);
     },
     [activeBranchId, syncBranch, workspaceId]
+  );
+
+  const steerQueued = useCallback(
+    async (
+      id: string,
+      input: {
+        content?: string;
+        inputOptions?: ChatInputOptions;
+        steerNote?: string;
+        runNow?: boolean;
+      }
+    ) => {
+      if (!activeBranchId) return;
+      const queued = queuedMessages.find((item) => item.id === id);
+      if (!queued) return;
+
+      const content = typeof input.content === "string" ? input.content.trim() : queued.content;
+      if (!content) return;
+
+      const mergedInputOptions: ChatInputOptions =
+        input.inputOptions ||
+        queued.inputOptions ||
+        buildInputOptionsFromPreferences(preferences);
+      const steerNote = typeof input.steerNote === "string" ? input.steerNote.trim() : undefined;
+
+      if (input.runNow) {
+        await patchRuntimeQueueItem(workspaceId, activeBranchId, id, {
+          content,
+          inputOptions: mergedInputOptions,
+          ...(steerNote !== undefined ? { steerNote } : {}),
+        });
+        await cancelRuntimeQueueItem(workspaceId, activeBranchId, id);
+        const runtimePreferences: SessionPreferences = {
+          ...preferences,
+          responseMode: mergedInputOptions.modeLabel,
+          targetLength: mergedInputOptions.targetLength,
+          sourceScope: normalizeSourceScope(mergedInputOptions.sourceScope),
+        };
+        await sendRuntimeMessage(workspaceId, activeBranchId, {
+          content,
+          userId: "portal-user",
+          mode: "interrupt",
+          policy: buildPolicyFromPreferences(runtimePreferences),
+          inputOptions: {
+            ...mergedInputOptions,
+            ...(steerNote ? { steerNote } : {}),
+          },
+        });
+        await syncBranch(activeBranchId);
+        return;
+      }
+
+      await patchRuntimeQueueItem(workspaceId, activeBranchId, id, {
+        content,
+        inputOptions: mergedInputOptions,
+        ...(steerNote !== undefined ? { steerNote } : {}),
+      });
+      await syncBranch(activeBranchId);
+    },
+    [activeBranchId, preferences, queuedMessages, syncBranch, workspaceId]
   );
 
   const resolveDecision = useCallback(
@@ -1479,10 +1657,20 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
   );
 
   const setPreference = useCallback(<K extends keyof SessionPreferences>(key: K, value: SessionPreferences[K]) => {
-    setPreferences((prev) => ({
-      ...prev,
-      [key]: value,
-    }));
+    setPreferences((prev) => {
+      const next: SessionPreferences = {
+        ...prev,
+        [key]: value,
+      } as SessionPreferences;
+
+      if (key === "responseMode") {
+        next.targetLength = defaultTargetLengthForMode(value as SessionPreferences["responseMode"]);
+      }
+      if (key === "sourceScope") {
+        next.sourceScope = normalizeSourceScope(value as Partial<ChatInputSourceScope>);
+      }
+      return next;
+    });
   }, []);
 
   const isBranchHot = useMemo(
@@ -1818,6 +2006,7 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
     interruptRun,
     reorderQueue,
     removeQueued,
+    steerQueued,
     resolveDecision,
     steerRun,
     setPreference,

@@ -364,6 +364,7 @@ export type RuntimeMessageDto = {
   blocksJson?: unknown;
   citationsJson?: unknown;
   reasoningJson?: unknown;
+  inputOptionsJson?: unknown;
   createdAt: string;
 };
 
@@ -599,6 +600,26 @@ export type RuntimeQueueDto = {
   createdAt: string;
   position: number;
   status: string;
+  inputOptionsJson?: unknown;
+  steerJson?: unknown;
+};
+
+export type RuntimeInputSourceScopeDto = {
+  workspaceData: boolean;
+  libraryPinned: boolean;
+  uploadedDocs: boolean;
+  webSearch: boolean;
+  liveWebsiteCrawl: boolean;
+  socialIntel: boolean;
+};
+
+export type RuntimeInputOptionsDto = {
+  modeLabel: "fast" | "balanced" | "deep" | "pro";
+  sourceScope: RuntimeInputSourceScopeDto;
+  targetLength: "short" | "medium" | "long";
+  steerNote?: string;
+  strictValidation?: boolean;
+  pauseAfterPlanning?: boolean;
 };
 
 export async function listRuntimeQueue(workspaceId: string, branchId: string) {
@@ -647,6 +668,7 @@ export async function sendRuntimeMessage(
     userId: string;
     mode: "send" | "queue" | "interrupt";
     policy?: Record<string, unknown>;
+    inputOptions?: RuntimeInputOptionsDto;
   }
 ) {
   const response = await fetch(`/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/messages`, {
@@ -696,6 +718,25 @@ export async function reorderRuntimeQueue(workspaceId: string, branchId: string,
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ ids }),
+    credentials: "include",
+  });
+  return parseJson<{ queue: RuntimeQueueDto[] }>(response);
+}
+
+export async function patchRuntimeQueueItem(
+  workspaceId: string,
+  branchId: string,
+  itemId: string,
+  input: {
+    content?: string;
+    inputOptions?: RuntimeInputOptionsDto;
+    steerNote?: string;
+  }
+) {
+  const response = await fetch(`/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/queue/${itemId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
     credentials: "include",
   });
   return parseJson<{ queue: RuntimeQueueDto[] }>(response);

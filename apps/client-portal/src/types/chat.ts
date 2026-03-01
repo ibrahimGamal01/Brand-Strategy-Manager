@@ -12,6 +12,7 @@ export interface ChatMessage {
   content: string;
   createdAt: string;
   blocks?: ChatMessageBlock[];
+  inputOptions?: ChatInputOptions;
   reasoning?: {
     plan: string[];
     tools: string[];
@@ -62,6 +63,30 @@ export interface QueuedMessage {
   id: string;
   content: string;
   createdAt: string;
+  position?: number;
+  inputOptions?: ChatInputOptions;
+  steer?: {
+    note?: string;
+    updatedAt?: string;
+  };
+}
+
+export interface ChatInputSourceScope {
+  workspaceData: boolean;
+  libraryPinned: boolean;
+  uploadedDocs: boolean;
+  webSearch: boolean;
+  liveWebsiteCrawl: boolean;
+  socialIntel: boolean;
+}
+
+export interface ChatInputOptions {
+  modeLabel: "fast" | "balanced" | "deep" | "pro";
+  sourceScope: ChatInputSourceScope;
+  targetLength: "short" | "medium" | "long";
+  steerNote?: string;
+  strictValidation?: boolean;
+  pauseAfterPlanning?: boolean;
 }
 
 export type ProcessStatus = "running" | "waiting_input" | "done" | "failed" | "cancelled";
@@ -158,9 +183,10 @@ export interface LibraryItem {
 export interface SessionPreferences {
   responseMode: "fast" | "balanced" | "deep" | "pro";
   tone: "balanced" | "detailed" | "concise";
-  sourceFocus: "mixed" | "web" | "social";
+  sourceScope: ChatInputSourceScope;
   transparency: boolean;
   askQuestionsFirst: boolean;
+  targetLength: "short" | "medium" | "long";
 }
 
 export interface RuntimeThread {

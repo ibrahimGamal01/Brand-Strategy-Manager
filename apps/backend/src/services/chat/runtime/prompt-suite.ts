@@ -1,5 +1,6 @@
 import { openai, OpenAI } from '../../ai/openai-client';
-import type { RuntimeDecision, RuntimePlan, RuntimeToolCall, RuntimeToolResult } from './types';
+import { resolveModelForTask } from '../../ai/model-router';
+import type { RunPolicy, RuntimeDecision, RuntimePlan, RuntimeToolCall, RuntimeToolResult } from './types';
 import { TOOL_REGISTRY } from '../../ai/chat/tools/tool-registry';
 
 type PlannerInput = {
@@ -7,11 +8,7 @@ type PlannerInput = {
   branchId: string;
   userMessage: string;
   runtimeContext?: Record<string, unknown>;
-  policy: {
-    allowMutationTools: boolean;
-    maxToolRuns: number;
-    maxAutoContinuations: number;
-  };
+  policy: RunPolicy;
   previousMessages: Array<{ role: string; content: string }>;
 };
 
@@ -34,6 +31,7 @@ export type ToolDigestOutput = {
 type WriterInput = {
   userMessage: string;
   plan: RuntimePlan;
+  policy: RunPolicy;
   toolDigest: ToolDigestOutput;
   toolResults: RuntimeToolResult[];
   runtimeContext?: Record<string, unknown>;
@@ -43,6 +41,7 @@ type WriterInput = {
 type EvidenceLedgerInput = {
   userMessage: string;
   plan: RuntimePlan;
+  policy: RunPolicy;
   toolDigest: ToolDigestOutput;
   toolResults: RuntimeToolResult[];
   runtimeContext?: Record<string, unknown>;
@@ -79,6 +78,12 @@ export type EvidenceLedgerOutput = {
 
 type WriterOutput = {
   response: string;
+  model: {
+    requested: string;
+    used: string;
+    fallbackUsed: boolean;
+    fallbackFrom?: string;
+  };
   reasoning: {
     plan: string[];
     tools: string[];
@@ -97,6 +102,7 @@ type WriterOutput = {
 type ValidatorInput = {
   userMessage: string;
   plan: RuntimePlan;
+  policy: RunPolicy;
   writerOutput: WriterOutput;
   toolResults: RuntimeToolResult[];
 };
@@ -125,6 +131,13 @@ const TOOL_NAME_ALIASES: Record<string, { tool: string; args: Record<string, unk
   searchweb: { tool: 'search.web', args: { provider: 'auto', count: 10 } },
   bravesearch: { tool: 'search.web', args: { provider: 'brave', count: 10 } },
   scraplyscan: { tool: 'research.gather', args: { depth: 'deep', includeScrapling: true, includeAccountContext: true } },
+};
+
+type JsonRequestResult = {
+  parsed: Record<string, unknown> | null;
+  requestedModel: string;
+  usedModel: string;
+  fallbackUsed: boolean;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -247,6 +260,29 @@ function completionText(response: OpenAI.Chat.Completions.ChatCompletion): strin
   return String(response.choices?.[0]?.message?.content || '').trim();
 }
 
+function normalizeModelName(value: unknown): string {
+  return String(value || '').trim();
+}
+
+function modelNamesMatch(left: string, right: string): boolean {
+  const a = normalizeModelName(left);
+  const b = normalizeModelName(right);
+  if (!a || !b) return false;
+  return a.toLowerCase() === b.toLowerCase();
+}
+
+function buildModelTelemetry(requestedModel: string, usedModel: string): WriterOutput['model'] {
+  const requested = normalizeModelName(requestedModel) || 'unknown';
+  const used = normalizeModelName(usedModel) || requested;
+  const fallbackUsed = !modelNamesMatch(requested, used);
+  return {
+    requested,
+    used,
+    fallbackUsed,
+    ...(fallbackUsed ? { fallbackFrom: requested } : {}),
+  };
+}
+
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
@@ -262,7 +298,12 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
   });
 }
 
-async function requestJson(task: Parameters<typeof openai.bat.chatCompletion>[0], messages: OpenAI.Chat.ChatCompletionMessageParam[], maxTokens = 900) {
+async function requestJson(
+  task: Parameters<typeof openai.bat.chatCompletion>[0],
+  messages: OpenAI.Chat.ChatCompletionMessageParam[],
+  maxTokens = 900
+): Promise<JsonRequestResult> {
+  const requestedModel = resolveModelForTask(task);
   const completion = (await withTimeout(
     openai.bat.chatCompletion(task, {
       messages,
@@ -273,9 +314,17 @@ async function requestJson(task: Parameters<typeof openai.bat.chatCompletion>[0]
     `Prompt task ${task}`
   )) as OpenAI.Chat.Completions.ChatCompletion;
 
+  const usedModelPrimary = normalizeModelName(completion.model) || requestedModel;
   const text = completionText(completion);
   const parsed = extractJsonObject(text);
-  if (parsed) return parsed;
+  if (parsed) {
+    return {
+      parsed,
+      requestedModel,
+      usedModel: usedModelPrimary,
+      fallbackUsed: !modelNamesMatch(requestedModel, usedModelPrimary),
+    };
+  }
 
   // One repair attempt for malformed JSON output.
   const repairCompletion = (await withTimeout(
@@ -298,7 +347,13 @@ async function requestJson(task: Parameters<typeof openai.bat.chatCompletion>[0]
     `Prompt task ${task} (repair)`
   )) as OpenAI.Chat.Completions.ChatCompletion;
 
-  return extractJsonObject(completionText(repairCompletion));
+  const usedModelRepair = normalizeModelName(repairCompletion.model) || resolveModelForTask('analysis_fast');
+  return {
+    parsed: extractJsonObject(completionText(repairCompletion)),
+    requestedModel,
+    usedModel: usedModelRepair,
+    fallbackUsed: !modelNamesMatch(requestedModel, usedModelRepair),
+  };
 }
 
 export function buildToolDigest(input: ToolDigestInput): ToolDigestOutput {
@@ -696,9 +751,12 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   return calls;
 }
 
-function fallbackPlannerPlan(message: string): RuntimePlan {
+function fallbackPlannerPlan(message: string, policy: RunPolicy): RuntimePlan {
   const toolCalls = inferToolCallsFromMessage(message);
   const concise = prefersConciseOutput(message);
+  const mode = policy.responseMode || 'balanced';
+  const depthFromMode: 'fast' | 'deep' =
+    mode === 'fast' ? 'fast' : mode === 'deep' || mode === 'pro' ? 'deep' : concise ? 'fast' : 'deep';
   return {
     goal: 'Generate an evidence-grounded response for the active branch',
     plan: toolCalls.length
@@ -712,7 +770,7 @@ function fallbackPlannerPlan(message: string): RuntimePlan {
     needUserInput: false,
     decisionRequests: [],
     responseStyle: {
-      depth: concise ? 'fast' : 'deep',
+      depth: depthFromMode,
       tone: 'friendly',
     },
     runtime: {
@@ -722,10 +780,13 @@ function fallbackPlannerPlan(message: string): RuntimePlan {
 }
 
 function fallbackWriter(input: WriterInput): WriterOutput {
-  const concise = prefersConciseOutput(input.userMessage);
+  const requestedModel = resolveModelForTask('workspace_chat_writer');
+  const mode = input.policy.responseMode || 'balanced';
+  const concise = input.policy.targetLength === 'short' || mode === 'fast' || prefersConciseOutput(input.userMessage);
+  const deepMode = input.policy.targetLength === 'long' || mode === 'deep' || mode === 'pro';
   const evidence = input.toolResults
     .flatMap((result) => result.evidence)
-    .slice(0, concise ? 8 : 14)
+    .slice(0, concise ? 8 : deepMode ? 20 : 14)
     .map((item, idx) => ({
       id: `e-${idx + 1}`,
       label: item.label,
@@ -735,7 +796,7 @@ function fallbackWriter(input: WriterInput): WriterOutput {
   const topHighlights = input.toolDigest.highlights
     .map((item) => String(item || '').trim())
     .filter(Boolean)
-    .slice(0, concise ? 4 : 8);
+    .slice(0, concise ? 4 : deepMode ? 10 : 8);
   const topFacts = input.toolDigest.facts
     .map((fact) => {
       const claim = String(fact.claim || '').trim();
@@ -747,7 +808,7 @@ function fallbackWriter(input: WriterInput): WriterOutput {
       return evidenceSnippet.length ? `${claim} (${evidenceSnippet.join('; ')})` : claim;
     })
     .filter(Boolean)
-    .slice(0, concise ? 3 : 7);
+    .slice(0, concise ? 3 : deepMode ? 9 : 7);
   const topWarnings = Array.from(
     new Set(
       input.toolResults
@@ -755,7 +816,7 @@ function fallbackWriter(input: WriterInput): WriterOutput {
         .map((item) => String(item || '').replace(/\s+/g, ' ').trim())
         .filter(Boolean)
     )
-  ).slice(0, concise ? 2 : 4);
+  ).slice(0, concise ? 2 : deepMode ? 6 : 4);
   const hasToolResults = input.toolResults.length > 0;
   const runtimeContext = isRecord(input.runtimeContext) ? input.runtimeContext : {};
   const contextSummary: string[] = [];
@@ -831,6 +892,12 @@ function fallbackWriter(input: WriterInput): WriterOutput {
       );
     }
 
+    if (input.policy.strictValidation || mode === 'pro') {
+      responseSections.push(
+        'Validation summary:\n1. Claims are constrained to evidence observed in this run.\n2. Any uncertain area is surfaced explicitly.\n3. Mutation-like actions remain approval-gated.'
+      );
+    }
+
     if (!concise) {
       responseSections.push(
         'If you want, I can now turn this into a concrete deliverable next (for example: a post concept, testing plan, or client-ready brief) using the same evidence set.'
@@ -873,6 +940,7 @@ function fallbackWriter(input: WriterInput): WriterOutput {
 
   return {
     response: responseSections.filter((section) => section.trim().length > 0).join('\n\n'),
+    model: buildModelTelemetry(requestedModel, 'heuristic-fallback'),
     reasoning: {
       plan: input.plan.plan,
       tools: input.plan.toolCalls.map((call) => call.tool),
@@ -896,8 +964,13 @@ function fallbackValidator(): ValidatorOutput {
 }
 
 export async function generatePlannerPlan(input: PlannerInput): Promise<RuntimePlan> {
-  const fallback = fallbackPlannerPlan(input.userMessage);
+  const fallback = fallbackPlannerPlan(input.userMessage, input.policy);
   const conciseRequested = prefersConciseOutput(input.userMessage);
+  const disallowedTools = [
+    ...(input.policy.sourceScope.webSearch ? [] : ['search.web', 'research.gather', 'competitors.discover_v3']),
+    ...(input.policy.sourceScope.liveWebsiteCrawl ? [] : ['web.crawl', 'web.fetch']),
+    ...(input.policy.sourceScope.socialIntel ? [] : ['evidence.posts', 'orchestration.run']),
+  ];
 
   const systemPrompt = [
     'You are BAT Planner (Agency Operator).',
@@ -911,6 +984,12 @@ export async function generatePlannerPlan(input: PlannerInput): Promise<RuntimeP
     'When the user asks for deeper research on people/accounts/handles or names DDG/Scraply, include research.gather.',
     'Use intel.get only when you have section + id/target. For overviews, use intel.list.',
     'Mutation tools require explicit approvals and should be represented via decisionRequests.',
+    `Response mode for this run: ${input.policy.responseMode}.`,
+    `Target response length: ${input.policy.targetLength}.`,
+    `Strict validation: ${input.policy.strictValidation ? 'enabled' : 'disabled'}.`,
+    `Source scope: ${JSON.stringify(input.policy.sourceScope)}.`,
+    `Disallowed tool names for this run: ${disallowedTools.length ? disallowedTools.join(', ') : 'none'}.`,
+    'Never emit a tool listed as disallowed. If disallowed tools are needed, choose allowed fallback tools.',
     `Only use tool names from this allowlist: ${ALLOWED_PLANNER_TOOL_NAMES.join(', ')}`,
     'JSON schema:',
     '{',
@@ -933,7 +1012,7 @@ export async function generatePlannerPlan(input: PlannerInput): Promise<RuntimeP
   ].join('\n\n');
 
   try {
-    const parsed = await requestJson('workspace_chat_planner', [
+    const { parsed } = await requestJson('workspace_chat_planner', [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
     ], 900);
@@ -957,9 +1036,12 @@ export async function generatePlannerPlan(input: PlannerInput): Promise<RuntimeP
           input.policy.maxToolRuns
         )
       : fallback.toolCalls;
+    const filteredToolCalls = mergedToolCalls.filter((call) => !disallowedTools.includes(call.tool));
     const decisions = normalizeDecisions(parsed.decisionRequests, 8);
 
-    const defaultDepth = conciseRequested ? 'fast' : 'deep';
+    const defaultDepthFromMode =
+      input.policy.responseMode === 'fast' ? 'fast' : input.policy.responseMode === 'balanced' ? 'normal' : 'deep';
+    const defaultDepth = conciseRequested ? 'fast' : defaultDepthFromMode;
     const depthRaw = String((isRecord(parsed.responseStyle) ? parsed.responseStyle.depth : '') || defaultDepth).toLowerCase();
     const toneRaw = String((isRecord(parsed.responseStyle) ? parsed.responseStyle.tone : '') || 'direct').toLowerCase();
 
@@ -974,7 +1056,7 @@ export async function generatePlannerPlan(input: PlannerInput): Promise<RuntimeP
     return {
       goal: String(parsed.goal || fallback.goal),
       plan: planSteps.length ? planSteps : fallback.plan,
-      toolCalls: mergedToolCalls,
+      toolCalls: filteredToolCalls.length ? filteredToolCalls : fallback.toolCalls.filter((call) => !disallowedTools.includes(call.tool)),
       needUserInput: Boolean(parsed.needUserInput),
       decisionRequests: decisions,
       responseStyle: { depth, tone },
@@ -997,6 +1079,8 @@ export async function buildEvidenceLedger(input: EvidenceLedgerInput): Promise<E
     'You are BAT Evidence Builder.',
     'Return strict JSON only.',
     'Use only provided runtime context and tool outputs.',
+    `Source scope for this run: ${JSON.stringify(input.policy.sourceScope)}.`,
+    'Do not infer facts from sources that are outside the provided scope.',
     'Every high-value fact must include evidenceRefIds when available.',
     'JSON schema:',
     '{',
@@ -1010,6 +1094,12 @@ export async function buildEvidenceLedger(input: EvidenceLedgerInput): Promise<E
 
   const payload = {
     userMessage: input.userMessage,
+    policy: {
+      responseMode: input.policy.responseMode,
+      targetLength: input.policy.targetLength,
+      strictValidation: input.policy.strictValidation,
+      sourceScope: input.policy.sourceScope,
+    },
     runtimeContext: input.runtimeContext || {},
     plan: input.plan,
     toolDigest: input.toolDigest,
@@ -1017,7 +1107,7 @@ export async function buildEvidenceLedger(input: EvidenceLedgerInput): Promise<E
   };
 
   try {
-    const parsed = await requestJson('analysis_fast', [
+    const { parsed } = await requestJson('analysis_fast', [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: JSON.stringify(payload) },
     ], 2000);
@@ -1166,6 +1256,15 @@ export async function writeClientResponse(input: WriterInput): Promise<WriterOut
     'Default to a comfortable, high-context response with substantial detail.',
     'Only be concise when the user explicitly asks for concise/brief output.',
     `Concise mode for this request: ${conciseRequested ? 'true' : 'false'}.`,
+    `Response mode: ${input.policy.responseMode}.`,
+    `Target length: ${input.policy.targetLength}.`,
+    `Strict validation: ${input.policy.strictValidation ? 'enabled' : 'disabled'}.`,
+    `Source scope: ${JSON.stringify(input.policy.sourceScope)}.`,
+    'Mode behavior:',
+    '- fast: short answer and single next action.',
+    '- balanced: clear structure with moderate detail.',
+    '- deep: richer reasoning artifacts and wider evidence integration.',
+    '- pro: deep + strict caveats + explicit validation summary.',
     'Synthesize evidence into clear narrative and recommendations; do not just output sparse bullet points.',
     'Use the runtime workspace context to ground baseline facts before asking for missing information.',
     'Use the evidenceLedger as the primary 3D fact source before writing the 2D response.',
@@ -1189,6 +1288,12 @@ export async function writeClientResponse(input: WriterInput): Promise<WriterOut
 
   const writerPayload = {
     userMessage: input.userMessage,
+    policy: {
+      responseMode: input.policy.responseMode,
+      targetLength: input.policy.targetLength,
+      strictValidation: input.policy.strictValidation,
+      sourceScope: input.policy.sourceScope,
+    },
     runtimeContext: input.runtimeContext || {},
     evidenceLedger: input.evidenceLedger || null,
     plan: input.plan,
@@ -1197,10 +1302,11 @@ export async function writeClientResponse(input: WriterInput): Promise<WriterOut
   };
 
   try {
-    const parsed = await requestJson('workspace_chat_writer', [
+    const writerRequest = await requestJson('workspace_chat_writer', [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: JSON.stringify(writerPayload) },
     ], 2200);
+    const parsed = writerRequest.parsed;
 
     if (!parsed) return fallback;
 
@@ -1241,6 +1347,7 @@ export async function writeClientResponse(input: WriterInput): Promise<WriterOut
 
     return {
       response: String(parsed.response || fallback.response),
+      model: buildModelTelemetry(writerRequest.requestedModel, writerRequest.usedModel),
       reasoning: {
         plan: normalizeStringArray(reasoningRaw.plan, 12),
         tools: normalizeStringArray(reasoningRaw.tools, 12),
@@ -1264,6 +1371,10 @@ export async function validateClientResponse(input: ValidatorInput): Promise<Val
     'You are BAT Validator (trust and safety).',
     'Return strict JSON only.',
     'Check grounding, fallback quality, mutation confirmations, and response completeness.',
+    `Strict validation mode: ${input.policy.strictValidation ? 'enabled' : 'disabled'}.`,
+    `Source scope for this run: ${JSON.stringify(input.policy.sourceScope)}.`,
+    'When strict validation is enabled, fail if claims lack evidence references.',
+    'Always check source-scope compliance for the proposed response and actions.',
     'JSON schema:',
     '{',
     '  "pass": true,',
@@ -1273,12 +1384,18 @@ export async function validateClientResponse(input: ValidatorInput): Promise<Val
   ].join('\n');
 
   try {
-    const parsed = await requestJson('workspace_chat_validator', [
+    const { parsed } = await requestJson('workspace_chat_validator', [
       { role: 'system', content: systemPrompt },
       {
         role: 'user',
         content: JSON.stringify({
           userMessage: input.userMessage,
+          policy: {
+            responseMode: input.policy.responseMode,
+            targetLength: input.policy.targetLength,
+            strictValidation: input.policy.strictValidation,
+            sourceScope: input.policy.sourceScope,
+          },
           plan: input.plan,
           writerOutput: input.writerOutput,
           toolResults: input.toolResults,

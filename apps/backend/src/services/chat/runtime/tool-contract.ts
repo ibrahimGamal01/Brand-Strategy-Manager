@@ -4,6 +4,7 @@ import { buildRuntimeAgentContext } from './context-assembler';
 import { createRuntimeMutationAuditEntry } from './mutations/mutation-audit';
 import { buildRuntimeMutationOperationsFromIntelToolCall, evaluateRuntimeMutationGuard } from './mutations/mutation-guard';
 import { persistRuntimeEvidenceRefs } from '../../evidence/workspace-evidence-service';
+import { prisma } from '../../../lib/prisma';
 import type { RunPolicy, RuntimeContinuation, RuntimeDecision, RuntimeEvidenceItem, RuntimeToolArtifact, RuntimeToolResult } from './types';
 
 const CONFIRMATION_REQUIRED_MUTATION_TOOLS = new Set([
@@ -25,6 +26,10 @@ const RUNTIME_EVIDENCE_LEDGER_ENABLED = String(process.env.RUNTIME_EVIDENCE_LEDG
   .trim()
   .toLowerCase() === 'true';
 
+const WEB_SEARCH_TOOLS = new Set(['search.web', 'research.gather', 'competitors.discover_v3']);
+const LIVE_CRAWL_TOOLS = new Set(['web.crawl', 'web.fetch']);
+const SOCIAL_INTEL_TOOLS = new Set(['evidence.posts', 'orchestration.run']);
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -36,6 +41,102 @@ function resolveBranchIdFromSyntheticSessionId(syntheticSessionId: string): stri
     return raw.slice('runtime-'.length);
   }
   return raw;
+}
+
+function normalizeHostname(value: unknown): string {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try {
+    const candidate = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    return String(new URL(candidate).hostname || '').trim().toLowerCase().replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
+function isWithinWorkspaceHost(url: string, hosts: string[]): boolean {
+  const hostname = normalizeHostname(url);
+  if (!hostname) return false;
+  return hosts.some((host) => hostname === host || hostname.endsWith(`.${host}`));
+}
+
+function extractWorkspaceWebsiteHosts(inputData: unknown): string[] {
+  if (!isRecord(inputData)) return [];
+  const candidates: string[] = [];
+  if (typeof inputData.website === 'string') {
+    candidates.push(inputData.website);
+  }
+  if (Array.isArray(inputData.websites)) {
+    candidates.push(...inputData.websites.map((entry) => String(entry || '')));
+  }
+  const hosts = new Set<string>();
+  for (const candidate of candidates) {
+    const hostname = normalizeHostname(candidate);
+    if (!hostname) continue;
+    hosts.add(hostname);
+  }
+  return Array.from(hosts);
+}
+
+async function evaluateSourceScopeBlock(input: {
+  researchJobId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  policy: RunPolicy;
+}): Promise<{ blocked: boolean; reason?: string }> {
+  const sourceScope = input.policy.sourceScope;
+
+  if (!sourceScope.webSearch && WEB_SEARCH_TOOLS.has(input.toolName)) {
+    return {
+      blocked: true,
+      reason: `Tool ${input.toolName} blocked because web_search is disabled.`,
+    };
+  }
+
+  if (!sourceScope.socialIntel && SOCIAL_INTEL_TOOLS.has(input.toolName)) {
+    return {
+      blocked: true,
+      reason: `Tool ${input.toolName} blocked because social_intel is disabled.`,
+    };
+  }
+
+  if (!sourceScope.liveWebsiteCrawl && LIVE_CRAWL_TOOLS.has(input.toolName)) {
+    const workspace = await prisma.researchJob.findUnique({
+      where: { id: input.researchJobId },
+      select: { inputData: true },
+    });
+    const hosts = extractWorkspaceWebsiteHosts(workspace?.inputData);
+    if (!hosts.length) {
+      return {
+        blocked: true,
+        reason: `Tool ${input.toolName} blocked because live_website_crawl is disabled.`,
+      };
+    }
+
+    if (input.toolName === 'web.fetch') {
+      const url = String(input.args.url || '').trim();
+      if (!url || !isWithinWorkspaceHost(url, hosts)) {
+        return {
+          blocked: true,
+          reason: `Tool ${input.toolName} blocked because the URL is outside known workspace websites while live_website_crawl is disabled.`,
+        };
+      }
+    }
+
+    if (input.toolName === 'web.crawl') {
+      const urls = Array.isArray(input.args.startUrls)
+        ? input.args.startUrls.map((entry) => String(entry || '').trim()).filter(Boolean)
+        : [];
+      if (!urls.length || urls.some((url) => !isWithinWorkspaceHost(url, hosts))) {
+        return {
+          blocked: true,
+          reason: `Tool ${input.toolName} blocked because requested crawl targets are outside known workspace websites while live_website_crawl is disabled.`,
+        };
+      }
+    }
+  }
+
+  return { blocked: false };
 }
 
 function mergeWarnings(...groups: string[][]): string[] {
@@ -451,6 +552,39 @@ export async function executeToolWithContract(input: {
       continuations: [],
       decisions: [],
       warnings: [`Tool ${input.toolName} is not registered.`],
+    };
+  }
+
+  const sourceScopeEvaluation = await evaluateSourceScopeBlock({
+    researchJobId: input.researchJobId,
+    toolName: input.toolName,
+    args: input.args,
+    policy: input.policy,
+  });
+  if (sourceScopeEvaluation.blocked) {
+    return {
+      ok: false,
+      summary: `Tool ${input.toolName} blocked by selected source scope.`,
+      artifacts: [],
+      evidence: [],
+      continuations: [
+        {
+          type: 'auto_continue',
+          reason: 'Use existing workspace intelligence as fallback.',
+          suggestedToolCalls: [
+            {
+              tool: 'intel.list',
+              args: { section: 'web_sources', limit: 12 },
+            },
+          ],
+        },
+      ],
+      decisions: [],
+      warnings: [String(sourceScopeEvaluation.reason || 'Blocked by selected source scope.')],
+      raw: {
+        sourceScopeBlocked: true,
+        toolName: input.toolName,
+      },
     };
   }
 

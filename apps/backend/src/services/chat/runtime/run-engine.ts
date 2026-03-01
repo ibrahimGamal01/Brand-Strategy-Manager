@@ -25,6 +25,7 @@ import {
   listToolRuns,
   popNextQueuedMessage,
   runtimeEnums,
+  updateQueueItem,
   updateAgentRun,
   updateToolRun,
 } from './repository';
@@ -36,11 +37,23 @@ import {
   validateClientResponse,
   writeClientResponse,
 } from './prompt-suite';
-import type { RunPolicy, RuntimeDecision, RuntimePlan, RuntimeToolCall, RuntimeToolResult, SendMessageMode } from './types';
+import type {
+  RunPolicy,
+  RuntimeDecision,
+  RuntimeInputOptions,
+  RuntimePlan,
+  RuntimeResponseMode,
+  RuntimeSourceScope,
+  RuntimeTargetLength,
+  RuntimeToolCall,
+  RuntimeToolResult,
+  SendMessageMode,
+} from './types';
 import { TOOL_REGISTRY } from '../../ai/chat/tools/tool-registry';
 import { buildRuntimeAgentContext } from './context-assembler';
 import type { RuntimeAgentContext } from './agent-context';
 import { createKnowledgeLedgerVersion } from '../../knowledge/knowledge-ledger-service';
+import { resolveModelForTask } from '../../ai/model-router';
 
 type SendMessageInput = {
   researchJobId: string;
@@ -49,6 +62,7 @@ type SendMessageInput = {
   content: string;
   mode?: SendMessageMode;
   policy?: Partial<RunPolicy>;
+  inputOptions?: RuntimeInputOptions;
 };
 
 type SendMessageResult = {
@@ -72,6 +86,18 @@ const DEFAULT_POLICY: RunPolicy = {
   toolConcurrency: 3,
   allowMutationTools: false,
   maxToolMs: envRuntimeNumber('CHAT_TOOL_TIMEOUT_MS', 45_000, 2_000, 300_000),
+  responseMode: 'balanced',
+  targetLength: 'medium',
+  strictValidation: false,
+  sourceScope: {
+    workspaceData: true,
+    libraryPinned: true,
+    uploadedDocs: true,
+    webSearch: true,
+    liveWebsiteCrawl: true,
+    socialIntel: true,
+  },
+  pauseAfterPlanning: false,
 };
 
 const BOOTSTRAP_PROMPT =
@@ -156,7 +182,85 @@ const RUNTIME_LEDGER_BUILDER_ENABLED = String(process.env.RUNTIME_EVIDENCE_LEDGE
   .toLowerCase() === 'true';
 const RUNTIME_LEDGER_BUILDER_ROLLOUT = envRuntimeNumber('RUNTIME_LEDGER_BUILDER_ROLLOUT', 100, 0, 100);
 
-export function normalizePolicy(raw?: Partial<RunPolicy> | null): RunPolicy {
+function normalizeSourceScope(raw?: Partial<RuntimeSourceScope> | null): RuntimeSourceScope {
+  const scope = {
+    ...DEFAULT_POLICY.sourceScope,
+    ...(raw || {}),
+  };
+  return {
+    workspaceData: scope.workspaceData !== false,
+    libraryPinned: scope.libraryPinned !== false,
+    uploadedDocs: scope.uploadedDocs !== false,
+    webSearch: scope.webSearch !== false,
+    liveWebsiteCrawl: scope.liveWebsiteCrawl !== false,
+    socialIntel: scope.socialIntel !== false,
+  };
+}
+
+function normalizeInputOptions(raw?: RuntimeInputOptions | null): RuntimeInputOptions | null {
+  if (!isRecord(raw)) return null;
+  const modeRaw = String(raw.modeLabel || '').trim().toLowerCase();
+  const modeLabel: RuntimeResponseMode =
+    modeRaw === 'fast' || modeRaw === 'deep' || modeRaw === 'pro' ? (modeRaw as RuntimeResponseMode) : 'balanced';
+  const targetLengthRaw = String(raw.targetLength || '').trim().toLowerCase();
+  const targetLength: RuntimeTargetLength =
+    targetLengthRaw === 'short' || targetLengthRaw === 'long' ? (targetLengthRaw as RuntimeTargetLength) : 'medium';
+  return {
+    modeLabel,
+    targetLength,
+    sourceScope: normalizeSourceScope(isRecord(raw.sourceScope) ? (raw.sourceScope as Partial<RuntimeSourceScope>) : {}),
+    ...(typeof raw.steerNote === 'string' && raw.steerNote.trim()
+      ? { steerNote: raw.steerNote.trim().slice(0, 1000) }
+      : {}),
+    ...(typeof raw.strictValidation === 'boolean' ? { strictValidation: raw.strictValidation } : {}),
+    ...(typeof raw.pauseAfterPlanning === 'boolean' ? { pauseAfterPlanning: raw.pauseAfterPlanning } : {}),
+  };
+}
+
+function mergePolicyWithInputOptions(
+  policy: RunPolicy,
+  inputOptions?: RuntimeInputOptions | null
+): RunPolicy {
+  const normalizedOptions = normalizeInputOptions(inputOptions);
+  if (!normalizedOptions) return policy;
+
+  const responseMode = normalizedOptions.modeLabel || policy.responseMode;
+  const targetLengthFromMode: RuntimeTargetLength =
+    responseMode === 'fast' ? 'short' : responseMode === 'deep' || responseMode === 'pro' ? 'long' : 'medium';
+  const targetLength = normalizedOptions.targetLength || targetLengthFromMode;
+  const strictValidation =
+    typeof normalizedOptions.strictValidation === 'boolean'
+      ? normalizedOptions.strictValidation
+      : responseMode === 'pro' || policy.strictValidation;
+  const sourceScope = normalizeSourceScope({
+    ...policy.sourceScope,
+    ...(normalizedOptions.sourceScope || {}),
+  });
+
+  return {
+    ...policy,
+    responseMode,
+    targetLength,
+    strictValidation,
+    sourceScope,
+    pauseAfterPlanning:
+      typeof normalizedOptions.pauseAfterPlanning === 'boolean'
+        ? normalizedOptions.pauseAfterPlanning
+        : policy.pauseAfterPlanning,
+  };
+}
+
+function buildPolicySummary(policy: RunPolicy) {
+  return {
+    responseMode: policy.responseMode,
+    targetLength: policy.targetLength,
+    strictValidation: policy.strictValidation,
+    sourceScope: policy.sourceScope,
+    pauseAfterPlanning: policy.pauseAfterPlanning,
+  };
+}
+
+export function normalizePolicy(raw?: Partial<RunPolicy> | null, inputOptions?: RuntimeInputOptions | null): RunPolicy {
   const policy = {
     ...DEFAULT_POLICY,
     ...(raw || {}),
@@ -167,7 +271,7 @@ export function normalizePolicy(raw?: Partial<RunPolicy> | null): RunPolicy {
   const toolConcurrencyRaw = Number(policy.toolConcurrency);
   const maxToolMsRaw = Number(policy.maxToolMs);
 
-  return {
+  const basePolicy: RunPolicy = {
     autoContinue: Boolean(policy.autoContinue),
     maxAutoContinuations: Number.isFinite(maxAutoContinuationsRaw)
       ? Math.max(0, Math.min(4, Math.floor(maxAutoContinuationsRaw)))
@@ -182,7 +286,23 @@ export function normalizePolicy(raw?: Partial<RunPolicy> | null): RunPolicy {
     maxToolMs: Number.isFinite(maxToolMsRaw)
       ? Math.max(1_000, Math.min(180_000, Math.floor(maxToolMsRaw)))
       : DEFAULT_POLICY.maxToolMs,
+    responseMode:
+      String(policy.responseMode || '').toLowerCase() === 'fast' ||
+      String(policy.responseMode || '').toLowerCase() === 'deep' ||
+      String(policy.responseMode || '').toLowerCase() === 'pro'
+        ? (String(policy.responseMode || '').toLowerCase() as RuntimeResponseMode)
+        : 'balanced',
+    targetLength:
+      String(policy.targetLength || '').toLowerCase() === 'short' ||
+      String(policy.targetLength || '').toLowerCase() === 'long'
+        ? (String(policy.targetLength || '').toLowerCase() as RuntimeTargetLength)
+        : 'medium',
+    strictValidation: Boolean(policy.strictValidation),
+    sourceScope: normalizeSourceScope(isRecord(policy.sourceScope) ? (policy.sourceScope as Partial<RuntimeSourceScope>) : {}),
+    pauseAfterPlanning: Boolean(policy.pauseAfterPlanning),
   };
+  // Input options are message-scoped and should override persisted/session defaults.
+  return mergePolicyWithInputOptions(basePolicy, inputOptions);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -401,6 +521,7 @@ function fallbackWriterOutput(input: {
   userMessage?: string;
   runtimeContext?: Record<string, unknown>;
 }): RuntimeWriterOutput {
+  const requestedWriterModel = resolveModelForTask('workspace_chat_writer');
   const concise = prefersConciseOutput(input.userMessage || '');
   const hasToolResults = input.toolResults.length > 0;
   const highlights = input.toolDigest.highlights.filter(Boolean).slice(0, concise ? 4 : 8);
@@ -477,6 +598,12 @@ function fallbackWriterOutput(input: {
 
   return {
     response,
+    model: {
+      requested: requestedWriterModel || 'unknown',
+      used: 'heuristic-fallback',
+      fallbackUsed: true,
+      fallbackFrom: requestedWriterModel || 'unknown',
+    },
     reasoning: {
       plan: input.plan.plan.slice(0, 8),
       tools: input.plan.toolCalls.map((entry) => entry.tool).slice(0, 8),
@@ -1107,6 +1234,141 @@ function sanitizeToolCalls(toolCalls: RuntimeToolCall[], userMessage: string, ma
   }
 
   return sanitized.slice(0, maxToolRuns);
+}
+
+type SourceScopeBlockedTool = {
+  tool: string;
+  lane: 'web_search' | 'live_website_crawl' | 'social_intel';
+  reason: string;
+  fallbackTool?: RuntimeToolCall;
+};
+
+function parseHostname(value: unknown): string {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try {
+    const normalized = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    return String(new URL(normalized).hostname || '').trim().toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function parseHostnames(values: unknown[]): string[] {
+  const hosts = new Set<string>();
+  for (const value of values) {
+    const hostname = parseHostname(value);
+    if (!hostname) continue;
+    hosts.add(hostname.replace(/^www\./, ''));
+  }
+  return Array.from(hosts);
+}
+
+function isAllowedWebsiteUrl(url: string, allowedHosts: string[]): boolean {
+  const hostname = parseHostname(url).replace(/^www\./, '');
+  if (!hostname) return false;
+  return allowedHosts.some((host) => hostname === host || hostname.endsWith(`.${host}`));
+}
+
+function enforceToolSourceScope(input: {
+  toolCalls: RuntimeToolCall[];
+  policy: RunPolicy;
+  runtimeContextSnapshot?: Record<string, unknown>;
+  maxToolRuns: number;
+}): { toolCalls: RuntimeToolCall[]; blocked: SourceScopeBlockedTool[] } {
+  const blocked: SourceScopeBlockedTool[] = [];
+  const output: RuntimeToolCall[] = [];
+  const seen = new Set<string>();
+  const sourceScope = input.policy.sourceScope;
+  const contextWebsites = Array.isArray(input.runtimeContextSnapshot?.websites)
+    ? input.runtimeContextSnapshot?.websites
+    : [];
+  const allowedHosts = parseHostnames(contextWebsites as unknown[]);
+
+  const pushAllowed = (call: RuntimeToolCall) => {
+    const key = `${call.tool}:${stableJson(call.args || {})}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    output.push(call);
+  };
+
+  const pushFallback = (fallback: RuntimeToolCall | undefined) => {
+    if (!fallback) return;
+    const key = `${fallback.tool}:${stableJson(fallback.args || {})}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    output.push(fallback);
+  };
+
+  const block = (entry: SourceScopeBlockedTool) => {
+    blocked.push(entry);
+    pushFallback(entry.fallbackTool);
+  };
+
+  for (const call of input.toolCalls) {
+    const tool = String(call.tool || '').trim();
+    if (!tool) continue;
+
+    if (!sourceScope.webSearch && (tool === 'search.web' || tool === 'research.gather' || tool === 'competitors.discover_v3')) {
+      block({
+        tool,
+        lane: 'web_search',
+        reason: 'Web search is disabled by input source scope.',
+        fallbackTool: {
+          tool: 'intel.list',
+          args: { section: 'web_sources', limit: 12 },
+        },
+      });
+      continue;
+    }
+
+    if (!sourceScope.socialIntel && (tool === 'evidence.posts' || tool === 'orchestration.run')) {
+      block({
+        tool,
+        lane: 'social_intel',
+        reason: 'Social intelligence is disabled by input source scope.',
+        fallbackTool: {
+          tool: 'intel.list',
+          args: { section: 'competitors', limit: 12 },
+        },
+      });
+      continue;
+    }
+
+    if (!sourceScope.liveWebsiteCrawl && (tool === 'web.crawl' || tool === 'web.fetch')) {
+      let canUseKnownWorkspaceSite = false;
+      if (tool === 'web.fetch') {
+        const url = String((call.args as Record<string, unknown>)?.url || '').trim();
+        canUseKnownWorkspaceSite = Boolean(url) && isAllowedWebsiteUrl(url, allowedHosts);
+      } else if (tool === 'web.crawl') {
+        const urls = Array.isArray((call.args as Record<string, unknown>)?.startUrls)
+          ? ((call.args as Record<string, unknown>)?.startUrls as unknown[])
+          : [];
+        canUseKnownWorkspaceSite =
+          urls.length > 0 && urls.every((entry) => isAllowedWebsiteUrl(String(entry || '').trim(), allowedHosts));
+      }
+
+      if (!canUseKnownWorkspaceSite) {
+        block({
+          tool,
+          lane: 'live_website_crawl',
+          reason: 'Live website crawling is disabled by input source scope.',
+          fallbackTool: {
+            tool: 'intel.list',
+            args: { section: 'web_snapshots', limit: 20 },
+          },
+        });
+        continue;
+      }
+    }
+
+    pushAllowed(call);
+  }
+
+  return {
+    toolCalls: output.slice(0, input.maxToolRuns),
+    blocked,
+  };
 }
 
 function normalizeRunPlan(value: unknown): RuntimePlan | null {
@@ -1896,6 +2158,9 @@ export class RuntimeRunEngine {
         content: nextQueued.content,
         mode: input.mode || 'send',
         policy: input.policy,
+        inputOptions: isRecord(nextQueued.inputOptionsJson)
+          ? (nextQueued.inputOptionsJson as RuntimeInputOptions)
+          : undefined,
       }).catch((error) => {
         console.error('[RuntimeRunEngine] Failed to process next queued message:', error);
       });
@@ -1937,6 +2202,7 @@ export class RuntimeRunEngine {
           branchId: input.branchId,
           userId: input.userId,
           content,
+          ...(input.inputOptions ? { inputOptions: normalizeInputOptions(input.inputOptions) } : {}),
         });
 
         await this.emitEvent({
@@ -1963,6 +2229,7 @@ export class RuntimeRunEngine {
         branchId: input.branchId,
         userId: input.userId,
         content,
+        ...(input.inputOptions ? { inputOptions: normalizeInputOptions(input.inputOptions) } : {}),
       });
 
       await this.emitEvent({
@@ -1994,14 +2261,18 @@ export class RuntimeRunEngine {
       branchId: input.branchId,
       role: ChatBranchMessageRole.USER,
       content,
+      ...(input.inputOptions ? { inputOptionsJson: normalizeInputOptions(input.inputOptions) } : {}),
       clientVisible: true,
     });
 
+    const normalizedInputOptions = normalizeInputOptions(input.inputOptions);
+    const normalizedPolicy = normalizePolicy(input.policy, normalizedInputOptions);
     const run = await createAgentRun({
       branchId: input.branchId,
       triggerType: AgentRunTriggerType.USER_MESSAGE,
       triggerMessageId: userMessage.id,
-      policy: normalizePolicy(input.policy),
+      policy: normalizedPolicy,
+      ...(normalizedInputOptions ? { inputOptions: normalizedInputOptions } : {}),
     });
 
     await this.emitEvent({
@@ -2012,6 +2283,20 @@ export class RuntimeRunEngine {
       payload: {
         triggerType: run.triggerType,
         triggerMessageId: userMessage.id,
+        inputOptions: normalizedInputOptions,
+        policySummary: buildPolicySummary(normalizedPolicy),
+      },
+    });
+
+    await this.emitEvent({
+      branchId: input.branchId,
+      agentRunId: run.id,
+      type: ProcessEventType.PROCESS_LOG,
+      message: 'Input options applied for this run.',
+      payload: {
+        event: 'CHAT_INPUT_OPTIONS_APPLIED',
+        inputOptions: normalizedInputOptions || null,
+        policySummary: buildPolicySummary(normalizedPolicy),
       },
     });
 
@@ -2031,6 +2316,52 @@ export class RuntimeRunEngine {
       runId: run.id,
       userMessageId: userMessage.id,
     };
+  }
+
+  async updateQueuedMessage(input: {
+    researchJobId: string;
+    branchId: string;
+    itemId: string;
+    content?: string;
+    inputOptions?: RuntimeInputOptions;
+    steerNote?: string;
+  }) {
+    const branch = await getBranch(input.branchId, input.researchJobId);
+    if (!branch) {
+      throw new Error('Branch not found for this research job');
+    }
+
+    const content = input.content !== undefined ? String(input.content || '').trim() : undefined;
+    if (content !== undefined && !content) {
+      throw new Error('Queue item content cannot be empty');
+    }
+    const normalizedInputOptions = normalizeInputOptions(input.inputOptions);
+    const steerNote = String(input.steerNote || '').trim();
+    const steerPayload =
+      input.steerNote === undefined
+        ? undefined
+        : steerNote
+          ? { note: steerNote.slice(0, 1000), updatedAt: new Date().toISOString() }
+          : null;
+
+    await updateQueueItem(input.branchId, input.itemId, {
+      ...(content !== undefined ? { content } : {}),
+      ...(input.inputOptions !== undefined ? { inputOptions: normalizedInputOptions } : {}),
+      ...(steerPayload !== undefined ? { steer: steerPayload } : {}),
+    });
+
+    await this.emitEvent({
+      branchId: input.branchId,
+      type: ProcessEventType.PROCESS_LOG,
+      message: 'Queued message updated.',
+      payload: {
+        event: 'CHAT_QUEUE_ITEM_UPDATED',
+        queueItemId: input.itemId,
+        hasContentUpdate: content !== undefined,
+        hasInputOptionsUpdate: input.inputOptions !== undefined,
+        hasSteerNote: Boolean(steerNote),
+      },
+    });
   }
 
   async cancelBranchRuns(input: { researchJobId: string; branchId: string; reason?: string }) {
@@ -2094,7 +2425,8 @@ export class RuntimeRunEngine {
     }
 
     const basePolicy = normalizePolicy(
-      isRecord(targetRun.policyJson) ? (targetRun.policyJson as Partial<RunPolicy>) : undefined
+      isRecord(targetRun.policyJson) ? (targetRun.policyJson as Partial<RunPolicy>) : undefined,
+      isRecord(targetRun.inputOptionsJson) ? (targetRun.inputOptionsJson as RuntimeInputOptions) : undefined
     );
     const policyForRun: Record<string, unknown> = {
       ...basePolicy,
@@ -2211,6 +2543,10 @@ export class RuntimeRunEngine {
         branchId: input.branchId,
         userId: input.userId,
         content: `Steer note: ${note}`,
+        steer: {
+          note,
+          updatedAt: new Date().toISOString(),
+        },
       });
 
       await this.emitEvent({
@@ -2571,6 +2907,7 @@ export class RuntimeRunEngine {
         buildEvidenceLedger({
           userMessage: effectiveUserMessage,
           plan,
+          policy,
           runtimeContext: runtimeContextSnapshot,
           toolDigest,
           toolResults: promptToolResults,
@@ -2643,7 +2980,7 @@ export class RuntimeRunEngine {
       tool,
       args: {},
     }));
-    const continuationCalls = sanitizeToolCalls(
+    const continuationCallsRaw = sanitizeToolCalls(
       [...continuationCallsFromResults, ...continuationCallsFromLedger, ...continuationFromDigestCalls].slice(
         0,
         policy.maxToolRuns
@@ -2651,6 +2988,36 @@ export class RuntimeRunEngine {
       triggerMessage,
       policy.maxToolRuns
     );
+    const continuationSourceScope = enforceToolSourceScope({
+      toolCalls: continuationCallsRaw,
+      policy,
+      ...(runtimeContextSnapshot ? { runtimeContextSnapshot } : {}),
+      maxToolRuns: policy.maxToolRuns,
+    });
+    const continuationCalls = continuationSourceScope.toolCalls;
+    if (continuationSourceScope.blocked.length > 0) {
+      for (const blocked of continuationSourceScope.blocked) {
+        await this.emitEvent({
+          branchId: run.branchId,
+          agentRunId: run.id,
+          type: ProcessEventType.PROCESS_LOG,
+          level: ProcessEventLevel.WARN,
+          message: blocked.reason,
+          payload: {
+            event: 'CHAT_SOURCE_SCOPE_BLOCKED_TOOL',
+            blockedTool: blocked.tool,
+            sourceLane: blocked.lane,
+            ...(blocked.fallbackTool
+              ? {
+                  fallbackTool: blocked.fallbackTool.tool,
+                  fallbackArgs: blocked.fallbackTool.args,
+                }
+              : {}),
+            policySummary: buildPolicySummary(policy),
+          },
+        });
+      }
+    }
 
     if (
       policy.autoContinue &&
@@ -2706,6 +3073,7 @@ export class RuntimeRunEngine {
       writeClientResponse({
         userMessage: effectiveUserMessage,
         plan,
+        policy,
         runtimeContext: runtimeContextSnapshot,
         toolDigest,
         ...(evidenceLedger ? { evidenceLedger } : {}),
@@ -2730,12 +3098,29 @@ export class RuntimeRunEngine {
       });
     });
 
+    if (writerOutput.model?.fallbackUsed) {
+      await this.emitEvent({
+        branchId: run.branchId,
+        agentRunId: run.id,
+        type: ProcessEventType.PROCESS_LOG,
+        level: ProcessEventLevel.WARN,
+        message: `Chat writer model fallback: ${writerOutput.model.used} (requested ${writerOutput.model.requested})`,
+        payload: {
+          requestedModel: writerOutput.model.requested,
+          usedModel: writerOutput.model.used,
+          fallbackUsed: writerOutput.model.fallbackUsed,
+          fallbackFrom: writerOutput.model.fallbackFrom || writerOutput.model.requested,
+        },
+      });
+    }
+
     if (await isRunCancelled('validation')) return;
 
     const validatorOutput = await withTimeout(
       validateClientResponse({
         userMessage: effectiveUserMessage,
         plan,
+        policy,
         writerOutput,
         toolResults: promptToolResults,
       }),
@@ -2826,6 +3211,7 @@ export class RuntimeRunEngine {
           : undefined,
       reasoningJson: {
         ...writerOutput.reasoning,
+        model: writerOutput.model,
         runId: run.id,
         ...(ledgerVersionId ? { ledgerVersionId } : {}),
       },
@@ -2910,7 +3296,10 @@ export class RuntimeRunEngine {
       if (!fresh) return;
       if (fresh.status === AgentRunStatus.CANCELLED || fresh.status === AgentRunStatus.DONE) return;
 
-      const policy = normalizePolicy(isRecord(fresh.policyJson) ? (fresh.policyJson as Partial<RunPolicy>) : undefined);
+      const policy = normalizePolicy(
+        isRecord(fresh.policyJson) ? (fresh.policyJson as Partial<RunPolicy>) : undefined,
+        isRecord(fresh.inputOptionsJson) ? (fresh.inputOptionsJson as RuntimeInputOptions) : undefined
+      );
 
       if (!fresh.startedAt) {
         await updateAgentRun(fresh.id, {
@@ -3000,11 +3389,7 @@ export class RuntimeRunEngine {
           branchId: fresh.branchId,
           userMessage: fresh.triggerMessage?.content || 'Continue workflow',
           ...(runtimeContextSnapshot ? { runtimeContext: runtimeContextSnapshot } : {}),
-          policy: {
-            allowMutationTools: policy.allowMutationTools,
-            maxToolRuns: policy.maxToolRuns,
-            maxAutoContinuations: policy.maxAutoContinuations,
-          },
+          policy,
           previousMessages: previousMessages.map((message) => ({
             role: message.role,
             content: message.content,
@@ -3031,6 +3416,37 @@ export class RuntimeRunEngine {
       ) {
         sanitizedToolCalls = buildFallbackDiscoveryToolCalls(triggerContent, policy.maxToolRuns);
       }
+      const sourceScopeEnforcement = enforceToolSourceScope({
+        toolCalls: sanitizedToolCalls,
+        policy,
+        ...(runtimeContextSnapshot ? { runtimeContextSnapshot } : {}),
+        maxToolRuns: policy.maxToolRuns,
+      });
+      sanitizedToolCalls = sourceScopeEnforcement.toolCalls;
+
+      if (sourceScopeEnforcement.blocked.length > 0) {
+        for (const blocked of sourceScopeEnforcement.blocked) {
+          await this.emitEvent({
+            branchId: fresh.branchId,
+            agentRunId: fresh.id,
+            type: ProcessEventType.PROCESS_LOG,
+            level: ProcessEventLevel.WARN,
+            message: blocked.reason,
+            payload: {
+              event: 'CHAT_SOURCE_SCOPE_BLOCKED_TOOL',
+              blockedTool: blocked.tool,
+              sourceLane: blocked.lane,
+              ...(blocked.fallbackTool
+                ? {
+                    fallbackTool: blocked.fallbackTool.tool,
+                    fallbackArgs: blocked.fallbackTool.args,
+                  }
+                : {}),
+              policySummary: buildPolicySummary(policy),
+            },
+          });
+        }
+      }
 
       if (JSON.stringify(plan.toolCalls) !== JSON.stringify(sanitizedToolCalls)) {
         plan = {
@@ -3053,6 +3469,7 @@ export class RuntimeRunEngine {
           goal: plan.goal,
           plan: plan.plan,
           toolCalls: plan.toolCalls,
+          policySummary: buildPolicySummary(policy),
         },
       });
 

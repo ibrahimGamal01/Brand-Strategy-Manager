@@ -26,6 +26,10 @@ import { issueRuntimeWsToken } from '../services/chat/runtime/runtime-ws-auth';
 
 const router = Router();
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 router.use('/:id/runtime', requirePortalAuth, requireWorkspaceMembership);
 
 router.get('/:id/runtime/threads', async (req, res) => {
@@ -326,6 +330,7 @@ router.post('/:id/runtime/branches/:branchId/messages', async (req, res) => {
     const userId = String(req.body?.userId || 'portal_user').trim().slice(0, 120) || 'portal_user';
     const modeRaw = String(req.body?.mode || 'send').trim().toLowerCase();
     const mode = modeRaw === 'queue' || modeRaw === 'interrupt' ? modeRaw : 'send';
+    const inputOptions = isRecord(req.body?.inputOptions) ? req.body.inputOptions : undefined;
 
     const result = await runtimeRunEngine.sendMessage({
       researchJobId,
@@ -337,6 +342,7 @@ router.post('/:id/runtime/branches/:branchId/messages', async (req, res) => {
         req.body?.policy && typeof req.body.policy === 'object' && !Array.isArray(req.body.policy)
           ? req.body.policy
           : undefined,
+      ...(inputOptions ? { inputOptions } : {}),
     });
 
     return res.status(202).json(result);
@@ -469,6 +475,54 @@ router.post('/:id/runtime/branches/:branchId/queue/reorder', async (req, res) =>
   } catch (error: any) {
     const status = String(error?.message || '').includes('not found') ? 404 : 500;
     return res.status(status).json({ error: 'Failed to reorder queue', details: error?.message || String(error) });
+  }
+});
+
+router.patch('/:id/runtime/branches/:branchId/queue/:itemId', async (req, res) => {
+  try {
+    const researchJobId = String(req.params.id || '').trim();
+    const branchId = String(req.params.branchId || '').trim();
+    const itemId = String(req.params.itemId || '').trim();
+    if (!itemId) {
+      return res.status(400).json({ error: 'itemId is required' });
+    }
+
+    await runtimeRunEngine.getBranchState({ researchJobId, branchId });
+    const content = req.body?.content === undefined ? undefined : String(req.body?.content || '').trim();
+    const inputOptions = isRecord(req.body?.inputOptions) ? req.body.inputOptions : undefined;
+    const steerNote = req.body?.steerNote === undefined ? undefined : String(req.body?.steerNote || '').trim();
+
+    if (content === undefined && inputOptions === undefined && steerNote === undefined) {
+      return res.status(400).json({ error: 'At least one field is required: content, inputOptions, or steerNote' });
+    }
+
+    await runtimeRunEngine.updateQueuedMessage({
+      researchJobId,
+      branchId,
+      itemId,
+      ...(content !== undefined ? { content } : {}),
+      ...(inputOptions ? { inputOptions } : {}),
+      ...(steerNote !== undefined ? { steerNote } : {}),
+    });
+
+    const queue = await listQueue(branchId);
+    return res.json({ queue });
+  } catch (error: any) {
+    const message = String(error?.message || error || '');
+    const status =
+      message.includes('Queue item not found')
+        ? 404
+        : message.includes('cannot be empty')
+          ? 400
+        : message.includes('can only be updated while queued')
+          ? 409
+          : message.includes('not found')
+            ? 404
+            : 500;
+    return res.status(status).json({
+      error: 'Failed to update queue item',
+      details: message,
+    });
   }
 });
 

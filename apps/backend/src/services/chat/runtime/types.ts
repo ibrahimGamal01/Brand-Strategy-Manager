@@ -41,6 +41,27 @@ export type RuntimeContinuation = {
   suggestedToolCalls?: RuntimeSuggestedToolCall[];
 };
 
+export type RuntimeResponseMode = 'fast' | 'balanced' | 'deep' | 'pro';
+export type RuntimeTargetLength = 'short' | 'medium' | 'long';
+
+export type RuntimeSourceScope = {
+  workspaceData: boolean;
+  libraryPinned: boolean;
+  uploadedDocs: boolean;
+  webSearch: boolean;
+  liveWebsiteCrawl: boolean;
+  socialIntel: boolean;
+};
+
+export type RuntimeInputOptions = {
+  modeLabel?: RuntimeResponseMode;
+  sourceScope?: Partial<RuntimeSourceScope>;
+  steerNote?: string;
+  targetLength?: RuntimeTargetLength;
+  strictValidation?: boolean;
+  pauseAfterPlanning?: boolean;
+};
+
 export type RuntimeToolResult = {
   ok: boolean;
   summary: string;
@@ -81,6 +102,11 @@ export type RunPolicy = {
   toolConcurrency: number;
   allowMutationTools: boolean;
   maxToolMs: number;
+  responseMode: RuntimeResponseMode;
+  targetLength: RuntimeTargetLength;
+  strictValidation: boolean;
+  sourceScope: RuntimeSourceScope;
+  pauseAfterPlanning: boolean;
 };
 
 export type SendMessageMode = 'send' | 'queue' | 'interrupt';

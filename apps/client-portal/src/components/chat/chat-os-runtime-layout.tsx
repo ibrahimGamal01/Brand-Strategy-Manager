@@ -21,6 +21,7 @@ const steerSystemPrompts: Record<
   string,
   {
     pref?: [keyof SessionPreferences, SessionPreferences[keyof SessionPreferences]];
+    sourceScopePatch?: Partial<SessionPreferences["sourceScope"]>;
     composerText?: string;
     steerPrompt?: string;
   }
@@ -37,12 +38,20 @@ const steerSystemPrompts: Record<
   "Show sources": { pref: ["transparency", true], composerText: "/show_sources" },
   "Make it a PDF": { composerText: "/generate_pdf" },
   "Focus on TikTok": {
-    pref: ["sourceFocus", "social"],
+    sourceScopePatch: {
+      socialIntel: true,
+      webSearch: false,
+      liveWebsiteCrawl: false,
+    },
     composerText: "Prioritize TikTok and social evidence in the next response.",
     steerPrompt: "Prioritize TikTok and social evidence in this run.",
   },
   "Focus on Web evidence": {
-    pref: ["sourceFocus", "web"],
+    sourceScopePatch: {
+      socialIntel: false,
+      webSearch: true,
+      liveWebsiteCrawl: true,
+    },
     composerText: "Prioritize web evidence and cite page URLs first.",
     steerPrompt: "Prioritize web evidence and cite page URLs first.",
   },
@@ -110,6 +119,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     interruptRun,
     reorderQueue,
     removeQueued,
+    steerQueued,
     resolveDecision,
     steerRun,
     setPreference,
@@ -181,7 +191,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     });
   };
 
-  const onSend = (content: string, mode: "send" | "queue") => {
+  const onSend = (content: string, mode: "send" | "queue" | "interrupt") => {
     runAsync(sendMessage(content, mode));
   };
 
@@ -207,15 +217,19 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
       if (key === "tone" && (value === "balanced" || value === "detailed" || value === "concise")) {
         setPreference("tone", value);
       }
-      if (key === "sourceFocus" && (value === "mixed" || value === "web" || value === "social")) {
-        setPreference("sourceFocus", value);
-      }
       if (key === "transparency" && typeof value === "boolean") {
         setPreference("transparency", value);
       }
       if (key === "askQuestionsFirst" && typeof value === "boolean") {
         setPreference("askQuestionsFirst", value);
       }
+    }
+
+    if (mapping.sourceScopePatch) {
+      setPreference("sourceScope", {
+        ...preferences.sourceScope,
+        ...mapping.sourceScopePatch,
+      });
     }
 
     if (isStreaming && mapping.steerPrompt) {
@@ -630,20 +644,18 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                   focusSignal={composerFocusSignal}
                   isStreaming={isStreaming}
                   responseMode={preferences.responseMode}
-                  sourceFocus={preferences.sourceFocus}
+                  sourceScope={preferences.sourceScope}
                   onResponseModeChange={(mode) => setPreference("responseMode", mode)}
-                  onSourceFocusChange={(focus) => setPreference("sourceFocus", focus)}
+                  onSourceScopeChange={(key, value) =>
+                    setPreference("sourceScope", {
+                      ...preferences.sourceScope,
+                      [key]: value,
+                    })
+                  }
                   queuedMessages={queuedMessages}
                   onSend={onSend}
                   onSteerRun={(note) => runAsync(steerRun(note))}
-                  onSteerQueued={(id, content) =>
-                    runAsync(
-                      (async () => {
-                        await steerRun(content);
-                        await removeQueued(id);
-                      })()
-                    )
-                  }
+                  onSteerQueued={(id, input) => runAsync(steerQueued(id, input))}
                   onStop={() => runAsync(interruptRun())}
                   onReorderQueue={(from, to) => runAsync(reorderQueue(from, to))}
                   onDeleteQueued={(id) => runAsync(removeQueued(id))}

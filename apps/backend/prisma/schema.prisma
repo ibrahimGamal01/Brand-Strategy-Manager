@@ -2075,6 +2075,7 @@ model ChatBranchMessage {
   blocksJson      Json?                 @map("blocks_json")
   citationsJson   Json?                 @map("citations_json")
   reasoningJson   Json?                 @map("reasoning_json")
+  inputOptionsJson Json?                @map("input_options_json")
   parentMessageId String?               @map("parent_message_id")
   clientVisible   Boolean               @default(true) @map("client_visible")
   createdAt       DateTime              @default(now()) @map("created_at")
@@ -2117,6 +2118,7 @@ model AgentRun {
   status           AgentRunStatus      @default(QUEUED)
   policyJson       Json?               @map("policy_json")
   planJson         Json?               @map("plan_json")
+  inputOptionsJson Json?               @map("input_options_json")
   startedAt        DateTime?           @map("started_at")
   endedAt          DateTime?           @map("ended_at")
   error            String?
@@ -2214,6 +2216,8 @@ model MessageQueueItem {
   branchId  String                 @map("branch_id")
   userId    String                 @map("user_id")
   content   String
+  inputOptionsJson Json?           @map("input_options_json")
+  steerJson Json?                  @map("steer_json")
   position  Int
   status    MessageQueueItemStatus @default(QUEUED)
   createdAt DateTime               @default(now()) @map("created_at")
