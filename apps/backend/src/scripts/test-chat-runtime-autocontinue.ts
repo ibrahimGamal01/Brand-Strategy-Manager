@@ -6,6 +6,7 @@ import {
   normalizePolicy,
   stripLegacyBoilerplateResponse,
 } from '../services/chat/runtime/run-engine';
+import { executeToolWithContract } from '../services/chat/runtime/tool-contract';
 import type { RuntimeToolResult } from '../services/chat/runtime/types';
 
 function testPlannerHeuristics() {
@@ -193,6 +194,94 @@ function testPolicyNormalization() {
   assert.equal(policy.maxToolRuns, 1, 'Policy must clamp minimum tool runs to 1.');
   assert.equal(policy.toolConcurrency, 3, 'Policy must clamp tool concurrency to 3.');
   assert.equal(policy.maxToolMs, 1000, 'Policy must clamp tool timeout to minimum 1000ms.');
+
+  const modePolicy = normalizePolicy(
+    {
+      responseMode: 'balanced',
+      targetLength: 'medium',
+      strictValidation: false,
+      sourceScope: {
+        workspaceData: true,
+        libraryPinned: true,
+        uploadedDocs: true,
+        webSearch: true,
+        liveWebsiteCrawl: true,
+        socialIntel: true,
+      },
+    },
+    {
+      modeLabel: 'pro',
+      sourceScope: {
+        webSearch: false,
+        socialIntel: false,
+      },
+    }
+  );
+  assert.equal(modePolicy.responseMode, 'pro', 'Input options should override response mode.');
+  assert.equal(modePolicy.targetLength, 'long', 'Pro mode should default to long target length.');
+  assert.equal(modePolicy.strictValidation, true, 'Pro mode should enforce strict validation.');
+  assert.equal(modePolicy.sourceScope.webSearch, false, 'Input options should override source scope for webSearch.');
+  assert.equal(modePolicy.sourceScope.socialIntel, false, 'Input options should override source scope for socialIntel.');
+}
+
+async function testSourceScopeBlockingInToolContract() {
+  const webSearchBlockedPolicy = normalizePolicy({
+    sourceScope: {
+      workspaceData: true,
+      libraryPinned: true,
+      uploadedDocs: true,
+      webSearch: false,
+      liveWebsiteCrawl: true,
+      socialIntel: true,
+    },
+  });
+  const webSearchBlocked = await executeToolWithContract({
+    researchJobId: 'runtime-test-job',
+    syntheticSessionId: 'runtime-runtime-test-branch',
+    userMessage: 'Search this on web',
+    toolName: 'search.web',
+    args: { query: 'eluumis competitors' },
+    policy: webSearchBlockedPolicy,
+  });
+  assert.equal(webSearchBlocked.ok, false, 'Blocked source-scope call should return ok=false.');
+  assert.match(
+    webSearchBlocked.summary,
+    /blocked by selected source scope/i,
+    'Blocked tool summary should explain source scope restriction.'
+  );
+  assert.ok(
+    webSearchBlocked.warnings.some((warning) => /web_search is disabled/i.test(warning)),
+    'Expected warning to mention web_search restriction.'
+  );
+  assert.equal(
+    webSearchBlocked.continuations?.[0]?.suggestedToolCalls?.[0]?.tool,
+    'intel.list',
+    'Blocked tool should propose intel.list fallback continuation.'
+  );
+
+  const socialBlockedPolicy = normalizePolicy({
+    sourceScope: {
+      workspaceData: true,
+      libraryPinned: true,
+      uploadedDocs: true,
+      webSearch: true,
+      liveWebsiteCrawl: true,
+      socialIntel: false,
+    },
+  });
+  const socialBlocked = await executeToolWithContract({
+    researchJobId: 'runtime-test-job',
+    syntheticSessionId: 'runtime-runtime-test-branch',
+    userMessage: 'Fetch social evidence',
+    toolName: 'evidence.posts',
+    args: { limit: 5 },
+    policy: socialBlockedPolicy,
+  });
+  assert.equal(socialBlocked.ok, false, 'Social blocked call should return ok=false.');
+  assert.ok(
+    socialBlocked.warnings.some((warning) => /social_intel is disabled/i.test(warning)),
+    'Expected warning to mention social_intel restriction.'
+  );
 }
 
 function testLegacyBoilerplateStripping() {
@@ -213,12 +302,16 @@ function testLegacyBoilerplateStripping() {
   assert.equal(cleaned, 'Here is the actual answer.', 'Expected legacy scaffold text to be stripped from response.');
 }
 
-function main() {
+async function main() {
   testPlannerHeuristics();
   testContinuationCollection();
   testPolicyNormalization();
   testLegacyBoilerplateStripping();
+  await testSourceScopeBlockingInToolContract();
   console.log('[Runtime Engine] Heuristic + continuation tests passed.');
 }
 
-main();
+main().catch((error) => {
+  console.error('[Runtime Engine] Heuristic + continuation tests failed.', error);
+  process.exit(1);
+});

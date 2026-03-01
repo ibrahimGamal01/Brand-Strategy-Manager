@@ -166,6 +166,18 @@ async function main() {
         content: 'queued message one',
         userId: 'workflow-e2e',
         mode: 'queue',
+        inputOptions: {
+          modeLabel: 'pro',
+          targetLength: 'long',
+          sourceScope: {
+            workspaceData: true,
+            libraryPinned: true,
+            uploadedDocs: true,
+            webSearch: true,
+            liveWebsiteCrawl: true,
+            socialIntel: true,
+          },
+        },
       }),
     },
     jar
@@ -188,7 +200,20 @@ async function main() {
   );
   assert.equal(queueTwo.status, 202, 'Queue message two failed');
 
-  const queuedSnapshot = await apiRequest<{ queue?: Array<{ id: string }> }>(
+  const queuedSnapshot = await apiRequest<{
+    queue?: Array<{
+      id: string;
+      content?: string;
+      inputOptionsJson?: {
+        modeLabel?: string;
+        targetLength?: string;
+        sourceScope?: Record<string, unknown>;
+      };
+      steerJson?: {
+        note?: string;
+      };
+    }>;
+  }>(
     baseUrl,
     `/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/queue`,
     { method: 'GET' },
@@ -196,8 +221,76 @@ async function main() {
   );
   assert.equal(queuedSnapshot.status, 200, 'Queue read failed');
   assert.equal((queuedSnapshot.data.queue || []).length, 2, 'Queue should contain two items');
+  const queuedFirst = (queuedSnapshot.data.queue || [])[0];
+  assert.equal(
+    String(queuedFirst?.inputOptionsJson?.modeLabel || ''),
+    'pro',
+    'Queued item should persist inputOptions.modeLabel.'
+  );
+  assert.equal(
+    String(queuedFirst?.inputOptionsJson?.targetLength || ''),
+    'long',
+    'Queued item should persist inputOptions.targetLength.'
+  );
 
   const queueIds = (queuedSnapshot.data.queue || []).map((item) => item.id);
+  const patchedQueue = await apiRequest<{
+    queue?: Array<{
+      id: string;
+      content?: string;
+      inputOptionsJson?: {
+        modeLabel?: string;
+        targetLength?: string;
+        sourceScope?: Record<string, unknown>;
+      };
+      steerJson?: {
+        note?: string;
+      };
+    }>;
+  }>(
+    baseUrl,
+    `/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/queue/${queueIds[1]}`,
+    {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        content: 'queued message two refined',
+        steerNote: 'Use user text first and keep evidence explicit.',
+        inputOptions: {
+          modeLabel: 'deep',
+          sourceScope: {
+            webSearch: false,
+            socialIntel: false,
+          },
+        },
+      }),
+    },
+    jar
+  );
+  assert.equal(patchedQueue.status, 200, 'Queue patch failed');
+  const patchedQueueItem = (patchedQueue.data.queue || []).find((item) => item.id === queueIds[1]);
+  assert.equal(String(patchedQueueItem?.content || ''), 'queued message two refined', 'Queue patch should update content.');
+  assert.equal(
+    String(patchedQueueItem?.inputOptionsJson?.modeLabel || ''),
+    'deep',
+    'Queue patch should update inputOptions.modeLabel.'
+  );
+  assert.equal(
+    String((patchedQueueItem?.inputOptionsJson?.sourceScope || {}).webSearch),
+    'false',
+    'Queue patch should apply sourceScope.webSearch=false.'
+  );
+  assert.equal(
+    String((patchedQueueItem?.inputOptionsJson?.sourceScope || {}).socialIntel),
+    'false',
+    'Queue patch should apply sourceScope.socialIntel=false.'
+  );
+  assert.equal(
+    String(patchedQueueItem?.steerJson?.note || ''),
+    'Use user text first and keep evidence explicit.',
+    'Queue patch should persist steer note.'
+  );
+
   const reordered = await apiRequest<{ queue?: Array<{ id: string }> }>(
     baseUrl,
     `/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/queue/reorder`,

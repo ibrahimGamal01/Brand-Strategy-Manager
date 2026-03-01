@@ -197,24 +197,43 @@ function normalizeSourceScope(raw?: Partial<RuntimeSourceScope> | null): Runtime
   };
 }
 
+function normalizeInputSourceScope(raw?: unknown): Partial<RuntimeSourceScope> | undefined {
+  if (!isRecord(raw)) return undefined;
+  const normalized: Partial<RuntimeSourceScope> = {};
+  if (typeof raw.workspaceData === 'boolean') normalized.workspaceData = raw.workspaceData;
+  if (typeof raw.libraryPinned === 'boolean') normalized.libraryPinned = raw.libraryPinned;
+  if (typeof raw.uploadedDocs === 'boolean') normalized.uploadedDocs = raw.uploadedDocs;
+  if (typeof raw.webSearch === 'boolean') normalized.webSearch = raw.webSearch;
+  if (typeof raw.liveWebsiteCrawl === 'boolean') normalized.liveWebsiteCrawl = raw.liveWebsiteCrawl;
+  if (typeof raw.socialIntel === 'boolean') normalized.socialIntel = raw.socialIntel;
+  return Object.keys(normalized).length ? normalized : undefined;
+}
+
 function normalizeInputOptions(raw?: RuntimeInputOptions | null): RuntimeInputOptions | null {
   if (!isRecord(raw)) return null;
-  const modeRaw = String(raw.modeLabel || '').trim().toLowerCase();
-  const modeLabel: RuntimeResponseMode =
-    modeRaw === 'fast' || modeRaw === 'deep' || modeRaw === 'pro' ? (modeRaw as RuntimeResponseMode) : 'balanced';
-  const targetLengthRaw = String(raw.targetLength || '').trim().toLowerCase();
-  const targetLength: RuntimeTargetLength =
-    targetLengthRaw === 'short' || targetLengthRaw === 'long' ? (targetLengthRaw as RuntimeTargetLength) : 'medium';
-  return {
-    modeLabel,
-    targetLength,
-    sourceScope: normalizeSourceScope(isRecord(raw.sourceScope) ? (raw.sourceScope as Partial<RuntimeSourceScope>) : {}),
-    ...(typeof raw.steerNote === 'string' && raw.steerNote.trim()
-      ? { steerNote: raw.steerNote.trim().slice(0, 1000) }
-      : {}),
-    ...(typeof raw.strictValidation === 'boolean' ? { strictValidation: raw.strictValidation } : {}),
-    ...(typeof raw.pauseAfterPlanning === 'boolean' ? { pauseAfterPlanning: raw.pauseAfterPlanning } : {}),
-  };
+  const normalized: RuntimeInputOptions = {};
+  const modeRaw = typeof raw.modeLabel === 'string' ? raw.modeLabel.trim().toLowerCase() : '';
+  if (modeRaw === 'fast' || modeRaw === 'balanced' || modeRaw === 'deep' || modeRaw === 'pro') {
+    normalized.modeLabel = modeRaw as RuntimeResponseMode;
+  }
+  const targetLengthRaw = typeof raw.targetLength === 'string' ? raw.targetLength.trim().toLowerCase() : '';
+  if (targetLengthRaw === 'short' || targetLengthRaw === 'medium' || targetLengthRaw === 'long') {
+    normalized.targetLength = targetLengthRaw as RuntimeTargetLength;
+  }
+  const sourceScope = normalizeInputSourceScope(raw.sourceScope);
+  if (sourceScope) {
+    normalized.sourceScope = sourceScope;
+  }
+  if (typeof raw.steerNote === 'string' && raw.steerNote.trim()) {
+    normalized.steerNote = raw.steerNote.trim().slice(0, 1000);
+  }
+  if (typeof raw.strictValidation === 'boolean') {
+    normalized.strictValidation = raw.strictValidation;
+  }
+  if (typeof raw.pauseAfterPlanning === 'boolean') {
+    normalized.pauseAfterPlanning = raw.pauseAfterPlanning;
+  }
+  return Object.keys(normalized).length ? normalized : null;
 }
 
 function mergePolicyWithInputOptions(
@@ -227,7 +246,13 @@ function mergePolicyWithInputOptions(
   const responseMode = normalizedOptions.modeLabel || policy.responseMode;
   const targetLengthFromMode: RuntimeTargetLength =
     responseMode === 'fast' ? 'short' : responseMode === 'deep' || responseMode === 'pro' ? 'long' : 'medium';
-  const targetLength = normalizedOptions.targetLength || targetLengthFromMode;
+  let targetLength: RuntimeTargetLength = policy.targetLength;
+  if (normalizedOptions.modeLabel) {
+    targetLength = targetLengthFromMode;
+  }
+  if (normalizedOptions.targetLength) {
+    targetLength = normalizedOptions.targetLength;
+  }
   const strictValidation =
     typeof normalizedOptions.strictValidation === 'boolean'
       ? normalizedOptions.strictValidation
