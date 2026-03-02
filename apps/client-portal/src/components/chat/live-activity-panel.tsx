@@ -542,6 +542,13 @@ function FeedTab({ feedItems }: { feedItems: ProcessFeedItem[] }) {
             </div>
           </div>
           <p className="mt-1 text-sm">{item.message}</p>
+          {item.details?.length ? (
+            <ul className="mt-2 space-y-1 text-xs" style={{ color: "var(--bat-text-muted)" }}>
+              {item.details.map((detail) => (
+                <li key={`${item.id}-${detail}`}>• {detail}</li>
+              ))}
+            </ul>
+          ) : null}
         </article>
       ))}
     </div>

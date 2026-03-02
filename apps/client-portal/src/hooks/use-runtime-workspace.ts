@@ -772,6 +772,76 @@ function toolOutputPreviewPayload(payload: Record<string, unknown> | null): Reco
   return isRecord(toolOutput.preview) ? toolOutput.preview : null;
 }
 
+type DocumentPlanPreview = {
+  docType?: string;
+  title?: string;
+  audience?: string;
+  depth?: string;
+  timeframeDays?: number;
+  includeCompetitors?: boolean;
+  includeEvidenceLinks?: boolean;
+};
+
+function normalizeDocumentPlanPreview(value: unknown): DocumentPlanPreview | null {
+  if (!isRecord(value)) return null;
+  const docType = String(value.docType || "").trim();
+  const title = String(value.title || "").trim();
+  const audience = String(value.audience || "").trim();
+  const depth = String(value.depth || "").trim();
+  const timeframeDaysRaw = Number(value.timeframeDays);
+  const timeframeDays = Number.isFinite(timeframeDaysRaw) ? Math.max(1, Math.floor(timeframeDaysRaw)) : undefined;
+  const includeCompetitors = typeof value.includeCompetitors === "boolean" ? value.includeCompetitors : undefined;
+  const includeEvidenceLinks = typeof value.includeEvidenceLinks === "boolean" ? value.includeEvidenceLinks : undefined;
+  if (!docType && !title && !audience && !depth && timeframeDays === undefined && includeCompetitors === undefined && includeEvidenceLinks === undefined) {
+    return null;
+  }
+  return {
+    ...(docType ? { docType } : {}),
+    ...(title ? { title } : {}),
+    ...(audience ? { audience } : {}),
+    ...(depth ? { depth } : {}),
+    ...(timeframeDays !== undefined ? { timeframeDays } : {}),
+    ...(includeCompetitors !== undefined ? { includeCompetitors } : {}),
+    ...(includeEvidenceLinks !== undefined ? { includeEvidenceLinks } : {}),
+  };
+}
+
+function extractDocumentPlanPreview(payload: Record<string, unknown> | null): DocumentPlanPreview | null {
+  return normalizeDocumentPlanPreview(toolOutputPreviewPayload(payload));
+}
+
+function formatDocumentPlanSummary(plan: DocumentPlanPreview): string {
+  const docType = plan.docType ? humanizeToken(plan.docType.toLowerCase()) : "Document";
+  const depthLabel = plan.depth ? humanizeToken(plan.depth.toLowerCase()) : "";
+  const extra: string[] = [];
+  if (plan.timeframeDays) extra.push(`${plan.timeframeDays}-day scope`);
+  if (depthLabel) extra.push(`${depthLabel} depth`);
+  if (plan.includeCompetitors) extra.push("includes competitors");
+  if (plan.includeEvidenceLinks) extra.push("includes evidence links");
+  const heading = `${docType} plan ready${plan.audience ? ` for ${plan.audience}` : ""}${plan.title ? ` — "${plan.title}"` : ""}`;
+  return extra.length ? `${heading}. ${extra.join(" • ")}.` : `${heading}.`;
+}
+
+function documentPlanDetailLines(plan: DocumentPlanPreview): string[] {
+  const lines: string[] = [];
+  if (plan.docType) lines.push(`Type: ${humanizeToken(plan.docType.toLowerCase())}`);
+  if (plan.title) lines.push(`Title: ${plan.title}`);
+  if (plan.audience) lines.push(`Audience: ${plan.audience}`);
+  if (plan.depth) lines.push(`Depth: ${humanizeToken(plan.depth.toLowerCase())}`);
+  if (plan.timeframeDays) lines.push(`Timeframe: ${plan.timeframeDays} day(s)`);
+  const includes: string[] = [];
+  if (plan.includeCompetitors) includes.push("competitor analysis");
+  if (plan.includeEvidenceLinks) includes.push("evidence links");
+  if (includes.length) lines.push(`Includes: ${includes.join(", ")}`);
+  return lines.slice(0, 6);
+}
+
+function unwrapToolRunResult(result: Record<string, unknown> | null): Record<string, unknown> | null {
+  if (!result) return null;
+  if (isRecord(result.raw)) return result.raw;
+  return result;
+}
+
 function toValueFirstToolMessage(
   toolName: string | undefined,
   inputMessage: string,
@@ -804,6 +874,13 @@ function toValueFirstToolMessage(
     const top = previewItemsFromUnknown(preview.items, 2).map((item) => item.label);
     const countLabel = Number.isFinite(count) ? `${Math.max(0, Math.floor(count))} result(s)` : "search results";
     return `Web search returned ${countLabel}${provider ? ` via ${provider}` : ""}${query ? ` for "${query}"` : ""}${top.length ? `. Top: ${top.join(", ")}` : "."}`;
+  }
+
+  if (toolName === "document.plan" && preview) {
+    const plan = normalizeDocumentPlanPreview(preview);
+    if (plan) {
+      return formatDocumentPlanSummary(plan);
+    }
   }
 
   const numberResult = parseNumericResult(raw);
@@ -846,6 +923,7 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
   const latest = normalizeRuntimeEvents(events).slice(-120).reverse();
   return latest.map((event) => {
     let message = event.message || "Runtime event";
+    const documentPlanPreview = event.toolName === "document.plan" ? extractDocumentPlanPreview(event.payload) : null;
 
     if (event.event.startsWith("document.")) {
       if (event.event === "document.upload_received") {
@@ -920,6 +998,7 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
       ...(actionLabel ? { actionLabel } : {}),
       ...(event.runId ? { runId: event.runId } : {}),
       ...(event.toolName ? { toolName: event.toolName } : {}),
+      ...(documentPlanPreview ? { details: documentPlanDetailLines(documentPlanPreview) } : {}),
       phase: event.phase,
       level: event.level,
     };
@@ -981,8 +1060,29 @@ function extractRunInsightsFromToolRuns(toolRuns: Array<Record<string, unknown>>
 
   for (const toolRun of toolRuns) {
     const toolName = String(toolRun.toolName || "").trim().toLowerCase();
-    const result = isRecord(toolRun.resultJson) ? toolRun.resultJson : null;
+    const resultJson = isRecord(toolRun.resultJson) ? toolRun.resultJson : null;
+    const result = unwrapToolRunResult(resultJson);
     if (!result) continue;
+
+    if (toolName === "document.plan") {
+      const plan = normalizeDocumentPlanPreview(isRecord(result.plan) ? result.plan : result);
+      if (plan) {
+        pushDetail(formatDocumentPlanSummary(plan));
+        for (const line of documentPlanDetailLines(plan)) {
+          pushDetail(line);
+        }
+        if (plan.docType) {
+          pushMetric({ key: "Document type", value: humanizeToken(plan.docType.toLowerCase()) });
+        }
+        if (plan.depth) {
+          pushMetric({ key: "Depth", value: humanizeToken(plan.depth.toLowerCase()) });
+        }
+        if (plan.timeframeDays) {
+          pushMetric({ key: "Timeframe", value: `${plan.timeframeDays} day(s)` });
+        }
+      }
+      continue;
+    }
 
     if (toolName === "competitors.discover_v3") {
       for (const metric of metricsFromDiscoverV3Result(result)) {

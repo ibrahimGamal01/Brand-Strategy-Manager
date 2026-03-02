@@ -1956,6 +1956,19 @@ function buildListPreviewItems(value: unknown, maxItems = 6): Array<{ label: str
 }
 
 function buildToolOutputPreview(raw: Record<string, unknown>, toolName: string): Record<string, unknown> | null {
+  if (toolName === 'document.plan') {
+    const plan = isRecord(raw.plan) ? raw.plan : raw;
+    return {
+      ...(typeof plan.docType === 'string' ? { docType: sanitizePreviewText(plan.docType, 48) } : {}),
+      ...(typeof plan.title === 'string' ? { title: sanitizePreviewText(plan.title, 180) } : {}),
+      ...(typeof plan.audience === 'string' ? { audience: sanitizePreviewText(plan.audience, 140) } : {}),
+      ...(typeof plan.depth === 'string' ? { depth: sanitizePreviewText(plan.depth, 40) } : {}),
+      ...(toNumber(plan.timeframeDays) !== null ? { timeframeDays: Math.max(1, Math.floor(Number(plan.timeframeDays))) } : {}),
+      ...(typeof plan.includeCompetitors === 'boolean' ? { includeCompetitors: plan.includeCompetitors } : {}),
+      ...(typeof plan.includeEvidenceLinks === 'boolean' ? { includeEvidenceLinks: plan.includeEvidenceLinks } : {}),
+    };
+  }
+
   if (toolName === 'competitors.discover_v3') {
     const statsRaw = isRecord(raw.stats) ? raw.stats : isRecord(raw.summary) ? raw.summary : null;
     const laneStatsRaw = isRecord(raw.laneStats) ? raw.laneStats : null;

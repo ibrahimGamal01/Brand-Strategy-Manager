@@ -224,6 +224,7 @@ export interface ProcessFeedItem {
   id: string;
   timestamp: string;
   message: string;
+  details?: string[];
   actionLabel?: string;
   runId?: string;
   toolName?: string;
