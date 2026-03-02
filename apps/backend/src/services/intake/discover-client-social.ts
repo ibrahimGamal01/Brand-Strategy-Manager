@@ -26,9 +26,24 @@ function extractDomain(website: string): string {
 export async function discoverClientSocialFromWebsite(
   website: string,
   _brandName?: string
-): Promise<{ instagram?: string; tiktok?: string }> {
+): Promise<{
+  instagram?: string;
+  tiktok?: string;
+  linkedin?: string;
+  youtube?: string;
+  twitter?: string;
+  candidates?: Array<{
+    platform: 'instagram' | 'tiktok' | 'youtube' | 'twitter' | 'linkedin';
+    handle: string;
+    profileUrl?: string;
+    confidence: number;
+    reason: string;
+    source: string;
+    isLikelyClient: boolean;
+  }>;
+}> {
   const domain = extractDomain(website);
-  if (!domain) return {};
+  if (!domain) return { candidates: [] };
 
   const result = await searchSocialHandlesForWebsite(domain, { timeoutMs: 25_000 });
   return result;

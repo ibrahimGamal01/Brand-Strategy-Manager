@@ -5,6 +5,28 @@
 
 import { searchBrandContextDDG } from '../discovery/duckduckgo-search.js';
 
+const NAME_NOISE_WORDS = new Set([
+  'the',
+  'and',
+  'for',
+  'with',
+  'from',
+  'first',
+  'time',
+  'labs',
+  'lab',
+  'studio',
+  'group',
+  'media',
+  'digital',
+  'solutions',
+  'company',
+  'inc',
+  'llc',
+  'co',
+  'agency',
+]);
+
 function extractDomain(website: string): string {
   const s = String(website || '').trim();
   if (!s) return '';
@@ -35,7 +57,7 @@ export interface ValidateSuggestedProfileResult {
  */
 export async function validateSuggestedProfileIsClient(params: {
   handle: string;
-  platform: 'instagram' | 'tiktok';
+  platform: 'instagram' | 'tiktok' | 'youtube' | 'linkedin' | 'x' | 'twitter';
   clientWebsite?: string;
   clientName?: string;
 }): Promise<ValidateSuggestedProfileResult> {
@@ -65,10 +87,14 @@ export async function validateSuggestedProfileIsClient(params: {
     }
 
     if (clientNameNorm) {
-      const words = clientNameNorm.split(/\s+/).filter((w) => w.length > 2);
+      const normalizedName = clientNameNorm.replace(/\s+/g, ' ').trim();
+      const hasPhraseMatch = normalizedName.length >= 6 && combinedText.includes(normalizedName);
+      const words = normalizedName
+        .split(/\s+/)
+        .filter((w) => w.length >= 4 && !NAME_NOISE_WORDS.has(w));
       const matchCount = words.filter((w) => combinedText.includes(w)).length;
-      if (matchCount > 0) {
-        confidence += Math.min(0.3, matchCount * 0.15);
+      if (hasPhraseMatch || matchCount >= 2) {
+        confidence += hasPhraseMatch ? 0.22 : Math.min(0.2, matchCount * 0.08);
         reasons.push(`Name overlap with "${clientName}"`);
       }
     }

@@ -36,6 +36,12 @@ function isSocialHost(hostname: string): boolean {
   return SOCIAL_HOST_MARKERS.some((marker) => host.includes(marker));
 }
 
+function normalizeUrlForStorage(parsed: URL): string {
+  parsed.hash = '';
+  const normalized = parsed.toString();
+  return normalized.endsWith('/') ? normalized.slice(0, -1) : normalized;
+}
+
 function toHostname(url: string): string {
   try {
     const parsed = new URL(url.startsWith('http') ? url : `https://${url}`);
@@ -60,11 +66,37 @@ function normalizeWebsiteCandidate(rawValue: string): string {
   try {
     const parsed = new URL(candidate);
     if (!['http:', 'https:'].includes(parsed.protocol)) return '';
-    if (isSocialHost(parsed.hostname)) return '';
+    const hostname = parsed.hostname.replace(/^www\./i, '').toLowerCase();
+    if (!hostname) return '';
+    if (/[, ]/.test(hostname)) return '';
+    if (isSocialHost(hostname)) return '';
 
-    parsed.hash = '';
-    const normalized = parsed.toString();
-    return normalized.endsWith('/') ? normalized.slice(0, -1) : normalized;
+    return normalizeUrlForStorage(parsed);
+  } catch {
+    return '';
+  }
+}
+
+function normalizeSocialReferenceCandidate(rawValue: string): string {
+  let candidate = String(rawValue || '').trim();
+  if (!candidate) return '';
+
+  candidate = candidate
+    .replace(/^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/i, '$2')
+    .replace(/[)\],;.!]+$/g, '');
+
+  if (!/^https?:\/\//i.test(candidate)) {
+    candidate = `https://${candidate}`;
+  }
+
+  try {
+    const parsed = new URL(candidate);
+    if (!['http:', 'https:'].includes(parsed.protocol)) return '';
+    const hostname = parsed.hostname.replace(/^www\./i, '').toLowerCase();
+    if (!hostname) return '';
+    if (/[, ]/.test(hostname)) return '';
+    if (!isSocialHost(hostname)) return '';
+    return normalizeUrlForStorage(parsed);
   } catch {
     return '';
   }
@@ -82,7 +114,7 @@ function extractWebsiteCandidates(value: string): string[] {
     if (extracted) results.push(extracted);
   }
 
-  const urlMatches = source.match(/https?:\/\/[^\s)]+/gi) || [];
+  const urlMatches = source.match(/https?:\/\/[^\s),;]+/gi) || [];
   results.push(...urlMatches);
 
   const domainMatches = source.match(/\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[\w\-./?%&=]*)?/gi) || [];
@@ -96,38 +128,73 @@ function extractWebsiteCandidates(value: string): string[] {
 }
 
 export function parseWebsiteList(input: unknown, maxItems = 8): string[] {
+  return classifyIntakeUrlInputs(input, maxItems, maxItems).crawlWebsites;
+}
+
+export function parseSocialReferenceList(input: unknown, maxItems = 12): string[] {
+  return classifyIntakeUrlInputs(input, maxItems, maxItems).socialReferences;
+}
+
+export function classifyIntakeUrlInputs(
+  input: unknown,
+  maxWebsiteItems = 8,
+  maxSocialItems = 12
+): {
+  crawlWebsites: string[];
+  socialReferences: string[];
+} {
   const chunks = Array.isArray(input) ? input : [input];
-  const out: string[] = [];
-  const seen = new Set<string>();
+  const crawlWebsites: string[] = [];
+  const socialReferences: string[] = [];
+  const seenWeb = new Set<string>();
+  const seenSocial = new Set<string>();
 
   for (const chunk of chunks) {
     const candidates = extractWebsiteCandidates(String(chunk || ''));
     for (const candidate of candidates) {
       const normalized = normalizeWebsiteCandidate(candidate);
-      if (!normalized) continue;
-      const key = normalized.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push(normalized);
-      if (out.length >= maxItems) {
-        return out;
+      if (normalized) {
+        const key = normalized.toLowerCase();
+        if (!seenWeb.has(key)) {
+          seenWeb.add(key);
+          crawlWebsites.push(normalized);
+          if (crawlWebsites.length >= maxWebsiteItems) break;
+        }
+        continue;
       }
+
+      const socialReference = normalizeSocialReferenceCandidate(candidate);
+      if (!socialReference) continue;
+      const socialKey = socialReference.toLowerCase();
+      if (seenSocial.has(socialKey)) continue;
+      seenSocial.add(socialKey);
+      socialReferences.push(socialReference);
+      if (socialReferences.length >= maxSocialItems) break;
     }
   }
 
-  return out;
+  return {
+    crawlWebsites,
+    socialReferences,
+  };
 }
 
 export function resolveIntakeWebsites(payload: Record<string, unknown>): {
   websites: string[];
   primaryWebsite: string;
+  socialReferences: string[];
 } {
   const directWebsite = String(payload.website || payload.websiteDomain || '').trim();
-  const websites = parseWebsiteList([directWebsite, payload.websites], 8);
+  const classified = classifyIntakeUrlInputs([directWebsite, payload.websites, payload.socialReferences], 8, 12);
+  const websites = classified.crawlWebsites;
+  const socialReferences = classified.socialReferences;
+  const directWebsiteHost = toHostname(directWebsite);
+  const hasDirectWebsite = Boolean(directWebsiteHost && !isSocialHost(directWebsiteHost));
 
   return {
     websites,
-    primaryWebsite: websites[0] || directWebsite,
+    primaryWebsite: websites[0] || (hasDirectWebsite ? directWebsite : ''),
+    socialReferences,
   };
 }
 

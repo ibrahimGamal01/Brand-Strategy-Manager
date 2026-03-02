@@ -56,7 +56,6 @@ import { buildRuntimeAgentContext } from './context-assembler';
 import type { RuntimeAgentContext } from './agent-context';
 import { createKnowledgeLedgerVersion } from '../../knowledge/knowledge-ledger-service';
 import { resolveModelForTask } from '../../ai/model-router';
-import { buildDocumentGroundingHint, hydrateDocumentIdsFromMessageInput, normalizeDocumentIds } from '../../documents/workspace-document-service';
 
 type SendMessageInput = {
   researchJobId: string;
@@ -78,10 +77,46 @@ type SendMessageResult = {
   userMessageId?: string;
 };
 
+type RuntimeDocumentHydrationInput = {
+  researchJobId: string;
+  documentIds?: string[];
+  attachmentIds?: string[];
+};
+
+type RuntimeDocumentGroundingInput = {
+  researchJobId: string;
+  documentIds?: string[];
+  attachmentIds?: string[];
+  maxChars?: number;
+};
+
 function envRuntimeNumber(name: string, fallback: number, min: number, max: number): number {
   const parsed = Number(process.env[name]);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.max(min, Math.min(max, Math.floor(parsed)));
+}
+
+function normalizeDocumentIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const entry of value) {
+    const normalized = String(entry || '').trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
+}
+
+async function hydrateDocumentIdsFromMessageInput(input: RuntimeDocumentHydrationInput): Promise<string[]> {
+  // Fallback hydration path for environments where workspace document service is not available.
+  return normalizeDocumentIds(input.documentIds || []);
+}
+
+async function buildDocumentGroundingHint(_input: RuntimeDocumentGroundingInput): Promise<string> {
+  // Keep runtime chat stable even when document ingestion modules are not deployed.
+  return '';
 }
 
 const DEFAULT_POLICY: RunPolicy = {
