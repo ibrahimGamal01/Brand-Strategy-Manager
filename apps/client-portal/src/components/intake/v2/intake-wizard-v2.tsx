@@ -125,14 +125,13 @@ export function IntakeWizardV2({
   const hasChannel = normalizedChannels.length > 0;
   const hasWebsite =
     state.website.trim().length > 0 || state.websites.some((item) => String(item || "").trim().length > 0);
-  const hasOfferOrGoal = state.mainOffer.trim().length > 0 || state.primaryGoal.trim().length > 0;
   const requireChannelConfirmation = confirmationRequired && hasChannel;
 
   const disableContinue =
     loading ||
     (step.id === "brand" && !hasName) ||
     (step.id === "channels" && !hasChannel && !hasWebsite) ||
-    (step.id === "voice" && (!hasOfferOrGoal || (requireChannelConfirmation && !channelsConfirmed)));
+    (step.id === "voice" && requireChannelConfirmation && !channelsConfirmed);
 
   function updateField<K extends keyof IntakeStateV2>(field: K, value: IntakeStateV2[K]) {
     if (field === "website" || field === "websites" || field === "socialReferences") {
