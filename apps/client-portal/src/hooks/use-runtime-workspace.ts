@@ -1573,24 +1573,24 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
         setProcessRuns(mapRuns(activeRuns, events));
         setQueuedMessages(
           (queuePayload.queue || []).map((item) => {
-            const inputOptions = normalizeMessageInputOptions(item.inputOptionsJson);
+            const itemRecord = item as unknown as Record<string, unknown>;
+            const inputOptions = normalizeMessageInputOptions(itemRecord.inputOptionsJson);
+            const attachmentIds = normalizeIdList(itemRecord.attachmentIdsJson);
+            const documentIds = normalizeIdList(itemRecord.documentIdsJson);
+            const steerRaw = isRecord(itemRecord.steerJson) ? itemRecord.steerJson : null;
             return {
-              id: String(item.id),
-              content: String(item.content),
-              createdAt: toIso(item.createdAt),
-              position: Number.isFinite(Number(item.position)) ? Number(item.position) : undefined,
-              ...(normalizeIdList(item.attachmentIdsJson).length
-                ? { attachmentIds: normalizeIdList(item.attachmentIdsJson) }
-                : {}),
-              ...(normalizeIdList(item.documentIdsJson).length
-                ? { documentIds: normalizeIdList(item.documentIdsJson) }
-                : {}),
+              id: String(itemRecord.id || ""),
+              content: String(itemRecord.content || ""),
+              createdAt: toIso(itemRecord.createdAt),
+              position: Number.isFinite(Number(itemRecord.position)) ? Number(itemRecord.position) : undefined,
+              ...(attachmentIds.length ? { attachmentIds } : {}),
+              ...(documentIds.length ? { documentIds } : {}),
               ...(inputOptions ? { inputOptions } : {}),
-              ...(isRecord(item.steerJson)
+              ...(steerRaw
                 ? {
                     steer: {
-                      ...(typeof item.steerJson.note === "string" ? { note: item.steerJson.note } : {}),
-                      ...(typeof item.steerJson.updatedAt === "string" ? { updatedAt: item.steerJson.updatedAt } : {}),
+                      ...(typeof steerRaw.note === "string" ? { note: steerRaw.note } : {}),
+                      ...(typeof steerRaw.updatedAt === "string" ? { updatedAt: steerRaw.updatedAt } : {}),
                     },
                   }
                 : {}),
