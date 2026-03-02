@@ -517,12 +517,14 @@ export function ChatComposer({
             Enter to send/queue, Shift+Enter for newline, Cmd/Ctrl+Enter to interrupt + send
           </p>
           {!canAttach && attachDisabledReason ? (
-            <p className="pointer-events-none absolute bottom-3 left-4 translate-y-4 text-[11px] text-amber-700">
+            <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
               {attachDisabledReason}
-            </p>
+            </div>
           ) : null}
           {uploadError ? (
-            <p className="pointer-events-none absolute bottom-3 left-4 translate-y-8 text-[11px] text-red-700">{uploadError}</p>
+            <div className="mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              {uploadError}
+            </div>
           ) : null}
 
           <div className="absolute bottom-2.5 right-2.5 flex items-center gap-2">
