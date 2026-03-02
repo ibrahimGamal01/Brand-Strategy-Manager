@@ -14,6 +14,32 @@ const collections: Array<{ id: LibraryCollection | "all"; label: string }> = [
   { id: "deliverables", label: "Deliverables" }
 ];
 
+function toFreshnessLabel(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown freshness";
+  const diffMs = Date.now() - date.getTime();
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  if (diffHours < 1) return "Updated just now";
+  if (diffHours < 24) return `Updated ${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return `Updated ${diffDays}d ago`;
+  return `Updated ${date.toLocaleDateString()}`;
+}
+
+function trustBadgeStyle(status?: string) {
+  const normalized = String(status || "").toLowerCase();
+  if (normalized === "high") {
+    return { borderColor: "#9ad2b2", background: "#eefaf2", color: "#166534" };
+  }
+  if (normalized === "medium") {
+    return { borderColor: "#f5d08b", background: "#fff8eb", color: "#7a4a00" };
+  }
+  if (normalized === "low") {
+    return { borderColor: "#f2b8b5", background: "#fdf1f0", color: "#8a1f17" };
+  }
+  return { borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)", color: "var(--bat-text-muted)" };
+}
+
 export function LibraryDrawer({
   open,
   onClose,
@@ -101,11 +127,24 @@ export function LibraryDrawer({
             <article key={item.id} className="rounded-xl border p-3" style={{ borderColor: "var(--bat-border)" }}>
               <div className="flex items-center justify-between gap-2">
                 <p className="text-sm font-semibold">{item.title}</p>
-                <span className="bat-chip">{item.collection}</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="bat-chip">{item.collection}</span>
+                  <span className="rounded-full border px-2 py-0.5 text-[11px]" style={trustBadgeStyle(item.trustStatus)}>
+                    {(item.trustStatus || "unknown").toUpperCase()}
+                  </span>
+                </div>
               </div>
               <p className="mt-1 text-xs" style={{ color: "var(--bat-text-muted)" }}>
                 {item.summary}
               </p>
+              {item.snippet ? (
+                <p
+                  className="mt-2 rounded-lg border px-2 py-2 text-xs"
+                  style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)", color: "var(--bat-text-muted)" }}
+                >
+                  {item.snippet}
+                </p>
+              ) : null}
               {item.previewText ? (
                 <p
                   className="mt-2 rounded-lg border px-2 py-2 text-xs"
@@ -129,8 +168,13 @@ export function LibraryDrawer({
                 ))}
               </div>
               <p className="mt-2 text-xs" style={{ color: "var(--bat-text-muted)" }}>
-                {item.freshness} • {item.evidenceLabel}
+                {toFreshnessLabel(item.freshness)} • {item.evidenceLabel}
               </p>
+              {item.evidenceCount ? (
+                <p className="mt-1 text-[11px]" style={{ color: "var(--bat-text-muted)" }}>
+                  {item.evidenceCount} evidence source{item.evidenceCount === 1 ? "" : "s"} linked
+                </p>
+              ) : null}
               <div className="mt-2 flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -162,6 +206,18 @@ export function LibraryDrawer({
                     Open source
                   </a>
                 ) : null}
+                {item.evidenceLinks?.slice(0, 3).map((link) => (
+                  <a
+                    key={`${item.id}-evidence-${link.href}`}
+                    href={link.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-full border px-3 py-1 text-xs"
+                    style={{ borderColor: "var(--bat-border)" }}
+                  >
+                    {link.label}
+                  </a>
+                ))}
                 {item.links?.map((link) => (
                   <a
                     key={`${item.id}-${link.label}-${link.href}`}

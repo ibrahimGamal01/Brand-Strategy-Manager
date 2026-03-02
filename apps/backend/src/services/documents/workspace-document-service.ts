@@ -265,49 +265,219 @@ function buildChangeSummary(instruction: string): string {
   return trimmed.length > 180 ? `${trimmed.slice(0, 177)}...` : trimmed;
 }
 
-function createProposedContent(current: string, instruction: string): string {
+function buildQuotedTextRegex(value: string): RegExp | null {
+  const compact = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!compact) return null;
+  const tokens = compact
+    .split(' ')
+    .map((token) => token.trim())
+    .filter(Boolean)
+    .map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  if (!tokens.length) return null;
+  return new RegExp(tokens.join('\\s+'), 'i');
+}
+
+function parseQuotedEditInstruction(instruction: string): {
+  quotedText?: string;
+  replacementText?: string;
+} {
+  const prompt = String(instruction || '').trim();
+  if (!prompt) return {};
+
+  const patterns: RegExp[] = [
+    /replace\s+[“"]([^”"]+)[”"]\s+with\s+[“"]([^”"]*)[”"]/i,
+    /replace\s+'([^']+)'\s+with\s+'([^']*)'/i,
+    /change\s+[“"]([^”"]+)[”"]\s+(?:to|into)\s+[“"]([^”"]*)[”"]/i,
+    /change\s+'([^']+)'\s+(?:to|into)\s+'([^']*)'/i,
+  ];
+  for (const pattern of patterns) {
+    const match = prompt.match(pattern);
+    if (!match) continue;
+    const quotedText = String(match[1] || '').trim();
+    const replacementText = String(match[2] || '').trim();
+    if (quotedText) {
+      return {
+        quotedText,
+        replacementText,
+      };
+    }
+  }
+
+  const quotedParts = Array.from(
+    prompt.matchAll(/[“"]([^”"]{2,320})[”"]|'([^']{2,320})'/g),
+    (match) => String(match[1] || match[2] || '').trim()
+  ).filter(Boolean);
+  if (
+    quotedParts.length >= 2 &&
+    /\b(replace|change|rewrite|update|swap)\b/i.test(prompt)
+  ) {
+    return {
+      quotedText: quotedParts[0],
+      replacementText: quotedParts[1],
+    };
+  }
+
+  if (quotedParts.length >= 1 && /\b(remove|delete)\b/i.test(prompt)) {
+    return {
+      quotedText: quotedParts[0],
+      replacementText: '',
+    };
+  }
+
+  if (
+    quotedParts.length >= 1 &&
+    /\b(edit|rewrite|update|change|replace|quote|quoted|around|section)\b/i.test(prompt)
+  ) {
+    return {
+      quotedText: quotedParts[0],
+    };
+  }
+
+  return {};
+}
+
+type ProposedContentMeta = {
+  contentMd: string;
+  anchor?: {
+    quotedText: string;
+    replacementText?: string;
+    matched: boolean;
+    matchType?: 'exact' | 'whitespace';
+    matchCount?: number;
+  };
+};
+
+function createProposedContent(
+  current: string,
+  instruction: string,
+  options?: {
+    quotedText?: string;
+    replacementText?: string;
+  }
+): ProposedContentMeta {
   const text = String(current || '').trim();
   const prompt = String(instruction || '').trim();
-  if (!prompt) return text;
+  if (!prompt) return { contentMd: text };
+
+  const parsed = parseQuotedEditInstruction(prompt);
+  const quotedText = String(options?.quotedText || parsed.quotedText || '').trim();
+  const replacementText =
+    options?.replacementText !== undefined
+      ? String(options.replacementText)
+      : parsed.replacementText !== undefined
+        ? String(parsed.replacementText)
+        : undefined;
+
+  if (quotedText) {
+    const exactOccurrences = text.split(quotedText).length - 1;
+    if (exactOccurrences > 0) {
+      if (replacementText !== undefined) {
+        return {
+          contentMd: text.replace(quotedText, replacementText),
+          anchor: {
+            quotedText,
+            replacementText,
+            matched: true,
+            matchType: 'exact',
+            matchCount: exactOccurrences,
+          },
+        };
+      }
+      return {
+        contentMd: text,
+        anchor: {
+          quotedText,
+          replacementText,
+          matched: true,
+          matchType: 'exact',
+          matchCount: exactOccurrences,
+        },
+      };
+    }
+
+    const quoteRegex = buildQuotedTextRegex(quotedText);
+    if (quoteRegex) {
+      const matched = quoteRegex.exec(text);
+      if (matched?.[0]) {
+        if (replacementText !== undefined) {
+          return {
+            contentMd: text.replace(quoteRegex, replacementText),
+            anchor: {
+              quotedText,
+              replacementText,
+              matched: true,
+              matchType: 'whitespace',
+              matchCount: 1,
+            },
+          };
+        }
+        return {
+          contentMd: text,
+          anchor: {
+            quotedText,
+            replacementText,
+            matched: true,
+            matchType: 'whitespace',
+            matchCount: 1,
+          },
+        };
+      }
+    }
+
+    return {
+      contentMd: text,
+      anchor: {
+        quotedText,
+        replacementText,
+        matched: false,
+      },
+    };
+  }
 
   const replaceMatch = prompt.match(/replace\s+"([^"]+)"\s+with\s+"([^"]+)"/i);
   if (replaceMatch) {
     const from = replaceMatch[1];
     const to = replaceMatch[2];
     if (from) {
-      return text.split(from).join(to);
+      return { contentMd: text.split(from).join(to) };
     }
   }
 
   if (/\b(summarize|shorten|concise)\b/i.test(prompt)) {
     const lines = text.split(/\n+/).map((line) => line.trim()).filter(Boolean);
     const kept = lines.slice(0, Math.max(8, Math.ceil(lines.length * 0.45)));
-    return [
-      '# Concise Version',
-      ...kept,
-      '',
-      '## Notes',
-      '- This concise version was generated from the latest canonical draft.',
-      `- Requested instruction: ${prompt}`,
-    ].join('\n');
+    return {
+      contentMd: [
+        '# Concise Version',
+        ...kept,
+        '',
+        '## Notes',
+        '- This concise version was generated from the latest canonical draft.',
+        `- Requested instruction: ${prompt}`,
+      ].join('\n'),
+    };
   }
 
   if (/\b(client version|client-friendly|board-ready|executive)\b/i.test(prompt)) {
-    return [
-      '# Client Version',
-      text,
-      '',
-      '## Editorial Note',
-      `- Adapted per request: ${prompt}`,
-    ].join('\n');
+    return {
+      contentMd: [
+        '# Client Version',
+        text,
+        '',
+        '## Editorial Note',
+        `- Adapted per request: ${prompt}`,
+      ].join('\n'),
+    };
   }
 
-  return [
-    text,
-    '',
-    '## Requested Edit Notes',
-    `- ${prompt}`,
-  ].join('\n');
+  return {
+    contentMd: [
+      text,
+      '',
+      '## Requested Edit Notes',
+      `- ${prompt}`,
+    ].join('\n'),
+  };
 }
 
 export async function uploadRuntimeDocuments(input: {
@@ -605,6 +775,8 @@ export async function proposeRuntimeDocumentEdit(input: {
   documentId: string;
   instruction: string;
   userId: string;
+  quotedText?: string;
+  replacementText?: string;
 }) {
   const detail = await getRuntimeDocumentDetail({
     researchJobId: input.researchJobId,
@@ -620,8 +792,18 @@ export async function proposeRuntimeDocumentEdit(input: {
     throw new Error('instruction is required');
   }
 
-  const proposedContentMd = createProposedContent(latest.contentMd, instruction);
+  const proposal = createProposedContent(latest.contentMd, instruction, {
+    ...(typeof input.quotedText === 'string' && input.quotedText.trim()
+      ? { quotedText: input.quotedText.trim() }
+      : {}),
+    ...(typeof input.replacementText === 'string' ? { replacementText: input.replacementText } : {}),
+  });
+  const proposedContentMd = proposal.contentMd;
   const changed = proposedContentMd !== latest.contentMd;
+  const changeSummary =
+    proposal.anchor?.quotedText && proposal.anchor.matched
+      ? `Updated quoted text: "${proposal.anchor.quotedText.slice(0, 100)}${proposal.anchor.quotedText.length > 100 ? '...' : ''}"`
+      : buildChangeSummary(instruction);
 
   await emitWorkspaceDocumentRuntimeEvent({
     branchId: input.branchId,
@@ -633,6 +815,7 @@ export async function proposeRuntimeDocumentEdit(input: {
       versionId: latest.id,
       instruction,
       changed,
+      ...(proposal.anchor ? { anchor: proposal.anchor } : {}),
       mode: 'proposal',
     },
     toolName: 'document.propose_edit',
@@ -655,7 +838,8 @@ export async function proposeRuntimeDocumentEdit(input: {
         instruction,
         proposedContentMd,
         changed,
-        changeSummary: buildChangeSummary(instruction),
+        changeSummary,
+        ...(proposal.anchor ? { anchor: proposal.anchor } : {}),
         preview: {
           beforeChars: latest.contentMd.length,
           afterChars: proposedContentMd.length,
@@ -668,7 +852,7 @@ export async function proposeRuntimeDocumentEdit(input: {
                 payload: {
                   documentId: detail.id,
                   proposedContentMd,
-                  changeSummary: buildChangeSummary(instruction),
+                  changeSummary,
                   baseVersionId: latest.id,
                 },
               },
@@ -697,7 +881,8 @@ export async function proposeRuntimeDocumentEdit(input: {
     instruction,
     proposedContentMd,
     changed,
-    changeSummary: buildChangeSummary(instruction),
+    changeSummary,
+    ...(proposal.anchor ? { anchor: proposal.anchor } : {}),
     preview: {
       beforeChars: latest.contentMd.length,
       afterChars: proposedContentMd.length,

@@ -6,6 +6,20 @@ import { DecisionItem, ProcessFeedItem, ProcessRun } from "@/types/chat";
 
 type Tab = "running" | "feed" | "decisions";
 
+function humanizeToolName(toolName?: string): string {
+  const normalized = String(toolName || "").trim().toLowerCase();
+  if (!normalized) return "";
+  if (normalized === "document.plan") return "Document plan";
+  if (normalized === "document.generate") return "Document generation";
+  if (normalized === "document.export") return "Document export";
+  if (normalized === "web.crawl") return "Website crawl";
+  if (normalized === "web.fetch") return "Website fetch";
+  if (normalized === "search.web") return "Web search";
+  if (normalized === "competitors.discover_v3") return "Competitor discovery";
+  if (normalized === "intel.list") return "Workspace records";
+  return normalized.replace(/\./g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
 function StatusIcon({ status }: { status: ProcessRun["status"] }) {
   if (status === "running") {
     return <Loader2 className="h-4 w-4 animate-spin" style={{ color: "var(--bat-accent)" }} />;
@@ -513,7 +527,13 @@ function RunningTab({
   );
 }
 
-function FeedTab({ feedItems }: { feedItems: ProcessFeedItem[] }) {
+function FeedTab({
+  feedItems,
+  onFeedItemAction,
+}: {
+  feedItems: ProcessFeedItem[];
+  onFeedItemAction?: (item: ProcessFeedItem) => void;
+}) {
   return (
     <div className="space-y-2">
       {feedItems.map((item) => (
@@ -523,8 +543,7 @@ function FeedTab({ feedItems }: { feedItems: ProcessFeedItem[] }) {
               {item.timestamp}
             </p>
             <div className="flex items-center gap-2">
-              {item.toolName ? <span className="bat-chip">{item.toolName}</span> : null}
-              {item.runId ? <span className="bat-chip">Run {item.runId.slice(0, 8)}</span> : null}
+              {item.toolName ? <span className="bat-chip">{humanizeToolName(item.toolName)}</span> : null}
               {phaseLabel(item.phase) ? (
                 <span className="rounded-full border px-2 py-0.5 text-xs" style={phaseChipStyle(item.phase)}>
                   {phaseLabel(item.phase)}
@@ -533,8 +552,10 @@ function FeedTab({ feedItems }: { feedItems: ProcessFeedItem[] }) {
             {item.actionLabel ? (
               <button
                 type="button"
+                onClick={() => onFeedItemAction?.(item)}
                 className="rounded-full border px-2 py-1 text-xs"
                 style={{ borderColor: "var(--bat-border)" }}
+                disabled={!onFeedItemAction}
               >
                 {item.actionLabel}
               </button>
@@ -600,7 +621,8 @@ export function LiveActivityPanel({
   decisions,
   onResolve,
   onRunAudit,
-  onSteer
+  onSteer,
+  onFeedItemAction,
 }: {
   runs: ProcessRun[];
   feedItems: ProcessFeedItem[];
@@ -608,6 +630,7 @@ export function LiveActivityPanel({
   onResolve: (id: string, option: string) => void;
   onRunAudit?: () => void;
   onSteer?: (instruction: string) => void;
+  onFeedItemAction?: (item: ProcessFeedItem) => void;
 }) {
   const [tab, setTab] = useState<Tab>("running");
   const tabs = useMemo(
@@ -655,7 +678,7 @@ export function LiveActivityPanel({
         ) : null}
         {tab === "feed" ? (
           <div className="bat-scrollbar h-full overflow-y-auto pr-1">
-            <FeedTab feedItems={feedItems} />
+            <FeedTab feedItems={feedItems} onFeedItemAction={onFeedItemAction} />
           </div>
         ) : null}
         {tab === "decisions" ? (

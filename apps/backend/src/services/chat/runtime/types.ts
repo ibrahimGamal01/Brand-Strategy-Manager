@@ -60,6 +60,7 @@ export type RuntimeInputOptions = {
   targetLength?: RuntimeTargetLength;
   strictValidation?: boolean;
   pauseAfterPlanning?: boolean;
+  libraryRefs?: string[];
 };
 
 export type RuntimeToolResult = {

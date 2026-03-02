@@ -356,7 +356,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
 
   const resolveDocumentHrefFromPayload = (payload?: Record<string, unknown>): string | null => {
     if (!payload) return null;
-    const fields: Array<keyof Record<string, unknown>> = ["downloadHref", "storageHref", "href", "storagePath"];
+    const fields = ["downloadHref", "storageHref", "href", "storagePath"] as const;
     for (const field of fields) {
       const value = String(payload[field] || "").trim();
       if (!value) continue;
@@ -798,11 +798,33 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setActivityOpen(true)}
+                  onClick={() => {
+                    setRightRailTab("activity");
+                    setActivityOpen(true);
+                  }}
                   className="inline-flex items-center gap-1 rounded-full border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 xl:hidden"
                 >
                   <PanelRight className="h-3.5 w-3.5" />
                   Activity
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRightRailTab("docs");
+                    setActivityOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1 rounded-full border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 xl:hidden"
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  Docs
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRightRailCollapsed((previous) => !previous)}
+                  className="hidden items-center gap-1 rounded-full border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 xl:inline-flex"
+                >
+                  <PanelRight className="h-3.5 w-3.5" />
+                  {rightRailCollapsed ? "Show panel" : "Hide panel"}
                 </button>
                 {queuedMessages.length > 0 ? (
                   <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs text-zinc-600">
@@ -822,7 +844,13 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
               </div>
             </header>
 
-            <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden xl:grid-cols-[minmax(0,1fr)_22rem] 2xl:grid-cols-[minmax(0,1fr)_24rem]">
+            <div
+              className={`grid min-h-0 flex-1 grid-cols-1 overflow-hidden ${
+                rightRailCollapsed
+                  ? "xl:grid-cols-1"
+                  : "xl:grid-cols-[minmax(0,1fr)_22rem] 2xl:grid-cols-[minmax(0,1fr)_24rem]"
+              }`}
+            >
               <div className="flex min-h-0 flex-col border-zinc-200 xl:border-r">
                 <ChatThread
                   messages={messages}
@@ -878,19 +906,80 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                 />
               </div>
 
-              <div className="hidden min-h-0 bg-[#f8fafc] xl:block">
-                <LiveActivityPanel
-                  runs={processRuns}
-                  feedItems={feedItems}
-                  decisions={decisions}
-                  onResolve={(decisionId, option) => runAsync(resolveDecision(decisionId, option))}
-                  onRunAudit={onRunAudit}
-                  onSteer={(instruction) => runAsync(steerRun(instruction))}
-                />
-              </div>
+              {!rightRailCollapsed ? (
+                <div className="hidden min-h-0 border-l border-zinc-200 bg-[#f8fafc] xl:flex xl:flex-col">
+                  <div className="flex items-center gap-1 border-b border-zinc-200 px-3 py-2">
+                    <button
+                      type="button"
+                      onClick={() => setRightRailTab("activity")}
+                      className={`rounded-full border px-2.5 py-1 text-xs ${
+                        rightRailTab === "activity"
+                          ? "border-zinc-300 bg-white text-zinc-800"
+                          : "border-zinc-200 bg-transparent text-zinc-600 hover:bg-zinc-100"
+                      }`}
+                    >
+                      Activity
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRightRailTab("docs")}
+                      className={`rounded-full border px-2.5 py-1 text-xs ${
+                        rightRailTab === "docs"
+                          ? "border-zinc-300 bg-white text-zinc-800"
+                          : "border-zinc-200 bg-transparent text-zinc-600 hover:bg-zinc-100"
+                      }`}
+                    >
+                      Docs
+                    </button>
+                    <div className="ml-auto" />
+                    <button
+                      type="button"
+                      onClick={() => setRightRailCollapsed(true)}
+                      className="rounded-full border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
+                    >
+                      Collapse
+                    </button>
+                  </div>
+                  <div className="min-h-0 flex-1 overflow-hidden">
+                    {rightRailTab === "activity" ? (
+                      <LiveActivityPanel
+                        runs={processRuns}
+                        feedItems={feedItems}
+                        decisions={decisions}
+                        onResolve={(decisionId, option) => runAsync(resolveDecision(decisionId, option))}
+                        onRunAudit={onRunAudit}
+                        onSteer={(instruction) => runAsync(steerRun(instruction))}
+                        onFeedItemAction={onFeedItemAction}
+                      />
+                    ) : (
+                      <DocumentWorkspacePanel
+                        workspaceId={workspaceId}
+                        branchId={activeBranchId}
+                        documents={runtimeDocuments}
+                        selectedDocumentId={selectedRuntimeDocumentId}
+                        onSelectDocument={setSelectedRuntimeDocumentId}
+                        onQuoteInChat={onQuoteDocumentInChat}
+                        onRefreshDocuments={refreshRuntimeDocuments}
+                        onRefreshRuntime={refreshNow}
+                      />
+                    )}
+                  </div>
+                </div>
+              ) : null}
             </div>
           </section>
         </div>
+
+        {rightRailCollapsed ? (
+          <button
+            type="button"
+            onClick={() => setRightRailCollapsed(false)}
+            className="absolute right-3 top-1/2 z-20 hidden -translate-y-1/2 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-700 shadow-sm hover:bg-zinc-100 xl:inline-flex"
+          >
+            <PanelRight className="mr-1 h-3.5 w-3.5" />
+            Open panel
+          </button>
+        ) : null}
 
         {sidebarOpen ? (
           <button
@@ -905,7 +994,30 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
           <div className="absolute inset-0 z-40 flex justify-end bg-black/35 xl:hidden">
             <div className="flex h-full w-11/12 max-w-lg flex-col border-l border-zinc-200 bg-[#f8fafc] shadow-2xl">
               <div className="flex items-center justify-between border-b border-zinc-200 px-3 py-2">
-                <p className="text-sm font-semibold text-zinc-900">Live Activity</p>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setRightRailTab("activity")}
+                    className={`rounded-full border px-2.5 py-1 text-xs ${
+                      rightRailTab === "activity"
+                        ? "border-zinc-300 bg-white text-zinc-800"
+                        : "border-zinc-200 bg-transparent text-zinc-600"
+                    }`}
+                  >
+                    Activity
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRightRailTab("docs")}
+                    className={`rounded-full border px-2.5 py-1 text-xs ${
+                      rightRailTab === "docs"
+                        ? "border-zinc-300 bg-white text-zinc-800"
+                        : "border-zinc-200 bg-transparent text-zinc-600"
+                    }`}
+                  >
+                    Docs
+                  </button>
+                </div>
                 <button
                   type="button"
                   onClick={() => setActivityOpen(false)}
@@ -915,14 +1027,28 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                 </button>
               </div>
               <div className="min-h-0 flex-1 overflow-hidden">
-                <LiveActivityPanel
-                  runs={processRuns}
-                  feedItems={feedItems}
-                  decisions={decisions}
-                  onResolve={(decisionId, option) => runAsync(resolveDecision(decisionId, option))}
-                  onRunAudit={onRunAudit}
-                  onSteer={(instruction) => runAsync(steerRun(instruction))}
-                />
+                {rightRailTab === "activity" ? (
+                  <LiveActivityPanel
+                    runs={processRuns}
+                    feedItems={feedItems}
+                    decisions={decisions}
+                    onResolve={(decisionId, option) => runAsync(resolveDecision(decisionId, option))}
+                    onRunAudit={onRunAudit}
+                    onSteer={(instruction) => runAsync(steerRun(instruction))}
+                    onFeedItemAction={onFeedItemAction}
+                  />
+                ) : (
+                  <DocumentWorkspacePanel
+                    workspaceId={workspaceId}
+                    branchId={activeBranchId}
+                    documents={runtimeDocuments}
+                    selectedDocumentId={selectedRuntimeDocumentId}
+                    onSelectDocument={setSelectedRuntimeDocumentId}
+                    onQuoteInChat={onQuoteDocumentInChat}
+                    onRefreshDocuments={refreshRuntimeDocuments}
+                    onRefreshRuntime={refreshNow}
+                  />
+                )}
               </div>
             </div>
             <button

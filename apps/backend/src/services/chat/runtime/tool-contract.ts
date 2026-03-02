@@ -583,6 +583,11 @@ function summarize(raw: Record<string, unknown>, toolName: string): string {
   }
 
   if (toolName === 'document.propose_edit') {
+    const anchor = isRecord(raw.anchor) ? raw.anchor : null;
+    const anchorMatched = anchor ? Boolean(anchor.matched) : null;
+    if (anchorMatched === false) {
+      return 'document.propose_edit could not match the requested quoted text in the current version.';
+    }
     const changed = Boolean(raw.changed);
     return changed ? 'document.propose_edit prepared a change proposal.' : 'document.propose_edit found no effective changes.';
   }

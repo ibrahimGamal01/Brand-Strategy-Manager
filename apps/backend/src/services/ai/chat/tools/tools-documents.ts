@@ -271,6 +271,8 @@ export const documentTools: ToolDefinition<Record<string, unknown>, Record<strin
       properties: {
         documentId: { type: 'string' },
         instruction: { type: 'string' },
+        quotedText: { type: 'string' },
+        replacementText: { type: 'string' },
       },
       required: ['documentId', 'instruction'],
       additionalProperties: false,
@@ -299,6 +301,10 @@ export const documentTools: ToolDefinition<Record<string, unknown>, Record<strin
         documentId,
         instruction,
         userId: 'runtime-tool',
+        ...(typeof args.quotedText === 'string' && args.quotedText.trim()
+          ? { quotedText: args.quotedText.trim() }
+          : {}),
+        ...(typeof args.replacementText === 'string' ? { replacementText: args.replacementText } : {}),
       });
     },
   },

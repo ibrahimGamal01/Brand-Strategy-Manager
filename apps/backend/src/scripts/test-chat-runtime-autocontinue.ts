@@ -113,8 +113,12 @@ function testPlannerHeuristics() {
 
   const slashGeneratePdfCalls = inferToolCallsFromMessage('/generate_pdf');
   assert.ok(
-    slashGeneratePdfCalls.some((entry) => entry.tool === 'document.plan'),
-    'Expected /generate_pdf to trigger document.plan.'
+    slashGeneratePdfCalls.some((entry) => entry.tool === 'document.generate'),
+    'Expected /generate_pdf to trigger document.generate.'
+  );
+  assert.ok(
+    !slashGeneratePdfCalls.some((entry) => entry.tool === 'document.plan'),
+    'Expected /generate_pdf not to schedule document.plan.'
   );
 
   const slashV3Calls = inferToolCallsFromMessage('/competitors.discover_v3 {"mode":"wide"}');
@@ -133,6 +137,30 @@ function testPlannerHeuristics() {
   assert.ok(
     mentionUrlCalls.some((entry) => entry.tool === 'web.fetch'),
     'Expected @library mention with URL title to trigger web.fetch.'
+  );
+
+  const quotedDocumentEditCalls = inferToolCallsFromMessage(
+    'Please replace "Increase SQL pipeline" with "Increase qualified patient bookings" in [document:doc-11aa22bb33] and keep tone concise.'
+  );
+  const quotedEditCall = quotedDocumentEditCalls.find((entry) => entry.tool === 'document.propose_edit');
+  assert.ok(quotedEditCall, 'Expected quoted document edit request to trigger document.propose_edit.');
+  assert.equal(
+    String((quotedEditCall?.args as Record<string, unknown>)?.quotedText || ''),
+    'Increase SQL pipeline',
+    'Quoted edit should map source quote into document.propose_edit args.'
+  );
+  assert.equal(
+    String((quotedEditCall?.args as Record<string, unknown>)?.replacementText || ''),
+    'Increase qualified patient bookings',
+    'Quoted edit should map replacement quote into document.propose_edit args.'
+  );
+
+  const quoteLocateCalls = inferToolCallsFromMessage(
+    'Edit [document:doc-11aa22bb33] around this quote: "Pricing assumptions may be stale."'
+  );
+  assert.ok(
+    quoteLocateCalls.some((entry) => entry.tool === 'document.search'),
+    'Expected quote-only document edit phrasing to trigger document.search for anchor lookup.'
   );
 }
 

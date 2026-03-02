@@ -365,6 +365,9 @@ router.post('/:id/runtime/branches/:branchId/messages', async (req, res) => {
     const modeRaw = String(req.body?.mode || 'send').trim().toLowerCase();
     const mode = modeRaw === 'queue' || modeRaw === 'interrupt' ? modeRaw : 'send';
     const inputOptions = isRecord(req.body?.inputOptions) ? req.body.inputOptions : undefined;
+    const libraryRefs = Array.isArray(req.body?.libraryRefs)
+      ? req.body.libraryRefs.map((entry: unknown) => String(entry || '').trim()).filter(Boolean).slice(0, 40)
+      : undefined;
     const attachmentIds = Array.isArray(req.body?.attachmentIds)
       ? req.body.attachmentIds.map((entry: unknown) => String(entry || '').trim()).filter(Boolean).slice(0, 20)
       : undefined;
@@ -386,6 +389,7 @@ router.post('/:id/runtime/branches/:branchId/messages', async (req, res) => {
           ? req.body.policy
           : undefined,
       ...(inputOptions ? { inputOptions } : {}),
+      ...(libraryRefs ? { libraryRefs } : {}),
       ...(attachmentIds ? { attachmentIds } : {}),
       ...(documentIds ? { documentIds } : {}),
     });
@@ -541,6 +545,16 @@ router.patch('/:id/runtime/branches/:branchId/queue/:itemId', async (req, res) =
     await runtimeRunEngine.getBranchState({ researchJobId, branchId });
     const content = req.body?.content === undefined ? undefined : String(req.body?.content || '').trim();
     const inputOptions = isRecord(req.body?.inputOptions) ? req.body.inputOptions : undefined;
+    const libraryRefs = Array.isArray(req.body?.libraryRefs)
+      ? req.body.libraryRefs.map((entry: unknown) => String(entry || '').trim()).filter(Boolean).slice(0, 40)
+      : undefined;
+    const inputOptionsWithLibraryRefs =
+      libraryRefs && libraryRefs.length
+        ? ({
+            ...(inputOptions || {}),
+            libraryRefs,
+          } as Record<string, unknown>)
+        : inputOptions;
     const steerNote = req.body?.steerNote === undefined ? undefined : String(req.body?.steerNote || '').trim();
     const attachmentIds = Array.isArray(req.body?.attachmentIds)
       ? req.body.attachmentIds.map((entry: unknown) => String(entry || '').trim()).filter(Boolean).slice(0, 20)
@@ -551,7 +565,7 @@ router.patch('/:id/runtime/branches/:branchId/queue/:itemId', async (req, res) =
 
     if (
       content === undefined &&
-      inputOptions === undefined &&
+      inputOptionsWithLibraryRefs === undefined &&
       steerNote === undefined &&
       attachmentIds === undefined &&
       documentIds === undefined
@@ -566,7 +580,7 @@ router.patch('/:id/runtime/branches/:branchId/queue/:itemId', async (req, res) =
       branchId,
       itemId,
       ...(content !== undefined ? { content } : {}),
-      ...(inputOptions ? { inputOptions } : {}),
+      ...(inputOptionsWithLibraryRefs ? { inputOptions: inputOptionsWithLibraryRefs } : {}),
       ...(steerNote !== undefined ? { steerNote } : {}),
       ...(attachmentIds !== undefined ? { attachmentIds } : {}),
       ...(documentIds !== undefined ? { documentIds } : {}),
@@ -750,6 +764,8 @@ router.post('/:id/runtime/branches/:branchId/documents/:documentId/propose-edit'
     const branchId = String(req.params.branchId || '').trim();
     const documentId = String(req.params.documentId || '').trim();
     const instruction = String(req.body?.instruction || '').trim();
+    const quotedText = typeof req.body?.quotedText === 'string' ? req.body.quotedText.trim() : '';
+    const replacementText = typeof req.body?.replacementText === 'string' ? req.body.replacementText : undefined;
     if (!instruction) {
       return res.status(400).json({ error: 'instruction is required' });
     }
@@ -762,6 +778,8 @@ router.post('/:id/runtime/branches/:branchId/documents/:documentId/propose-edit'
       documentId,
       instruction,
       userId,
+      ...(quotedText ? { quotedText } : {}),
+      ...(replacementText !== undefined ? { replacementText } : {}),
     });
     return res.json({ proposal });
   } catch (error: any) {

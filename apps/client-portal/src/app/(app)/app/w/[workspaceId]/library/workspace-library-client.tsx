@@ -31,6 +31,32 @@ function compactText(value: unknown, max = 280): string {
   return `${text.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
 }
 
+function trustBadgeStyle(status?: string) {
+  const normalized = String(status || "").toLowerCase();
+  if (normalized === "high") {
+    return { borderColor: "#9ad2b2", background: "#eefaf2", color: "#166534" };
+  }
+  if (normalized === "medium") {
+    return { borderColor: "#f5d08b", background: "#fff8eb", color: "#7a4a00" };
+  }
+  if (normalized === "low") {
+    return { borderColor: "#f2b8b5", background: "#fdf1f0", color: "#8a1f17" };
+  }
+  return { borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)", color: "var(--bat-text-muted)" };
+}
+
+function toFreshnessLabel(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown freshness";
+  const diffMs = Date.now() - date.getTime();
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  if (diffHours < 1) return "Updated just now";
+  if (diffHours < 24) return `Updated ${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return `Updated ${diffDays}d ago`;
+  return `Updated ${date.toLocaleDateString()}`;
+}
+
 export function WorkspaceLibraryClient({ workspaceId }: { workspaceId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -188,11 +214,28 @@ export function WorkspaceLibraryClient({ workspaceId }: { workspaceId: string })
             <article key={item.id} className="bat-surface p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-base font-semibold">{item.title}</p>
-                <span className="bat-chip">{item.collection}</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="bat-chip">{item.collection}</span>
+                  <span className="rounded-full border px-2 py-0.5 text-[11px]" style={trustBadgeStyle(item.trustStatus)}>
+                    {(item.trustStatus || "unknown").toUpperCase()}
+                  </span>
+                </div>
               </div>
               <p className="mt-1 text-sm" style={{ color: "var(--bat-text-muted)" }}>
                 {compactText(item.summary, 420)}
               </p>
+              {item.snippet ? (
+                <p
+                  className="mt-2 rounded-xl border px-3 py-2 text-xs"
+                  style={{
+                    borderColor: "var(--bat-border)",
+                    background: "var(--bat-surface-muted)",
+                    color: "var(--bat-text-muted)",
+                  }}
+                >
+                  {compactText(item.snippet, 520)}
+                </p>
+              ) : null}
               {item.previewText ? (
                 <p
                   className="mt-2 rounded-xl border px-3 py-2 text-xs"
@@ -224,8 +267,13 @@ export function WorkspaceLibraryClient({ workspaceId }: { workspaceId: string })
                 </div>
               ) : null}
               <p className="mt-2 text-xs" style={{ color: "var(--bat-text-muted)" }}>
-                {item.freshness} • {item.evidenceLabel}
+                {toFreshnessLabel(item.freshness)} • {item.evidenceLabel}
               </p>
+              {item.evidenceCount ? (
+                <p className="mt-1 text-[11px]" style={{ color: "var(--bat-text-muted)" }}>
+                  {item.evidenceCount} evidence source{item.evidenceCount === 1 ? "" : "s"} linked
+                </p>
+              ) : null}
               <div className="mt-2 flex flex-wrap gap-2">
                 {item.evidenceHref ? (
                   <a
@@ -249,6 +297,18 @@ export function WorkspaceLibraryClient({ workspaceId }: { workspaceId: string })
                     Open downloaded content
                   </a>
                 ) : null}
+                {item.evidenceLinks?.slice(0, 3).map((link) => (
+                  <a
+                    key={`${item.id}-evidence-${link.href}`}
+                    href={link.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-full border px-3 py-1 text-xs"
+                    style={{ borderColor: "var(--bat-border)" }}
+                  >
+                    {link.label}
+                  </a>
+                ))}
                 {item.links?.map((link) => (
                   <a
                     key={`${item.id}-${link.label}-${link.href}`}
