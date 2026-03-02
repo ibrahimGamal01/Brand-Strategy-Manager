@@ -1133,6 +1133,13 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
     pushIfMissing('intel.list', { section: 'competitors', limit: 12 });
     pushIfMissing('intel.list', { section: 'competitor_accounts', limit: 20 });
     pushIfMissing('evidence.posts', { platform: 'any', sort: 'engagement', limit: 8 });
+    // Competitor-brief asks should proactively run discovery instead of returning
+    // meta "run discovery first" answers when the workspace has little seeded data.
+    pushIfMissing('competitors.discover_v3', {
+      mode: hasDeepInvestigationIntent ? 'deep' : 'standard',
+      maxCandidates: hasDeepInvestigationIntent ? 200 : 120,
+      maxEnrich: hasDeepInvestigationIntent ? 18 : 10,
+    });
   }
   if (
     shouldMutateCompetitorLinks &&
