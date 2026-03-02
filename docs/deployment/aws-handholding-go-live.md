@@ -40,20 +40,31 @@ Why this target:
 
 ## 3. Day-by-Day Execution Plan (With Checkpoints)
 
-## Day 0 - Accounts and Security Baseline
+## Day 0 - Proper AWS Account Foundation (Scale-Ready)
 
 ### Checklist
 
-- Create AWS account and set billing alert budgets.
-- Create IAM admin role for daily ops (do not use root account).
-- Enable MFA for root and admin users.
-- Create least-privilege CI user/role for deploy automation.
-- Buy/attach domain (Route53 or external DNS).
+- Create account strategy first:
+  - minimum: `management + production`
+  - preferred: `management + production + staging`
+- Enable root MFA and stop root daily usage.
+- Enable IAM Identity Center and create an admin role.
+- Enable CloudTrail, GuardDuty, Security Hub, and Config.
+- Create budgets + anomaly detection + alert channels.
+- Select primary region (`us-east-1`) and DR region.
+- Review and request quota increases for ECS/ALB/RDS/ElastiCache/ECR.
+- Create production VPC across 3 AZs with public/private subnets.
+- Configure Route53 (or external DNS) and request ACM certs.
+- Create least-privilege CI deploy role.
+- Install/authenticate AWS CLI with non-root profile.
 
 ### Verify
 
-- `aws sts get-caller-identity` returns your admin role identity.
-- Budget alerts email is tested.
+- `aws sts get-caller-identity` returns admin role identity (not root).
+- Budget and anomaly alert test notifications are received.
+- Security services show `enabled` in the production account.
+- Quota requests are submitted for expected 6-month demand.
+- Domain and certificate status are ready for deployment.
 
 ### Output artifact
 
