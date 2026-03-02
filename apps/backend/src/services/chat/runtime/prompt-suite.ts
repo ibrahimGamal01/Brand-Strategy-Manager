@@ -1559,6 +1559,7 @@ export async function generatePlannerPlan(input: PlannerInput): Promise<RuntimeP
     const hasDeepResearchIntent =
       /\b(investigat|research|analy[sz]e|profile|account|person|people|creator|founder|handle)\b/i.test(input.userMessage) &&
       /\b(deep|deeper|thorough|full|comprehensive|detailed|ddg|duckduckgo|scraply|scrapling)\b/i.test(input.userMessage);
+    const hasCompetitorBriefIntent = detectWriterIntent(input.userMessage) === 'competitor_brief';
     const fallbackResearchCall = fallback.toolCalls.find((entry) => entry.tool === 'research.gather');
     const plannerHasResearchGather = plannerToolCalls.some((entry) => entry.tool === 'research.gather');
     const mergedToolCalls = plannerToolCalls.length
@@ -1570,7 +1571,27 @@ export async function generatePlannerPlan(input: PlannerInput): Promise<RuntimeP
           input.policy.maxToolRuns
         )
       : fallback.toolCalls;
-    const filteredToolCalls = mergedToolCalls.filter((call) => !disallowedTools.includes(call.tool));
+    const plannerHasCompetitorDiscovery = mergedToolCalls.some(
+      (entry) => entry.tool === 'competitors.discover_v3' || entry.tool === 'orchestration.run'
+    );
+    const mergedWithCompetitorDiscovery =
+      hasCompetitorBriefIntent && !plannerHasCompetitorDiscovery
+        ? dedupeToolCalls(
+            [
+              {
+                tool: 'competitors.discover_v3',
+                args: {
+                  mode: hasDeepResearchIntent ? 'deep' : 'standard',
+                  maxCandidates: hasDeepResearchIntent ? 200 : 120,
+                  maxEnrich: hasDeepResearchIntent ? 18 : 10,
+                },
+              },
+              ...mergedToolCalls,
+            ],
+            input.policy.maxToolRuns
+          )
+        : mergedToolCalls;
+    const filteredToolCalls = mergedWithCompetitorDiscovery.filter((call) => !disallowedTools.includes(call.tool));
     const decisions = normalizeDecisions(parsed.decisionRequests, 8);
 
     const defaultDepthFromMode =
