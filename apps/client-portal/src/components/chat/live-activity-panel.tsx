@@ -298,6 +298,10 @@ function RunningTab({
     () => runs.filter((run) => run.status === "running" || run.status === "waiting_input"),
     [runs]
   );
+  const recentCompletedRuns = useMemo(
+    () => runs.filter((run) => run.status === "done" || run.status === "failed" || run.status === "cancelled").slice(0, 4),
+    [runs]
+  );
   const activeFeedItems = useMemo(
     () =>
       feedItems.filter(
@@ -328,20 +332,47 @@ function RunningTab({
 
   if (!activeRuns.length) {
     return (
-      <div className="rounded-xl border p-4" style={{ borderColor: "var(--bat-border)" }}>
-        <p className="text-sm font-semibold">No active runs right now.</p>
-        <p className="mt-1 text-xs" style={{ color: "var(--bat-text-muted)" }}>
-          BAT can immediately run a workspace intelligence audit across web, competitors, social, and news.
-        </p>
-        {onRunAudit ? (
-          <button
-            type="button"
-            onClick={onRunAudit}
-            className="mt-3 rounded-full border px-3 py-1.5 text-xs"
-            style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}
-          >
-            Run Audit Now
-          </button>
+      <div className="space-y-3">
+        <div className="rounded-xl border p-4" style={{ borderColor: "var(--bat-border)" }}>
+          <p className="text-sm font-semibold">No active runs right now.</p>
+          <p className="mt-1 text-xs" style={{ color: "var(--bat-text-muted)" }}>
+            BAT can immediately run a workspace intelligence audit across web, competitors, social, and news.
+          </p>
+          {onRunAudit ? (
+            <button
+              type="button"
+              onClick={onRunAudit}
+              className="mt-3 rounded-full border px-3 py-1.5 text-xs"
+              style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}
+            >
+              Run Audit Now
+            </button>
+          ) : null}
+        </div>
+        {recentCompletedRuns.length ? (
+          <section className="space-y-2">
+            <p className="px-1 text-xs font-semibold uppercase tracking-[0.08em]" style={{ color: "var(--bat-text-muted)" }}>
+              Latest Completed Work
+            </p>
+            {recentCompletedRuns.map((run) => (
+              <article key={run.id} className="rounded-xl border p-3" style={{ borderColor: "var(--bat-border)" }}>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold">{run.label}</p>
+                  <StatusIcon status={run.status} />
+                </div>
+                <p className="mt-1 text-xs" style={{ color: "var(--bat-text-muted)" }}>
+                  {run.stage}
+                </p>
+                {run.details?.length ? (
+                  <ul className="mt-2 space-y-1 text-xs" style={{ color: "var(--bat-text-muted)" }}>
+                    {run.details.map((detail) => (
+                      <li key={`${run.id}-${detail}`}>• {detail}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </article>
+            ))}
+          </section>
         ) : null}
       </div>
     );

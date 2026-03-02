@@ -32,6 +32,59 @@ export type TopPostRow = {
   views: number;
 };
 
+export type WebSnapshotRow = {
+  finalUrl: string;
+  statusCode: number | null;
+  fetchedAt: string;
+  snippet: string;
+};
+
+export type NewsRow = {
+  title: string;
+  url: string;
+  source: string;
+  publishedAt: string | null;
+  snippet: string;
+};
+
+export type CommunityInsightRow = {
+  source: string;
+  url: string;
+  summary: string;
+  createdAt: string;
+};
+
+export type DocumentCoverage = {
+  score: number;
+  band: 'thin' | 'moderate' | 'strong';
+  counts: {
+    competitors: number;
+    posts: number;
+    webSnapshots: number;
+    news: number;
+    community: number;
+  };
+  targets: {
+    competitors: number;
+    posts: number;
+    webSnapshots: number;
+    news: number;
+    community: number;
+  };
+  freshnessHours: number | null;
+  reasons: string[];
+  enriched: boolean;
+  partial: boolean;
+};
+
+export type DocumentPlanRecommendations = {
+  quickWins: string[];
+  days30: string[];
+  days60: string[];
+  days90: string[];
+  risks: string[];
+};
+
 export type DocumentDataPayload = {
   generatedAt: string;
   clientName: string;
@@ -43,6 +96,11 @@ export type DocumentDataPayload = {
   timeframeDays: number;
   competitors: CompetitorRow[];
   topPosts: TopPostRow[];
+  webSnapshots: WebSnapshotRow[];
+  news: NewsRow[];
+  communityInsights: CommunityInsightRow[];
+  coverage: DocumentCoverage;
+  recommendations: DocumentPlanRecommendations;
 };
 
 export type GeneratedDocument = {
@@ -53,4 +111,11 @@ export type GeneratedDocument = {
   sizeBytes: number;
   createdAt: string;
   clientDocumentId: string;
+  documentId?: string;
+  versionId?: string;
+  coverageScore?: number;
+  coverageBand?: 'thin' | 'moderate' | 'strong';
+  enrichmentPerformed?: boolean;
+  partial?: boolean;
+  resumeDocumentId?: string;
 };

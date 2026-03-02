@@ -1417,7 +1417,7 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   const hasDocumentGenerationIntent = hasDocumentKeyword && hasDocumentGenerateVerb;
   const defaultDocumentArgs: Record<string, unknown> = {
     docType: 'STRATEGY_BRIEF',
-    depth: 'standard',
+    depth: 'deep',
     includeCompetitors: true,
     includeEvidenceLinks: true,
   };

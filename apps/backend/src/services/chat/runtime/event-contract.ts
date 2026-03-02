@@ -34,6 +34,11 @@ export type RuntimeEventKind =
   | 'document.parse_needs_review'
   | 'document.parse_failed'
   | 'document.chunking_completed'
+  | 'document.preflight'
+  | 'document.enrichment_started'
+  | 'document.enrichment_completed'
+  | 'document.draft_ready'
+  | 'document.partial_returned'
   | 'document.edit_proposed'
   | 'document.edit_applied'
   | 'document.export_started'
@@ -120,6 +125,11 @@ function normalizeEvent(value: unknown): RuntimeEventKind | null {
     normalized === 'document.parse_needs_review' ||
     normalized === 'document.parse_failed' ||
     normalized === 'document.chunking_completed' ||
+    normalized === 'document.preflight' ||
+    normalized === 'document.enrichment_started' ||
+    normalized === 'document.enrichment_completed' ||
+    normalized === 'document.draft_ready' ||
+    normalized === 'document.partial_returned' ||
     normalized === 'document.edit_proposed' ||
     normalized === 'document.edit_applied' ||
     normalized === 'document.export_started' ||

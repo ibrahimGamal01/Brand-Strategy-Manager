@@ -103,7 +103,11 @@ export const documentTools: ToolDefinition<Record<string, unknown>, Record<strin
     },
     mutate: true,
     execute: async (context, args) =>
-      generateDocumentForResearchJob(context.researchJobId, normalizePlanInput(args)) as unknown as Record<string, unknown>,
+      (generateDocumentForResearchJob(context.researchJobId, normalizePlanInput(args), {
+        branchId: resolveBranchId(context),
+        userId: 'runtime-tool',
+        enrichmentPerformed: typeof args.enrichmentPerformed === 'boolean' ? args.enrichmentPerformed : undefined,
+      }) as unknown as Record<string, unknown>),
   },
   {
     name: 'document.status',

@@ -967,6 +967,22 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
     if (event.event.startsWith("document.")) {
       if (event.event === "document.upload_received") {
         message = event.message || "Upload received.";
+      } else if (event.event === "document.preflight") {
+        const score = Number(event.payload?.coverageScore || 0);
+        const band = String(event.payload?.coverageBand || "").trim().toLowerCase();
+        if (Number.isFinite(score) && score > 0) {
+          message = `Document preflight complete (${Math.round(score)}/100${band ? `, ${band}` : ""}).`;
+        } else {
+          message = event.message || "Document preflight complete.";
+        }
+      } else if (event.event === "document.enrichment_started") {
+        message = event.message || "Gathering additional evidence for deep document quality.";
+      } else if (event.event === "document.enrichment_completed") {
+        message = event.message || "Evidence enrichment completed.";
+      } else if (event.event === "document.draft_ready") {
+        message = event.message || "Document draft is ready.";
+      } else if (event.event === "document.partial_returned") {
+        message = event.message || "Returned best draft within runtime budget.";
       } else if (event.event === "document.parse_started") {
         message = parser === "image" ? "Parsing image (OCR)." : event.message || "Parsing document.";
       } else if (event.event === "document.image_ocr_completed") {

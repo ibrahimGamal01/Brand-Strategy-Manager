@@ -19,8 +19,8 @@ const TOOL_TIMEOUT_OVERRIDES_MS: Record<string, number> = {
   'web.crawl': 120_000,
   'web.fetch': 45_000,
   'search.web': 25_000,
-  'document.generate': 180_000,
-  'document.export': 180_000,
+  'document.generate': 90_000,
+  'document.export': 90_000,
   'document.ingest': 120_000,
   'intel.list': 12_000,
   'intel.get': 12_000,
@@ -251,6 +251,8 @@ function normalizeArtifacts(raw: Record<string, unknown>, toolName: string): Run
   }
   if (toolName === 'document.generate') {
     pushArtifact('deliverable', raw.docId, 'deliverables');
+    pushArtifact('workspace_document', raw.documentId, 'deliverables');
+    pushArtifact('workspace_document_version', raw.versionId, 'deliverables');
   }
   if (toolName === 'document.ingest' || toolName === 'document.read' || toolName === 'document.search') {
     pushArtifact('workspace_document', raw.documentId, 'deliverables');
@@ -555,8 +557,14 @@ function summarize(raw: Record<string, unknown>, toolName: string): string {
 
   if (toolName === 'document.generate') {
     const docId = String(raw.docId || '').trim();
+    const runtimeDocumentId = String(raw.documentId || '').trim();
     if (docId) {
-      return `document.generate created deliverable ${docId}.`;
+      return runtimeDocumentId
+        ? `document.generate created deliverable ${docId} and synced runtime document ${runtimeDocumentId}.`
+        : `document.generate created deliverable ${docId}.`;
+    }
+    if (runtimeDocumentId) {
+      return `document.generate synced runtime document ${runtimeDocumentId}.`;
     }
   }
 

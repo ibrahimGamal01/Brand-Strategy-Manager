@@ -109,6 +109,9 @@ export async function buildRuntimeAgentContext(input: BuildRuntimeAgentContextIn
     queuedMessages,
     pendingDecisionEvents,
     steerMessages,
+    socialPostsCount,
+    newsItemsCount,
+    communityInsightsCount,
   ] = await Promise.all([
     prisma.chatBranch.findUnique({
       where: { id: input.branchId },
@@ -243,6 +246,19 @@ export async function buildRuntimeAgentContext(input: BuildRuntimeAgentContextIn
       orderBy: { createdAt: 'desc' },
       take: 12,
       select: { content: true },
+    }),
+    prisma.socialPost.count({
+      where: {
+        socialProfile: {
+          researchJobId: input.researchJobId,
+        },
+      },
+    }),
+    prisma.ddgNewsResult.count({
+      where: { researchJobId: input.researchJobId },
+    }),
+    prisma.communityInsight.count({
+      where: { researchJobId: input.researchJobId },
     }),
   ]);
 
@@ -394,6 +410,11 @@ export async function buildRuntimeAgentContext(input: BuildRuntimeAgentContextIn
           relevanceScore: entry.relevanceScore,
           profileUrl: entry.profileUrl,
         })),
+      },
+      counts: {
+        socialPosts: socialPostsCount,
+        news: newsItemsCount,
+        communityInsights: communityInsightsCount,
       },
     },
     runtime: {

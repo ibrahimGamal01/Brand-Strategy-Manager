@@ -211,7 +211,7 @@ const TOOL_NAME_ALIASES: Record<string, { tool: string; args: Record<string, unk
     tool: 'document.plan',
     args: {
       docType: 'STRATEGY_BRIEF',
-      depth: 'standard',
+      depth: 'deep',
       includeCompetitors: true,
       includeEvidenceLinks: true,
     },
@@ -249,6 +249,22 @@ const SCHEDULED_RUN_PREEMPTION_ENABLED = String(process.env.RUNTIME_PREEMPT_SCHE
   .trim()
   .toLowerCase() !== 'false';
 const TOOL_TRANSIENT_MAX_RETRIES = envRuntimeNumber('CHAT_TOOL_MAX_RETRIES', 2, 0, 5);
+const TOOL_TRANSIENT_RETRY_OVERRIDES: Record<string, number> = {
+  'document.generate': 0,
+  'document.export': 0,
+};
+const DOCUMENT_RUN_BUDGET_MS = envRuntimeNumber(
+  'RUNTIME_DOCUMENT_RUN_BUDGET_MS',
+  6 * 60_000,
+  60_000,
+  30 * 60_000
+);
+const DOCUMENT_ENRICHMENT_MIN_SCORE = envRuntimeNumber(
+  'RUNTIME_DOCUMENT_ENRICHMENT_MIN_SCORE',
+  65,
+  0,
+  100
+);
 const RUNTIME_CONTINUATION_CALLS_V2 = String(process.env.RUNTIME_CONTINUATION_CALLS_V2 || 'true')
   .trim()
   .toLowerCase() === 'true';
@@ -510,6 +526,15 @@ function isTransientToolContractFailure(result: RuntimeToolResult): boolean {
     return true;
   }
   return /\b5\d\d\b/.test(text);
+}
+
+function resolveToolRetryLimit(toolName: string): number {
+  const normalized = String(toolName || '').trim().toLowerCase();
+  const override = TOOL_TRANSIENT_RETRY_OVERRIDES[normalized];
+  if (typeof override === 'number' && Number.isFinite(override)) {
+    return Math.max(0, Math.floor(override));
+  }
+  return TOOL_TRANSIENT_MAX_RETRIES;
 }
 
 function retryBackoffMs(attempt: number): number {
@@ -1033,6 +1058,17 @@ const CLIENT_META_BLOCKLIST = [
   /^assumptions\s*$/gim,
 ];
 
+function stripClientFacingIds(content: string): string {
+  return String(content || '')
+    .replace(/\b(run|snapshot|document|tool run)\s*[:#-]?\s*[a-f0-9]{6,}\b/gi, '$1')
+    .replace(/(^|[\s•(])[a-f0-9]{8,}(?=([\s•),]|$))/gi, '$1')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\s+([,.)])/g, '$1')
+    .replace(/•\s*•/g, '•')
+    .replace(/\(\s*\)/g, '')
+    .trim();
+}
+
 export function sanitizeClientResponse(content: string): string {
   let cleaned = stripLegacyBoilerplateResponse(content);
   cleaned = cleaned.replace(/\n{0,2}tool execution trace:[\s\S]*$/i, '').trim();
@@ -1042,6 +1078,7 @@ export function sanitizeClientResponse(content: string): string {
   for (const pattern of CLIENT_META_BLOCKLIST) {
     cleaned = cleaned.replace(pattern, '');
   }
+  cleaned = stripClientFacingIds(cleaned);
   cleaned = cleaned
     .replace(/\n{3,}/g, '\n\n')
     .replace(/[ \t]+\n/g, '\n')
@@ -1054,6 +1091,9 @@ function buildRuntimeContextSnapshot(context: RuntimeAgentContext): Record<strin
     ? context.workspace.inputData.websites
     : [];
   const website = String(context.workspace.inputData?.website || '').trim();
+  const evidenceCounts = isRecord((context.evidence as Record<string, unknown>).counts)
+    ? ((context.evidence as Record<string, unknown>).counts as Record<string, unknown>)
+    : {};
   const websites = [
     ...(website ? [website] : []),
     ...websitesRaw.map((entry) => String(entry || '').trim()).filter(Boolean),
@@ -1065,6 +1105,9 @@ function buildRuntimeContextSnapshot(context: RuntimeAgentContext): Record<strin
     competitorsCount: Number(context.evidence.competitors?.discovered || 0),
     candidateCompetitorsCount: Number(context.evidence.competitors?.candidates || 0),
     webSnapshotsCount: Array.isArray(context.evidence.webSnapshots) ? context.evidence.webSnapshots.length : 0,
+    socialPostsCount: Number(evidenceCounts.socialPosts || 0),
+    newsCount: Number(evidenceCounts.news || 0),
+    communityInsightsCount: Number(evidenceCounts.communityInsights || 0),
     pendingDecisionsCount: Array.isArray(context.runtime.pendingDecisions) ? context.runtime.pendingDecisions.length : 0,
     queuedMessagesCount: Array.isArray(context.runtime.queuedMessages) ? context.runtime.queuedMessages.length : 0,
     topCompetitors: Array.isArray(context.evidence.competitors?.topPicks)
@@ -1097,6 +1140,9 @@ async function loadFallbackRuntimeContextSnapshot(researchJobId: string): Promis
     competitorsCount: 0,
     candidateCompetitorsCount: 0,
     webSnapshotsCount: 0,
+    socialPostsCount: 0,
+    newsCount: 0,
+    communityInsightsCount: 0,
     pendingDecisionsCount: 0,
     queuedMessagesCount: 0,
     topCompetitors: [],
@@ -1131,12 +1177,24 @@ function buildGroundedBaselineLines(contextSnapshot: Record<string, unknown>): s
   const competitorsCount = Number(contextSnapshot.competitorsCount || 0);
   const candidateCount = Number(contextSnapshot.candidateCompetitorsCount || 0);
   const webSnapshotsCount = Number(contextSnapshot.webSnapshotsCount || 0);
+  const socialPostsCount = Number(contextSnapshot.socialPostsCount || 0);
+  const newsCount = Number(contextSnapshot.newsCount || 0);
+  const communityInsightsCount = Number(contextSnapshot.communityInsightsCount || 0);
 
   const baseline: string[] = [];
   if (clientName) baseline.push(`Workspace: ${clientName}.`);
   if (websites.length) baseline.push(`Known websites: ${websites.join(', ')}.`);
   if (Number.isFinite(webSnapshotsCount) && webSnapshotsCount > 0) {
     baseline.push(`Stored web snapshots: ${webSnapshotsCount}.`);
+  }
+  if (Number.isFinite(socialPostsCount) && socialPostsCount > 0) {
+    baseline.push(`Stored social posts: ${socialPostsCount}.`);
+  }
+  if (Number.isFinite(newsCount) && newsCount > 0) {
+    baseline.push(`Stored news items: ${newsCount}.`);
+  }
+  if (Number.isFinite(communityInsightsCount) && communityInsightsCount > 0) {
+    baseline.push(`Stored community insights: ${communityInsightsCount}.`);
   }
   if (Number.isFinite(competitorsCount) && competitorsCount > 0) {
     baseline.push(`Discovered competitors: ${competitorsCount}.`);
@@ -1513,6 +1571,332 @@ function sanitizeToolCalls(toolCalls: RuntimeToolCall[], userMessage: string, ma
   return sanitized.slice(0, maxToolRuns);
 }
 
+type RuntimeDocumentCoverage = {
+  score: number;
+  counts: {
+    competitors: number;
+    posts: number;
+    webSnapshots: number;
+    news: number;
+    community: number;
+  };
+  reasons: string[];
+};
+
+function isDocumentGenerateCall(call: RuntimeToolCall): boolean {
+  return String(call.tool || '').trim().toLowerCase() === 'document.generate';
+}
+
+function resolveDocumentGenerateDepth(call: RuntimeToolCall | null): 'short' | 'standard' | 'deep' {
+  if (!call || !isRecord(call.args)) return 'deep';
+  const raw = String(call.args.depth || '').trim().toLowerCase();
+  if (raw === 'short' || raw === 'standard' || raw === 'deep') return raw;
+  return 'deep';
+}
+
+function scoreRuntimeDocumentCoverage(contextSnapshot: Record<string, unknown>): RuntimeDocumentCoverage {
+  const counts = {
+    competitors: Math.max(0, Math.floor(Number(contextSnapshot.competitorsCount || 0))),
+    posts: Math.max(0, Math.floor(Number(contextSnapshot.socialPostsCount || 0))),
+    webSnapshots: Math.max(0, Math.floor(Number(contextSnapshot.webSnapshotsCount || 0))),
+    news: Math.max(0, Math.floor(Number(contextSnapshot.newsCount || 0))),
+    community: Math.max(0, Math.floor(Number(contextSnapshot.communityInsightsCount || 0))),
+  };
+  const targets = {
+    competitors: 12,
+    posts: 18,
+    webSnapshots: 10,
+    news: 7,
+    community: 6,
+  };
+  const weights = {
+    competitors: 0.25,
+    posts: 0.25,
+    webSnapshots: 0.2,
+    news: 0.15,
+    community: 0.15,
+  } as const;
+
+  const component = (key: keyof typeof counts): number => {
+    const target = Number(targets[key] || 0);
+    if (target <= 0) return 1;
+    return Math.max(0, Math.min(1, counts[key] / target));
+  };
+
+  const rawScore =
+    component('competitors') * weights.competitors +
+    component('posts') * weights.posts +
+    component('webSnapshots') * weights.webSnapshots +
+    component('news') * weights.news +
+    component('community') * weights.community;
+  const score = Math.max(0, Math.min(100, Math.round(rawScore * 100)));
+
+  const reasons: string[] = [];
+  if (counts.competitors < targets.competitors) {
+    reasons.push(`Competitor evidence is thin (${counts.competitors}/${targets.competitors}).`);
+  }
+  if (counts.posts < targets.posts) {
+    reasons.push(`Social signal density is thin (${counts.posts}/${targets.posts}).`);
+  }
+  if (counts.webSnapshots < targets.webSnapshots) {
+    reasons.push(`Web snapshot coverage is thin (${counts.webSnapshots}/${targets.webSnapshots}).`);
+  }
+  if (counts.news < targets.news) {
+    reasons.push(`News signal coverage is thin (${counts.news}/${targets.news}).`);
+  }
+  if (counts.community < targets.community) {
+    reasons.push(`Community signal coverage is thin (${counts.community}/${targets.community}).`);
+  }
+
+  return {
+    score,
+    counts,
+    reasons: reasons.length ? reasons : ['Coverage is strong enough for deep document generation.'],
+  };
+}
+
+function maybeInjectDocumentEnrichmentToolCalls(input: {
+  toolCalls: RuntimeToolCall[];
+  triggerMessage: string;
+  runtimeContextSnapshot?: Record<string, unknown>;
+  maxToolRuns: number;
+}): {
+  toolCalls: RuntimeToolCall[];
+  enrichmentApplied: boolean;
+  coverage: RuntimeDocumentCoverage | null;
+  addedTools: string[];
+} {
+  const docCall = input.toolCalls.find((call) => isDocumentGenerateCall(call)) || null;
+  if (!docCall) {
+    return {
+      toolCalls: input.toolCalls,
+      enrichmentApplied: false,
+      coverage: null,
+      addedTools: [],
+    };
+  }
+
+  const depth = resolveDocumentGenerateDepth(docCall);
+  if (depth !== 'deep') {
+    return {
+      toolCalls: input.toolCalls,
+      enrichmentApplied: false,
+      coverage: null,
+      addedTools: [],
+    };
+  }
+
+  const context = isRecord(input.runtimeContextSnapshot) ? input.runtimeContextSnapshot : {};
+  const coverage = scoreRuntimeDocumentCoverage(context);
+  if (coverage.score >= DOCUMENT_ENRICHMENT_MIN_SCORE) {
+    return {
+      toolCalls: input.toolCalls,
+      enrichmentApplied: false,
+      coverage,
+      addedTools: [],
+    };
+  }
+
+  const query = compactPromptString(input.triggerMessage, 220) || 'Collect additional validated evidence for the active workspace';
+  const candidates: RuntimeToolCall[] = [
+    {
+      tool: 'research.gather',
+      args: {
+        query,
+        depth: 'standard',
+        includeScrapling: true,
+        includeAccountContext: true,
+        includeWorkspaceWebsites: true,
+      },
+    },
+    {
+      tool: 'competitors.discover_v3',
+      args: {
+        mode: 'standard',
+        maxCandidates: 90,
+        maxEnrich: 8,
+      },
+    },
+    {
+      tool: 'evidence.posts',
+      args: {
+        platform: 'any',
+        sort: 'engagement',
+        limit: 10,
+      },
+    },
+    {
+      tool: 'evidence.news',
+      args: {
+        limit: 8,
+      },
+    },
+  ];
+
+  const existing = new Set(input.toolCalls.map((call) => `${call.tool}:${stableJson(call.args || {})}`));
+  const addedCalls: RuntimeToolCall[] = [];
+  for (const candidate of candidates) {
+    const key = `${candidate.tool}:${stableJson(candidate.args || {})}`;
+    if (existing.has(key)) continue;
+    existing.add(key);
+    addedCalls.push(candidate);
+  }
+
+  if (!addedCalls.length) {
+    return {
+      toolCalls: input.toolCalls,
+      enrichmentApplied: false,
+      coverage,
+      addedTools: [],
+    };
+  }
+
+  const merged = [...addedCalls, ...input.toolCalls];
+  let bounded = merged.slice(0, Math.max(1, input.maxToolRuns));
+
+  if (!bounded.some((call) => isDocumentGenerateCall(call))) {
+    const originalDocCall = input.toolCalls.find((call) => isDocumentGenerateCall(call));
+    if (originalDocCall) {
+      if (bounded.length >= input.maxToolRuns) {
+        bounded[bounded.length - 1] = originalDocCall;
+      } else {
+        bounded.push(originalDocCall);
+      }
+    }
+  }
+
+  const boundedWithEnrichmentFlag = bounded.map((call) => {
+    if (!isDocumentGenerateCall(call)) return call;
+    return {
+      ...call,
+      args: {
+        ...(isRecord(call.args) ? call.args : {}),
+        enrichmentPerformed: true,
+      },
+    };
+  });
+
+  return {
+    toolCalls: boundedWithEnrichmentFlag,
+    enrichmentApplied: true,
+    coverage,
+    addedTools: addedCalls.map((call) => call.tool),
+  };
+}
+
+function isDocumentFocusedRun(input: { plan: RuntimePlan; toolRuns: Array<{ toolName: string }> }): boolean {
+  const planHasDocument = input.plan.toolCalls.some((call) => /^document\./i.test(String(call.tool || '').trim()));
+  const runHasDocument = input.toolRuns.some((run) => /^document\./i.test(String(run.toolName || '').trim()));
+  return planHasDocument || runHasDocument;
+}
+
+function extractDocumentRuntimeTarget(toolResults: RuntimeToolResult[]): {
+  runtimeDocumentId?: string;
+  storagePath?: string;
+  title?: string;
+  coverageScore?: number;
+} {
+  for (let index = toolResults.length - 1; index >= 0; index -= 1) {
+    const raw = isRecord(toolResults[index].raw) ? (toolResults[index].raw as Record<string, unknown>) : null;
+    if (!raw) continue;
+    const runtimeDocumentId = String(raw.documentId || raw.runtimeDocumentId || '').trim();
+    const storagePath = String(raw.storagePath || '').trim();
+    const title = String(raw.title || '').trim();
+    const coverageScore = Number(raw.coverageScore);
+    return {
+      ...(runtimeDocumentId ? { runtimeDocumentId } : {}),
+      ...(storagePath ? { storagePath } : {}),
+      ...(title ? { title } : {}),
+      ...(Number.isFinite(coverageScore) ? { coverageScore } : {}),
+    };
+  }
+  return {};
+}
+
+function hasPartialDocumentResult(toolResults: RuntimeToolResult[]): boolean {
+  for (let index = toolResults.length - 1; index >= 0; index -= 1) {
+    const raw = isRecord(toolResults[index].raw) ? (toolResults[index].raw as Record<string, unknown>) : null;
+    if (!raw) continue;
+    const hasDocumentSignals = Boolean(
+      String(raw.documentId || raw.runtimeDocumentId || raw.docId || '').trim() ||
+        String(raw.storagePath || '').trim() ||
+        raw.coverageScore !== undefined ||
+        raw.coverageBand !== undefined ||
+        raw.partial !== undefined
+    );
+    if (!hasDocumentSignals) continue;
+
+    if (raw.partial === true) return true;
+    if (raw.partial === false) return false;
+
+    const coverageBand = String(raw.coverageBand || '').trim().toLowerCase();
+    if (coverageBand === 'thin') return true;
+    if (coverageBand === 'moderate' || coverageBand === 'strong') return false;
+  }
+  return false;
+}
+
+function buildDocumentBudgetPartialMessage(input: {
+  runElapsedMs: number;
+  budgetMs: number;
+  contextSnapshot: Record<string, unknown>;
+  toolResults: RuntimeToolResult[];
+}): {
+  content: string;
+  actions: Array<{ label: string; action: string; payload?: Record<string, unknown> }>;
+} {
+  const target = extractDocumentRuntimeTarget(input.toolResults);
+  const coverageScore = Number(input.contextSnapshot.documentCoverageScore || target.coverageScore || 0);
+  const websites = Array.isArray(input.contextSnapshot.websites)
+    ? input.contextSnapshot.websites.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 3)
+    : [];
+  const elapsedMin = Math.max(1, Math.round(input.runElapsedMs / 60_000));
+  const budgetMin = Math.max(1, Math.round(input.budgetMs / 60_000));
+
+  const lines: string[] = [
+    `I returned the best available draft after ${elapsedMin} minute(s) to stay within the ${budgetMin}-minute runtime budget.`,
+    'You can continue deepening now without losing current progress.',
+  ];
+
+  if (Number.isFinite(coverageScore) && coverageScore > 0) {
+    lines.push(`Current evidence coverage score: ${Math.round(coverageScore)}/100.`);
+  }
+  if (websites.length) {
+    lines.push(`Known website scope: ${websites.join(', ')}.`);
+  }
+
+  const actions: Array<{ label: string; action: string; payload?: Record<string, unknown> }> = [];
+  if (target.runtimeDocumentId) {
+    actions.push({
+      label: 'Open Draft In Docs',
+      action: 'document.read',
+      payload: { documentId: target.runtimeDocumentId },
+    });
+  }
+  if (target.storagePath) {
+    actions.push({
+      label: 'Download Current PDF',
+      action: 'document.download',
+      payload: { storagePath: target.storagePath },
+    });
+  }
+  actions.push({
+    label: 'Continue Deepening Document',
+    action: 'document.generate',
+    payload: {
+      docType: 'STRATEGY_BRIEF',
+      depth: 'deep',
+      continueDeepening: true,
+      ...(target.runtimeDocumentId ? { resumeDocumentId: target.runtimeDocumentId } : {}),
+    },
+  });
+
+  return {
+    content: lines.join('\n\n'),
+    actions,
+  };
+}
+
 type SourceScopeBlockedTool = {
   tool: string;
   lane: 'web_search' | 'live_website_crawl' | 'social_intel';
@@ -1778,7 +2162,7 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   const hasDocumentGenerationIntent = hasDocumentKeyword && hasDocumentGenerateVerb;
   const defaultDocumentArgs: Record<string, unknown> = {
     docType: 'STRATEGY_BRIEF',
-    depth: 'standard',
+    depth: 'deep',
     includeCompetitors: true,
     includeEvidenceLinks: true,
   };
@@ -2014,11 +2398,6 @@ function toNumber(value: unknown): number | null {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
-function shortArtifactId(value: unknown): string {
-  const raw = String(value || '').trim();
-  return raw ? raw.slice(0, 8) : '';
-}
-
 function buildLibraryUpdatesSection(
   toolRuns: Array<{
     toolName: string;
@@ -2047,25 +2426,27 @@ function buildLibraryUpdatesSection(
     if (!result) continue;
 
     if (toolRun.toolName === 'web.fetch') {
-      const snapshotId = shortArtifactId(result.snapshotId);
       const finalUrl = String(result.finalUrl || '').trim();
-      if (snapshotId || finalUrl) {
+      if (finalUrl) {
         pushLine(
-          `Web library updated: saved page snapshot${snapshotId ? ` ${snapshotId}` : ''}${finalUrl ? ` from ${finalUrl}` : ''}.`,
+          `Web library updated: saved a page snapshot from ${finalUrl}.`,
           'web'
         );
+      } else if (result.snapshotId) {
+        pushLine('Web library updated: saved a new page snapshot.', 'web');
       }
       continue;
     }
 
     if (toolRun.toolName === 'web.crawl') {
       const persisted = toNumber(result.persisted);
-      const runId = shortArtifactId(result.runId);
-      if ((persisted !== null && persisted > 0) || runId) {
+      if (persisted !== null && persisted > 0) {
         pushLine(
-          `Web library updated: crawl${runId ? ` ${runId}` : ''} captured ${persisted !== null ? Math.max(0, Math.floor(persisted)) : 0} page snapshot(s).`,
+          `Web library updated: crawl captured ${Math.max(0, Math.floor(persisted))} page snapshot(s).`,
           'web'
         );
+      } else if (result.runId) {
+        pushLine('Web library updated: crawl finished and added workspace evidence.', 'web');
       }
       continue;
     }
@@ -2118,9 +2499,17 @@ function buildLibraryUpdatesSection(
     }
 
     if (toolRun.toolName === 'document.generate') {
-      const docId = shortArtifactId(result.docId);
-      if (docId) {
-        pushLine(`Deliverables library updated: generated document ${docId}.`, 'deliverables');
+      const title = String(
+        result.title || result.fileName || result.documentTitle || result.docType || ''
+      ).trim();
+      const runtimeDocumentId = String(result.documentId || '').trim();
+      if (title) {
+        pushLine(`Deliverables library updated: generated "${title}".`, 'deliverables');
+      } else if (result.docId) {
+        pushLine('Deliverables library updated: generated a new document.', 'deliverables');
+      }
+      if (runtimeDocumentId) {
+        pushLine('Docs workspace updated: the generated brief is now available for quote/edit.', 'deliverables');
       }
       continue;
     }
@@ -3204,8 +3593,9 @@ export class RuntimeRunEngine {
     const userMessage = run.triggerMessage?.content || '';
     let contract: RuntimeToolResult | null = null;
     let attempt = 0;
+    const maxTransientRetries = resolveToolRetryLimit(toolRun.toolName);
 
-    while (attempt <= TOOL_TRANSIENT_MAX_RETRIES) {
+    while (attempt <= maxTransientRetries) {
       attempt += 1;
       try {
         const nextContract = await executeToolWithContract({
@@ -3219,7 +3609,7 @@ export class RuntimeRunEngine {
         });
         contract = nextContract;
 
-        if (nextContract.ok || !isTransientToolContractFailure(nextContract) || attempt > TOOL_TRANSIENT_MAX_RETRIES) {
+        if (nextContract.ok || !isTransientToolContractFailure(nextContract) || attempt > maxTransientRetries) {
           break;
         }
 
@@ -3230,18 +3620,18 @@ export class RuntimeRunEngine {
           toolRunId,
           type: ProcessEventType.PROCESS_LOG,
           level: ProcessEventLevel.WARN,
-          message: `Retrying ${toolRun.toolName} after transient failure (${attempt}/${TOOL_TRANSIENT_MAX_RETRIES}).`,
+          message: `Retrying ${toolRun.toolName} after transient failure (${attempt}/${maxTransientRetries}).`,
           payload: {
             toolName: toolRun.toolName,
             retryAttempt: attempt,
-            maxRetries: TOOL_TRANSIENT_MAX_RETRIES,
+            maxRetries: maxTransientRetries,
             delayMs,
             reason: nextContract.warnings.slice(0, 3),
           },
         });
         await sleep(delayMs);
       } catch (error) {
-        if (!isTransientToolError(error) || attempt > TOOL_TRANSIENT_MAX_RETRIES) {
+        if (!isTransientToolError(error) || attempt > maxTransientRetries) {
           contract = {
             ok: false,
             summary: `Tool ${toolRun.toolName} failed.`,
@@ -3261,11 +3651,11 @@ export class RuntimeRunEngine {
           toolRunId,
           type: ProcessEventType.PROCESS_LOG,
           level: ProcessEventLevel.WARN,
-          message: `Retrying ${toolRun.toolName} after transient runtime error (${attempt}/${TOOL_TRANSIENT_MAX_RETRIES}).`,
+          message: `Retrying ${toolRun.toolName} after transient runtime error (${attempt}/${maxTransientRetries}).`,
           payload: {
             toolName: toolRun.toolName,
             retryAttempt: attempt,
-            maxRetries: TOOL_TRANSIENT_MAX_RETRIES,
+            maxRetries: maxTransientRetries,
             delayMs,
             error: String((error as Error)?.message || error || 'unknown error'),
           },
@@ -3381,8 +3771,8 @@ export class RuntimeRunEngine {
         })
       : '';
     const triggerMessage = documentGroundingHint ? `${triggerMessageRaw}\n\n${documentGroundingHint}` : triggerMessageRaw;
-    const plan = normalizeRunPlan(run.planJson) || buildPlanFromMessage(triggerMessage);
-    const runtimeContextSnapshot = isRecord(plan.runtime?.contextSnapshot)
+    let plan = normalizeRunPlan(run.planJson) || buildPlanFromMessage(triggerMessage);
+    let runtimeContextSnapshot = isRecord(plan.runtime?.contextSnapshot)
       ? (plan.runtime.contextSnapshot as Record<string, unknown>)
       : {};
     const runStartedAt = run.startedAt || run.createdAt || new Date(0);
@@ -3403,6 +3793,44 @@ export class RuntimeRunEngine {
     const toolResults = toolRuns
       .map((item) => (isRecord(item.resultJson) ? (item.resultJson as RuntimeToolResult) : null))
       .filter((item): item is RuntimeToolResult => Boolean(item));
+
+    if (
+      isRecord(runtimeContextSnapshot) &&
+      runtimeContextSnapshot.documentEnrichmentApplied &&
+      !runtimeContextSnapshot.documentEnrichmentCompleted
+    ) {
+      runtimeContextSnapshot = {
+        ...runtimeContextSnapshot,
+        documentEnrichmentCompleted: true,
+        documentEnrichmentCompletedAt: new Date().toISOString(),
+      };
+      plan = {
+        ...plan,
+        runtime: {
+          continuationDepth: plan.runtime?.continuationDepth ?? 0,
+          contextSnapshot: runtimeContextSnapshot,
+        },
+      };
+      await updateAgentRun(run.id, { plan });
+      await this.emitEvent({
+        branchId: run.branchId,
+        agentRunId: run.id,
+        type: ProcessEventType.PROCESS_RESULT,
+        message: 'Bounded enrichment completed; generating best available deep draft now.',
+        payload: {
+          toolName: 'document.generate',
+          eventV2: {
+            version: 2,
+            event: 'document.enrichment_completed',
+            phase: 'tools',
+            status: 'info',
+            runId: run.id,
+            toolName: 'document.generate',
+            createdAt: new Date().toISOString(),
+          },
+        },
+      });
+    }
 
     const blockingDecisions = collectBlockingDecisions(toolResults);
     if (blockingDecisions.length > 0) {
@@ -3457,6 +3885,90 @@ export class RuntimeRunEngine {
         mode: 'interrupt',
       });
       return;
+    }
+
+    if (isDocumentFocusedRun({ plan, toolRuns })) {
+      const runElapsedMs = Date.now() - runStartedAt.getTime();
+      if (Number.isFinite(runElapsedMs) && runElapsedMs > DOCUMENT_RUN_BUDGET_MS) {
+        const partial = buildDocumentBudgetPartialMessage({
+          runElapsedMs,
+          budgetMs: DOCUMENT_RUN_BUDGET_MS,
+          contextSnapshot: runtimeContextSnapshot,
+          toolResults,
+        });
+        const actionButtons = sanitizeWriterActions(partial.actions, 8);
+        await this.persistAssistantMessage({
+          branchId: run.branchId,
+          content: partial.content,
+          blocksJson: actionButtons.length
+            ? {
+                type: 'action_buttons',
+                actions: actionButtons,
+                decisions: [],
+              }
+            : undefined,
+          reasoningJson: {
+            plan: plan.plan,
+            tools: toolRuns.map((item) => item.toolName),
+            assumptions: ['Runtime budget guard returned a best-available draft to prevent stalls.'],
+            nextSteps: ['Open current draft', 'Continue deepening only if needed'],
+            evidence: flattenEvidence(toolResults).map((item, idx) => ({
+              id: `e-${idx + 1}`,
+              label: item.label,
+              url: item.url,
+            })),
+          },
+          citationsJson: flattenEvidence(toolResults),
+          clientVisible: true,
+          contextSnapshot: runtimeContextSnapshot,
+        });
+
+        await updateAgentRun(run.id, {
+          status: AgentRunStatus.DONE,
+          endedAt: new Date(),
+          error: null,
+        });
+
+        await this.emitEvent({
+          branchId: run.branchId,
+          agentRunId: run.id,
+          type: ProcessEventType.PROCESS_RESULT,
+          level: ProcessEventLevel.WARN,
+          message: 'Returned best draft due to document runtime budget.',
+          payload: {
+            budgetMs: DOCUMENT_RUN_BUDGET_MS,
+            elapsedMs: runElapsedMs,
+            toolName: 'document.generate',
+            eventV2: {
+              version: 2,
+              event: 'document.partial_returned',
+              phase: 'writing',
+              status: 'warn',
+              runId: run.id,
+              toolName: 'document.generate',
+              createdAt: new Date().toISOString(),
+            },
+          },
+        });
+
+        await this.emitEvent({
+          branchId: run.branchId,
+          agentRunId: run.id,
+          type: ProcessEventType.DONE,
+          message: `Run completed with budget guard after ${Math.round(runElapsedMs / 1000)}s.`,
+          payload: {
+            policySummary: buildPolicySummary(policy),
+          },
+        });
+
+        await this.dispatchNextQueuedMessage({
+          researchJobId: run.branch.thread.researchJobId,
+          branchId: run.branchId,
+          policy,
+          mode: 'send',
+        });
+        return;
+      }
     }
 
     const promptToolResults = compactToolResultsForPrompt(toolResults);
@@ -3855,6 +4367,29 @@ export class RuntimeRunEngine {
     }
 
     const actionButtons = sanitizeWriterActions(writerOutput.actions, 8);
+    if (isDocumentFocusedRun({ plan, toolRuns }) && hasPartialDocumentResult(toolResults)) {
+      const hasContinueAction = actionButtons.some((action) => {
+        if (String(action.action || '').trim().toLowerCase() !== 'document.generate') return false;
+        const payload = isRecord(action.payload) ? action.payload : {};
+        return (
+          payload.continueDeepening === true ||
+          (typeof payload.resumeDocumentId === 'string' && payload.resumeDocumentId.trim().length > 0)
+        );
+      });
+      if (!hasContinueAction) {
+        const target = extractDocumentRuntimeTarget(toolResults);
+        actionButtons.push({
+          label: 'Continue Deepening Document',
+          action: 'document.generate',
+          payload: {
+            docType: 'STRATEGY_BRIEF',
+            depth: 'deep',
+            continueDeepening: true,
+            ...(target.runtimeDocumentId ? { resumeDocumentId: target.runtimeDocumentId } : {}),
+          },
+        });
+      }
+    }
     if (libraryUpdates.hasUpdates && !actionButtons.some((action) => action.action === 'open_library')) {
       actionButtons.unshift({
         label: 'Open library',
@@ -4252,6 +4787,28 @@ export class RuntimeRunEngine {
       ) {
         sanitizedToolCalls = buildFallbackDiscoveryToolCalls(triggerContent, policy.maxToolRuns);
       }
+      const enrichmentInjection = maybeInjectDocumentEnrichmentToolCalls({
+        toolCalls: sanitizedToolCalls,
+        triggerMessage: triggerContent,
+        ...(runtimeContextSnapshot ? { runtimeContextSnapshot } : {}),
+        maxToolRuns: policy.maxToolRuns,
+      });
+      sanitizedToolCalls = enrichmentInjection.toolCalls;
+
+      if (runtimeContextSnapshot && enrichmentInjection.coverage) {
+        runtimeContextSnapshot = {
+          ...runtimeContextSnapshot,
+          documentCoverageScore: enrichmentInjection.coverage.score,
+          documentCoverageCounts: enrichmentInjection.coverage.counts,
+          documentCoverageReasons: enrichmentInjection.coverage.reasons,
+          documentEnrichmentApplied: enrichmentInjection.enrichmentApplied,
+          documentEnrichmentCompleted: false,
+          ...(enrichmentInjection.enrichmentApplied
+            ? { documentEnrichmentTools: enrichmentInjection.addedTools }
+            : {}),
+        };
+      }
+
       const sourceScopeEnforcement = enforceToolSourceScope({
         toolCalls: sanitizedToolCalls,
         policy,
@@ -4284,10 +4841,59 @@ export class RuntimeRunEngine {
         }
       }
 
-      if (JSON.stringify(plan.toolCalls) !== JSON.stringify(sanitizedToolCalls)) {
+      if (
+        enrichmentInjection.enrichmentApplied &&
+        runtimeContextSnapshot &&
+        runtimeContextSnapshot.documentEnrichmentApplied &&
+        !runtimeContextSnapshot.documentEnrichmentStartedAt
+      ) {
+        runtimeContextSnapshot = {
+          ...runtimeContextSnapshot,
+          documentEnrichmentStartedAt: new Date().toISOString(),
+        };
+        await this.emitEvent({
+          branchId: fresh.branchId,
+          agentRunId: fresh.id,
+          type: ProcessEventType.PROCESS_LOG,
+          message: 'Evidence is thin for deep document generation; running bounded enrichment first.',
+          payload: {
+            coverageScore: enrichmentInjection.coverage?.score || null,
+            coverageCounts: enrichmentInjection.coverage?.counts || null,
+            reasons: enrichmentInjection.coverage?.reasons || [],
+            enrichmentTools: enrichmentInjection.addedTools,
+            toolName: 'document.generate',
+            eventV2: {
+              version: 2,
+              event: 'document.enrichment_started',
+              phase: 'tools',
+              status: 'info',
+              runId: fresh.id,
+              toolName: 'document.generate',
+              createdAt: new Date().toISOString(),
+            },
+          },
+        });
+      }
+
+      const shouldPersistPlan =
+        JSON.stringify(plan.toolCalls) !== JSON.stringify(sanitizedToolCalls) ||
+        Boolean(
+          runtimeContextSnapshot &&
+            enrichmentInjection.coverage &&
+            JSON.stringify(plan.runtime?.contextSnapshot || {}) !== JSON.stringify(runtimeContextSnapshot || {})
+        );
+      if (shouldPersistPlan) {
         plan = {
           ...plan,
           toolCalls: sanitizedToolCalls,
+          ...(runtimeContextSnapshot
+            ? {
+                runtime: {
+                  continuationDepth: plan.runtime?.continuationDepth ?? 0,
+                  contextSnapshot: runtimeContextSnapshot,
+                },
+              }
+            : {}),
         };
         await updateAgentRun(fresh.id, { plan });
       }

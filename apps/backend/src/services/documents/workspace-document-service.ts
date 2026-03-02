@@ -6,6 +6,7 @@ import { Document, Packer, Paragraph, TextRun } from 'docx';
 import { prisma } from '../../lib/prisma';
 import { STORAGE_ROOT } from '../storage/storage-root';
 import { createFileAttachment } from '../chat/file-attachments';
+import { markdownToRichHtml } from './markdown-renderer';
 import { renderPdfFromHtml } from './pdf-renderer';
 import { ingestWorkspaceDocument, emitWorkspaceDocumentRuntimeEvent } from './ingestion/ingestion-orchestrator';
 import { buildDocumentChunks } from './ingestion/chunker';
@@ -139,80 +140,6 @@ export function runtimeUploadCapabilities() {
     ],
     imageUploadsEnabled: ENABLE_IMAGE_UPLOADS,
   };
-}
-
-function markdownToBasicHtml(markdown: string, title: string): string {
-  const lines = String(markdown || '').replace(/\r\n/g, '\n').split('\n');
-  const body: string[] = [];
-  let inList = false;
-
-  const flushList = () => {
-    if (inList) {
-      body.push('</ul>');
-      inList = false;
-    }
-  };
-
-  for (const lineRaw of lines) {
-    const line = lineRaw.trim();
-    if (!line) {
-      flushList();
-      body.push('<p></p>');
-      continue;
-    }
-
-    const escaped = line
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
-
-    if (/^###\s+/.test(line)) {
-      flushList();
-      body.push(`<h3>${escaped.replace(/^###\s+/, '')}</h3>`);
-      continue;
-    }
-    if (/^##\s+/.test(line)) {
-      flushList();
-      body.push(`<h2>${escaped.replace(/^##\s+/, '')}</h2>`);
-      continue;
-    }
-    if (/^#\s+/.test(line)) {
-      flushList();
-      body.push(`<h1>${escaped.replace(/^#\s+/, '')}</h1>`);
-      continue;
-    }
-    if (/^-\s+/.test(line)) {
-      if (!inList) {
-        body.push('<ul>');
-        inList = true;
-      }
-      body.push(`<li>${escaped.replace(/^-\s+/, '')}</li>`);
-      continue;
-    }
-
-    flushList();
-    body.push(`<p>${escaped}</p>`);
-  }
-
-  flushList();
-
-  return `<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>${title.replace(/[<>]/g, '')}</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #121212; font-size: 12pt; line-height: 1.6; padding: 26px; }
-    h1,h2,h3 { color: #0f172a; margin: 16px 0 8px; }
-    p { margin: 8px 0; }
-    ul { margin: 6px 0 10px 20px; }
-    li { margin: 4px 0; }
-  </style>
-</head>
-<body>
-${body.join('\n')}
-</body>
-</html>`;
 }
 
 async function markdownToDocxBuffer(markdown: string): Promise<Buffer> {
@@ -1289,7 +1216,7 @@ export async function exportRuntimeDocumentVersion(input: {
   } else if (format === WorkspaceDocumentExportFormat.DOCX) {
     buffer = await markdownToDocxBuffer(version.contentMd);
   } else {
-    const html = markdownToBasicHtml(version.contentMd, detail.title);
+    const html = markdownToRichHtml(version.contentMd, { title: detail.title });
     buffer = await renderPdfFromHtml(html);
   }
 

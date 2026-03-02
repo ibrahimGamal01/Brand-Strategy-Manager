@@ -74,6 +74,11 @@ export type RuntimeAgentContext = {
       candidates: number;
       topPicks: Array<Record<string, unknown>>;
     };
+    counts: {
+      socialPosts: number;
+      news: number;
+      communityInsights: number;
+    };
   };
   runtime: {
     queuedMessages: Array<{ id: string; content: string; createdAt: string; position: number }>;
@@ -135,4 +140,3 @@ export function defaultRuntimePermissions(role: RuntimeActorRole): RuntimeAgentC
     allowedSections: Object.keys(SECTION_CONFIG),
   };
 }
-
