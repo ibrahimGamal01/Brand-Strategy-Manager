@@ -1137,8 +1137,8 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
     // meta "run discovery first" answers when the workspace has little seeded data.
     pushIfMissing('competitors.discover_v3', {
       mode: hasDeepInvestigationIntent ? 'deep' : 'standard',
-      maxCandidates: hasDeepInvestigationIntent ? 200 : 120,
-      maxEnrich: hasDeepInvestigationIntent ? 18 : 10,
+      maxCandidates: hasDeepInvestigationIntent ? 120 : 60,
+      maxEnrich: hasDeepInvestigationIntent ? 10 : 6,
     });
   }
   if (
@@ -1582,8 +1582,8 @@ export async function generatePlannerPlan(input: PlannerInput): Promise<RuntimeP
                 tool: 'competitors.discover_v3',
                 args: {
                   mode: hasDeepResearchIntent ? 'deep' : 'standard',
-                  maxCandidates: hasDeepResearchIntent ? 200 : 120,
-                  maxEnrich: hasDeepResearchIntent ? 18 : 10,
+                  maxCandidates: hasDeepResearchIntent ? 120 : 60,
+                  maxEnrich: hasDeepResearchIntent ? 10 : 6,
                 },
               },
               ...mergedToolCalls,
