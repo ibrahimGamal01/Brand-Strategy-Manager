@@ -3074,6 +3074,18 @@ export class RuntimeRunEngine {
     }
 
     const promptToolResults = compactToolResultsForPrompt(toolResults);
+    await updateAgentRun(run.id, { status: AgentRunStatus.RUNNING });
+    await this.emitEvent({
+      branchId: run.branchId,
+      agentRunId: run.id,
+      type: ProcessEventType.PROCESS_PROGRESS,
+      message: 'Synthesizing evidence and preparing final response.',
+      payload: {
+        phase: 'planning',
+        stage: 'synthesis',
+        toolCount: toolRuns.length,
+      },
+    });
     const isRunCancelled = async (stage: string): Promise<boolean> => {
       const latest = await getAgentRun(run.id);
       if (!latest || latest.status === AgentRunStatus.CANCELLED) {
