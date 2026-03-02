@@ -320,14 +320,22 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     runAsync(sendMessage(content, mode, options));
   };
 
+  const runPriorityCommand = (command: string, options?: { attachmentIds?: string[]; documentIds?: string[] }) => {
+    const next = command.trim();
+    if (!next) return;
+    runAsync(sendMessage(next, "interrupt", options));
+  };
+
   const onUploadDocuments = async (files: File[]) => {
     if (!activeBranchId) {
       throw new Error("Open a branch before uploading documents.");
     }
+    setActionError(null);
     try {
       const payload = await uploadRuntimeDocuments(workspaceId, activeBranchId, { files });
       const docs = Array.isArray(payload.documents) ? payload.documents : [];
       await refreshNow();
+      setActionError(null);
       return docs.map((doc) => ({
         id: doc.id,
         title: doc.title,
@@ -555,7 +563,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     if (action === "document.generate") {
       setActionError(null);
       const payloadText = payload ? ` ${JSON.stringify(payload)}` : "";
-      injectComposerText(`/document.generate${payloadText}`, "append");
+      runPriorityCommand(`/document.generate${payloadText}`);
       return;
     }
 
@@ -634,7 +642,12 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
           ? "generate_pdf"
           : action.replace(/[^a-z0-9_./-]+/g, "_");
     const payloadText = payload ? ` ${JSON.stringify(payload)}` : "";
-    injectComposerText(`/${normalizedCommand}${payloadText}`, "append");
+    const command = `/${normalizedCommand}${payloadText}`;
+    if (normalizedCommand === "generate_pdf" || normalizedCommand.startsWith("document.")) {
+      runPriorityCommand(command);
+    } else {
+      injectComposerText(command, "append");
+    }
     setActionError(null);
   };
 
