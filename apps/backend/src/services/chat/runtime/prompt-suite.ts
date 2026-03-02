@@ -505,6 +505,13 @@ function detectWriterIntent(message: string): 'competitor_brief' | 'general' {
   const normalized = String(message || '').toLowerCase();
   if (!/\bcompetitor|rival|alternative\b/.test(normalized)) return 'general';
 
+  const hasActionVerb =
+    /\b(give|list|rank|name|show|identify|find|provide|outline|write|compare|analy[sz]e|audit|map)\b/.test(
+      normalized
+    );
+  const hasMetaSufficiency =
+    /\b(is there|do we have|do you have|enough|sufficient|missing|lack|whether)\b/.test(normalized) &&
+    /\b(evidence|workspace|context|data)\b/.test(normalized);
   const hasBriefSignals =
     /\b(top\s*\d+|top five|top 5|best competitors?|direct competitors?|competitor brief|competitor analysis)\b/.test(
       normalized
@@ -512,6 +519,7 @@ function detectWriterIntent(message: string): 'competitor_brief' | 'general' {
     /\bwhy (each|they|these)\b/.test(normalized) ||
     /\b(positioning gap|market gap|white\s*space|whitespace|angle)\b/.test(normalized);
 
+  if (hasMetaSufficiency && !hasActionVerb) return 'general';
   return hasBriefSignals ? 'competitor_brief' : 'general';
 }
 
@@ -586,7 +594,7 @@ function extractCompetitorCandidates(
 ): CompetitorCandidate[] {
   const byKey = new Map<string, CompetitorCandidate>();
   const upsert = (candidate: CompetitorCandidate) => {
-    const key = `${candidate.platform || 'unknown'}:${candidate.handle}`;
+    const key = candidate.handle;
     const existing = byKey.get(key);
     if (!existing) {
       byKey.set(key, candidate);
@@ -598,6 +606,13 @@ function extractCompetitorCandidates(
       stateRank(candidate.selectionState) * 100 + typeRank(candidate.competitorType) * 20 + candidate.relevanceScore;
     if (nextScore > currentScore) {
       byKey.set(key, candidate);
+      return;
+    }
+    if (nextScore === currentScore && existing.platform === 'unknown' && candidate.platform !== 'unknown') {
+      byKey.set(key, {
+        ...existing,
+        ...candidate,
+      });
     }
   };
 
