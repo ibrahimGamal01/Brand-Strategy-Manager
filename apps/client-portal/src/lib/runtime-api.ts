@@ -51,6 +51,7 @@ export async function fetchWorkspaceLibrary(
     collection?: "web" | "competitors" | "social" | "community" | "news" | "deliverables";
     q?: string;
     limit?: number;
+    v?: "v1" | "v2";
   }
 ) {
   const params = new URLSearchParams();
@@ -59,6 +60,7 @@ export async function fetchWorkspaceLibrary(
   if (typeof options?.limit === "number" && Number.isFinite(options.limit)) {
     params.set("limit", String(Math.max(10, Math.min(300, Math.floor(options.limit)))));
   }
+  params.set("v", options?.v || "v2");
   const suffix = params.toString() ? `?${params.toString()}` : "";
 
   const response = await fetch(`/api/portal/workspaces/${workspaceId}/library${suffix}`, {
@@ -76,6 +78,54 @@ export async function fetchWorkspaceLibrary(
       community: number;
       news: number;
       deliverables: number;
+    };
+  }>(response);
+}
+
+export async function resolveWorkspaceLibraryRefs(
+  workspaceId: string,
+  libraryRefs: string[]
+) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/library/resolve-refs`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ libraryRefs }),
+    credentials: "include",
+  });
+  return parseJson<{
+    ok: boolean;
+    items: LibraryItem[];
+    unresolvedRefs: string[];
+  }>(response);
+}
+
+export async function fetchWorkspaceLibraryDiagnostics(workspaceId: string) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/library/diagnostics`, {
+    method: "GET",
+    cache: "no-store",
+    credentials: "include",
+  });
+  return parseJson<{
+    ok: boolean;
+    diagnostics: {
+      workspaceId: string;
+      snapshotAt: string;
+      citationRate: number;
+      lowTrustUsageRate: number;
+      unresolvedLibraryRefRate: number;
+      totals: {
+        assistantMessages: number;
+        assistantMessagesWithEvidence: number;
+        libraryRefEvents: number;
+        lowTrustBlocked: number;
+        unresolvedRefs: number;
+      };
+    };
+    flags?: {
+      v2Enabled: boolean;
+      trustGuardEnabled: boolean;
+      hideIdsEnabled: boolean;
+      hardCleanupEnabled: boolean;
     };
   }>(response);
 }
@@ -655,6 +705,7 @@ export type RuntimeInputOptionsDto = {
   modeLabel: "fast" | "balanced" | "deep" | "pro";
   sourceScope: RuntimeInputSourceScopeDto;
   targetLength: "short" | "medium" | "long";
+  libraryRefs?: string[];
   steerNote?: string;
   strictValidation?: boolean;
   pauseAfterPlanning?: boolean;
@@ -706,6 +757,7 @@ export async function sendRuntimeMessage(
     mode: "send" | "queue" | "interrupt";
     policy?: Record<string, unknown>;
     inputOptions?: RuntimeInputOptionsDto;
+    libraryRefs?: string[];
     attachmentIds?: string[];
     documentIds?: string[];
   }
@@ -769,6 +821,7 @@ export async function patchRuntimeQueueItem(
   input: {
     content?: string;
     inputOptions?: RuntimeInputOptionsDto;
+    libraryRefs?: string[];
     steerNote?: string;
     attachmentIds?: string[];
     documentIds?: string[];
@@ -928,7 +981,7 @@ export async function proposeRuntimeDocumentEdit(
   workspaceId: string,
   branchId: string,
   documentId: string,
-  input: { instruction: string }
+  input: { instruction: string; quotedText?: string; replacementText?: string }
 ) {
   const response = await fetch(
     `/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/documents/${documentId}/propose-edit`,
@@ -949,6 +1002,13 @@ export async function proposeRuntimeDocumentEdit(
       changed: boolean;
       changeSummary: string;
       preview: { beforeChars: number; afterChars: number };
+      anchor?: {
+        quotedText: string;
+        replacementText?: string;
+        matched: boolean;
+        matchType?: "exact" | "whitespace";
+        matchCount?: number;
+      };
     };
   }>(response);
 }

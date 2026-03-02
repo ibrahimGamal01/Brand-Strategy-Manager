@@ -10,6 +10,7 @@ import {
   fetchRuntimeBranchState,
   fetchWorkspaceLibrary,
   issueRuntimeWsToken,
+  listRuntimeDocuments,
   listRuntimeEvents,
   listRuntimeMessages,
   listRuntimeQueue,
@@ -21,6 +22,7 @@ import {
   sendRuntimeMessage,
   steerRuntimeBranch,
   interruptRuntimeBranch,
+  RuntimeWorkspaceDocumentDto,
   RuntimeSocketMessage,
 } from "@/lib/runtime-api";
 import {
@@ -55,6 +57,7 @@ type UseRuntimeWorkspaceResult = {
   queuedMessages: QueuedMessage[];
   isStreaming: boolean;
   libraryItems: LibraryItem[];
+  runtimeDocuments: RuntimeWorkspaceDocumentDto[];
   preferences: SessionPreferences;
   setActiveThreadId: (threadId: string) => void;
   setActiveBranchId: (branchId: string) => void;
@@ -78,6 +81,7 @@ type UseRuntimeWorkspaceResult = {
   resolveDecision: (decisionId: string, option: string) => Promise<void>;
   steerRun: (note: string) => Promise<void>;
   setPreference: <K extends keyof SessionPreferences>(key: K, value: SessionPreferences[K]) => void;
+  refreshRuntimeDocuments: () => Promise<void>;
   refreshNow: () => Promise<void>;
 };
 
@@ -136,11 +140,6 @@ function humanizeTriggerType(value: unknown): string {
   if (normalized === "MUTATION_APPLIED") return "Mutation run";
   if (normalized === "MANUAL_RETRY") return "Retry run";
   return `${humanizeToken(normalized.toLowerCase()) || "Workflow"} run`;
-}
-
-function shortId(value: unknown): string {
-  const raw = String(value || "").trim();
-  return raw ? raw.slice(0, 8) : "unknown";
 }
 
 type RuntimeEventPhase = ProcessRun["phase"];
@@ -436,6 +435,9 @@ function normalizeDecisionBlockItems(value: unknown): Array<{
 }
 
 function normalizeMessageBlocks(value: unknown): ChatMessageBlock[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => normalizeMessageBlocks(entry)).slice(0, 24);
+  }
   const block = isRecord(value) ? value : null;
   if (!block) return [];
   const type = String(block.type || "").trim().toLowerCase();
@@ -545,6 +547,19 @@ function normalizeMessageBlocks(value: unknown): ChatMessageBlock[] {
           afterChars: Number(block.preview.afterChars) || 0,
         }
       : undefined;
+    const anchor = isRecord(block.anchor)
+      ? {
+          quotedText: String(block.anchor.quotedText || "").trim(),
+          ...(typeof block.anchor.replacementText === "string" ? { replacementText: block.anchor.replacementText } : {}),
+          matched: Boolean(block.anchor.matched),
+          ...(block.anchor.matchType === "exact" || block.anchor.matchType === "whitespace"
+            ? { matchType: block.anchor.matchType }
+            : {}),
+          ...(Number.isFinite(Number(block.anchor.matchCount))
+            ? { matchCount: Math.max(0, Math.floor(Number(block.anchor.matchCount))) }
+            : {}),
+        }
+      : undefined;
     return [
       {
         type: "document_edit_proposal",
@@ -557,6 +572,7 @@ function normalizeMessageBlocks(value: unknown): ChatMessageBlock[] {
         ...(typeof block.changeSummary === "string" && block.changeSummary.trim()
           ? { changeSummary: block.changeSummary.trim() }
           : {}),
+        ...(anchor?.quotedText ? { anchor } : {}),
         ...(preview ? { preview } : {}),
         ...(parseActions().length ? { actions: parseActions() } : {}),
       },
@@ -607,6 +623,14 @@ function normalizeMessageInputOptions(value: unknown): ChatInputOptions | undefi
     modeLabel,
     targetLength,
     sourceScope,
+    ...(Array.isArray(value.libraryRefs)
+      ? {
+          libraryRefs: value.libraryRefs
+            .map((entry) => String(entry || "").trim())
+            .filter(Boolean)
+            .slice(0, 40),
+        }
+      : {}),
     ...(typeof value.steerNote === "string" && value.steerNote.trim()
       ? { steerNote: value.steerNote.trim() }
       : {}),
@@ -921,9 +945,10 @@ function toValueFirstToolMessage(
 
 function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[] {
   const latest = normalizeRuntimeEvents(events).slice(-120).reverse();
-  return latest.map((event) => {
+  const mapped = latest.map((event) => {
     let message = event.message || "Runtime event";
     const documentPlanPreview = event.toolName === "document.plan" ? extractDocumentPlanPreview(event.payload) : null;
+    const eventDocumentId = String(event.payload?.documentId || event.payload?.docId || "").trim() || undefined;
 
     if (event.event.startsWith("document.")) {
       if (event.event === "document.upload_received") {
@@ -952,9 +977,13 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
     } else if (event.event === "run.planning") {
       message = "Planning execution steps.";
     } else if (event.event === "tool.started" && event.toolName) {
-      message = `Running ${event.toolName}...`;
+      message = `Running ${readableToolName(event.toolName)}...`;
     } else if (event.event === "tool.output" && event.toolName) {
-      message = toValueFirstToolMessage(event.toolName, event.message, event.payload);
+      if (event.toolName === "document.plan") {
+        message = documentPlanPreview ? formatDocumentPlanSummary(documentPlanPreview) : "Document plan completed.";
+      } else {
+        message = toValueFirstToolMessage(event.toolName, event.message, event.payload);
+      }
     } else if (event.event === "tool.failed" && event.toolName) {
       const raw = String(event.message || "Failed").trim();
       message = `${readableToolName(event.toolName)} failed: ${raw}`;
@@ -967,7 +996,7 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
         const preview = tools.slice(0, 3).map((tool) => readableToolName(tool)).join(", ");
         message = `Run completed with ${pluralize(tools.length, "tool", "tools")}: ${preview}${tools.length > 3 ? "..." : ""}`;
       } else {
-        message = event.runId ? `Run ${event.runId.slice(0, 8)} completed.` : "Run completed.";
+        message = "Run completed.";
       }
     } else if (event.event === "decision.required" || event.phase === "waiting_input") {
       message = "Approval needed before BAT can continue.";
@@ -981,7 +1010,9 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
           ? "Inspect issue"
           : event.event.endsWith("completed")
             ? "Open result"
-            : undefined
+            : eventDocumentId
+              ? "Open document"
+              : undefined
         :
       event.event === "tool.output"
         ? "View result"
@@ -996,13 +1027,27 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
       timestamp: formatTime(event.createdAt),
       message,
       ...(actionLabel ? { actionLabel } : {}),
-      ...(event.runId ? { runId: event.runId } : {}),
+      ...(eventDocumentId ? { actionTarget: { kind: "document" as const, documentId: eventDocumentId } } : {}),
       ...(event.toolName ? { toolName: event.toolName } : {}),
       ...(documentPlanPreview ? { details: documentPlanDetailLines(documentPlanPreview) } : {}),
       phase: event.phase,
       level: event.level,
     };
   });
+  const collapsed: ProcessFeedItem[] = [];
+  for (const entry of mapped) {
+    const previous = collapsed[collapsed.length - 1];
+    if (
+      previous &&
+      previous.message === entry.message &&
+      previous.phase === entry.phase &&
+      (previous.toolName || "") === (entry.toolName || "")
+    ) {
+      continue;
+    }
+    collapsed.push(entry);
+  }
+  return collapsed.slice(0, 80);
 }
 
 function metricsFromDiscoverV3Result(result: Record<string, unknown>): Array<{ key: string; value: string }> {
@@ -1359,7 +1404,7 @@ function mapRecentRunsFromEvents(events: Array<Record<string, unknown>>): Proces
         : [];
       return {
         id: run.id,
-        label: `${humanizeTriggerType(run.triggerType)} • ${shortId(run.id)}`,
+        label: humanizeTriggerType(run.triggerType),
         stage: buildRunStage({
           phase: run.phase,
           latestMessage: run.latestMessage,
@@ -1371,6 +1416,15 @@ function mapRecentRunsFromEvents(events: Array<Record<string, unknown>>): Proces
         status: phaseToStatus(run.phase),
         ...(details.length ? { details } : {}),
       };
+    })
+    .filter((run, index, all) => {
+      const previous = all[index - 1];
+      if (!previous) return true;
+      return !(
+        previous.label === run.label &&
+        previous.phase === run.phase &&
+        previous.stage === run.stage
+      );
     });
 }
 
@@ -1456,7 +1510,7 @@ function mapRuns(activeRuns: Array<Record<string, unknown>>, events: Array<Recor
 
     return {
       id: runId,
-      label: `${humanizeTriggerType(run.triggerType)} • ${shortId(run.id)}`,
+      label: humanizeTriggerType(run.triggerType),
       stage,
       phase,
       progress: phaseToProgress(phase, done, total),
@@ -1545,6 +1599,7 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
   const [decisions, setDecisions] = useState<DecisionItem[]>([]);
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
   const [libraryItemsRemote, setLibraryItemsRemote] = useState<LibraryItem[]>([]);
+  const [runtimeDocuments, setRuntimeDocuments] = useState<RuntimeWorkspaceDocumentDto[]>([]);
   const [activeRunIdsByBranch, setActiveRunIdsByBranch] = useState<Record<string, string[]>>({});
 
   const [preferences, setPreferences] = useState<SessionPreferences>(DEFAULT_PREFERENCES);
@@ -1617,18 +1672,32 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
     setActiveBranchIdState(branchId);
   }, []);
 
+  const refreshRuntimeDocuments = useCallback(async () => {
+    if (!activeBranchId) {
+      setRuntimeDocuments([]);
+      return;
+    }
+    try {
+      const payload = await listRuntimeDocuments(workspaceId, activeBranchId, 80);
+      setRuntimeDocuments(Array.isArray(payload.documents) ? payload.documents : []);
+    } catch (documentError: any) {
+      setError((previous) => previous || String(documentError?.message || "Failed to sync workspace documents"));
+    }
+  }, [activeBranchId, workspaceId]);
+
   const syncBranch = useCallback(
     async (branchId: string) => {
       if (syncInFlightRef.current) return;
       syncInFlightRef.current = true;
       setSyncing(true);
       try {
-        const [threadPayload, messagePayload, eventPayload, queuePayload, statePayload] = await Promise.all([
+        const [threadPayload, messagePayload, eventPayload, queuePayload, statePayload, documentPayload] = await Promise.all([
           listRuntimeThreads(workspaceId),
           listRuntimeMessages(workspaceId, branchId),
           listRuntimeEvents(workspaceId, branchId),
           listRuntimeQueue(workspaceId, branchId),
           fetchRuntimeBranchState(workspaceId, branchId),
+          listRuntimeDocuments(workspaceId, branchId, 80).catch(() => ({ documents: [] as RuntimeWorkspaceDocumentDto[] })),
         ]);
 
         setThreads(threadPayload);
@@ -1699,6 +1768,7 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
             };
           })
         );
+        setRuntimeDocuments(Array.isArray(documentPayload.documents) ? documentPayload.documents : []);
         setError(null);
       } catch (fetchError: any) {
         setError(String(fetchError?.message || "Failed to sync runtime data"));
@@ -1769,6 +1839,9 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
         mode,
         policy: buildPolicyFromPreferences(preferences),
         inputOptions,
+        ...(Array.isArray(inputOptions.libraryRefs) && inputOptions.libraryRefs.length
+          ? { libraryRefs: inputOptions.libraryRefs }
+          : {}),
         ...(attachmentIds.length ? { attachmentIds } : {}),
         ...(documentIds.length ? { documentIds } : {}),
       });
@@ -1867,6 +1940,9 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
             ...mergedInputOptions,
             ...(steerNote ? { steerNote } : {}),
           },
+          ...(Array.isArray(mergedInputOptions.libraryRefs) && mergedInputOptions.libraryRefs.length
+            ? { libraryRefs: mergedInputOptions.libraryRefs }
+            : {}),
           ...(Array.isArray(queued.attachmentIds) ? { attachmentIds: queued.attachmentIds } : {}),
           ...(Array.isArray(queued.documentIds) ? { documentIds: queued.documentIds } : {}),
         });
@@ -2286,6 +2362,7 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
     queuedMessages,
     isStreaming: activeRunIds.length > 0,
     libraryItems: libraryItemsRemote,
+    runtimeDocuments,
     preferences,
     setActiveThreadId,
     setActiveBranchId,
@@ -2300,6 +2377,7 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
     resolveDecision,
     steerRun,
     setPreference,
+    refreshRuntimeDocuments,
     refreshNow,
   };
 }

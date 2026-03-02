@@ -56,6 +56,10 @@ import { buildRuntimeAgentContext } from './context-assembler';
 import type { RuntimeAgentContext } from './agent-context';
 import { createKnowledgeLedgerVersion } from '../../knowledge/knowledge-ledger-service';
 import { resolveModelForTask } from '../../ai/model-router';
+import {
+  listPortalWorkspaceLibrary,
+  resolvePortalWorkspaceLibraryRefs,
+} from '../../portal/portal-library';
 
 type SendMessageInput = {
   researchJobId: string;
@@ -65,6 +69,7 @@ type SendMessageInput = {
   mode?: SendMessageMode;
   policy?: Partial<RunPolicy>;
   inputOptions?: RuntimeInputOptions;
+  libraryRefs?: string[];
   attachmentIds?: string[];
   documentIds?: string[];
 };
@@ -110,13 +115,42 @@ function normalizeDocumentIds(value: unknown): string[] {
 }
 
 async function hydrateDocumentIdsFromMessageInput(input: RuntimeDocumentHydrationInput): Promise<string[]> {
-  // Fallback hydration path for environments where workspace document service is not available.
-  return normalizeDocumentIds(input.documentIds || []);
+  const fallbackIds = normalizeDocumentIds(input.documentIds || []);
+  try {
+    const documentService = await import('../../documents/workspace-document-service');
+    const hydrated = await documentService.hydrateDocumentIdsFromMessageInput({
+      researchJobId: input.researchJobId,
+      documentIds: fallbackIds,
+      attachmentIds: normalizeDocumentIds(input.attachmentIds || []),
+    });
+    return normalizeDocumentIds(hydrated);
+  } catch {
+    // Keep runtime chat available even if document modules are not active.
+    return fallbackIds;
+  }
 }
 
-async function buildDocumentGroundingHint(_input: RuntimeDocumentGroundingInput): Promise<string> {
-  // Keep runtime chat stable even when document ingestion modules are not deployed.
-  return '';
+async function buildDocumentGroundingHint(input: RuntimeDocumentGroundingInput): Promise<string> {
+  const hydrated = await hydrateDocumentIdsFromMessageInput({
+    researchJobId: input.researchJobId,
+    documentIds: normalizeDocumentIds(input.documentIds || []),
+    attachmentIds: normalizeDocumentIds(input.attachmentIds || []),
+  });
+  if (!hydrated.length) return '';
+
+  try {
+    const documentService = await import('../../documents/workspace-document-service');
+    const hint = await documentService.buildDocumentGroundingHint({
+      researchJobId: input.researchJobId,
+      documentIds: hydrated,
+    });
+    const compact = String(hint || '').trim();
+    if (!compact) return '';
+    const maxChars = Number.isFinite(Number(input.maxChars)) ? Math.max(400, Number(input.maxChars)) : 3600;
+    return compact.length <= maxChars ? compact : `${compact.slice(0, maxChars - 1).trimEnd()}…`;
+  } catch {
+    return '';
+  }
 }
 
 const DEFAULT_POLICY: RunPolicy = {
@@ -221,6 +255,23 @@ const RUNTIME_LEDGER_BUILDER_ENABLED = String(process.env.RUNTIME_EVIDENCE_LEDGE
   .trim()
   .toLowerCase() === 'true';
 const RUNTIME_LEDGER_BUILDER_ROLLOUT = envRuntimeNumber('RUNTIME_LEDGER_BUILDER_ROLLOUT', 100, 0, 100);
+const RUNTIME_STALE_ACTIVE_RUN_MS = envRuntimeNumber(
+  'RUNTIME_STALE_ACTIVE_RUN_MS',
+  10 * 60_000,
+  120_000,
+  24 * 60 * 60_000
+);
+const RUNTIME_STALE_RECOVERY_COOLDOWN_MS = envRuntimeNumber(
+  'RUNTIME_STALE_RECOVERY_COOLDOWN_MS',
+  60_000,
+  10_000,
+  15 * 60_000
+);
+const PORTAL_LIBRARY_TRUST_GUARD_ENABLED = String(
+  process.env.PORTAL_LIBRARY_TRUST_GUARD_ENABLED || 'true'
+)
+  .trim()
+  .toLowerCase() !== 'false';
 
 function normalizeSourceScope(raw?: Partial<RuntimeSourceScope> | null): RuntimeSourceScope {
   const scope = {
@@ -273,7 +324,32 @@ function normalizeInputOptions(raw?: RuntimeInputOptions | null): RuntimeInputOp
   if (typeof raw.pauseAfterPlanning === 'boolean') {
     normalized.pauseAfterPlanning = raw.pauseAfterPlanning;
   }
+  if (Array.isArray(raw.libraryRefs)) {
+    const refs = raw.libraryRefs
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean)
+      .slice(0, 40);
+    if (refs.length) {
+      normalized.libraryRefs = Array.from(new Set(refs));
+    }
+  }
   return Object.keys(normalized).length ? normalized : null;
+}
+
+function mergeLibraryRefs(...values: Array<unknown>): string[] {
+  const refs: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (!Array.isArray(value)) continue;
+    for (const entry of value) {
+      const ref = String(entry || '').trim();
+      if (!ref || seen.has(ref)) continue;
+      seen.add(ref);
+      refs.push(ref);
+      if (refs.length >= 40) return refs;
+    }
+  }
+  return refs;
 }
 
 function mergePolicyWithInputOptions(
@@ -781,26 +857,58 @@ function findReferencedCrawlRunId(message: string): string | null {
   return candidate.startsWith('crawl-') ? candidate : `crawl-${candidate}`;
 }
 
-function extractLibraryMentions(message: string): Array<{ id: string; title: string }> {
+type LibraryMention = {
+  ref: string;
+  title: string;
+  rawToken: string;
+};
+
+function extractLibraryMentions(message: string): LibraryMention[] {
   const raw = String(message || '');
-  const mentions: Array<{ id: string; title: string }> = [];
-  const matcher = /@library\[([^\]|]+)\|([^\]]+)\]/gi;
-  let current = matcher.exec(raw);
-  while (current) {
-    const id = String(current[1] || '').trim();
-    const title = String(current[2] || '').trim();
-    if (id && title) {
-      mentions.push({ id, title });
+  const mentions: LibraryMention[] = [];
+  const patterns = [
+    /@libraryRef\[([^\]|]+)\|([^\]]+)\]/gi,
+    /@library\[([^\]|]+)\|([^\]]+)\]/gi,
+  ];
+  for (const matcher of patterns) {
+    let current = matcher.exec(raw);
+    while (current) {
+      const ref = String(current[1] || '').trim();
+      const title = String(current[2] || '').trim();
+      const rawToken = String(current[0] || '').trim();
+      if (ref && title && rawToken) {
+        mentions.push({ ref, title, rawToken });
+      }
+      current = matcher.exec(raw);
     }
-    current = matcher.exec(raw);
   }
   return mentions;
+}
+
+function extractLibraryRefsFromText(message: string): string[] {
+  return Array.from(
+    new Set(
+      extractLibraryMentions(message)
+        .map((entry) => entry.ref)
+        .filter(Boolean)
+    )
+  ).slice(0, 40);
+}
+
+function requestsExplicitLibraryGrounding(message: string): boolean {
+  const normalized = String(message || '').toLowerCase();
+  if (!normalized) return false;
+  return (
+    /@libraryref\[|@library\[/.test(normalized) ||
+    /\b(use|show|cite|ground|pin|resolve)\b.{0,24}\b(library|source|evidence|citation)\b/.test(normalized) ||
+    /\b(from|with)\b.{0,24}\b(library|source|evidence)\b/.test(normalized)
+  );
 }
 
 function withLibraryMentionHints(message: string): string {
   const mentions = extractLibraryMentions(message);
   if (!mentions.length) return message;
-  const hints = mentions.map((entry) => `Use evidence from: ${entry.title}`).join('\n');
+  const hints = mentions.map((entry) => `Use pinned library evidence: ${entry.title}`).join('\n');
   return `${message}\n${hints}`;
 }
 
@@ -826,6 +934,65 @@ function parseSlashCommand(message: string): { command: string; argsText: string
     }
   }
   return { command, argsText, argsJson: null };
+}
+
+function extractDocumentEditDirective(message: string): {
+  quotedText?: string;
+  replacementText?: string;
+} {
+  const prompt = String(message || '').trim();
+  if (!prompt) return {};
+
+  const patterns: RegExp[] = [
+    /replace\s+[“"]([^”"]+)[”"]\s+with\s+[“"]([^”"]*)[”"]/i,
+    /replace\s+'([^']+)'\s+with\s+'([^']*)'/i,
+    /change\s+[“"]([^”"]+)[”"]\s+(?:to|into)\s+[“"]([^”"]*)[”"]/i,
+    /change\s+'([^']+)'\s+(?:to|into)\s+'([^']*)'/i,
+  ];
+  for (const pattern of patterns) {
+    const match = prompt.match(pattern);
+    if (!match) continue;
+    const quotedText = String(match[1] || '').trim();
+    const replacementText = String(match[2] || '').trim();
+    if (quotedText) {
+      return {
+        quotedText,
+        replacementText,
+      };
+    }
+  }
+
+  const quotedParts = Array.from(
+    prompt.matchAll(/[“"]([^”"]{2,320})[”"]|'([^']{2,320})'/g),
+    (match) => String(match[1] || match[2] || '').trim()
+  ).filter(Boolean);
+  if (
+    quotedParts.length >= 2 &&
+    /\b(replace|change|rewrite|update|swap)\b/i.test(prompt)
+  ) {
+    return {
+      quotedText: quotedParts[0],
+      replacementText: quotedParts[1],
+    };
+  }
+
+  if (quotedParts.length >= 1 && /\b(remove|delete)\b/i.test(prompt)) {
+    return {
+      quotedText: quotedParts[0],
+      replacementText: '',
+    };
+  }
+
+  if (
+    quotedParts.length >= 1 &&
+    /\b(edit|rewrite|update|change|replace|quote|quoted|around|section)\b/i.test(prompt)
+  ) {
+    return {
+      quotedText: quotedParts[0],
+    };
+  }
+
+  return {};
 }
 
 export function stripLegacyBoilerplateResponse(content: string): string {
@@ -1541,6 +1708,10 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   const referencedCrawlRunId = findReferencedCrawlRunId(messageWithMentions);
   const libraryMentions = extractLibraryMentions(originalMessage);
   const slashCommand = parseSlashCommand(originalMessage);
+  const referencedDocumentIds = Array.from(
+    messageWithMentions.matchAll(/\[document:([a-z0-9-]{8,})\]/gi),
+    (match) => String(match[1] || '').trim()
+  ).filter(Boolean);
 
   const pushIfMissing = (tool: string, args: Record<string, unknown>) => {
     const key = `${tool}:${JSON.stringify(args)}`;
@@ -1601,6 +1772,15 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
     /\b(what do (you|we) (see|have)|what['’]s (on|in) (the )?(app|application|workspace)|show (me )?(what|everything) (we|you) (have|see)|workspace status|workspace snapshot|summari[sz]e (the )?(workspace|app|application))\b/.test(
       normalized
     );
+  const hasDocumentKeyword = /\b(pdf|report|brief|document|doc)\b/.test(normalized);
+  const hasDocumentGenerateVerb = /\b(generate|create|make|build|produce|draft|export)\b/.test(normalized);
+  const hasDocumentGenerationIntent = hasDocumentKeyword && hasDocumentGenerateVerb;
+  const defaultDocumentArgs: Record<string, unknown> = {
+    docType: 'STRATEGY_BRIEF',
+    depth: 'standard',
+    includeCompetitors: true,
+    includeEvidenceLinks: true,
+  };
 
   if (slashCommand) {
     if (slashCommand.command === 'show_sources') {
@@ -1611,11 +1791,9 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
       pushIfMissing('evidence.posts', { platform: 'any', sort: 'engagement', limit: 8 });
       pushIfMissing('evidence.news', { limit: 8 });
     } else if (slashCommand.command === 'generate_pdf') {
-      pushIfMissing('document.plan', {
-        docType: 'STRATEGY_BRIEF',
-        depth: 'standard',
-        includeCompetitors: true,
-        includeEvidenceLinks: true,
+      pushIfMissing('document.generate', {
+        ...defaultDocumentArgs,
+        ...(slashCommand.argsJson || {}),
       });
     } else if (slashCommand.command === 'audit') {
       pushIfMissing('intel.list', { section: 'web_sources', limit: 10 });
@@ -1736,17 +1914,67 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
     pushIfMissing('evidence.posts', { platform: 'any', sort: 'engagement', limit: 8 });
   }
 
-  if (/report|pdf|brief|document/.test(normalized)) {
-    pushIfMissing('document.plan', {
-      docType: 'STRATEGY_BRIEF',
-      depth: 'standard',
-      includeCompetitors: true,
-      includeEvidenceLinks: true,
-    });
+  if (hasDocumentKeyword) {
+    if (slashCommand?.command === 'generate_pdf' || hasDocumentGenerationIntent) {
+      pushIfMissing('document.generate', {
+        ...defaultDocumentArgs,
+      });
+    } else {
+      pushIfMissing('document.plan', {
+        ...defaultDocumentArgs,
+      });
+    }
+  }
+
+  if (
+    referencedDocumentIds.length > 0 &&
+    /\b(document|doc|draft|proposal|attachment|edit|rewrite|change|update|summari[sz]e|read|review|export|download)\b/.test(
+      normalized
+    )
+  ) {
+    const primaryDocumentId = referencedDocumentIds[0];
+    const editDirective = extractDocumentEditDirective(originalMessage);
+    const hasDocumentEditIntent = /\b(edit|rewrite|refine|improve|change|update|replace)\b/.test(normalized);
+    const hasDocumentReadIntent =
+      /\b(summarize|summarise|read|review|outline|extract|what does it say)\b/.test(normalized) || hasEvidenceReferenceIntent;
+    const hasDocumentExportIntent = /\b(export|download|pdf|docx|markdown|md)\b/.test(normalized);
+
+    if (hasDocumentEditIntent) {
+      const editArgs: Record<string, unknown> = {
+        documentId: primaryDocumentId,
+        instruction: originalMessage,
+      };
+      if (editDirective.quotedText) {
+        editArgs.quotedText = editDirective.quotedText;
+      }
+      if (editDirective.replacementText !== undefined) {
+        editArgs.replacementText = editDirective.replacementText;
+      }
+      pushIfMissing('document.propose_edit', editArgs);
+      if (editDirective.quotedText && editDirective.replacementText === undefined) {
+        pushIfMissing('document.search', {
+          documentId: primaryDocumentId,
+          query: editDirective.quotedText,
+          limit: 6,
+        });
+      }
+    } else if (hasDocumentReadIntent) {
+      pushIfMissing('document.read', {
+        documentId: primaryDocumentId,
+      });
+    }
+
+    if (hasDocumentExportIntent) {
+      const format = /\bdocx\b/.test(normalized) ? 'DOCX' : /\bmarkdown|\bmd\b/.test(normalized) ? 'MD' : 'PDF';
+      pushIfMissing('document.export', {
+        documentId: primaryDocumentId,
+        format,
+      });
+    }
   }
 
   if (libraryMentions.length) {
-    pushIfMissing('intel.list', { section: 'web_snapshots', limit: 20 });
+    // Library refs are resolved strictly before planning; avoid heuristic fallback retrieval.
   }
 
   return calls;
@@ -2175,8 +2403,40 @@ function extractRunSteerNotes(messages: Array<{ role: ChatBranchMessageRole; con
     .slice(-6);
 }
 
+function inferRunLastActivityMs(input: {
+  createdAt: Date;
+  startedAt?: Date | null;
+  toolRuns?: Array<{
+    createdAt: Date;
+    startedAt?: Date | null;
+    endedAt?: Date | null;
+  }>;
+}): number {
+  const baseDate = input.startedAt || input.createdAt;
+  let latestMs = baseDate.getTime();
+  if (!Number.isFinite(latestMs)) {
+    latestMs = Date.now();
+  }
+
+  for (const toolRun of input.toolRuns || []) {
+    const candidates = [toolRun.createdAt, toolRun.startedAt || null, toolRun.endedAt || null];
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      const candidateMs = candidate.getTime();
+      if (!Number.isFinite(candidateMs)) continue;
+      if (candidateMs > latestMs) {
+        latestMs = candidateMs;
+      }
+    }
+  }
+
+  return latestMs;
+}
+
 export class RuntimeRunEngine {
   private readonly branchLocks = new Map<string, Promise<void>>();
+  private readonly staleRecoveryInFlight = new Set<string>();
+  private readonly staleRecoveryLastAttemptMs = new Map<string, number>();
 
   private async withBranchLock<T>(branchId: string, work: () => Promise<T>): Promise<T> {
     const previous = this.branchLocks.get(branchId) || Promise.resolve();
@@ -2195,6 +2455,76 @@ export class RuntimeRunEngine {
       if (this.branchLocks.get(branchId) === lockChain) {
         this.branchLocks.delete(branchId);
       }
+    }
+  }
+
+  private async scheduleStaleActiveRunRecovery(branchId: string): Promise<void> {
+    const activeRuns = await listActiveRuns(branchId);
+    if (!activeRuns.length) return;
+
+    const nowMs = Date.now();
+    for (const run of activeRuns) {
+      if (run.status === AgentRunStatus.WAITING_USER) continue;
+      const lastActivityMs = inferRunLastActivityMs({
+        createdAt: run.createdAt,
+        startedAt: run.startedAt,
+        toolRuns: run.toolRuns,
+      });
+      const idleMs = Math.max(0, nowMs - lastActivityMs);
+      if (idleMs < RUNTIME_STALE_ACTIVE_RUN_MS) continue;
+
+      const lastAttemptMs = this.staleRecoveryLastAttemptMs.get(run.id) || 0;
+      if (nowMs - lastAttemptMs < RUNTIME_STALE_RECOVERY_COOLDOWN_MS) continue;
+      if (this.staleRecoveryInFlight.has(run.id)) continue;
+
+      this.staleRecoveryLastAttemptMs.set(run.id, nowMs);
+      this.staleRecoveryInFlight.add(run.id);
+
+      await this.emitEvent({
+        branchId,
+        agentRunId: run.id,
+        type: ProcessEventType.PROCESS_LOG,
+        level: ProcessEventLevel.WARN,
+        message: `Detected stale active run (idle ${Math.floor(idleMs / 1000)}s). Attempting recovery.`,
+        payload: {
+          event: 'run.stale_detected',
+          status: run.status,
+          idleMs,
+          lastActivityAt: new Date(lastActivityMs).toISOString(),
+        },
+      });
+
+      void this.executeRun(run.id)
+        .then(async () => {
+          const refreshed = await getAgentRun(run.id);
+          if (!refreshed) return;
+          if (
+            refreshed.status === AgentRunStatus.DONE ||
+            refreshed.status === AgentRunStatus.FAILED ||
+            refreshed.status === AgentRunStatus.CANCELLED ||
+            refreshed.status === AgentRunStatus.WAITING_USER
+          ) {
+            return;
+          }
+
+          await this.handleRunFailure({
+            runId: run.id,
+            branchId,
+            message: 'Run remained active after stale recovery attempt.',
+            error: new Error('stale_recovery_no_progress'),
+          });
+        })
+        .catch((error) =>
+          this.handleRunFailure({
+            runId: run.id,
+            branchId,
+            message: 'Automatic stale-run recovery failed.',
+            error,
+          })
+        )
+        .finally(() => {
+          this.staleRecoveryInFlight.delete(run.id);
+        });
     }
   }
 
@@ -2320,6 +2650,7 @@ export class RuntimeRunEngine {
     if (!branch) {
       throw new Error('Branch not found for this research job');
     }
+    await this.scheduleStaleActiveRunRecovery(input.branchId);
 
     const mode = input.mode || 'send';
     const attachmentIds = normalizeDocumentIds(input.attachmentIds || []);
@@ -2337,6 +2668,46 @@ export class RuntimeRunEngine {
       (documentIds.length > 0
         ? 'Please analyze the attached documents and continue the workflow with grounded recommendations.'
         : 'Please analyze the attached files and continue the workflow with grounded recommendations.');
+    const normalizedInputOptions = normalizeInputOptions(input.inputOptions);
+    const requestedLibraryRefs = mergeLibraryRefs(
+      Array.isArray(input.libraryRefs) ? input.libraryRefs : [],
+      normalizedInputOptions?.libraryRefs || [],
+      extractLibraryRefsFromText(normalizedContent)
+    );
+    let resolvedLibraryRefs: string[] = [];
+    let unresolvedLibraryRefs: string[] = [];
+    if (requestedLibraryRefs.length > 0) {
+      const resolved = await resolvePortalWorkspaceLibraryRefs(input.researchJobId, requestedLibraryRefs);
+      resolvedLibraryRefs = resolved.items.map((item) => item.libraryRef || item.id).filter(Boolean);
+      unresolvedLibraryRefs = resolved.unresolvedRefs;
+      await this.emitEvent({
+        branchId: input.branchId,
+        type: ProcessEventType.PROCESS_LOG,
+        message: `Pinned library references resolved: ${resolvedLibraryRefs.length}/${requestedLibraryRefs.length}.`,
+        payload: {
+          event: 'LIBRARY_REF_RESOLVED',
+          requestedRefs: requestedLibraryRefs.length,
+          resolvedRefs: resolvedLibraryRefs.length,
+          unresolvedRefs: unresolvedLibraryRefs.length,
+        },
+      });
+      if (unresolvedLibraryRefs.length > 0) {
+        await this.emitEvent({
+          branchId: input.branchId,
+          type: ProcessEventType.PROCESS_LOG,
+          level: ProcessEventLevel.WARN,
+          message: 'Some library references could not be resolved and were ignored.',
+          payload: {
+            event: 'LIBRARY_HEURISTIC_BLOCKED',
+            unresolvedRefs: unresolvedLibraryRefs.slice(0, 20),
+          },
+        });
+      }
+    }
+    const inputOptionsWithRefs = normalizeInputOptions({
+      ...(normalizedInputOptions || {}),
+      ...(resolvedLibraryRefs.length ? { libraryRefs: resolvedLibraryRefs } : {}),
+    });
 
     const activeRuns = await listActiveRuns(input.branchId);
     if (mode === 'send' && activeRuns.length > 0) {
@@ -2359,7 +2730,7 @@ export class RuntimeRunEngine {
           branchId: input.branchId,
           userId: input.userId,
           content: normalizedContent,
-          ...(input.inputOptions ? { inputOptions: normalizeInputOptions(input.inputOptions) } : {}),
+          ...(inputOptionsWithRefs ? { inputOptions: inputOptionsWithRefs } : {}),
           ...(attachmentIds.length ? { attachmentIds } : {}),
           ...(documentIds.length ? { documentIds } : {}),
         });
@@ -2390,7 +2761,7 @@ export class RuntimeRunEngine {
         branchId: input.branchId,
         userId: input.userId,
         content: normalizedContent,
-        ...(input.inputOptions ? { inputOptions: normalizeInputOptions(input.inputOptions) } : {}),
+        ...(inputOptionsWithRefs ? { inputOptions: inputOptionsWithRefs } : {}),
         ...(attachmentIds.length ? { attachmentIds } : {}),
         ...(documentIds.length ? { documentIds } : {}),
       });
@@ -2426,20 +2797,19 @@ export class RuntimeRunEngine {
       branchId: input.branchId,
       role: ChatBranchMessageRole.USER,
       content: normalizedContent,
-      ...(input.inputOptions ? { inputOptionsJson: normalizeInputOptions(input.inputOptions) } : {}),
+      ...(inputOptionsWithRefs ? { inputOptionsJson: inputOptionsWithRefs } : {}),
       ...(attachmentIds.length ? { attachmentIdsJson: attachmentIds } : {}),
       ...(documentIds.length ? { documentIdsJson: documentIds } : {}),
       clientVisible: true,
     });
 
-    const normalizedInputOptions = normalizeInputOptions(input.inputOptions);
-    const normalizedPolicy = normalizePolicy(input.policy, normalizedInputOptions);
+    const normalizedPolicy = normalizePolicy(input.policy, inputOptionsWithRefs || normalizedInputOptions);
     const run = await createAgentRun({
       branchId: input.branchId,
       triggerType: AgentRunTriggerType.USER_MESSAGE,
       triggerMessageId: userMessage.id,
       policy: normalizedPolicy,
-      ...(normalizedInputOptions ? { inputOptions: normalizedInputOptions } : {}),
+      ...(inputOptionsWithRefs ? { inputOptions: inputOptionsWithRefs } : {}),
       ...(attachmentIds.length ? { attachmentIds } : {}),
       ...(documentIds.length ? { documentIds } : {}),
     });
@@ -2452,9 +2822,11 @@ export class RuntimeRunEngine {
       payload: {
         triggerType: run.triggerType,
         triggerMessageId: userMessage.id,
-        inputOptions: normalizedInputOptions,
+        inputOptions: inputOptionsWithRefs,
         attachmentIds,
         documentIds,
+        trustedRefsUsed: resolvedLibraryRefs,
+        lowTrustRefsDeferred: 0,
         policySummary: buildPolicySummary(normalizedPolicy),
       },
     });
@@ -2466,7 +2838,7 @@ export class RuntimeRunEngine {
       message: 'Input options applied for this run.',
       payload: {
         event: 'CHAT_INPUT_OPTIONS_APPLIED',
-        inputOptions: normalizedInputOptions || null,
+        inputOptions: inputOptionsWithRefs || null,
         policySummary: buildPolicySummary(normalizedPolicy),
       },
     });
@@ -3407,6 +3779,24 @@ export class RuntimeRunEngine {
         resultJson: toolRun.resultJson,
       }))
     );
+    const pinnedLibraryItems = Array.isArray(runtimeContextSnapshot.libraryPinnedItems)
+      ? runtimeContextSnapshot.libraryPinnedItems
+          .map((item) => (isRecord(item) ? item : null))
+          .filter((item): item is Record<string, unknown> => Boolean(item))
+      : [];
+    const lowTrustPinnedOnly =
+      PORTAL_LIBRARY_TRUST_GUARD_ENABLED &&
+      Boolean(runtimeContextSnapshot.libraryLowTrustOnly) &&
+      pinnedLibraryItems.length > 0;
+    const trustedRefsUsed = pinnedLibraryItems
+      .filter((item) => {
+        const status = String(item.trustStatus || '').toLowerCase();
+        return status === 'high' || status === 'medium';
+      })
+      .map((item) => String(item.libraryRef || '').trim())
+      .filter(Boolean)
+      .slice(0, 40);
+    const lowTrustRefsDeferred = lowTrustPinnedOnly ? pinnedLibraryItems.length : 0;
 
     const toolFailures = toolRuns.filter(
       (toolRun) => toolRun.status === ToolRunStatus.FAILED || toolRun.status === ToolRunStatus.CANCELLED
@@ -3420,7 +3810,41 @@ export class RuntimeRunEngine {
       .join('\n\n');
     finalResponseContent = sanitizeClientResponse(finalResponseContent);
 
-    if (!finalResponseContent || allToolsFailed) {
+    if (lowTrustPinnedOnly) {
+      const pinnedSummary = pinnedLibraryItems
+        .slice(0, 5)
+        .map((item, index) => {
+          const title = String(item.title || `Pinned source ${index + 1}`).trim();
+          const score = Number(item.trustScore || 0);
+          return `${index + 1}. ${title} (trust ${(Number.isFinite(score) ? score : 0).toFixed(2)}).`;
+        })
+        .join('\n');
+      finalResponseContent = [
+        'I found only low-trust pinned library evidence for this request, so I need your confirmation before making factual claims.',
+        'Choose one to continue safely:',
+        '1. Approve using these sources as-is.',
+        '2. Ask me to fetch fresher supporting evidence first.',
+        'Pinned sources:',
+        pinnedSummary,
+      ]
+        .filter(Boolean)
+        .join('\n\n');
+      await this.emitEvent({
+        branchId: run.branchId,
+        agentRunId: run.id,
+        type: ProcessEventType.PROCESS_LOG,
+        level: ProcessEventLevel.WARN,
+        message: 'Low-trust pinned evidence blocked direct factual synthesis.',
+      payload: {
+          event: 'LIBRARY_LOW_TRUST_BLOCKED',
+          pinnedCount: pinnedLibraryItems.length,
+          trustedRefsUsed,
+          lowTrustRefsDeferred,
+        },
+      });
+    }
+
+    if ((!finalResponseContent || allToolsFailed) && !lowTrustPinnedOnly) {
       finalResponseContent = buildGroundedFailureResponse({
         contextSnapshot: runtimeContextSnapshot,
       });
@@ -3515,6 +3939,9 @@ export class RuntimeRunEngine {
       message: `Run completed: ${toolRuns.length} tool(s) executed.`,
       payload: {
         ...(ledgerVersionId ? { ledgerVersionId } : {}),
+        trustedRefsUsed,
+        lowTrustRefsDeferred,
+        policySummary: buildPolicySummary(policy),
         toolRuns: toolRuns.map((item) => {
           const result = isRecord(item.resultJson) ? item.resultJson : null;
           return {
@@ -3571,7 +3998,7 @@ export class RuntimeRunEngine {
             documentIds: triggerDocumentIds,
           })
         : '';
-      const triggerMessageForPlanning = documentGroundingHint
+      let triggerMessageForPlanning = documentGroundingHint
         ? `${triggerMessageRaw}\n\n${documentGroundingHint}`
         : triggerMessageRaw;
 
@@ -3632,6 +4059,139 @@ export class RuntimeRunEngine {
               pendingDecisionsCount: Number(runtimeContextSnapshot.pendingDecisionsCount || 0),
             },
           });
+        }
+      }
+
+      const pinnedLibraryRefs = mergeLibraryRefs(
+        normalizeIdList((fresh.inputOptionsJson as any)?.libraryRefs),
+        extractLibraryRefsFromText(triggerMessageRaw)
+      );
+      if (pinnedLibraryRefs.length > 0) {
+        const resolvedRefs = await resolvePortalWorkspaceLibraryRefs(
+          fresh.branch.thread.researchJobId,
+          pinnedLibraryRefs
+        );
+        const pinnedItems = resolvedRefs.items.slice(0, 12).map((item) => ({
+          libraryRef: item.libraryRef || item.id,
+          title: item.title,
+          collection: item.collection,
+          trustStatus: item.trustStatus || 'low',
+          trustScore: typeof item.trustScore === 'number' ? item.trustScore : 0,
+          summary: item.summary,
+          evidenceHref: item.evidenceHref || undefined,
+        }));
+        const hasTrustedPinnedItems = pinnedItems.some((item) => item.trustStatus === 'high' || item.trustStatus === 'medium');
+        runtimeContextSnapshot = {
+          ...(runtimeContextSnapshot || {}),
+          libraryPinnedRefs: pinnedItems.map((item) => item.libraryRef),
+          libraryPinnedItems: pinnedItems,
+          libraryPinnedTrustMode: 'balanced',
+          libraryLowTrustOnly: pinnedItems.length > 0 && !hasTrustedPinnedItems,
+        };
+
+        if (pinnedItems.length > 0) {
+          const hintLines = pinnedItems.map((item, index) => {
+            const trust = String(item.trustStatus || 'low').toUpperCase();
+            const score = Number(item.trustScore || 0).toFixed(2);
+            return `${index + 1}. [${trust} ${score}] ${item.title}: ${item.summary}`;
+          });
+          triggerMessageForPlanning = `${triggerMessageForPlanning}\n\nPinned library evidence (use these refs first):\n${hintLines.join('\n')}`;
+        }
+
+        await this.emitEvent({
+          branchId: fresh.branchId,
+          agentRunId: fresh.id,
+          type: ProcessEventType.PROCESS_LOG,
+          message: `Resolved ${resolvedRefs.items.length}/${pinnedLibraryRefs.length} pinned library references.`,
+          payload: {
+            event: 'LIBRARY_REF_RESOLVED',
+            requestedRefs: pinnedLibraryRefs.length,
+            resolvedRefs: resolvedRefs.items.length,
+            unresolvedRefs: resolvedRefs.unresolvedRefs.length,
+          },
+        });
+
+        if (resolvedRefs.unresolvedRefs.length > 0) {
+          await this.emitEvent({
+            branchId: fresh.branchId,
+            agentRunId: fresh.id,
+            type: ProcessEventType.PROCESS_LOG,
+            level: ProcessEventLevel.WARN,
+            message: 'Some pinned library references were not found in this workspace and were skipped.',
+            payload: {
+              event: 'LIBRARY_HEURISTIC_BLOCKED',
+              unresolvedRefs: resolvedRefs.unresolvedRefs.slice(0, 20),
+            },
+          });
+        }
+      }
+
+      if (
+        PORTAL_LIBRARY_TRUST_GUARD_ENABLED &&
+        pinnedLibraryRefs.length === 0 &&
+        requestsExplicitLibraryGrounding(triggerMessageRaw)
+      ) {
+        const librarySnapshot = await listPortalWorkspaceLibrary(fresh.branch.thread.researchJobId, {
+          version: 'v2',
+          limit: 80,
+        }).catch(() => ({ items: [], counts: { web: 0, competitors: 0, social: 0, community: 0, news: 0, deliverables: 0 } }));
+        const candidateRefs = (Array.isArray(librarySnapshot.items) ? librarySnapshot.items : [])
+          .filter((item) => (item.trustStatus || 'low') !== 'low')
+          .slice(0, 8);
+        if (candidateRefs.length > 0) {
+          const candidateLines = candidateRefs
+            .map((item, index) => `${index + 1}. @libraryRef[${item.libraryRef || item.id}|${item.title}]`)
+            .join('\n');
+          const guidance = [
+            'Before I make factual claims, please pin the exact library evidence you want me to use.',
+            'Reply by copying 1-3 refs from this list (or click "Use in answer" in Library):',
+            candidateLines,
+          ].join('\n\n');
+          await this.persistAssistantMessage({
+            branchId: fresh.branchId,
+            content: guidance,
+            reasoningJson: {
+              plan: ['Resolve explicit library refs before synthesis.'],
+              tools: ['portal.library.resolve_refs'],
+              assumptions: ['No explicit trusted refs were provided in this message.'],
+              nextSteps: ['Select the refs to ground the next answer.'],
+              evidence: candidateRefs.map((item) => ({
+                id: String(item.libraryRef || item.id || ''),
+                label: item.title,
+                ...(item.evidenceHref ? { url: item.evidenceHref } : {}),
+              })),
+              runId: fresh.id,
+            },
+            clientVisible: true,
+            contextSnapshot: runtimeContextSnapshot || {},
+          });
+
+          await updateAgentRun(fresh.id, {
+            status: AgentRunStatus.DONE,
+            endedAt: new Date(),
+            error: null,
+          });
+
+          await this.emitEvent({
+            branchId: fresh.branchId,
+            agentRunId: fresh.id,
+            type: ProcessEventType.DONE,
+            message: 'Run paused until explicit library refs are selected.',
+            payload: {
+              trustedRefsUsed: [],
+              lowTrustRefsDeferred: 0,
+              policySummary: buildPolicySummary(policy),
+              candidateRefsOffered: candidateRefs.length,
+            },
+          });
+
+          await this.dispatchNextQueuedMessage({
+            researchJobId: fresh.branch.thread.researchJobId,
+            branchId: fresh.branchId,
+            policy,
+            mode: 'send',
+          });
+          return;
         }
       }
 
@@ -3767,6 +4327,7 @@ export class RuntimeRunEngine {
   async getBranchState(input: { researchJobId: string; branchId: string }) {
     const branch = await getBranch(input.branchId, input.researchJobId);
     if (!branch) throw new Error('Branch not found for this research job');
+    await this.scheduleStaleActiveRunRecovery(input.branchId);
     const activeRuns = await listActiveRuns(input.branchId);
     return {
       branch,

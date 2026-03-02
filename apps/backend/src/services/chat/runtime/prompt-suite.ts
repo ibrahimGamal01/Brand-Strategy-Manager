@@ -940,11 +940,50 @@ export function applyWriterQualityGate(input: {
 }): { response: string; quality: WriterQualityResult } {
   const intent = detectWriterIntent(input.userMessage);
   if (intent !== 'competitor_brief') {
+    const raw = String(input.response || '').trim();
+    const genericSignals =
+      (raw.match(/\bloaded\s+\d+\s+record\(s\)\b/gi) || []).length +
+      (raw.match(/\btool completed successfully\b/gi) || []).length +
+      (raw.match(/\bauto-continuing based on tool suggestions\b/gi) || []).length;
+    const hasLowSignal = genericSignals >= 2 || raw.length < 80;
+    if (!hasLowSignal) {
+      return {
+        response: input.response,
+        quality: {
+          intent: 'general',
+          passed: true,
+        },
+      };
+    }
+
+    const highlights = input.toolResults
+      .map((result) => String(result.summary || '').trim())
+      .filter(Boolean)
+      .slice(0, 4);
+    const evidenceLinks = input.toolResults
+      .flatMap((result) => result.evidence || [])
+      .map((entry) => String(entry.url || entry.label || '').trim())
+      .filter(Boolean)
+      .slice(0, 3);
+    const clientName = String((input.runtimeContext || {}).clientName || '').trim();
+    const rewritten = [
+      clientName ? `I reviewed the latest workspace evidence for ${clientName}.` : 'I reviewed the latest workspace evidence.',
+      highlights.length
+        ? `What changed:\n${highlights.map((line, index) => `${index + 1}. ${line}`).join('\n')}`
+        : 'The latest run completed with fresh evidence updates.',
+      evidenceLinks.length
+        ? `Evidence references:\n${evidenceLinks.map((line, index) => `${index + 1}. ${line}`).join('\n')}`
+        : '',
+      'Tell me which direction you want next: deeper research, concise summary, or a client-ready deliverable.',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
     return {
-      response: input.response,
+      response: rewritten,
       quality: {
         intent: 'general',
-        passed: true,
+        passed: false,
+        notes: ['Rewritten low-signal response to improve clarity and usefulness.'],
       },
     };
   }
@@ -1096,17 +1135,23 @@ function findReferencedCrawlRunId(message: string): string | null {
   return candidate.startsWith('crawl-') ? candidate : `crawl-${candidate}`;
 }
 
-function extractLibraryMentions(message: string): Array<{ id: string; title: string }> {
-  const mentions: Array<{ id: string; title: string }> = [];
-  const matcher = /@library\[([^\]|]+)\|([^\]]+)\]/gi;
-  let current = matcher.exec(message);
-  while (current) {
-    const id = String(current[1] || '').trim();
-    const title = String(current[2] || '').trim();
-    if (id && title) {
-      mentions.push({ id, title });
+function extractLibraryMentions(message: string): Array<{ ref: string; title: string }> {
+  const mentions: Array<{ ref: string; title: string }> = [];
+  const raw = String(message || '');
+  const patterns = [
+    /@libraryRef\[([^\]|]+)\|([^\]]+)\]/gi,
+    /@library\[([^\]|]+)\|([^\]]+)\]/gi,
+  ];
+  for (const matcher of patterns) {
+    let current = matcher.exec(raw);
+    while (current) {
+      const ref = String(current[1] || '').trim();
+      const title = String(current[2] || '').trim();
+      if (ref && title) {
+        mentions.push({ ref, title });
+      }
+      current = matcher.exec(raw);
     }
-    current = matcher.exec(message);
   }
   return mentions;
 }
@@ -1114,7 +1159,7 @@ function extractLibraryMentions(message: string): Array<{ id: string; title: str
 function withLibraryMentionHints(message: string): string {
   const mentions = extractLibraryMentions(message);
   if (!mentions.length) return message;
-  const hints = mentions.map((entry) => `Use evidence from: ${entry.title}`).join('\n');
+  const hints = mentions.map((entry) => `Use pinned library evidence: ${entry.title}`).join('\n');
   return `${message}\n${hints}`;
 }
 
@@ -1135,6 +1180,65 @@ function parseSlashCommand(message: string): { command: string; argsJson: Record
     }
   }
   return { command, argsJson: null };
+}
+
+function extractDocumentEditDirective(message: string): {
+  quotedText?: string;
+  replacementText?: string;
+} {
+  const prompt = String(message || '').trim();
+  if (!prompt) return {};
+
+  const patterns: RegExp[] = [
+    /replace\s+[“"]([^”"]+)[”"]\s+with\s+[“"]([^”"]*)[”"]/i,
+    /replace\s+'([^']+)'\s+with\s+'([^']*)'/i,
+    /change\s+[“"]([^”"]+)[”"]\s+(?:to|into)\s+[“"]([^”"]*)[”"]/i,
+    /change\s+'([^']+)'\s+(?:to|into)\s+'([^']*)'/i,
+  ];
+  for (const pattern of patterns) {
+    const match = prompt.match(pattern);
+    if (!match) continue;
+    const quotedText = String(match[1] || '').trim();
+    const replacementText = String(match[2] || '').trim();
+    if (quotedText) {
+      return {
+        quotedText,
+        replacementText,
+      };
+    }
+  }
+
+  const quotedParts = Array.from(
+    prompt.matchAll(/[“"]([^”"]{2,320})[”"]|'([^']{2,320})'/g),
+    (match) => String(match[1] || match[2] || '').trim()
+  ).filter(Boolean);
+  if (
+    quotedParts.length >= 2 &&
+    /\b(replace|change|rewrite|update|swap)\b/i.test(prompt)
+  ) {
+    return {
+      quotedText: quotedParts[0],
+      replacementText: quotedParts[1],
+    };
+  }
+
+  if (quotedParts.length >= 1 && /\b(remove|delete)\b/i.test(prompt)) {
+    return {
+      quotedText: quotedParts[0],
+      replacementText: '',
+    };
+  }
+
+  if (
+    quotedParts.length >= 1 &&
+    /\b(edit|rewrite|update|change|replace|quote|quoted|around|section)\b/i.test(prompt)
+  ) {
+    return {
+      quotedText: quotedParts[0],
+    };
+  }
+
+  return {};
 }
 
 function normalizeToolAliasKey(value: string): string {
@@ -1221,11 +1325,21 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
     /\b(what do (you|we) (see|have)|what['’]s (on|in) (the )?(app|application|workspace)|show (me )?(what|everything) (we|you) (have|see)|workspace status|workspace snapshot|summari[sz]e (the )?(workspace|app|application))\b/.test(
       normalized
     );
+  const hasDocumentKeyword = /\b(pdf|report|brief|document|doc)\b/.test(normalized);
+  const hasDocumentGenerateVerb = /\b(generate|create|make|build|produce|draft|export)\b/.test(normalized);
+  const hasDocumentGenerationIntent = hasDocumentKeyword && hasDocumentGenerateVerb;
+  const defaultDocumentArgs: Record<string, unknown> = {
+    docType: 'STRATEGY_BRIEF',
+    depth: 'standard',
+    includeCompetitors: true,
+    includeEvidenceLinks: true,
+  };
   const hasDocumentSignals = /\b(document|doc|proposal|draft|uploaded file|attachment)\b/.test(normalized);
-  const hasDocumentEditIntent = /\b(edit|rewrite|refine|improve|change|update)\b/.test(normalized);
+  const hasDocumentEditIntent = /\b(edit|rewrite|refine|improve|change|update|replace)\b/.test(normalized);
   const hasDocumentReadIntent =
     /\b(summarize|summarise|read|review|outline|extract|what does it say)\b/.test(normalized) || hasEvidenceReferenceIntent;
   const hasDocumentExportIntent = /\b(export|download|pdf|docx|markdown|md)\b/.test(normalized);
+  const documentEditDirective = extractDocumentEditDirective(originalMessage);
 
   if (slashCommand) {
     if (slashCommand.command === 'show_sources') {
@@ -1236,11 +1350,9 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
       pushIfMissing('evidence.posts', { platform: 'any', sort: 'engagement', limit: 8 });
       pushIfMissing('evidence.news', { limit: 8 });
     } else if (slashCommand.command === 'generate_pdf') {
-      pushIfMissing('document.plan', {
-        docType: 'STRATEGY_BRIEF',
-        depth: 'standard',
-        includeCompetitors: true,
-        includeEvidenceLinks: true,
+      pushIfMissing('document.generate', {
+        ...defaultDocumentArgs,
+        ...(slashCommand.argsJson || {}),
       });
     } else if (slashCommand.command === 'audit') {
       pushIfMissing('intel.list', { section: 'web_sources', limit: 10 });
@@ -1365,22 +1477,42 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   if (/post|example|tiktok|instagram|social/.test(normalized)) {
     pushIfMissing('evidence.posts', { platform: 'any', sort: 'engagement', limit: 8 });
   }
-  if (/report|pdf|brief|document/.test(normalized)) {
-    pushIfMissing('document.plan', {
-      docType: 'STRATEGY_BRIEF',
-      depth: 'standard',
-      includeCompetitors: true,
-      includeEvidenceLinks: true,
-    });
+  if (hasDocumentKeyword) {
+    if (slashCommand?.command === 'generate_pdf' || hasDocumentGenerationIntent) {
+      pushIfMissing('document.generate', {
+        ...defaultDocumentArgs,
+      });
+    } else {
+      pushIfMissing('document.plan', {
+        ...defaultDocumentArgs,
+      });
+    }
   }
 
-  if (referencedDocumentIds.length > 0 && hasDocumentSignals) {
+  if (
+    referencedDocumentIds.length > 0 &&
+    (hasDocumentSignals || hasDocumentEditIntent || hasDocumentReadIntent || hasDocumentExportIntent)
+  ) {
     const primaryDocumentId = referencedDocumentIds[0];
     if (hasDocumentEditIntent) {
-      pushIfMissing('document.propose_edit', {
+      const editArgs: Record<string, unknown> = {
         documentId: primaryDocumentId,
         instruction: originalMessage,
-      });
+      };
+      if (documentEditDirective.quotedText) {
+        editArgs.quotedText = documentEditDirective.quotedText;
+      }
+      if (documentEditDirective.replacementText !== undefined) {
+        editArgs.replacementText = documentEditDirective.replacementText;
+      }
+      pushIfMissing('document.propose_edit', editArgs);
+      if (documentEditDirective.quotedText && documentEditDirective.replacementText === undefined) {
+        pushIfMissing('document.search', {
+          documentId: primaryDocumentId,
+          query: documentEditDirective.quotedText,
+          limit: 6,
+        });
+      }
     } else if (hasDocumentReadIntent) {
       pushIfMissing('document.read', {
         documentId: primaryDocumentId,
@@ -1397,7 +1529,7 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   }
 
   if (libraryMentions.length) {
-    pushIfMissing('intel.list', { section: 'web_snapshots', limit: 20 });
+    // Library references are resolved explicitly before planning; skip heuristic retrieval.
   }
 
   return calls;
@@ -1447,7 +1579,14 @@ function fallbackWriter(input: WriterInput): WriterOutput {
 
   const topHighlights = input.toolDigest.highlights
     .map((item) => String(item || '').trim())
+    .map((line) =>
+      line
+        .replace(/\bloaded\s+\d+\s+record\(s\)\s+from\s+([a-z0-9_]+)/gi, 'Reviewed workspace evidence from $1')
+        .replace(/\btool completed successfully\b/gi, 'Tool run completed')
+        .trim()
+    )
     .filter(Boolean)
+    .filter((line) => !/^auto-continuing based on tool suggestions\.?$/i.test(line))
     .slice(0, concise ? 4 : deepMode ? 10 : 8);
   const topFacts = input.toolDigest.facts
     .map((fact) => {
@@ -1669,6 +1808,9 @@ export async function generatePlannerPlan(input: PlannerInput): Promise<RuntimeP
     `Target response length: ${input.policy.targetLength}.`,
     `Strict validation: ${input.policy.strictValidation ? 'enabled' : 'disabled'}.`,
     `Source scope: ${JSON.stringify(input.policy.sourceScope)}.`,
+    'If runtime context includes libraryPinnedRefs, treat those refs as the only admissible evidence set for factual synthesis.',
+    'If runtime context indicates libraryLowTrustOnly=true, do not synthesize facts; request confirmation or fresher refs first.',
+    'If the user asks for library-grounded/cited output and no pinned refs exist, ask for explicit ref selection before synthesis.',
     `Disallowed tool names for this run: ${disallowedTools.length ? disallowedTools.join(', ') : 'none'}.`,
     'Never emit a tool listed as disallowed. If disallowed tools are needed, choose allowed fallback tools.',
     `Only use tool names from this allowlist: ${ALLOWED_PLANNER_TOOL_NAMES.join(', ')}`,
@@ -1966,12 +2108,17 @@ export async function writeClientResponse(input: WriterInput): Promise<WriterOut
     `Target length: ${input.policy.targetLength}.`,
     `Strict validation: ${input.policy.strictValidation ? 'enabled' : 'disabled'}.`,
     `Source scope: ${JSON.stringify(input.policy.sourceScope)}.`,
+    'If runtimeContext.libraryPinnedRefs exists, every key factual claim must map to those refs.',
+    'If runtimeContext.libraryLowTrustOnly=true, ask for confirmation or fresher refs and avoid direct factual assertions.',
+    'If the user asked for evidence/library grounding and no pinned refs are present, ask the user to select refs first.',
     'Mode behavior:',
     '- fast: short answer and single next action.',
     '- balanced: clear structure with moderate detail.',
     '- deep: richer reasoning artifacts and wider evidence integration.',
     '- pro: deep + strict caveats + explicit validation summary.',
     'Synthesize evidence into clear narrative and recommendations; do not just output sparse bullet points.',
+    'Never output internal IDs, run IDs, or raw system identifiers.',
+    'Avoid mechanical phrasing like "Loaded X records" unless the user explicitly asked for raw logs.',
     'Use the runtime workspace context to ground baseline facts before asking for missing information.',
     'Use the evidenceLedger as the primary 3D fact source before writing the 2D response.',
     'If runtime context contains websites/snapshots/competitors, do not claim that data is unavailable or inaccessible.',
@@ -2088,6 +2235,8 @@ export async function validateClientResponse(input: ValidatorInput): Promise<Val
     `Strict validation mode: ${input.policy.strictValidation ? 'enabled' : 'disabled'}.`,
     `Source scope for this run: ${JSON.stringify(input.policy.sourceScope)}.`,
     'When strict validation is enabled, fail if claims lack evidence references.',
+    'Fail if the response makes factual claims while runtime context indicates libraryLowTrustOnly=true.',
+    'Fail if user requested evidence/library grounding but response does not request explicit ref selection when refs are missing.',
     'Always check source-scope compliance for the proposed response and actions.',
     'JSON schema:',
     '{',

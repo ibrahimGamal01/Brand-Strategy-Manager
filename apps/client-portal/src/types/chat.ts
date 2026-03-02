@@ -84,6 +84,13 @@ export type ChatMessageBlock =
       proposedContentMd: string;
       changed: boolean;
       changeSummary?: string;
+      anchor?: {
+        quotedText: string;
+        replacementText?: string;
+        matched: boolean;
+        matchType?: "exact" | "whitespace";
+        matchCount?: number;
+      };
       preview?: {
         beforeChars: number;
         afterChars: number;
@@ -158,6 +165,7 @@ export interface ChatInputOptions {
   modeLabel: "fast" | "balanced" | "deep" | "pro";
   sourceScope: ChatInputSourceScope;
   targetLength: "short" | "medium" | "long";
+  libraryRefs?: string[];
   steerNote?: string;
   strictValidation?: boolean;
   pauseAfterPlanning?: boolean;
@@ -226,6 +234,10 @@ export interface ProcessFeedItem {
   message: string;
   details?: string[];
   actionLabel?: string;
+  actionTarget?: {
+    kind: "document";
+    documentId: string;
+  };
   runId?: string;
   toolName?: string;
   phase?: ProcessPhase;
@@ -242,9 +254,11 @@ export type LibraryCollection =
 
 export interface LibraryItem {
   id: string;
+  libraryRef?: string;
   collection: LibraryCollection;
   title: string;
   summary: string;
+  snippet?: string;
   freshness: string;
   tags: string[];
   evidenceLabel: string;
@@ -253,6 +267,12 @@ export interface LibraryItem {
   details?: string[];
   previewText?: string;
   downloadHref?: string;
+  trustStatus?: "high" | "medium" | "low";
+  trustScore?: number;
+  trustReasonCodes?: string[];
+  evidenceCount?: number;
+  evidenceLinks?: Array<{ label: string; href: string }>;
+  actions?: Array<{ key: string; label: string }>;
 }
 
 export interface SessionPreferences {

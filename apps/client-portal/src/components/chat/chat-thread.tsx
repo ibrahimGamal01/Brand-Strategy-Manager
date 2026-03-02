@@ -21,7 +21,9 @@ function formatMessageTime(iso: string): string {
 }
 
 function formatMessageContentForDisplay(content: string): string {
-  return content.replace(/@library\[([^\]|]+)\|([^\]]+)\]/g, (_match, _id, title: string) => `[Library source: ${title}]`);
+  return content
+    .replace(/@libraryRef\[([^\]|]+)\|([^\]]+)\]/g, (_match, _ref, title: string) => `[Library source: ${title}]`)
+    .replace(/@library\[([^\]|]+)\|([^\]]+)\]/g, (_match, _id, title: string) => `[Library source: ${title}]`);
 }
 
 function ReasoningPanel({ message }: { message: ChatMessage }) {
@@ -245,7 +247,7 @@ function MessageBlocks({
                 ) : null}
                 {block.versionId ? (
                   <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
-                    Version {block.versionId.slice(0, 8)}
+                    Version ready
                   </span>
                 ) : null}
                 {typeof block.chunkCount === "number" ? (
@@ -290,7 +292,7 @@ function MessageBlocks({
             <div key={`${message.id}-doc-applied-${index}`} className="rounded-2xl border border-zinc-200 bg-zinc-50/80 p-3">
               <p className="text-xs font-semibold uppercase tracking-[0.08em] text-zinc-500">Document edit applied</p>
               <p className="mt-1 text-sm text-zinc-800">
-                Version {block.versionNumber} created for document {block.documentId.slice(0, 8)}.
+                Version {block.versionNumber} created and saved.
               </p>
               {block.changeSummary ? <p className="mt-1 text-xs text-zinc-600">{block.changeSummary}</p> : null}
               {block.actions?.length ? (
@@ -312,13 +314,30 @@ function MessageBlocks({
         }
 
         if (isDocumentEditProposalBlock(block)) {
+          const anchor = block.anchor;
+          const anchorLabel = anchor?.matched
+            ? `Anchor matched${typeof anchor.matchCount === "number" && anchor.matchCount > 1 ? ` (${anchor.matchCount})` : ""}`
+            : "Anchor not found";
           return (
             <div key={`${message.id}-doc-proposal-${index}`} className="rounded-2xl border border-sky-200 bg-sky-50/70 p-3">
               <p className="text-xs font-semibold uppercase tracking-[0.08em] text-sky-700">Document edit proposal</p>
               <p className="mt-1 text-sm text-zinc-800">
-                Prepared changes for document {block.documentId.slice(0, 8)} on version {block.baseVersionNumber}.
+                Prepared changes for the selected document on version {block.baseVersionNumber}.
               </p>
               <p className="mt-1 text-xs text-zinc-600">{block.changeSummary || block.instruction}</p>
+              {anchor?.quotedText ? (
+                <div className="mt-2 rounded-xl border border-zinc-200 bg-white p-2">
+                  <p className={`text-xs font-medium ${anchor.matched ? "text-emerald-700" : "text-amber-700"}`}>{anchorLabel}</p>
+                  <p className="mt-1 text-xs text-zinc-600">
+                    Quote: <span className="font-medium text-zinc-800">&quot;{anchor.quotedText}&quot;</span>
+                  </p>
+                  {typeof anchor.replacementText === "string" ? (
+                    <p className="mt-1 text-xs text-zinc-600">
+                      Replace with: <span className="font-medium text-zinc-800">&quot;{anchor.replacementText}&quot;</span>
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
               {block.preview ? (
                 <div className="mt-2 flex flex-wrap gap-2 text-xs text-zinc-600">
                   <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
@@ -355,7 +374,7 @@ function MessageBlocks({
             <div key={`${message.id}-doc-export-${index}`} className="rounded-2xl border border-zinc-200 bg-zinc-50/80 p-3">
               <p className="text-xs font-semibold uppercase tracking-[0.08em] text-zinc-500">Document export</p>
               <p className="mt-1 text-sm text-zinc-800">
-                {block.format} export ready for document {block.documentId.slice(0, 8)}.
+                {block.format} export is ready.
               </p>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-600">

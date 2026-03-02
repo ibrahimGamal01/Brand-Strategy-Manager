@@ -44,7 +44,12 @@ import {
   PortalIntakeScanMode,
   queuePortalIntakeWebsiteScan,
 } from '../services/portal/portal-intake-websites';
-import { listPortalWorkspaceLibrary } from '../services/portal/portal-library';
+import {
+  getPortalLibraryFeatureFlags,
+  getPortalWorkspaceLibraryDiagnostics,
+  listPortalWorkspaceLibrary,
+  resolvePortalWorkspaceLibraryRefs,
+} from '../services/portal/portal-library';
 import {
   getPortalIntakeScanRun,
   listPortalIntakeScanRunsWithEventCounts,
@@ -155,6 +160,14 @@ function parseLibraryCollection(value: unknown):
   ) {
     return raw;
   }
+  return undefined;
+}
+
+function parseLibraryVersion(value: unknown): 'v1' | 'v2' | undefined {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return undefined;
+  if (raw === '1' || raw === 'v1') return 'v1';
+  if (raw === '2' || raw === 'v2') return 'v2';
   return undefined;
 }
 
@@ -576,12 +589,14 @@ router.get('/workspaces/:workspaceId/library', requirePortalAuth, requireWorkspa
     const queryRaw = Array.isArray(req.query.q) ? req.query.q[0] : req.query.q;
     const collectionRaw = Array.isArray(req.query.collection) ? req.query.collection[0] : req.query.collection;
     const limitRaw = Array.isArray(req.query.limit) ? req.query.limit[0] : req.query.limit;
+    const versionRaw = Array.isArray(req.query.v) ? req.query.v[0] : req.query.v;
     const limitParsed = Number.parseInt(String(limitRaw || ''), 10);
 
     const result = await listPortalWorkspaceLibrary(workspaceId, {
       query: safeString(queryRaw),
       collection: parseLibraryCollection(collectionRaw),
       limit: Number.isFinite(limitParsed) ? limitParsed : undefined,
+      version: parseLibraryVersion(versionRaw),
     });
 
     return res.json(result);
@@ -589,6 +604,54 @@ router.get('/workspaces/:workspaceId/library', requirePortalAuth, requireWorkspa
     const message = String(error?.message || '');
     const status = message.toLowerCase().includes('not found') ? 404 : 500;
     return res.status(status).json({ error: 'LIBRARY_FETCH_FAILED', details: message || 'Failed to list workspace library' });
+  }
+});
+
+router.post('/workspaces/:workspaceId/library/resolve-refs', requirePortalAuth, requireWorkspaceMembership, async (req, res) => {
+  try {
+    const workspaceId = safeString(req.params.workspaceId);
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'workspaceId is required' });
+    }
+    const refs = Array.isArray(req.body?.libraryRefs)
+      ? req.body.libraryRefs.map((entry: unknown) => String(entry || '').trim()).filter(Boolean).slice(0, 80)
+      : [];
+    const result = await resolvePortalWorkspaceLibraryRefs(workspaceId, refs);
+    return res.json({
+      ok: true,
+      ...result,
+    });
+  } catch (error: any) {
+    const message = String(error?.message || '');
+    const status = message.toLowerCase().includes('not found') ? 404 : 500;
+    return res.status(status).json({
+      ok: false,
+      error: 'LIBRARY_REF_RESOLVE_FAILED',
+      details: message || 'Failed to resolve library refs',
+    });
+  }
+});
+
+router.get('/workspaces/:workspaceId/library/diagnostics', requirePortalAuth, requireWorkspaceMembership, async (req, res) => {
+  try {
+    const workspaceId = safeString(req.params.workspaceId);
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'workspaceId is required' });
+    }
+    const diagnostics = await getPortalWorkspaceLibraryDiagnostics(workspaceId);
+    return res.json({
+      ok: true,
+      diagnostics,
+      flags: getPortalLibraryFeatureFlags(),
+    });
+  } catch (error: any) {
+    const message = String(error?.message || '');
+    const status = message.toLowerCase().includes('not found') ? 404 : 500;
+    return res.status(status).json({
+      ok: false,
+      error: 'LIBRARY_DIAGNOSTICS_FAILED',
+      details: message || 'Failed to load library diagnostics',
+    });
   }
 });
 

@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Library, Menu, MessageSquarePlus, PanelRight, RefreshCcw, Search, X } from "lucide-react";
+import { FileText, Library, Menu, PanelRight, MessageSquarePlus, RefreshCcw, Search, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRuntimeWorkspace } from "@/hooks/use-runtime-workspace";
-import { LibraryCollection, SessionPreferences } from "@/types/chat";
+import { LibraryCollection, ProcessFeedItem, SessionPreferences } from "@/types/chat";
 import {
   applyRuntimeDocumentEdit,
   exportRuntimeDocument,
@@ -13,11 +13,13 @@ import {
   proposeRuntimeDocumentEdit,
   RuntimeEvidenceRefDto,
   RuntimeLedgerDto,
+  RuntimeWorkspaceDocumentDto,
   uploadRuntimeDocuments,
 } from "@/lib/runtime-api";
 import { ChatComposer } from "./chat-composer";
 import { ChatThread } from "./chat-thread";
 import { CommandPalette } from "./command-palette";
+import { DocumentWorkspacePanel } from "./document-workspace-panel";
 import { LiveActivityPanel } from "./live-activity-panel";
 import { LibraryDrawer } from "@/components/library/library-drawer";
 import type { UploadedDocumentChip } from "@/types/chat";
@@ -87,6 +89,9 @@ function mapParserStatusToUploadChipStatus(
 }
 
 export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
+  const [rightRailTab, setRightRailTab] = useState<"activity" | "docs">("activity");
+  const [rightRailCollapsed, setRightRailCollapsed] = useState(false);
+  const [selectedRuntimeDocumentId, setSelectedRuntimeDocumentId] = useState<string | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [activeLibraryCollection, setActiveLibraryCollection] = useState<LibraryCollection | "all">("all");
   const [actionError, setActionError] = useState<string | null>(null);
@@ -124,6 +129,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     queuedMessages,
     isStreaming,
     libraryItems,
+    runtimeDocuments,
     preferences,
     setActiveThreadId,
     createThread,
@@ -137,6 +143,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     resolveDecision,
     steerRun,
     setPreference,
+    refreshRuntimeDocuments,
     refreshNow,
   } = useRuntimeWorkspace(workspaceId);
 
@@ -183,6 +190,29 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
       document.body.style.overflow = originalOverflow;
     };
   }, [sidebarOpen, activityOpen]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const storageKey = `bat.runtime.rightRailCollapsed.${workspaceId}`;
+    setRightRailCollapsed(window.localStorage.getItem(storageKey) === "1");
+  }, [workspaceId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const storageKey = `bat.runtime.rightRailCollapsed.${workspaceId}`;
+    window.localStorage.setItem(storageKey, rightRailCollapsed ? "1" : "0");
+  }, [rightRailCollapsed, workspaceId]);
+
+  useEffect(() => {
+    if (!runtimeDocuments.length) {
+      setSelectedRuntimeDocumentId(null);
+      return;
+    }
+    if (selectedRuntimeDocumentId && runtimeDocuments.some((document) => document.id === selectedRuntimeDocumentId)) {
+      return;
+    }
+    setSelectedRuntimeDocumentId(runtimeDocuments[0].id);
+  }, [runtimeDocuments, selectedRuntimeDocumentId]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -279,58 +309,142 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   };
 
   const onUseLibraryItem = (item: { id: string; title: string }) => {
-    injectComposerText(`@library[${item.id}|${item.title}]`, "append");
+    injectComposerText(`@libraryRef[${item.id}|${item.title}]`, "append");
     setLibraryOpen(false);
   };
 
+  const openDocsRail = (documentId?: string) => {
+    setRightRailTab("docs");
+    if (documentId) {
+      setSelectedRuntimeDocumentId(documentId);
+    }
+    if (typeof window !== "undefined" && window.innerWidth < 1280) {
+      setActivityOpen(true);
+      return;
+    }
+    setRightRailCollapsed(false);
+  };
+
+  const onQuoteDocumentInChat = (input: { document: RuntimeWorkspaceDocumentDto; quotedText: string }) => {
+    const quoteLines = input.quotedText
+      .split(/\r?\n/g)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => `> ${line}`)
+      .join("\n");
+    if (!quoteLines) return;
+    const sourceTitle = input.document.title || input.document.originalFileName || "Document";
+    const versionLabel =
+      typeof input.document.latestVersion?.versionNumber === "number" && input.document.latestVersion.versionNumber > 0
+        ? `v${input.document.latestVersion.versionNumber}`
+        : "latest";
+    injectComposerText(
+      `${quoteLines}\n\nSource: ${sourceTitle} (${versionLabel}, documentId: ${input.document.id})`,
+      "append"
+    );
+  };
+
+  const onFeedItemAction = (item: ProcessFeedItem) => {
+    if (item.actionTarget?.kind === "document") {
+      openDocsRail(item.actionTarget.documentId);
+      return;
+    }
+  };
+
+  const resolvePayloadDocumentId = (payload?: Record<string, unknown>): string =>
+    String(payload?.documentId || payload?.docId || "").trim();
+
+  const resolveDocumentHrefFromPayload = (payload?: Record<string, unknown>): string | null => {
+    if (!payload) return null;
+    const fields: Array<keyof Record<string, unknown>> = ["downloadHref", "storageHref", "href", "storagePath"];
+    for (const field of fields) {
+      const value = String(payload[field] || "").trim();
+      if (!value) continue;
+      if (value.startsWith("/storage/")) return value;
+      if (value.startsWith("storage/")) return `/${value}`;
+      if (value.startsWith("./storage/")) return `/${value.slice(2)}`;
+      return value;
+    }
+    return null;
+  };
+
   const onRunMessageAction = (
-    actionLabel: string,
+    _actionLabel: string,
     actionKey: string,
     payload?: Record<string, unknown>
   ) => {
     const action = actionKey.trim().toLowerCase();
-    if (action === 'open_library') {
-      const requestedCollection = String(payload?.collection || '').trim().toLowerCase();
+    if (action === "open_library") {
+      const requestedCollection = String(payload?.collection || "").trim().toLowerCase();
       if (
-        requestedCollection === 'web' ||
-        requestedCollection === 'competitors' ||
-        requestedCollection === 'social' ||
-        requestedCollection === 'community' ||
-        requestedCollection === 'news' ||
-        requestedCollection === 'deliverables'
+        requestedCollection === "web" ||
+        requestedCollection === "competitors" ||
+        requestedCollection === "social" ||
+        requestedCollection === "community" ||
+        requestedCollection === "news" ||
+        requestedCollection === "deliverables"
       ) {
         setActiveLibraryCollection(requestedCollection as LibraryCollection);
       } else {
-        setActiveLibraryCollection('all');
+        setActiveLibraryCollection("all");
       }
       setLibraryOpen(true);
+      setActionError(null);
       return;
     }
 
     if (action === "fork_branch") {
       onForkBranch();
+      setActionError(null);
       return;
     }
 
-    if (action.startsWith("document.")) {
+    if (action === "document.open" || action === "document.download") {
+      const href = resolveDocumentHrefFromPayload(payload);
+      const payloadDocId = resolvePayloadDocumentId(payload);
+      if (payloadDocId) {
+        setSelectedRuntimeDocumentId(payloadDocId);
+      }
+      if (href) {
+        if (typeof window !== "undefined") {
+          window.open(href, "_blank", "noopener,noreferrer");
+        }
+      } else {
+        setActiveLibraryCollection("deliverables");
+        setLibraryOpen(true);
+      }
+      setActionError(null);
+      return;
+    }
+
+    if (action === "document.generate") {
+      setActionError(null);
+      const payloadText = payload ? ` ${JSON.stringify(payload)}` : "";
+      injectComposerText(`/document.generate${payloadText}`, "append");
+      return;
+    }
+
+    if (action === "document.read" || action === "document.propose_edit" || action === "document.apply_edit" || action === "document.export") {
       if (!activeBranchId) {
-        setActionError("Open a branch first to run document actions.");
+        setActionError("Open a branch first to run this document action.");
         return;
       }
-      const documentId = String(payload?.documentId || "").trim();
+      const documentId = resolvePayloadDocumentId(payload);
       if (!documentId) {
         setActionError("Document action is missing documentId.");
         return;
       }
+      setSelectedRuntimeDocumentId(documentId);
       if (action === "document.propose_edit") {
         const instruction = String(payload?.instruction || "").trim();
         if (!instruction) {
-          injectComposerText(`Propose an edit for document ${documentId}: `, "replace");
+          injectComposerText("Propose an edit for the selected document: ", "replace");
+          setActionError(null);
           return;
         }
         runAsync(
           proposeRuntimeDocumentEdit(workspaceId, activeBranchId, documentId, { instruction }).then(() =>
-            refreshNow()
+            Promise.all([refreshNow(), refreshRuntimeDocuments()])
           )
         );
         return;
@@ -350,7 +464,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
             ...(typeof payload?.baseVersionId === "string" && payload.baseVersionId.trim()
               ? { baseVersionId: payload.baseVersionId.trim() }
               : {}),
-          }).then(() => refreshNow())
+          }).then(() => Promise.all([refreshNow(), refreshRuntimeDocuments()]))
         );
         return;
       }
@@ -363,12 +477,13 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
             ...(typeof payload?.versionId === "string" && payload.versionId.trim()
               ? { versionId: payload.versionId.trim() }
               : {}),
-          }).then(() => refreshNow())
+          }).then(() => Promise.all([refreshNow(), refreshRuntimeDocuments()]))
         );
         return;
       }
       if (action === "document.read") {
-        injectComposerText(`Summarize document ${documentId} with section-level citations.`, "replace");
+        openDocsRail(documentId);
+        setActionError(null);
         return;
       }
     }
@@ -381,6 +496,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
           : action.replace(/[^a-z0-9_./-]+/g, "_");
     const payloadText = payload ? ` ${JSON.stringify(payload)}` : "";
     injectComposerText(`/${normalizedCommand}${payloadText}`, "append");
+    setActionError(null);
   };
 
   const onOpenEvidence = (messageId: string) => {
@@ -836,11 +952,11 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                 <div>
                   <p className="text-xs uppercase tracking-[0.08em] text-zinc-500">Evidence Drawer</p>
                   <p className="text-sm font-semibold text-zinc-900">
-                    {evidenceMessageId ? `Assistant message ${evidenceMessageId.slice(0, 8)}` : "Assistant evidence"}
+                    {evidenceMessageId ? "Selected assistant evidence" : "Assistant evidence"}
                   </p>
                   {evidenceLedger ? (
                     <p className="mt-1 text-xs text-zinc-500">
-                      Ledger {evidenceLedger.id.slice(0, 8)} • {new Date(evidenceLedger.createdAt).toLocaleString()}
+                      Evidence snapshot • {new Date(evidenceLedger.createdAt).toLocaleString()}
                     </p>
                   ) : null}
                 </div>
@@ -895,8 +1011,6 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                   <p className="mt-2 text-sm font-semibold text-zinc-900">{row.label || "Evidence item"}</p>
                   {row.snippet ? <p className="mt-1 text-xs text-zinc-600">{row.snippet}</p> : null}
                   <div className="mt-2 flex flex-wrap gap-2 text-xs text-zinc-500">
-                    {row.runId ? <span>run {row.runId.slice(0, 12)}</span> : null}
-                    {row.refId ? <span>ref {row.refId.slice(0, 12)}</span> : null}
                     <span>{new Date(row.createdAt).toLocaleString()}</span>
                   </div>
                   {row.url ? (

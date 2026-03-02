@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma';
 import { fileManager } from '../storage/file-manager';
 
@@ -9,11 +10,15 @@ export type PortalLibraryCollection =
   | 'news'
   | 'deliverables';
 
+export type PortalLibraryTrustStatus = 'high' | 'medium' | 'low';
+
 export type PortalLibraryItem = {
   id: string;
+  libraryRef?: string;
   collection: PortalLibraryCollection;
   title: string;
   summary: string;
+  snippet?: string;
   freshness: string;
   tags: string[];
   evidenceLabel: string;
@@ -22,12 +27,19 @@ export type PortalLibraryItem = {
   details?: string[];
   previewText?: string;
   downloadHref?: string;
+  trustStatus?: PortalLibraryTrustStatus;
+  trustScore?: number;
+  trustReasonCodes?: string[];
+  evidenceCount?: number;
+  evidenceLinks?: Array<{ label: string; href: string }>;
+  actions?: Array<{ key: string; label: string }>;
 };
 
 type ListPortalLibraryOptions = {
   collection?: PortalLibraryCollection;
   query?: string;
   limit?: number;
+  version?: 'v1' | 'v2';
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -184,6 +196,211 @@ function dedupeItems(items: PortalLibraryItem[]): PortalLibraryItem[] {
     }
   }
   return Array.from(map.values());
+}
+
+function isTruthyEnv(value: string | undefined, fallback: boolean): boolean {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (['1', 'true', 'yes', 'on', 'y'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off', 'n'].includes(normalized)) return false;
+  return fallback;
+}
+
+const LIBRARY_REF_SECRET =
+  String(process.env.PORTAL_LIBRARY_REF_SECRET || process.env.RUNTIME_WS_SIGNING_SECRET || 'bat-library-ref-secret')
+    .trim() || 'bat-library-ref-secret';
+const PORTAL_LIBRARY_TRUST_GUARD_ENABLED = isTruthyEnv(
+  process.env.PORTAL_LIBRARY_TRUST_GUARD_ENABLED,
+  true
+);
+const PORTAL_LIBRARY_HIDE_IDS_ENABLED = isTruthyEnv(
+  process.env.PORTAL_LIBRARY_HIDE_IDS_ENABLED,
+  true
+);
+const PORTAL_LIBRARY_HARD_CLEANUP_ENABLED = isTruthyEnv(
+  process.env.PORTAL_LIBRARY_HARD_CLEANUP_ENABLED,
+  false
+);
+
+function toBase64Url(value: string): string {
+  return Buffer.from(value, 'utf8').toString('base64url');
+}
+
+function createLibraryRef(workspaceId: string, rawItemId: string): string {
+  const payload = toBase64Url(JSON.stringify({ workspaceId, rawItemId, v: 2 }));
+  const signature = crypto
+    .createHmac('sha256', LIBRARY_REF_SECRET)
+    .update(payload)
+    .digest('base64url')
+    .slice(0, 18);
+  return `lr2.${payload}.${signature}`;
+}
+
+function sanitizeClientFacingText(value: string): string {
+  return value
+    .replace(/\b(run|snapshot|document|post|id|external id|crawl)\s*[:#-]?\s*[a-z0-9-]{6,}\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function sanitizeDetails(details?: string[]): string[] | undefined {
+  if (!Array.isArray(details) || details.length === 0) return undefined;
+  const cleaned = details
+    .map((detail) => sanitizeClientFacingText(String(detail || '').trim()))
+    .filter(Boolean)
+    .slice(0, 5);
+  return cleaned.length ? cleaned : undefined;
+}
+
+function clip(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function computeTrust(item: PortalLibraryItem): {
+  trustStatus: PortalLibraryTrustStatus;
+  trustScore: number;
+  trustReasonCodes: string[];
+  evidenceLinks: Array<{ label: string; href: string }>;
+} {
+  if (!PORTAL_LIBRARY_TRUST_GUARD_ENABLED) {
+    const linkMap = new Map<string, { label: string; href: string }>();
+    const pushLink = (label: string, href?: string) => {
+      const safe = toHttpHref(href) || (String(href || '').startsWith('/storage/') ? String(href) : undefined);
+      if (!safe) return;
+      if (!linkMap.has(safe)) {
+        linkMap.set(safe, { label, href: safe });
+      }
+    };
+    pushLink('Primary evidence', item.evidenceHref);
+    for (const link of item.links || []) {
+      pushLink(link.label, link.href);
+    }
+    return {
+      trustStatus: 'medium',
+      trustScore: 0.5,
+      trustReasonCodes: ['TRUST_GUARD_DISABLED'],
+      evidenceLinks: Array.from(linkMap.values()).slice(0, 8),
+    };
+  }
+
+  let score = 0.34;
+  const reasons: string[] = [];
+  const linkMap = new Map<string, { label: string; href: string }>();
+
+  const pushLink = (label: string, href?: string) => {
+    const safe = toHttpHref(href) || (String(href || '').startsWith('/storage/') ? String(href) : undefined);
+    if (!safe) return;
+    if (!linkMap.has(safe)) {
+      linkMap.set(safe, { label, href: safe });
+    }
+  };
+
+  pushLink('Primary evidence', item.evidenceHref);
+  for (const link of item.links || []) {
+    pushLink(link.label, link.href);
+  }
+  const evidenceLinks = Array.from(linkMap.values()).slice(0, 8);
+  if (evidenceLinks.length >= 1) {
+    score += 0.12;
+    reasons.push('HAS_EVIDENCE_LINK');
+  }
+  if (evidenceLinks.length >= 3) {
+    score += 0.07;
+    reasons.push('MULTI_SOURCE');
+  }
+
+  const freshnessMs = Date.now() - Date.parse(item.freshness || new Date(0).toISOString());
+  if (Number.isFinite(freshnessMs)) {
+    const days = freshnessMs / (24 * 60 * 60 * 1000);
+    if (days <= 7) {
+      score += 0.1;
+      reasons.push('RECENT');
+    } else if (days <= 30) {
+      score += 0.05;
+      reasons.push('CURRENT');
+    } else if (days > 180) {
+      score -= 0.06;
+      reasons.push('STALE');
+    }
+  }
+
+  if ((item.previewText || item.snippet || '').trim().length > 80) {
+    score += 0.07;
+    reasons.push('HAS_SNIPPET');
+  }
+
+  if (item.collection === 'web') {
+    score += 0.05;
+    reasons.push('WEB_SOURCE');
+  }
+  if (item.collection === 'deliverables') {
+    score += 0.05;
+    reasons.push('DELIVERABLE');
+  }
+  if (item.collection === 'social' || item.collection === 'news') {
+    score += 0.04;
+    reasons.push('EXTERNAL_SIGNAL');
+  }
+
+  const confidenceMatch = String(item.evidenceLabel || '').match(/confidence\s+([0-9]+(?:\.[0-9]+)?)/i);
+  if (confidenceMatch?.[1]) {
+    const confidence = clip(Number(confidenceMatch[1]), 0, 1);
+    score += confidence * 0.18;
+    reasons.push('EXTRACTION_CONFIDENCE');
+  }
+
+  if (/BLOCKED|FAILED|ERROR/i.test(String(item.evidenceLabel || ''))) {
+    score -= 0.2;
+    reasons.push('ERROR_SIGNAL');
+  }
+
+  const trustScore = clip(Number(score.toFixed(2)), 0, 1);
+  const trustStatus: PortalLibraryTrustStatus =
+    trustScore >= 0.78 ? 'high' : trustScore >= 0.5 ? 'medium' : 'low';
+  if (trustStatus === 'low') reasons.push('LOW_CONFIDENCE');
+  if (trustStatus === 'high') reasons.push('TRUSTED');
+
+  return {
+    trustStatus,
+    trustScore,
+    trustReasonCodes: Array.from(new Set(reasons)).slice(0, 8),
+    evidenceLinks,
+  };
+}
+
+function toLibraryItemV2(workspaceId: string, item: PortalLibraryItem): PortalLibraryItem {
+  const { trustStatus, trustScore, trustReasonCodes, evidenceLinks } = computeTrust(item);
+  const libraryRef = createLibraryRef(workspaceId, item.id);
+  const snippet = compactInline(item.previewText || item.summary, 280);
+  const details = sanitizeDetails(item.details);
+  const cleanedTitle = sanitizeClientFacingText(item.title || 'Library item') || 'Library item';
+  const cleanedSummary = sanitizeClientFacingText(item.summary || item.previewText || 'Evidence item');
+
+  return {
+    ...item,
+    id: PORTAL_LIBRARY_HIDE_IDS_ENABLED ? libraryRef : item.id,
+    libraryRef,
+    title: cleanedTitle,
+    summary: cleanedSummary,
+    ...(snippet ? { snippet } : {}),
+    ...(PORTAL_LIBRARY_HIDE_IDS_ENABLED
+      ? details
+        ? { details }
+        : {}
+      : item.details
+        ? { details: item.details.slice(0, 5) }
+        : {}),
+    trustStatus,
+    trustScore,
+    trustReasonCodes,
+    evidenceCount: evidenceLinks.length,
+    evidenceLinks,
+    actions: [
+      { key: 'use_in_answer', label: 'Use in answer' },
+      ...(item.evidenceHref ? [{ key: 'open_source', label: 'Open source' }] : []),
+      ...(item.downloadHref ? [{ key: 'open_download', label: 'Open downloaded content' }] : []),
+    ],
+  };
 }
 
 export async function listPortalWorkspaceLibrary(
@@ -399,7 +616,6 @@ export async function listPortalWorkspaceLibrary(
       ...(previewText ? { previewText } : {}),
       ...(textHref || htmlHref ? { downloadHref: textHref || htmlHref } : {}),
       details: [
-        `Snapshot: ${snapshot.id.slice(0, 8)}`,
         `Status: ${Number.isFinite(statusCode) ? statusCode : 'unknown'}`,
         `Captured chars: ${cleanText.length || 0}`,
         `Fetcher: ${fetcher}`,
@@ -472,7 +688,7 @@ export async function listPortalWorkspaceLibrary(
     return {
       id: `web-crawl:${row.runId}`,
       collection: 'web',
-      title: `Crawl run ${row.runId.slice(0, 8)}`,
+      title: 'Website crawl batch',
       summary: `Captured ${row.pages} page snapshot(s) across ${row.domains.size || 1} domain(s).`,
       freshness: row.latestAt,
       tags: ['crawl', ...Array.from(row.discoveredBy)],
@@ -521,7 +737,6 @@ export async function listPortalWorkspaceLibrary(
         `Recipe: ${run.recipe.name}`,
         `Fields extracted: ${extractedFieldCount}`,
         `Warnings: ${warningsCount}`,
-        `Snapshot: ${run.snapshotId.slice(0, 8)}`,
       ],
     };
   });
@@ -589,8 +804,6 @@ export async function listPortalWorkspaceLibrary(
       ...(links.length ? { links } : {}),
       ...(downloadedAssets[0]?.blobStoragePath ? { downloadHref: toStorageHref(downloadedAssets[0].blobStoragePath) } : {}),
       details: [
-        `Post id: ${post.id.slice(0, 8)}`,
-        `External id: ${post.externalId}`,
         metrics.length ? `Metrics: ${metrics.join(' • ')}` : 'Metrics: not available',
         `Downloaded assets: ${downloadedAssets.length}/${post.mediaAssets.length}`,
         readableSizes.length ? `Downloaded size(s): ${readableSizes.slice(0, 3).join(', ')}` : 'Downloaded size(s): n/a',
@@ -662,7 +875,6 @@ export async function listPortalWorkspaceLibrary(
         ...(links.length ? { links } : {}),
         ...(previewText ? { previewText } : {}),
         details: [
-          `Document id: ${doc.id.slice(0, 8)}`,
           `Original file: ${doc.originalFileName}`,
           `Versions: ${doc._count?.versions ?? 0}`,
           `Exports: ${doc.exports.length}`,
@@ -766,7 +978,160 @@ export async function listPortalWorkspaceLibrary(
   if (collectionFilter) {
     items = items.filter((item) => item.collection === collectionFilter);
   }
+  const version =
+    options?.version ||
+    (isTruthyEnv(process.env.PORTAL_LIBRARY_V2_ENABLED, true) ? 'v2' : 'v1');
   items = withQuery(items, options?.query).sort(byFreshnessDesc);
 
+  if (version === 'v2') {
+    items = items.map((item) => toLibraryItemV2(workspaceId, item));
+  }
+
   return { items, counts };
+}
+
+export async function resolvePortalWorkspaceLibraryRefs(
+  workspaceId: string,
+  refsRaw: string[]
+): Promise<{
+  items: PortalLibraryItem[];
+  unresolvedRefs: string[];
+}> {
+  const refs = Array.from(
+    new Set(
+      (Array.isArray(refsRaw) ? refsRaw : [])
+        .map((entry) => String(entry || '').trim())
+        .filter(Boolean)
+        .slice(0, 80)
+    )
+  );
+  if (!refs.length) {
+    return { items: [], unresolvedRefs: [] };
+  }
+
+  const { items } = await listPortalWorkspaceLibrary(workspaceId, {
+    version: 'v2',
+    limit: 320,
+  });
+  const byRef = new Map(items.map((item) => [item.libraryRef || item.id, item]));
+  const resolved: PortalLibraryItem[] = [];
+  const unresolvedRefs: string[] = [];
+  for (const ref of refs) {
+    const item = byRef.get(ref);
+    if (!item) {
+      unresolvedRefs.push(ref);
+      continue;
+    }
+    resolved.push(item);
+  }
+  return {
+    items: resolved,
+    unresolvedRefs,
+  };
+}
+
+export async function getPortalWorkspaceLibraryDiagnostics(workspaceId: string): Promise<{
+  workspaceId: string;
+  snapshotAt: string;
+  citationRate: number;
+  lowTrustUsageRate: number;
+  unresolvedLibraryRefRate: number;
+  totals: {
+    assistantMessages: number;
+    assistantMessagesWithEvidence: number;
+    libraryRefEvents: number;
+    lowTrustBlocked: number;
+    unresolvedRefs: number;
+  };
+}> {
+  const [assistantMessages, libraryEvents] = await Promise.all([
+    prisma.chatBranchMessage.findMany({
+      where: {
+        branch: {
+          thread: {
+            researchJobId: workspaceId,
+          },
+        },
+        role: 'ASSISTANT',
+        clientVisible: true,
+      },
+      select: {
+        id: true,
+        reasoningJson: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 260,
+    }),
+    prisma.processEvent.findMany({
+      where: {
+        branch: {
+          thread: {
+            researchJobId: workspaceId,
+          },
+        },
+        type: 'PROCESS_LOG',
+      },
+      select: {
+        payloadJson: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 320,
+    }),
+  ]);
+
+  const assistantMessagesWithEvidence = assistantMessages.filter((row) => {
+    const reasoning = isRecord(row.reasoningJson) ? row.reasoningJson : null;
+    return Boolean(reasoning && Array.isArray(reasoning.evidence) && reasoning.evidence.length > 0);
+  }).length;
+
+  const libraryRefEvents = libraryEvents.filter((row) => {
+    const payload = isRecord(row.payloadJson) ? row.payloadJson : null;
+    return String(payload?.event || '').trim().startsWith('LIBRARY_');
+  }).length;
+  const lowTrustBlocked = libraryEvents.filter((row) => {
+    const payload = isRecord(row.payloadJson) ? row.payloadJson : null;
+    return String(payload?.event || '').trim() === 'LIBRARY_LOW_TRUST_BLOCKED';
+  }).length;
+  const unresolvedRefs = libraryEvents.filter((row) => {
+    const payload = isRecord(row.payloadJson) ? row.payloadJson : null;
+    return String(payload?.event || '').trim() === 'LIBRARY_HEURISTIC_BLOCKED';
+  }).length;
+
+  const citationRate =
+    assistantMessages.length > 0
+      ? Number((assistantMessagesWithEvidence / assistantMessages.length).toFixed(3))
+      : 0;
+  const lowTrustUsageRate =
+    libraryRefEvents > 0 ? Number((lowTrustBlocked / libraryRefEvents).toFixed(3)) : 0;
+  const unresolvedLibraryRefRate =
+    libraryRefEvents > 0 ? Number((unresolvedRefs / libraryRefEvents).toFixed(3)) : 0;
+
+  return {
+    workspaceId,
+    snapshotAt: new Date().toISOString(),
+    citationRate,
+    lowTrustUsageRate,
+    unresolvedLibraryRefRate,
+    totals: {
+      assistantMessages: assistantMessages.length,
+      assistantMessagesWithEvidence,
+      libraryRefEvents,
+      lowTrustBlocked,
+      unresolvedRefs,
+    },
+  };
+}
+
+export function getPortalLibraryFeatureFlags(): {
+  v2Enabled: boolean;
+  trustGuardEnabled: boolean;
+  hideIdsEnabled: boolean;
+  hardCleanupEnabled: boolean;
+} {
+  return {
+    v2Enabled: isTruthyEnv(process.env.PORTAL_LIBRARY_V2_ENABLED, true),
+    trustGuardEnabled: PORTAL_LIBRARY_TRUST_GUARD_ENABLED,
+    hideIdsEnabled: PORTAL_LIBRARY_HIDE_IDS_ENABLED,
+    hardCleanupEnabled: PORTAL_LIBRARY_HARD_CLEANUP_ENABLED,
+  };
 }
