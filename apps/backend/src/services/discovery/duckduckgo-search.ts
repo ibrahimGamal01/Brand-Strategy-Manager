@@ -32,6 +32,31 @@ function trimForLog(text: string, maxLength: number = MAX_DDG_ERROR_SNIPPET): st
   return `${normalized.slice(-maxLength)} (truncated)`;
 }
 
+function isExpectedDdgNoise(error: unknown): boolean {
+  const message = String((error as any)?.message || error || '').toLowerCase();
+  return (
+    message.includes('certificate_verify_failed') ||
+    message.includes('self signed certificate') ||
+    message.includes('tls') ||
+    message.includes('econnreset') ||
+    message.includes('etimedout') ||
+    message.includes('timed out') ||
+    message.includes('429') ||
+    message.includes('403') ||
+    message.includes('too many requests') ||
+    message.includes('temporarily unavailable')
+  );
+}
+
+function logDdgFailure(scope: string, error: unknown): void {
+  const message = String((error as any)?.message || error || 'unknown error');
+  if (isExpectedDdgNoise(error)) {
+    console.warn(`[DDGSearch] ${scope} degraded: ${message}`);
+    return;
+  }
+  console.error(`[DDGSearch] ${scope} failed:`, message);
+}
+
 function resolveDdgScriptPath(): string {
   const cwd = process.cwd();
   const candidates = [
@@ -261,7 +286,7 @@ export async function searchRawDDG(
 
     return results;
   } catch (error: any) {
-    console.error('[DDGSearch] Raw search failed:', error?.message || error);
+    logDdgFailure('Raw search', error);
     return [];
   }
 }
@@ -290,14 +315,16 @@ const HANDLE_STOPWORDS = new Set([
   'www',
 ]);
 
-function normalizeExtractedHandle(raw: string): string {
+function normalizeExtractedHandle(raw: string, options?: { minLength?: number; maxLength?: number }): string {
   const normalized = String(raw || '')
     .trim()
     .toLowerCase()
     .replace(/^@+/, '')
     .replace(/[^a-z0-9._]/g, '');
 
-  if (!normalized || normalized.length < 2 || normalized.length > 30) return '';
+  const minLength = options?.minLength ?? 2;
+  const maxLength = options?.maxLength ?? 30;
+  if (!normalized || normalized.length < minLength || normalized.length > maxLength) return '';
   if (normalized.includes('..')) return '';
   if (HANDLE_STOPWORDS.has(normalized)) return '';
   if (normalized.endsWith('.com') || normalized.endsWith('.org') || normalized.endsWith('.net')) {
@@ -306,16 +333,119 @@ function normalizeExtractedHandle(raw: string): string {
   return normalized;
 }
 
-function extractHandlesFromRawResults(
+type SocialDiscoveryPlatform = 'instagram' | 'tiktok' | 'youtube' | 'twitter' | 'linkedin';
+
+export interface SocialHandleCandidate {
+  platform: SocialDiscoveryPlatform;
+  handle: string;
+  profileUrl: string;
+  confidence: number;
+  reason: string;
+  source: string;
+  isLikelyClient: boolean;
+}
+
+function platformPatterns(platform: SocialDiscoveryPlatform): {
+  urlRegex: RegExp;
+  mentionRegex?: RegExp;
+  maxLength: number;
+  hostMarker: string;
+} {
+  if (platform === 'instagram') {
+    return {
+      urlRegex: /instagram\.com\/([a-z0-9._]{2,40})/gi,
+      mentionRegex: /@([a-z0-9._]{2,40})/gi,
+      maxLength: 30,
+      hostMarker: 'instagram.com',
+    };
+  }
+  if (platform === 'tiktok') {
+    return {
+      urlRegex: /tiktok\.com\/@([a-z0-9._]{2,40})/gi,
+      mentionRegex: /@([a-z0-9._]{2,40})/gi,
+      maxLength: 30,
+      hostMarker: 'tiktok.com',
+    };
+  }
+  if (platform === 'youtube') {
+    return {
+      urlRegex: /youtube\.com\/(?:@|c\/|channel\/|user\/)?([a-z0-9._-]{2,80})/gi,
+      mentionRegex: /@([a-z0-9._-]{2,80})/gi,
+      maxLength: 80,
+      hostMarker: 'youtube.com',
+    };
+  }
+  if (platform === 'linkedin') {
+    return {
+      urlRegex: /linkedin\.com\/(?:in|company)\/([a-z0-9-]{2,100})/gi,
+      maxLength: 80,
+      hostMarker: 'linkedin.com',
+    };
+  }
+  return {
+    urlRegex: /(?:x|twitter)\.com\/@?([a-z0-9_]{1,40})/gi,
+    mentionRegex: /@([a-z0-9_]{1,40})/gi,
+    maxLength: 15,
+    hostMarker: 'x.com',
+  };
+}
+
+function profileUrlForCandidate(platform: SocialDiscoveryPlatform, handle: string): string {
+  if (platform === 'instagram') return `https://www.instagram.com/${handle}`;
+  if (platform === 'tiktok') return `https://www.tiktok.com/@${handle}`;
+  if (platform === 'youtube') return `https://www.youtube.com/@${handle}`;
+  if (platform === 'linkedin') return `https://www.linkedin.com/in/${handle}`;
+  return `https://x.com/${handle}`;
+}
+
+function clampConfidence(score: number): number {
+  if (!Number.isFinite(score)) return 0.1;
+  return Math.max(0.05, Math.min(0.99, score));
+}
+
+function scoreHandleCandidate(input: {
+  platform: SocialDiscoveryPlatform;
+  handle: string;
+  row: RawSearchResult;
+  domain: string;
+}): number {
+  const { platform, handle, row, domain } = input;
+  const href = String(row.href || '').toLowerCase();
+  const title = String(row.title || '').toLowerCase();
+  const body = String(row.body || '').toLowerCase();
+  const query = String(row.query || '').toLowerCase();
+  const text = `${title} ${body}`;
+  const host = domain.toLowerCase();
+  const rootToken = host.split('.')[0]?.replace(/[^a-z0-9]/g, '') || '';
+
+  let score = 0.2;
+  const platformKeyword = platform === 'twitter' ? 'x' : platform;
+  const handleLower = handle.toLowerCase();
+  const hasDomainInHref = href.includes(host);
+  const hasDomainInText = text.includes(host);
+  const hasRootTokenInHandle = Boolean(rootToken && handleLower.includes(rootToken));
+
+  if (hasDomainInHref) score += 0.3;
+  if (hasDomainInText) score += 0.24;
+  if (query.includes(platformKeyword)) score += 0.06;
+  if (href.includes(platformKeyword)) score += 0.08;
+  if (hasRootTokenInHandle) score += 0.28;
+  if (rootToken && handleLower === rootToken) score += 0.18;
+  if (/(official|team|hq|studio|company|inc|co)/.test(handle)) score += 0.08;
+  if (handleLower.length <= 3) score -= 0.25;
+  if (handleLower.endsWith('_') || handleLower.startsWith('_')) score -= 0.16;
+  if (!hasDomainInHref && !hasDomainInText && !hasRootTokenInHandle) score -= 0.12;
+  if (/fans|archive|backup|news|media|community|forum/.test(handle)) score -= 0.22;
+  return clampConfidence(score);
+}
+
+function buildCandidatesFromRawResults(
   rawResults: RawSearchResult[],
-  platform: 'instagram' | 'tiktok'
-): string[] {
-  const handles = new Set<string>();
-  const urlRegex =
-    platform === 'instagram'
-      ? /instagram\.com\/([a-z0-9._]{2,30})/gi
-      : /tiktok\.com\/@([a-z0-9._]{2,30})/gi;
-  const mentionRegex = /@([a-z0-9._]{2,30})/gi;
+  cleanDomain: string
+): SocialHandleCandidate[] {
+  const candidates = new Map<string, SocialHandleCandidate>();
+  const platforms: SocialDiscoveryPlatform[] = ['instagram', 'tiktok', 'youtube', 'linkedin', 'twitter'];
+  const rootToken = cleanDomain.split('.')[0]?.replace(/[^a-z0-9]/g, '').toLowerCase() || '';
 
   for (const row of rawResults || []) {
     const href = String(row.href || '');
@@ -323,19 +453,81 @@ function extractHandlesFromRawResults(
     const body = String(row.body || '');
     const text = `${title} ${body}`.toLowerCase();
 
-    const urlMatches = [...href.matchAll(urlRegex)];
-    for (const match of urlMatches) {
-      const handle = normalizeExtractedHandle(match[1] || '');
+    for (const platform of platforms) {
+      const pattern = platformPatterns(platform);
+      const matches = [...href.matchAll(pattern.urlRegex)];
+      for (const match of matches) {
+        const handle = normalizeExtractedHandle(match[1] || '', { maxLength: pattern.maxLength });
+        if (!handle) continue;
+        const confidence = scoreHandleCandidate({ platform, handle, row, domain: cleanDomain });
+        const key = `${platform}:${handle}`;
+        const candidate: SocialHandleCandidate = {
+          platform,
+          handle,
+          profileUrl: profileUrlForCandidate(platform, handle),
+          confidence,
+          reason: `Found via ${platform} profile result aligned with ${cleanDomain}.`,
+          source: 'ddg_social_search',
+          isLikelyClient: confidence >= 0.78,
+        };
+        const existing = candidates.get(key);
+        if (!existing || candidate.confidence > existing.confidence) {
+          candidates.set(key, candidate);
+        }
+      }
+
+      if (!pattern.mentionRegex) continue;
+      if (!text.includes(platform) && !href.toLowerCase().includes(pattern.hostMarker)) continue;
+      if (rootToken && !text.includes(rootToken) && !href.toLowerCase().includes(rootToken)) continue;
+      const mentions = [...text.matchAll(pattern.mentionRegex)];
+      for (const mention of mentions) {
+        const handle = normalizeExtractedHandle(mention[1] || '', { maxLength: pattern.maxLength });
+        if (!handle) continue;
+        const confidence = clampConfidence(scoreHandleCandidate({ platform, handle, row, domain: cleanDomain }) - 0.12);
+        const key = `${platform}:${handle}`;
+        const candidate: SocialHandleCandidate = {
+          platform,
+          handle,
+          profileUrl: profileUrlForCandidate(platform, handle),
+          confidence,
+          reason: `Mentioned in ${platform}-related result for ${cleanDomain}.`,
+          source: 'ddg_social_mention',
+          isLikelyClient: confidence >= 0.8,
+        };
+        const existing = candidates.get(key);
+        if (!existing || candidate.confidence > existing.confidence) {
+          candidates.set(key, candidate);
+        }
+      }
+    }
+  }
+
+  return Array.from(candidates.values()).sort((a, b) => b.confidence - a.confidence);
+}
+
+function extractHandlesFromRawResults(
+  rawResults: RawSearchResult[],
+  platform: 'instagram' | 'tiktok'
+): string[] {
+  const patterns = platformPatterns(platform);
+  const handles = new Set<string>();
+
+  for (const row of rawResults || []) {
+    const href = String(row.href || '');
+    const title = String(row.title || '');
+    const body = String(row.body || '');
+    const text = `${title} ${body}`.toLowerCase();
+
+    for (const match of href.matchAll(patterns.urlRegex)) {
+      const handle = normalizeExtractedHandle(match[1] || '', { maxLength: patterns.maxLength });
       if (handle) handles.add(handle);
     }
 
-    // Mentions are noisy; only trust them when platform appears in URL/title/body.
-    if (text.includes(platform) || href.toLowerCase().includes(platform)) {
-      const mentionMatches = [...text.matchAll(mentionRegex)];
-      for (const match of mentionMatches) {
-        const handle = normalizeExtractedHandle(match[1] || '');
-        if (handle) handles.add(handle);
-      }
+    if (!patterns.mentionRegex) continue;
+    if (!text.includes(platform) && !href.toLowerCase().includes(patterns.hostMarker)) continue;
+    for (const mention of text.matchAll(patterns.mentionRegex)) {
+      const handle = normalizeExtractedHandle(mention[1] || '', { maxLength: patterns.maxLength });
+      if (handle) handles.add(handle);
     }
   }
 
@@ -349,13 +541,33 @@ function extractHandlesFromRawResults(
 export async function searchSocialHandlesForWebsite(
   domain: string,
   options?: { timeoutMs?: number }
-): Promise<{ instagram?: string; tiktok?: string }> {
-  const out: { instagram?: string; tiktok?: string } = {};
+): Promise<{
+  instagram?: string;
+  tiktok?: string;
+  youtube?: string;
+  linkedin?: string;
+  twitter?: string;
+  candidates: SocialHandleCandidate[];
+}> {
+  const out: {
+    instagram?: string;
+    tiktok?: string;
+    youtube?: string;
+    linkedin?: string;
+    twitter?: string;
+    candidates: SocialHandleCandidate[];
+  } = { candidates: [] };
   const cleanDomain = String(domain || '').trim().replace(/^https?:\/\//, '').split('/')[0];
   if (!cleanDomain) return out;
 
   try {
-    const queries = [`${cleanDomain} instagram`, `${cleanDomain} tiktok`];
+    const queries = [
+      `${cleanDomain} instagram`,
+      `${cleanDomain} tiktok`,
+      `${cleanDomain} youtube`,
+      `${cleanDomain} linkedin`,
+      `${cleanDomain} twitter`,
+    ];
     const { stdout, stderr } = await runDdgCommand(
       ['raw', ...queries],
       options?.timeoutMs ?? 30_000
@@ -364,18 +576,25 @@ export async function searchSocialHandlesForWebsite(
 
     const parsed = JSON.parse(stdout) as { results?: RawSearchResult[]; total?: number };
     const rawResults = parsed.results || [];
+    const candidates = buildCandidatesFromRawResults(rawResults, cleanDomain);
+    out.candidates = candidates.slice(0, 20);
+    out.instagram = candidates.find((candidate) => candidate.platform === 'instagram')?.handle;
+    out.tiktok = candidates.find((candidate) => candidate.platform === 'tiktok')?.handle;
+    out.youtube = candidates.find((candidate) => candidate.platform === 'youtube')?.handle;
+    out.linkedin = candidates.find((candidate) => candidate.platform === 'linkedin')?.handle;
+    out.twitter = candidates.find((candidate) => candidate.platform === 'twitter')?.handle;
 
-    const instagramHandles = extractHandlesFromRawResults(rawResults, 'instagram');
-    const tiktokHandles = extractHandlesFromRawResults(rawResults, 'tiktok');
-    if (instagramHandles.length > 0) out.instagram = instagramHandles[0];
-    if (tiktokHandles.length > 0) out.tiktok = tiktokHandles[0];
-
-    if (out.instagram || out.tiktok) {
-      console.log(`[DDGSearch] Website ${cleanDomain} social: instagram=@${out.instagram ?? 'none'}, tiktok=@${out.tiktok ?? 'none'}`);
+    if (candidates.length > 0) {
+      console.log(
+        `[DDGSearch] Website ${cleanDomain} social candidates: ${candidates
+          .slice(0, 5)
+          .map((candidate) => `${candidate.platform}=@${candidate.handle}`)
+          .join(', ')}`
+      );
     }
     return out;
   } catch (error: any) {
-    console.error(`[DDGSearch] searchSocialHandlesForWebsite failed for ${cleanDomain}:`, error.message);
+    logDdgFailure(`searchSocialHandlesForWebsite (${cleanDomain})`, error);
     return out;
   }
 }
@@ -409,7 +628,7 @@ export async function saveRawResultsToDB(
     return created.count;
     
   } catch (error: any) {
-    console.error(`[DDGSearch] Failed to save raw results:`, error.message);
+    logDdgFailure('saveRawResultsToDB', error);
     return 0;
   }
 }
@@ -447,7 +666,7 @@ export async function searchBrandContextDDG(
     return result;
     
   } catch (error: any) {
-    console.error(`[DDGSearch] Brand context search failed:`, error.message);
+    logDdgFailure('Brand context search', error);
     return {
       brand_name: brandName,
       website_url: null,
@@ -501,7 +720,7 @@ export async function searchCompetitorsDDG(
     return result.competitors || [];
     
   } catch (error: any) {
-    console.error(`[DDGSearch] Competitor search failed:`, error.message);
+    logDdgFailure('Competitor search', error);
     return [];
   }
 }
@@ -561,7 +780,7 @@ export async function performDirectCompetitorSearchForPlatform(
     );
     return handles;
   } catch (error: any) {
-    console.error(`[DDGSearch] Direct ${platform} search failed:`, error.message);
+    logDdgFailure(`Direct ${platform} search`, error);
     return [];
   }
 }
@@ -602,7 +821,7 @@ export async function searchCompetitorsDDGFull(
     return result;
     
   } catch (error: any) {
-    console.error(`[DDGSearch] Full competitor search failed:`, error.message);
+    logDdgFailure('Full competitor search', error);
     return {
       competitors: [],
       raw_results: [],
@@ -635,7 +854,7 @@ export async function validateHandleDDG(
     return result;
     
   } catch (error: any) {
-    console.error(`[DDGSearch] Handle validation failed:`, error.message);
+    logDdgFailure('Handle validation', error);
     return {
       handle,
       platform,
@@ -691,7 +910,7 @@ export async function searchSocialProfiles(
     return result;
     
   } catch (error: any) {
-    console.error(`[DDGSearch] Social search failed:`, error.message);
+    logDdgFailure('Social search', error);
     return {
       brand_name: brandName,
       instagram: [],
@@ -856,7 +1075,7 @@ export async function gatherAllDDG(
     return result;
     
   } catch (error: any) {
-    console.error(`[DDGSearch] Gather all failed:`, error.message);
+    logDdgFailure('gatherAllDDG', error);
     throw error;
   }
 }
@@ -907,7 +1126,7 @@ async function saveAllResultsToDB(researchJobId: string, result: GatherAllResult
       } catch (error: any) {
         // Skip duplicates
         if (!error.message?.includes('Unique constraint')) {
-          console.error(`[DDGSearch] Error saving result:`, error.message);
+          logDdgFailure('saveAllResultsToDB.textResult', error);
         }
       }
     }
@@ -1082,7 +1301,7 @@ export async function scrapeSocialContent(
     return result;
     
   } catch (error: any) {
-    console.error(`[DDGSearch] Social content scrape failed:`, error.message);
+    logDdgFailure('Social content scrape', error);
     return {
       handles,
       images: [],

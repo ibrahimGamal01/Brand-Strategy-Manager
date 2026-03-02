@@ -7,12 +7,18 @@ import {
   parseStringList,
   syncBrainGoals,
 } from '../intake/brain-intake-utils';
+import { searchRawDDG } from '../discovery/duckduckgo-search';
 import { evaluatePendingQuestionSets } from '../intake/question-workflow';
-import { suggestIntakeCompletion } from '../intake/suggest-intake-completion';
+import { suggestIntakeCompletion, type IntakeSuggestionStep } from '../intake/suggest-intake-completion';
 import { resumeResearchJob } from '../social/research-resume';
-import { resolveIntakeWebsites, seedPortalIntakeWebsites, parseWebsiteList } from './portal-intake-websites';
+import {
+  parseSocialReferenceList,
+  parseWebsiteList,
+  resolveIntakeWebsites,
+  seedPortalIntakeWebsites,
+} from './portal-intake-websites';
 
-type IntakePlatform = 'instagram' | 'tiktok' | 'youtube' | 'twitter';
+type IntakePlatform = 'instagram' | 'tiktok' | 'youtube' | 'twitter' | 'linkedin';
 
 type IntakeHandles = Record<IntakePlatform, string>;
 
@@ -20,6 +26,7 @@ export type PortalWorkspaceIntakePrefill = {
   name: string;
   website: string;
   websites: string[];
+  socialReferences: string[];
   oneSentenceDescription: string;
   niche: string;
   businessType: string;
@@ -98,7 +105,40 @@ const EMPTY_HANDLES: IntakeHandles = {
   tiktok: '',
   youtube: '',
   twitter: '',
+  linkedin: '',
 };
+
+function logIntakeSuggestEvent(input: {
+  event:
+    | 'INTAKE_SUGGEST_STEP_STARTED'
+    | 'INTAKE_SUGGEST_STEP_COMPLETED'
+    | 'INTAKE_SUGGEST_LOW_SIGNAL_BLOCKED'
+    | 'INTAKE_SOCIAL_CANDIDATES_EMITTED';
+  workspaceId: string;
+  step?: IntakeSuggestionStep;
+  warnings?: string[];
+  candidateCount?: number;
+  suggestedFieldCount?: number;
+  durationMs?: number;
+}) {
+  const payload: Record<string, unknown> = {
+    event: input.event,
+    workspaceId: input.workspaceId,
+    step: input.step || null,
+    warnings: Array.isArray(input.warnings) ? input.warnings : [],
+    candidateCount: Number.isFinite(input.candidateCount as number)
+      ? Math.max(0, Math.floor(input.candidateCount as number))
+      : 0,
+    suggestedFieldCount: Number.isFinite(input.suggestedFieldCount as number)
+      ? Math.max(0, Math.floor(input.suggestedFieldCount as number))
+      : 0,
+    durationMs: Number.isFinite(input.durationMs as number)
+      ? Math.max(0, Math.floor(input.durationMs as number))
+      : 0,
+    timestamp: new Date().toISOString(),
+  };
+  console.log(JSON.stringify(payload));
+}
 
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -143,6 +183,7 @@ function fromAccountPlatform(value: string): IntakePlatform | null {
   if (normalized === 'instagram') return 'instagram';
   if (normalized === 'tiktok') return 'tiktok';
   if (normalized === 'youtube') return 'youtube';
+  if (normalized === 'linkedin') return 'linkedin';
   if (normalized === 'x' || normalized === 'twitter') return 'twitter';
   return null;
 }
@@ -181,21 +222,106 @@ function getHostname(value: string): string {
   }
 }
 
+function buildEvidenceHostnames(payload: Record<string, unknown>): Set<string> {
+  const websites = parseWebsiteList([payload.website, payload.websites], 8);
+  const socialReferences = parseSocialReferenceList([payload.socialReferences], 12);
+  return new Set(
+    [...websites, ...socialReferences]
+      .map((entry) => getHostname(entry))
+      .filter(Boolean)
+  );
+}
+
+function buildBrandTokens(payload: Record<string, unknown>): string[] {
+  const nameTokens = String(payload.name || '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token.length >= 5);
+  const websiteTokens = parseWebsiteList([payload.website, payload.websites], 3)
+    .map((entry) => {
+      const host = getHostname(entry);
+      return host.split('.')[0] || '';
+    })
+    .map((token) => token.replace(/[^a-z0-9]+/g, ''))
+    .filter((token) => token.length >= 3);
+  return Array.from(new Set([...nameTokens, ...websiteTokens])).slice(0, 12);
+}
+
+function countTokenHits(text: string, tokens: string[]): number {
+  if (!text || !tokens.length) return 0;
+  let hits = 0;
+  for (const token of tokens) {
+    if (text.includes(token)) hits += 1;
+  }
+  return hits;
+}
+
+function evidenceSignalScore(text: string): number {
+  let score = 0;
+  if (
+    /(offer|offers|service|services|program|product|products|subscription|pricing|plans|book|consult|demo|audience|who we help|benefit|results|case study|solution|positioning)/i.test(
+      text
+    )
+  ) {
+    score += 2;
+  }
+  if (/(about|mission|value proposition|what we do|why choose|for professionals|for teams)/i.test(text)) {
+    score += 1;
+  }
+  return score;
+}
+
+function shouldRunLiveDdgSuggest(): boolean {
+  const value = String(process.env.PORTAL_INTAKE_LIVE_DDG_SUGGEST || 'true')
+    .trim()
+    .toLowerCase();
+  return !['0', 'false', 'no', 'off'].includes(value);
+}
+
+function buildLiveDdgSuggestQueries(payload: Record<string, unknown>): string[] {
+  const name = String(payload.name || '').trim();
+  const websites = parseWebsiteList([payload.website, payload.websites], 3);
+  const website = websites[0] || '';
+  const domain = getHostname(website);
+  const socialReferences = parseSocialReferenceList([payload.socialReferences], 6);
+  const socialHints = socialReferences
+    .map((entry) => {
+      const host = getHostname(entry);
+      if (host.includes('linkedin.com')) return 'linkedin';
+      if (host.includes('instagram.com')) return 'instagram';
+      if (host.includes('tiktok.com')) return 'tiktok';
+      if (host.includes('youtube.com') || host.includes('youtu.be')) return 'youtube';
+      if (host.includes('x.com') || host.includes('twitter.com')) return 'twitter';
+      return '';
+    })
+    .filter(Boolean)
+    .slice(0, 3);
+  const queries = [
+    [name, domain].filter(Boolean).join(' ').trim(),
+    domain ? `site:${domain}` : '',
+    domain ? `site:${domain} services` : '',
+    domain ? `site:${domain} about` : '',
+    [name, 'what they do'].filter(Boolean).join(' ').trim(),
+    [name, 'services pricing'].filter(Boolean).join(' ').trim(),
+    [domain, 'about services'].filter(Boolean).join(' ').trim(),
+    socialHints.length > 0 ? `${name || domain} ${socialHints.join(' ')}` : '',
+  ]
+    .map((query) => query.trim())
+    .filter(Boolean);
+  return Array.from(new Set(queries)).slice(0, 8);
+}
+
 async function buildWebsiteEvidenceSummary(
   workspaceId: string,
   payload: Record<string, unknown>
 ): Promise<string> {
-  const websites = parseWebsiteList([payload.website, payload.websites], 5);
-  const hostnames = new Set(
-    websites
-      .map((entry) => getHostname(entry))
-      .filter(Boolean)
-  );
+  const hostnames = buildEvidenceHostnames(payload);
+  const brandTokens = buildBrandTokens(payload);
 
   const snapshots = await prisma.webPageSnapshot.findMany({
     where: { researchJobId: workspaceId, isActive: true },
     orderBy: { fetchedAt: 'desc' },
-    take: 30,
+    take: 50,
     select: {
       finalUrl: true,
       cleanText: true,
@@ -204,20 +330,31 @@ async function buildWebsiteEvidenceSummary(
   });
 
   const filtered = snapshots
-    .filter((row) => {
-      if (!hostnames.size) return true;
-      const host = getHostname(String(row.finalUrl || ''));
-      return host ? hostnames.has(host) : false;
-    })
     .filter((row) => String(row.cleanText || '').trim().length > 0)
-    .slice(0, 4);
+    .map((row) => {
+      const url = String(row.finalUrl || '').trim();
+      const host = getHostname(url);
+      const text = compactText(row.cleanText || '', 2000);
+      const lowered = text.toLowerCase();
+      const hostScore = host && hostnames.has(host) ? 2 : 0;
+      const tokenHits = countTokenHits(lowered, brandTokens);
+      const signalScore = evidenceSignalScore(lowered);
+      return {
+        row,
+        url,
+        text,
+        score: hostScore + tokenHits + signalScore,
+      };
+    })
+    .filter((item) => (hostnames.size > 0 ? item.score > 0 : true))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 6);
 
   if (!filtered.length) return '';
 
-  const lines = filtered.map((row, index) => {
-    const url = String(row.finalUrl || '').trim();
-    const excerpt = compactText(row.cleanText || '', 1200);
-    return `Snapshot ${index + 1}: ${url}\n${excerpt}`;
+  const lines = filtered.map((item, index) => {
+    const excerpt = compactText(item.text, 1200);
+    return `Snapshot ${index + 1}: ${item.url}\n${excerpt}`;
   });
 
   return compactText(lines.join('\n\n'), 5000);
@@ -227,12 +364,8 @@ async function buildDdgEvidenceSummary(
   workspaceId: string,
   payload: Record<string, unknown>
 ): Promise<string> {
-  const websites = parseWebsiteList([payload.website, payload.websites], 5);
-  const hostnames = new Set(
-    websites
-      .map((entry) => getHostname(entry))
-      .filter(Boolean)
-  );
+  const hostnames = buildEvidenceHostnames(payload);
+  const brandTokens = buildBrandTokens(payload);
 
   const rawRows = await prisma.rawSearchResult.findMany({
     where: { researchJobId: workspaceId },
@@ -249,13 +382,27 @@ async function buildDdgEvidenceSummary(
   });
 
   const filteredRaw = rawRows
-    .filter((row) => {
-      if (!hostnames.size) return true;
+    .map((row) => {
       const hrefHost = getHostname(String(row.href || ''));
-      const query = String(row.query || '').toLowerCase();
-      return hrefHost ? hostnames.has(hrefHost) : Array.from(hostnames).some((host) => query.includes(host));
+      const lowered = `${row.title || ''} ${row.body || ''} ${row.href || ''}`.toLowerCase();
+      const hostMatch = hrefHost && hostnames.has(hrefHost);
+      const tokenHits = countTokenHits(lowered, brandTokens);
+      const signalScore = evidenceSignalScore(lowered);
+      return {
+        row,
+        hostMatch,
+        tokenHits,
+        score: (hostMatch ? 3 : 0) + tokenHits + signalScore,
+      };
     })
-    .slice(0, 10);
+    .filter((item) => {
+      if (!hostnames.size) return item.score > 0;
+      if (item.hostMatch) return item.score > 0;
+      return item.score >= 2 && item.tokenHits >= 1;
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 12)
+    .map((item) => item.row);
 
   const newsRows = await prisma.ddgNewsResult.findMany({
     where: { researchJobId: workspaceId },
@@ -271,13 +418,27 @@ async function buildDdgEvidenceSummary(
   });
 
   const filteredNews = newsRows
-    .filter((row) => {
-      if (!hostnames.size) return true;
+    .map((row) => {
       const hrefHost = getHostname(String(row.url || ''));
-      const query = String(row.query || '').toLowerCase();
-      return hrefHost ? hostnames.has(hrefHost) : Array.from(hostnames).some((host) => query.includes(host));
+      const lowered = `${row.title || ''} ${row.body || ''} ${row.url || ''}`.toLowerCase();
+      const hostMatch = hrefHost && hostnames.has(hrefHost);
+      const tokenHits = countTokenHits(lowered, brandTokens);
+      const signalScore = evidenceSignalScore(lowered);
+      return {
+        row,
+        hostMatch,
+        tokenHits,
+        score: (hostMatch ? 3 : 0) + tokenHits + signalScore,
+      };
     })
-    .slice(0, 8);
+    .filter((item) => {
+      if (!hostnames.size) return item.score > 0;
+      if (item.hostMatch) return item.score > 0;
+      return item.score >= 2 && item.tokenHits >= 1;
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8)
+    .map((item) => item.row);
 
   if (!filteredRaw.length && !filteredNews.length) return '';
 
@@ -393,12 +554,19 @@ function buildPrefill(job: WorkspaceWithClient): PortalWorkspaceIntakePrefill {
   const profile = job.client.brainProfile;
   const constraints = asRecord(profile?.constraints);
   const websites = parseWebsiteList([input.website, input.websites], 8);
-  const primaryWebsite = websites[0] || stringify(input.website);
+  const socialReferences = parseSocialReferenceList(
+    [input.socialReferences, input.website, input.websites],
+    12
+  );
+  const websiteFromInput = stringify(input.website);
+  const websiteFromInputIsSocial = parseSocialReferenceList([websiteFromInput], 1).length > 0;
+  const primaryWebsite = websites[0] || (websiteFromInputIsSocial ? '' : websiteFromInput);
 
   return {
     name: stringify(input.brandName) || job.client.name || '',
     website: primaryWebsite,
     websites,
+    socialReferences,
     oneSentenceDescription:
       stringify(input.description) || stringify(input.businessOverview) || stringify(job.client.businessOverview),
     niche: stringify(input.niche),
@@ -488,14 +656,34 @@ export async function suggestPortalWorkspaceIntakeCompletion(
   workspaceId: string,
   partialPayload: Record<string, unknown>
 ) {
+  const startedAt = Date.now();
   const workspace = await getWorkspaceWithClient(workspaceId);
   if (!workspace) {
     throw new Error('Workspace not found');
   }
   const prefill = buildPrefill(workspace);
+  const rawStep = stringify(partialPayload.step).toLowerCase();
+  const suggestionStep: IntakeSuggestionStep | undefined =
+    rawStep === 'brand' ||
+    rawStep === 'channels' ||
+    rawStep === 'offer' ||
+    rawStep === 'audience' ||
+    rawStep === 'voice'
+      ? rawStep
+      : undefined;
+  logIntakeSuggestEvent({
+    event: 'INTAKE_SUGGEST_STEP_STARTED',
+    workspaceId,
+    step: suggestionStep,
+  });
+
   const payload = {
     ...prefill,
     ...partialPayload,
+    socialReferences: parseSocialReferenceList(
+      [partialPayload.socialReferences, partialPayload.website, partialPayload.websites, prefill.socialReferences],
+      12
+    ),
     handles:
       partialPayload.handles && typeof partialPayload.handles === 'object'
         ? partialPayload.handles
@@ -509,13 +697,32 @@ export async function suggestPortalWorkspaceIntakeCompletion(
     );
     return '';
   });
-  const ddgEvidence = await buildDdgEvidenceSummary(workspaceId, payload).catch((error) => {
+  let ddgEvidence = await buildDdgEvidenceSummary(workspaceId, payload).catch((error) => {
     console.warn(
       `[PortalIntake] Failed to build DDG evidence summary for ${workspaceId}:`,
       (error as Error)?.message || String(error)
     );
     return '';
   });
+  if (!ddgEvidence && shouldRunLiveDdgSuggest()) {
+    const liveQueries = buildLiveDdgSuggestQueries(payload);
+    if (liveQueries.length > 0) {
+      try {
+        await searchRawDDG(liveQueries, {
+          researchJobId: workspaceId,
+          source: 'portal_intake_suggest_live_ddg',
+          maxResults: 80,
+          timeoutMs: 45_000,
+        });
+        ddgEvidence = await buildDdgEvidenceSummary(workspaceId, payload).catch(() => '');
+      } catch (error) {
+        console.warn(
+          `[PortalIntake] Live DDG suggest enrichment failed for ${workspaceId}:`,
+          (error as Error)?.message || String(error)
+        );
+      }
+    }
+  }
 
   const payloadWithEvidence = {
     ...payload,
@@ -524,15 +731,65 @@ export async function suggestPortalWorkspaceIntakeCompletion(
   };
 
   try {
-    return await suggestIntakeCompletion(payloadWithEvidence);
+    const result = await suggestIntakeCompletion(payloadWithEvidence, { step: suggestionStep });
+    const warnings = Array.isArray((result as { warnings?: string[] }).warnings)
+      ? ((result as { warnings?: string[] }).warnings as string[])
+      : [];
+    const candidateCount = Array.isArray((result as { suggestedHandleCandidates?: unknown[] }).suggestedHandleCandidates)
+      ? ((result as { suggestedHandleCandidates?: unknown[] }).suggestedHandleCandidates as unknown[]).length
+      : 0;
+    const suggestedFieldCount = result.suggested && typeof result.suggested === 'object'
+      ? Object.keys(result.suggested).length
+      : 0;
+
+    logIntakeSuggestEvent({
+      event: 'INTAKE_SUGGEST_STEP_COMPLETED',
+      workspaceId,
+      step: suggestionStep,
+      warnings,
+      candidateCount,
+      suggestedFieldCount,
+      durationMs: Date.now() - startedAt,
+    });
+
+    if (warnings.includes('LOW_SIGNAL_COPY')) {
+      logIntakeSuggestEvent({
+        event: 'INTAKE_SUGGEST_LOW_SIGNAL_BLOCKED',
+        workspaceId,
+        step: suggestionStep,
+        warnings,
+        durationMs: Date.now() - startedAt,
+      });
+    }
+
+    if (candidateCount > 0) {
+      logIntakeSuggestEvent({
+        event: 'INTAKE_SOCIAL_CANDIDATES_EMITTED',
+        workspaceId,
+        step: suggestionStep,
+        warnings,
+        candidateCount,
+        durationMs: Date.now() - startedAt,
+      });
+    }
+
+    return result;
   } catch (error) {
     console.warn(
       `[PortalIntake] Suggestion fallback for workspace ${workspaceId}:`,
       (error as Error)?.message || String(error)
     );
+    logIntakeSuggestEvent({
+      event: 'INTAKE_SUGGEST_STEP_COMPLETED',
+      workspaceId,
+      step: suggestionStep,
+      warnings: ['AI_UNAVAILABLE'],
+      durationMs: Date.now() - startedAt,
+    });
     return {
       suggested: {},
       filledByUser: [],
+      warnings: ['AI_UNAVAILABLE'],
       confirmationRequired: false,
       confirmationReasons: ['AI_UNAVAILABLE'],
     };
@@ -572,7 +829,7 @@ export async function submitPortalWorkspaceIntake(
     platformHandles[normalizedPlatform] = normalizedHandle;
   }
 
-  const { websites, primaryWebsite } = resolveIntakeWebsites(nextPayload);
+  const { websites, primaryWebsite, socialReferences } = resolveIntakeWebsites(nextPayload);
   const website = primaryWebsite || stringify(nextPayload.website) || stringify(nextPayload.websiteDomain);
   const hasWebsite = websites.length > 0 || website.length > 0;
   if (!Object.keys(platformHandles).length && !hasWebsite) {
@@ -679,6 +936,7 @@ export async function submitPortalWorkspaceIntake(
     businessType: stringify(nextPayload.businessType),
     website,
     websites: websites.length ? websites : undefined,
+    socialReferences: socialReferences.length ? socialReferences : undefined,
     primaryGoal,
     secondaryGoals,
     futureGoal: stringify(nextPayload.futureGoal),

@@ -73,12 +73,16 @@ function isSignupDdgEnabled(): boolean {
 function buildDdgQueries(input: { brandName: string; domain: string }): string[] {
   const brandName = String(input.brandName || '').trim();
   const domain = String(input.domain || '').trim();
+  const conservativeBrand = brandName.length >= 5 ? brandName : '';
   const queries = [
-    [brandName, domain].filter(Boolean).join(' ').trim(),
-    [brandName, 'official website'].filter(Boolean).join(' ').trim(),
+    domain ? `site:${domain}` : '',
+    domain ? `site:${domain} services` : '',
+    domain ? `site:${domain} about` : '',
+    [conservativeBrand, domain].filter(Boolean).join(' ').trim(),
+    [conservativeBrand, 'official website'].filter(Boolean).join(' ').trim(),
     domain ? `${domain} reviews` : '',
-    [brandName, 'pricing'].filter(Boolean).join(' ').trim(),
-    [brandName, 'instagram tiktok youtube'].filter(Boolean).join(' ').trim(),
+    [conservativeBrand, 'pricing'].filter(Boolean).join(' ').trim(),
+    [conservativeBrand, 'linkedin instagram tiktok youtube'].filter(Boolean).join(' ').trim(),
   ]
     .map((entry) => entry.trim())
     .filter(Boolean);
@@ -248,8 +252,13 @@ export async function startPortalSignupEnrichment(input: {
       scanRunId ? { scanRunId } : undefined
     );
 
+    const brandContextSeed =
+      (brandName.length >= 5 ? [brandName, domain].filter(Boolean).join(' ').trim() : '') ||
+      domain ||
+      brandName ||
+      'business';
     const brandContext = await searchBrandContextDDG(
-      [brandName, domain].filter(Boolean).join(' ').trim() || brandName || domain || 'business',
+      brandContextSeed,
       workspaceId,
       { timeoutMs: 90_000 }
     );

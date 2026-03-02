@@ -5,19 +5,13 @@
  * No DB writes; stateless.
  */
 
-import OpenAI from 'openai';
 import { discoverClientSocialFromWebsite } from './discover-client-social.js';
 import { validateSuggestedProfileIsClient } from './validate-client-profile.js';
-import { resolveModelForTask } from '../ai/model-router';
-
-let openaiClient: OpenAI | null = null;
-function getOpenAiClient(): OpenAI | null {
-  if (openaiClient) return openaiClient;
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return null;
-  openaiClient = new OpenAI({ apiKey });
-  return openaiClient;
-}
+import { openai as openaiClient, OpenAI } from '../ai/openai-client';
+import {
+  normalizeHandleFromUrlOrHandle,
+  normalizeSocialHandlePlatform,
+} from '../handles/platform-handle';
 
 const INTAKE_KEYS = [
   'name',
@@ -51,8 +45,47 @@ const INTAKE_KEYS = [
   'budgetSensitivity',
   'competitorInspirationLinks',
 ] as const;
+const INTAKE_LIST_KEYS = new Set<IntakeKey>([
+  'websites',
+  'servicesList',
+  'secondaryGoals',
+  'topProblems',
+  'resultsIn90Days',
+  'questionsBeforeBuying',
+  'brandVoiceWords',
+  'topicsToAvoid',
+  'excludedCategories',
+  'competitorInspirationLinks',
+]);
 
 export type IntakeKey = (typeof INTAKE_KEYS)[number];
+export type IntakeSuggestionStep = 'brand' | 'channels' | 'offer' | 'audience' | 'voice';
+
+const STEP_KEY_MAP: Record<IntakeSuggestionStep, readonly IntakeKey[]> = {
+  brand: ['name', 'website', 'websites', 'oneSentenceDescription', 'niche', 'businessType'],
+  channels: [],
+  offer: ['mainOffer', 'servicesList', 'primaryGoal', 'budgetSensitivity', 'secondaryGoals', 'futureGoal'],
+  audience: [
+    'idealAudience',
+    'targetAudience',
+    'operateWhere',
+    'wantClientsWhere',
+    'topProblems',
+    'resultsIn90Days',
+    'questionsBeforeBuying',
+  ],
+  voice: [
+    'brandVoiceWords',
+    'topicsToAvoid',
+    'constraints',
+    'competitorInspirationLinks',
+    'language',
+    'planningHorizon',
+    'autonomyLevel',
+    'brandTone',
+    'engineGoal',
+  ],
+};
 
 function isFilled(value: unknown): boolean {
   if (value == null) return false;
@@ -78,11 +111,26 @@ export interface SuggestIntakeCompletionResult {
   suggestedHandleValidation?: {
     instagram?: SuggestedHandleValidationItem;
     tiktok?: SuggestedHandleValidationItem;
+    linkedin?: SuggestedHandleValidationItem;
+    youtube?: SuggestedHandleValidationItem;
+    twitter?: SuggestedHandleValidationItem;
   };
+  suggestedHandleCandidates?: SuggestedHandleCandidate[];
+  warnings?: string[];
   /** Whether the user must confirm channels before starting orchestration. */
   confirmationRequired: boolean;
   /** Machine-readable reason codes for confirmation blocking. */
   confirmationReasons: string[];
+}
+
+export interface SuggestedHandleCandidate {
+  platform: 'instagram' | 'tiktok' | 'youtube' | 'twitter' | 'linkedin';
+  handle: string;
+  profileUrl?: string;
+  confidence: number;
+  reason: string;
+  source: string;
+  isLikelyClient: boolean;
 }
 
 function normalizeHandle(raw: unknown): string {
@@ -90,11 +138,27 @@ function normalizeHandle(raw: unknown): string {
   return s;
 }
 
-const PRIMARY_CHANNELS = ['instagram', 'tiktok', 'youtube', 'twitter', 'x'] as const;
+const PRIMARY_CHANNELS = ['instagram', 'tiktok', 'youtube', 'twitter', 'x', 'linkedin'] as const;
 const HIGH_CONFIDENCE_THRESHOLD = 0.75;
+const AUTO_APPLY_HANDLE_THRESHOLD = Number(process.env.SUGGEST_HANDLE_AUTO_APPLY_THRESHOLD || 0.82);
 const TIKTOK_SUGGESTION_CONFIDENCE = Number(
   process.env.TIKTOK_SUGGESTION_CONFIDENCE_THRESHOLD || 0.7
 );
+const SOCIAL_VALIDATION_CANDIDATE_LIMIT = Number(process.env.SUGGEST_SOCIAL_VALIDATION_LIMIT || 6);
+const SOCIAL_VALIDATION_MIN_CONFIDENCE = Number(process.env.SUGGEST_SOCIAL_VALIDATION_MIN_CONFIDENCE || 0.6);
+const ENABLE_CROSS_PLATFORM_GUESS = String(process.env.SUGGEST_CROSS_PLATFORM_GUESS || '')
+  .trim()
+  .toLowerCase() === 'true';
+const AUTO_APPLY_DISCOVERED_HANDLES = String(process.env.SUGGEST_AUTO_APPLY_DISCOVERED_HANDLES || '')
+  .trim()
+  .toLowerCase() === 'true';
+const DISCOVERED_HANDLE_AUTO_APPLY_MIN_CONFIDENCE = Number(
+  process.env.SUGGEST_DISCOVERED_HANDLE_AUTO_APPLY_MIN_CONFIDENCE || 0.9
+);
+
+function containsUrl(value: string): boolean {
+  return /https?:\/\/|(?:^|\s)(?:www\.)?[a-z0-9.-]+\.[a-z]{2,}(?:\/|$)/i.test(String(value || ''));
+}
 
 function hasPrimaryHandle(handles: Record<string, unknown>): boolean {
   return PRIMARY_CHANNELS.some((platform) => normalizeHandle(handles[platform]).length > 0);
@@ -112,11 +176,57 @@ function hasWebsiteProvided(partialPayload: Record<string, unknown>): boolean {
   return false;
 }
 
+function parseSuggestionStep(value: unknown): IntakeSuggestionStep | undefined {
+  const raw = String(value || '').trim().toLowerCase();
+  if (raw === 'brand' || raw === 'channels' || raw === 'offer' || raw === 'audience' || raw === 'voice') {
+    return raw;
+  }
+  return undefined;
+}
+
+function filterMissingKeysForStep(
+  missingKeys: IntakeKey[],
+  step?: IntakeSuggestionStep
+): IntakeKey[] {
+  if (!step) return missingKeys;
+  const allowed = new Set<string>(STEP_KEY_MAP[step]);
+  return missingKeys.filter((key) => allowed.has(key));
+}
+
 function sanitizeSentence(value: string): string {
   return String(value || '')
     .replace(/\s+/g, ' ')
     .replace(/^[^a-zA-Z0-9]+/, '')
     .trim();
+}
+
+function isLowSignalAutofillText(value: unknown): boolean {
+  const text = sanitizeSentence(String(value || ''));
+  if (!text) return false;
+  if (text.length < 24) return true;
+  if (/(operates through|through https?:\/\/|visit .* for more|official website)/i.test(text)) return true;
+  if (/^([a-z0-9][a-z0-9\s._-]{1,40})\s+(is|offers|operates)\s+through\s+https?:\/\//i.test(text)) return true;
+  return false;
+}
+
+function isNoisySuggestionItem(value: string): boolean {
+  const text = sanitizeSentence(String(value || ''));
+  if (!text) return true;
+  if (
+    /(chatgpt|jailbreak|prompt injection|mp3|download music|lyrics|torrent|casino|betting|porn|adult|logo design services|buy followers|cheap seo|free download)/i.test(
+      text
+    )
+  ) {
+    return true;
+  }
+  if (/^buy\s+/i.test(text) && /services?/i.test(text)) return true;
+  return false;
+}
+
+function sanitizeListSuggestion(value: unknown, maxItems = 20): string[] {
+  return parseLooseList(value, maxItems).filter(
+    (entry) => !isLowSignalAutofillText(entry) && !isNoisySuggestionItem(entry)
+  );
 }
 
 function extractDescriptionFromEvidence(websiteEvidence: string, brandName: string): string {
@@ -131,6 +241,7 @@ function extractDescriptionFromEvidence(websiteEvidence: string, brandName: stri
       return words.length >= 8 && words.length <= 34;
     })
     .filter((row) => row.length >= 60 && row.length <= 240)
+    .filter((row) => !containsUrl(row))
     .filter(
       (row) =>
         !/cookie|privacy|terms|copyright|javascript|menu|navigation|login|log in|sign up|subscribe|tip|tips|cart|checkout|home page/i.test(
@@ -296,6 +407,101 @@ function parseLooseList(value: unknown, maxItems = 20): string[] {
   );
 }
 
+function parseStringCandidates(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((entry) => String(entry || '').trim()).filter(Boolean);
+  }
+  const text = String(value || '').trim();
+  if (!text) return [];
+  const urls = text.match(/https?:\/\/[^\s)]+/gi) || [];
+  if (urls.length > 0) return urls.map((entry) => entry.trim()).filter(Boolean);
+  return text
+    .split(/[\n,;|]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function inferSocialPlatformFromReference(
+  rawValue: string
+): SuggestedHandleCandidate['platform'] | null {
+  const lower = String(rawValue || '').toLowerCase();
+  if (lower.includes('instagram.com/')) return 'instagram';
+  if (lower.includes('tiktok.com/')) return 'tiktok';
+  if (lower.includes('youtube.com/') || lower.includes('youtu.be/')) return 'youtube';
+  if (lower.includes('linkedin.com/')) return 'linkedin';
+  if (lower.includes('x.com/') || lower.includes('twitter.com/')) return 'twitter';
+  return null;
+}
+
+function profileUrlFromHandle(platform: SuggestedHandleCandidate['platform'], handle: string): string {
+  const normalized = normalizeHandle(handle);
+  if (!normalized) return '';
+  if (platform === 'instagram') return `https://www.instagram.com/${normalized}`;
+  if (platform === 'tiktok') return `https://www.tiktok.com/@${normalized}`;
+  if (platform === 'youtube') return `https://www.youtube.com/@${normalized}`;
+  if (platform === 'linkedin') return `https://www.linkedin.com/in/${normalized}`;
+  return `https://x.com/${normalized}`;
+}
+
+function candidateKey(candidate: Pick<SuggestedHandleCandidate, 'platform' | 'handle'>): string {
+  return `${candidate.platform}:${normalizeHandle(candidate.handle)}`;
+}
+
+function parseUserSocialReferenceCandidates(payload: Record<string, unknown>): SuggestedHandleCandidate[] {
+  const rawValues = parseStringCandidates(payload.socialReferences);
+  const candidates: SuggestedHandleCandidate[] = [];
+  for (const raw of rawValues) {
+    const platformFromString = normalizeSocialHandlePlatform(raw);
+    const inferredPlatform = inferSocialPlatformFromReference(raw);
+    const normalizedPlatform =
+      platformFromString === 'x'
+        ? 'twitter'
+        : platformFromString && platformFromString !== 'facebook'
+          ? platformFromString
+          : inferredPlatform;
+    if (!normalizedPlatform) continue;
+    if (
+      normalizedPlatform !== 'instagram' &&
+      normalizedPlatform !== 'tiktok' &&
+      normalizedPlatform !== 'youtube' &&
+      normalizedPlatform !== 'twitter' &&
+      normalizedPlatform !== 'linkedin'
+    ) {
+      continue;
+    }
+    const parserPlatform = normalizedPlatform === 'twitter' ? 'x' : normalizedPlatform;
+    const handle = normalizeHandleFromUrlOrHandle(raw, parserPlatform);
+    if (!handle) continue;
+    candidates.push({
+      platform: normalizedPlatform,
+      handle,
+      profileUrl: profileUrlFromHandle(normalizedPlatform, handle) || raw,
+      confidence: 0.98,
+      reason: 'Detected directly from social profile URL provided in websites stage.',
+      source: 'user_provided_social_url',
+      isLikelyClient: true,
+    });
+  }
+  return candidates;
+}
+
+function mergeHandleCandidates(
+  candidates: SuggestedHandleCandidate[],
+  limit = 15
+): SuggestedHandleCandidate[] {
+  const map = new Map<string, SuggestedHandleCandidate>();
+  for (const candidate of candidates) {
+    const key = candidateKey(candidate);
+    const existing = map.get(key);
+    if (!existing || candidate.confidence > existing.confidence) {
+      map.set(key, candidate);
+    }
+  }
+  return Array.from(map.values())
+    .sort((a, b) => b.confidence - a.confidence)
+    .slice(0, limit);
+}
+
 function deriveServiceCandidatesFromDescription(description: string): string[] {
   const text = sanitizeSentence(description);
   if (!text) return [];
@@ -413,14 +619,19 @@ function buildFallbackSuggestions(
 
   if (missing.has('oneSentenceDescription')) {
     const extractedDescription = extractDescriptionFromEvidence(evidenceContext, brandName);
-    if (extractedDescription) {
+    if (extractedDescription && !isLowSignalAutofillText(extractedDescription) && !containsUrl(extractedDescription)) {
       fallback.oneSentenceDescription = extractedDescription;
     } else if (brandName && (mainOffer || primaryGoal)) {
-      fallback.oneSentenceDescription = mainOffer
-        ? `${brandName} offers ${mainOffer}.`
-        : `${brandName} focuses on ${primaryGoal}.`;
-    } else if (brandName && normalizedWebsite) {
-      fallback.oneSentenceDescription = `${brandName} operates through ${normalizedWebsite}.`;
+      const audienceLabel = sanitizeSentence(targetAudience || idealAudienceInput || '');
+      if (mainOffer) {
+        fallback.oneSentenceDescription = audienceLabel
+          ? `${brandName} helps ${audienceLabel} through ${mainOffer}.`
+          : `${brandName} delivers ${mainOffer} to drive measurable outcomes.`;
+      } else {
+        fallback.oneSentenceDescription = `${brandName} focuses on ${primaryGoal}.`;
+      }
+    } else if (brandName) {
+      fallback.oneSentenceDescription = `${brandName} helps clients achieve measurable outcomes through focused offers and clear execution.`;
     }
   }
 
@@ -455,7 +666,7 @@ function buildFallbackSuggestions(
     );
     const fallbackOffer = preferred || serviceCandidates[0] || mainOffer;
     const normalizedOffer = sanitizeSentence(fallbackOffer);
-    if (normalizedOffer) {
+    if (normalizedOffer && !containsUrl(normalizedOffer) && !isLowSignalAutofillText(normalizedOffer)) {
       fallback.mainOffer = normalizedOffer;
     }
   }
@@ -639,10 +850,63 @@ function keepOnlyMissingKeys(
   return out;
 }
 
+function normalizeSuggestedShape(
+  suggested: Record<string, unknown>,
+  missingKeys: IntakeKey[]
+): Record<string, unknown> {
+  const allowed = new Set<IntakeKey>(missingKeys);
+  const normalized: Record<string, unknown> = {};
+  for (const key of missingKeys) {
+    const raw = suggested[key];
+    if (raw === undefined || raw === null) continue;
+    if (!allowed.has(key)) continue;
+
+    if (INTAKE_LIST_KEYS.has(key)) {
+      const maxItems = key === 'resultsIn90Days' ? 2 : key === 'topProblems' ? 3 : key === 'questionsBeforeBuying' ? 3 : key === 'competitorInspirationLinks' ? 5 : 20;
+      const values = parseLooseList(raw, maxItems);
+      if (values.length > 0) {
+        normalized[key] = values;
+      }
+      continue;
+    }
+
+    if (key === 'autonomyLevel') {
+      const mode = String(raw || '')
+        .trim()
+        .toLowerCase();
+      normalized[key] = mode === 'auto' ? 'auto' : 'assist';
+      continue;
+    }
+
+    if (key === 'budgetSensitivity') {
+      const sensitivity = String(raw || '')
+        .trim()
+        .toLowerCase();
+      if (['low', 'mid', 'high'].includes(sensitivity)) {
+        normalized[key] = sensitivity;
+      } else if (sensitivity) {
+        normalized[key] = 'mid';
+      }
+      continue;
+    }
+
+    const text = Array.isArray(raw)
+      ? sanitizeSentence(raw.map((entry) => String(entry || '').trim()).filter(Boolean).join(' / '))
+      : sanitizeSentence(String(raw || ''));
+    if (text) normalized[key] = text;
+  }
+  return normalized;
+}
+
 export async function suggestIntakeCompletion(
-  partialPayload: Record<string, unknown>
+  partialPayload: Record<string, unknown>,
+  options?: { step?: IntakeSuggestionStep }
 ): Promise<SuggestIntakeCompletionResult> {
-  const openai = getOpenAiClient();
+  const hasOpenAi = Boolean(
+    String(process.env.OPENAI_API_KEY || '').trim() || String(process.env.OPENAI_API_KEY_FALLBACK || '').trim()
+  );
+  const warnings = new Set<string>();
+  const suggestionStep = options?.step || parseSuggestionStep(partialPayload.step);
 
   const filledByUser: string[] = [];
   const contextParts: string[] = [];
@@ -651,32 +915,17 @@ export async function suggestIntakeCompletion(
     const raw = partialPayload[key];
     if (isFilled(raw)) {
       filledByUser.push(key);
-      const display =
-        Array.isArray(raw) ? (raw as unknown[]).join(', ') : String(raw);
+      const display = Array.isArray(raw) ? (raw as unknown[]).join(', ') : String(raw);
       contextParts.push(`${key}: ${display}`);
     }
   }
 
   const websiteEvidence = String(partialPayload._websiteEvidence || partialPayload.websiteEvidence || '').trim();
   const ddgEvidence = String(partialPayload._ddgEvidence || partialPayload.ddgEvidence || '').trim();
-  if (websiteEvidence) {
-    contextParts.push(`websiteEvidence: ${websiteEvidence}`);
-  }
-  if (ddgEvidence) {
-    contextParts.push(`ddgEvidence: ${ddgEvidence}`);
-  }
-
-  if (contextParts.length === 0) {
-    return {
-      suggested: {},
-      filledByUser: [],
-      confirmationRequired: true,
-      confirmationReasons: ['MISSING_PRIMARY_CHANNEL'],
-    };
-  }
+  if (websiteEvidence) contextParts.push(`websiteEvidence: ${websiteEvidence}`);
+  if (ddgEvidence) contextParts.push(`ddgEvidence: ${ddgEvidence}`);
 
   const contextStr = contextParts.join('\n');
-  const missingKeys = INTAKE_KEYS.filter((k) => !filledByUser.includes(k));
   const handles =
     partialPayload.handles && typeof partialPayload.handles === 'object'
       ? (partialPayload.handles as Record<string, unknown>)
@@ -691,160 +940,307 @@ export async function suggestIntakeCompletion(
   const website = String(websiteFromList || partialPayload.website || '').trim();
   const name = String(partialPayload.name || '').trim();
 
-  if (missingKeys.length === 0) {
-    const confirmationReasons =
-      hasPrimaryHandle(handles) || hasWebsite ? [] : ['MISSING_PRIMARY_CHANNEL'];
-    return {
-      suggested: {},
-      filledByUser: [...INTAKE_KEYS],
-      confirmationRequired: confirmationReasons.length > 0,
-      confirmationReasons,
-    };
-  }
+  let missingKeys = INTAKE_KEYS.filter((k) => !filledByUser.includes(k));
+  missingKeys = filterMissingKeysForStep(missingKeys, suggestionStep);
 
-  let suggested: Record<string, unknown> = buildFallbackSuggestions(partialPayload, missingKeys, website);
+  const fallbackSuggested = buildFallbackSuggestions(partialPayload, missingKeys, website);
+  let suggested: Record<string, unknown> = {
+    ...fallbackSuggested,
+  };
 
-  if (openai && contextParts.length > 0) {
-    const systemPrompt = `You are a brand strategy assistant. Given partial business intake form data, suggest plausible values ONLY for the missing fields. Return a JSON object with exactly the keys listed in the "Missing keys" section. Rules:
-- Do not suggest values for fields the user already provided.
-- For list fields (websites, servicesList, topProblems, resultsIn90Days, questionsBeforeBuying, secondaryGoals, excludedCategories, competitorInspirationLinks) return an array of strings.
-- For single-line fields return a string. Keep suggestions concise and consistent with the provided context.
-- competitorInspirationLinks: return an empty array or leave out if you cannot suggest real URLs.
-- brandVoiceWords: 3-5 words only. topicsToAvoid: short list or comma-separated.
-- Be professional and aligned with the business context.`;
+  if (missingKeys.length > 0 && hasOpenAi && contextParts.length > 0) {
+    const stepLabel = suggestionStep ? suggestionStep.toUpperCase() : 'GLOBAL';
+    const stepRules = suggestionStep === 'brand'
+      ? `Brand step: produce a specific one-sentence description with outcome + audience. Never include raw URLs in prose fields.`
+      : suggestionStep === 'channels'
+        ? `Channels step: never invent handles. Only suggest channels grounded in evidence or explicit social references.`
+        : suggestionStep === 'offer'
+          ? `Offer step: produce concrete offer and services phrasing, never generic placeholder copy.`
+          : suggestionStep === 'audience'
+            ? `Audience step: define a clear target segment, pains, and intent in practical language.`
+            : suggestionStep === 'voice'
+              ? `Voice step: propose strong, brand-safe voice and guardrails with realistic constraints.`
+              : `Global step: keep suggestions practical and conversion-focused.`;
+    const systemPrompt = `You are BAT's intake strategist. Generate polished, specific, evidence-grounded suggestions for missing intake fields.
+Rules:
+- Output strict JSON only. No markdown.
+- Return only the missing keys requested.
+- Never use boilerplate like "operates through <url>" unless there is no meaningful evidence.
+- Prefer concrete offers/services/audience language based on context evidence.
+- Lists must be arrays of strings.
+- Keep tone professional, confident, and human.
+${stepRules}`;
 
-    const userPrompt = `Context (fields the user already filled):
+    const userPrompt = `Step: ${stepLabel}
+Context:
 ${contextStr}
 
-Missing keys to suggest (return JSON only with these keys): ${missingKeys.join(', ')}
+Missing keys:
+${missingKeys.join(', ')}
 
-Return a single JSON object. No explanation.`;
+Return a single JSON object with only these keys.`;
 
     try {
-      const response = await openai.chat.completions.create({
-        model: resolveModelForTask('intake_completion'),
+      const response = (await openaiClient.bat.chatCompletion('intake_completion', {
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
         ],
         response_format: { type: 'json_object' },
-        temperature: 0.5,
-        max_tokens: 1500,
-      });
+        max_completion_tokens: 1800,
+      })) as OpenAI.Chat.Completions.ChatCompletion;
 
       const raw = response.choices[0]?.message?.content || '{}';
-      const aiSuggested = keepOnlyMissingKeys(JSON.parse(raw) as Record<string, unknown>, missingKeys);
+      const aiSuggestedRaw = keepOnlyMissingKeys(JSON.parse(raw) as Record<string, unknown>, missingKeys);
+      const aiSuggested = normalizeSuggestedShape(aiSuggestedRaw, missingKeys);
       suggested = {
         ...suggested,
         ...aiSuggested,
       };
     } catch (error: unknown) {
       console.warn('[SuggestIntake] AI completion fallback:', (error as Error)?.message || String(error));
+      warnings.add('AI_UNAVAILABLE');
       suggested = keepOnlyMissingKeys(suggested, missingKeys);
     }
-  } else {
-    suggested = keepOnlyMissingKeys(suggested, missingKeys);
+  } else if (!hasOpenAi) {
+    warnings.add('AI_NOT_CONFIGURED');
+  }
+
+  suggested = normalizeSuggestedShape(keepOnlyMissingKeys(suggested, missingKeys), missingKeys);
+
+  const lowSignalKeys = (['oneSentenceDescription', 'mainOffer', 'primaryGoal'] as const).filter((key) =>
+    isLowSignalAutofillText(suggested[key])
+  );
+  if (lowSignalKeys.length > 0) {
+    warnings.add('LOW_SIGNAL_COPY');
+    for (const key of lowSignalKeys) {
+      const fallbackValue = fallbackSuggested[key];
+      if (fallbackValue && !isLowSignalAutofillText(fallbackValue)) {
+        suggested[key] = fallbackValue;
+      } else {
+        delete suggested[key];
+      }
+    }
+  }
+
+  const mainOffer = sanitizeSentence(String(suggested.mainOffer || ''));
+  if (mainOffer && !isLowSignalAutofillText(mainOffer) && !containsUrl(mainOffer)) {
+    suggested.mainOffer = mainOffer;
+  } else if (missingKeys.includes('mainOffer')) {
+    const fallbackOffer = sanitizeSentence(String(fallbackSuggested.mainOffer || ''));
+    if (fallbackOffer && !containsUrl(fallbackOffer) && !isLowSignalAutofillText(fallbackOffer)) {
+      suggested.mainOffer = fallbackOffer;
+    } else {
+      delete suggested.mainOffer;
+    }
+  }
+
+  const oneSentenceDescription = sanitizeSentence(String(suggested.oneSentenceDescription || ''));
+  if (oneSentenceDescription) {
+    if (containsUrl(oneSentenceDescription) || isLowSignalAutofillText(oneSentenceDescription)) {
+      const fallbackDescription = sanitizeSentence(String(fallbackSuggested.oneSentenceDescription || ''));
+      if (fallbackDescription && !containsUrl(fallbackDescription) && !isLowSignalAutofillText(fallbackDescription)) {
+        suggested.oneSentenceDescription = fallbackDescription;
+      } else {
+        delete suggested.oneSentenceDescription;
+      }
+    } else {
+      suggested.oneSentenceDescription = oneSentenceDescription;
+    }
+  }
+
+  if (missingKeys.includes('servicesList')) {
+    const aiServices = sanitizeListSuggestion(suggested.servicesList, 20);
+    const fallbackServices = sanitizeListSuggestion(fallbackSuggested.servicesList, 20);
+    const combinedServices = uniqueList(
+      [...aiServices, ...fallbackServices].filter((entry) => !containsUrl(entry)),
+      20
+    );
+    if (combinedServices.length > 0) {
+      suggested.servicesList = combinedServices;
+    } else {
+      delete suggested.servicesList;
+    }
   }
 
   const suggestedHandles: Record<string, string> = {};
   const suggestedHandleValidation: SuggestIntakeCompletionResult['suggestedHandleValidation'] = {};
-  const instagramHandle = normalizeHandle(handles.instagram);
-  const tiktokHandle = normalizeHandle(handles.tiktok);
+  const handleCandidates: SuggestedHandleCandidate[] = parseUserSocialReferenceCandidates(partialPayload);
+  const hasUserProvidedSocialCandidate = handleCandidates.some(
+    (candidate) => candidate.source === 'user_provided_social_url'
+  );
+  const discoveredCandidateMinConfidence = hasUserProvidedSocialCandidate ? 0.7 : 0.55;
+  const allowDiscoveryWithProvidedSocialRefs =
+    String(process.env.SUGGEST_SOCIAL_DISCOVERY_WITH_USER_REFS || '')
+      .trim()
+      .toLowerCase() === 'true';
+  const shouldRunDomainDiscovery = Boolean(website) && (!hasUserProvidedSocialCandidate || allowDiscoveryWithProvidedSocialRefs);
 
-  // Discover client Instagram/TikTok from website when user left them empty (domain-first search; never infer from brand name).
-  if (website && !instagramHandle) {
+  if (shouldRunDomainDiscovery) {
     try {
       const discovered = await discoverClientSocialFromWebsite(website, name);
-      if (discovered.instagram) {
-        suggestedHandles.instagram = discovered.instagram;
-        const validation = await validateSuggestedProfileIsClient({
-          handle: discovered.instagram,
-          platform: 'instagram',
-          clientWebsite: website,
-          clientName: name,
-        });
-        suggestedHandleValidation.instagram = {
-          handle: discovered.instagram,
-          isLikelyClient: validation.isLikelyClient,
-          confidence: validation.confidence,
-          reason: validation.reason,
-        };
+      if (Array.isArray(discovered.candidates)) {
+        for (const candidate of discovered.candidates) {
+          const confidence = Number(candidate.confidence || 0.55);
+          if (confidence < discoveredCandidateMinConfidence) continue;
+          handleCandidates.push({
+            platform: candidate.platform,
+            handle: candidate.handle,
+            profileUrl: candidate.profileUrl,
+            confidence,
+            reason: String(candidate.reason || 'Discovered from domain-first social search.'),
+            source: String(candidate.source || 'ddg_social_search'),
+            isLikelyClient: Boolean(candidate.isLikelyClient),
+          });
+        }
+      } else {
+        if (discovered.instagram) {
+          if (0.62 >= discoveredCandidateMinConfidence) {
+            handleCandidates.push({
+              platform: 'instagram',
+              handle: discovered.instagram,
+              profileUrl: profileUrlFromHandle('instagram', discovered.instagram),
+              confidence: 0.62,
+              reason: 'Discovered from domain-first social search.',
+              source: 'ddg_social_search',
+              isLikelyClient: false,
+            });
+          }
+        }
+        if (discovered.tiktok) {
+          if (0.62 >= discoveredCandidateMinConfidence) {
+            handleCandidates.push({
+              platform: 'tiktok',
+              handle: discovered.tiktok,
+              profileUrl: profileUrlFromHandle('tiktok', discovered.tiktok),
+              confidence: 0.62,
+              reason: 'Discovered from domain-first social search.',
+              source: 'ddg_social_search',
+              isLikelyClient: false,
+            });
+          }
+        }
       }
-      if (discovered.tiktok && !tiktokHandle) {
-        suggestedHandles.tiktok = discovered.tiktok;
-        const validation = await validateSuggestedProfileIsClient({
-          handle: discovered.tiktok,
-          platform: 'tiktok',
-          clientWebsite: website,
-          clientName: name,
-        });
-        suggestedHandleValidation.tiktok = {
-          handle: discovered.tiktok,
-          isLikelyClient: validation.isLikelyClient,
-          confidence: validation.confidence,
-          reason: validation.reason,
-        };
-      }
-    } catch (err: unknown) {
-      console.warn('[SuggestIntake] Discover/validate client social failed:', (err as Error)?.message);
+    } catch (error) {
+      console.warn(
+        '[SuggestIntake] discoverClientSocialFromWebsite failed:',
+        (error as Error)?.message || String(error)
+      );
     }
   }
 
-  // Suggest TikTok from Instagram when user already filled Instagram (many brands use same handle),
-  // but only if we can validate with decent confidence.
-  if (instagramHandle && !tiktokHandle && !suggestedHandles.tiktok) {
-    try {
-      const validation = await validateSuggestedProfileIsClient({
-        handle: instagramHandle,
-        platform: 'tiktok',
-        clientWebsite: website,
-        clientName: name,
-      });
-      suggestedHandleValidation.tiktok = {
-        handle: instagramHandle,
-        isLikelyClient: validation.isLikelyClient,
-        confidence: validation.confidence,
-        reason: validation.reason,
-      };
-      if (validation.isLikelyClient && validation.confidence >= TIKTOK_SUGGESTION_CONFIDENCE) {
-        suggestedHandles.tiktok = instagramHandle;
+  const instagramHandle = normalizeHandle(handles.instagram);
+  const tiktokHandle = normalizeHandle(handles.tiktok);
+  if (ENABLE_CROSS_PLATFORM_GUESS && instagramHandle && !tiktokHandle && !hasUserProvidedSocialCandidate) {
+    handleCandidates.push({
+      platform: 'tiktok',
+      handle: instagramHandle,
+      profileUrl: profileUrlFromHandle('tiktok', instagramHandle),
+      confidence: TIKTOK_SUGGESTION_CONFIDENCE,
+      reason: 'Instagram and TikTok handles often match for the same brand.',
+      source: 'cross_platform_guess',
+      isLikelyClient: false,
+    });
+  }
+
+  const uniqueCandidates = mergeHandleCandidates(handleCandidates);
+  const candidatesToValidate = new Set(
+    uniqueCandidates
+      .filter(
+        (candidate) =>
+          candidate.source !== 'user_provided_social_url' &&
+          Number(candidate.confidence || 0) >= SOCIAL_VALIDATION_MIN_CONFIDENCE
+      )
+      .slice(0, Math.max(1, SOCIAL_VALIDATION_CANDIDATE_LIMIT))
+      .map((candidate) => candidateKey(candidate))
+  );
+  for (const candidate of uniqueCandidates) {
+    const existingHandle = normalizeHandle(handles[candidate.platform]);
+    if (existingHandle) continue;
+    const shouldValidate = candidate.source !== 'user_provided_social_url' && candidatesToValidate.has(candidateKey(candidate));
+    if (shouldValidate) {
+      try {
+        const validation = await validateSuggestedProfileIsClient({
+          handle: candidate.handle,
+          platform: candidate.platform === 'twitter' ? 'x' : candidate.platform,
+          clientWebsite: website,
+          clientName: name,
+        });
+        candidate.isLikelyClient = validation.isLikelyClient;
+        candidate.confidence = Math.max(candidate.confidence, Number(validation.confidence || 0));
+        candidate.reason = validation.reason || candidate.reason;
+      } catch (error) {
+        console.warn('[SuggestIntake] candidate validation failed:', (error as Error)?.message || String(error));
       }
-    } catch (err: unknown) {
-      console.warn('[SuggestIntake] TikTok-from-Instagram validation failed:', (err as Error)?.message);
+    }
+
+    const validationItem: SuggestedHandleValidationItem = {
+      handle: candidate.handle,
+      isLikelyClient: candidate.isLikelyClient,
+      confidence: candidate.confidence,
+      reason: candidate.reason,
+    };
+    if (candidate.platform === 'instagram' && !suggestedHandleValidation.instagram) {
+      suggestedHandleValidation.instagram = validationItem;
+    }
+    if (candidate.platform === 'tiktok' && !suggestedHandleValidation.tiktok) {
+      suggestedHandleValidation.tiktok = validationItem;
+    }
+    if (candidate.platform === 'linkedin' && !suggestedHandleValidation.linkedin) {
+      suggestedHandleValidation.linkedin = validationItem;
+    }
+    if (candidate.platform === 'youtube' && !suggestedHandleValidation.youtube) {
+      suggestedHandleValidation.youtube = validationItem;
+    }
+    if (candidate.platform === 'twitter' && !suggestedHandleValidation.twitter) {
+      suggestedHandleValidation.twitter = validationItem;
+    }
+
+    const isUserProvided = candidate.source === 'user_provided_social_url';
+    const discoveredAutoApplyAllowed =
+      AUTO_APPLY_DISCOVERED_HANDLES &&
+      candidate.isLikelyClient &&
+      Number(candidate.confidence || 0) >= Math.max(AUTO_APPLY_HANDLE_THRESHOLD, DISCOVERED_HANDLE_AUTO_APPLY_MIN_CONFIDENCE);
+    if (isUserProvided || discoveredAutoApplyAllowed) {
+      suggestedHandles[candidate.platform] = candidate.handle;
     }
   }
 
   const hasUserPrimaryHandle = hasPrimaryHandle(handles);
-  const suggestedValidations = Object.values(suggestedHandleValidation || {}).filter(Boolean) as SuggestedHandleValidationItem[];
-  const hasHighConfidenceSuggestedPrimary = suggestedValidations.some(
-    (item) => item.isLikelyClient && Number(item.confidence || 0) >= HIGH_CONFIDENCE_THRESHOLD
+  const hasHighConfidenceSuggestedPrimary = uniqueCandidates.some(
+    (candidate) =>
+      PRIMARY_CHANNELS.includes(candidate.platform as (typeof PRIMARY_CHANNELS)[number]) &&
+      candidate.isLikelyClient &&
+      Number(candidate.confidence || 0) >= HIGH_CONFIDENCE_THRESHOLD
   );
-  const hasLowConfidenceSuggestion = suggestedValidations.some(
-    (item) => !item.isLikelyClient || Number(item.confidence || 0) < HIGH_CONFIDENCE_THRESHOLD
+  const hasLowConfidenceSuggestion = uniqueCandidates.some(
+    (candidate) => Number(candidate.confidence || 0) < HIGH_CONFIDENCE_THRESHOLD
   );
-  const hasUnvalidatedSuggestedPrimary = Object.keys(suggestedHandles).some((platform) => {
-    if (!PRIMARY_CHANNELS.includes(platform as (typeof PRIMARY_CHANNELS)[number])) return false;
-    if (hasUserPrimaryHandle) return false;
-    if (platform === 'instagram' && suggestedHandleValidation.instagram) return false;
-    if (platform === 'tiktok' && suggestedHandleValidation.tiktok) return false;
-    return true;
-  });
+  if (uniqueCandidates.length > 0 && !hasHighConfidenceSuggestedPrimary) {
+    warnings.add('NO_HIGH_CONFIDENCE_CHANNELS');
+  }
 
   const confirmationReasons: string[] = [];
   if (!hasUserPrimaryHandle && !hasHighConfidenceSuggestedPrimary && !hasWebsite) {
     confirmationReasons.push('MISSING_PRIMARY_CHANNEL');
   }
-  if (hasLowConfidenceSuggestion || hasUnvalidatedSuggestedPrimary) {
+  if (hasLowConfidenceSuggestion) {
     confirmationReasons.push('LOW_CONFIDENCE_SUGGESTION');
   }
+  for (const warningCode of warnings) {
+    if (warningCode === 'AI_UNAVAILABLE' || warningCode === 'AI_NOT_CONFIGURED') {
+      confirmationReasons.push(warningCode);
+    }
+  }
 
-  const result: SuggestIntakeCompletionResult = {
+  return {
     suggested,
     filledByUser,
     ...(Object.keys(suggestedHandles).length > 0 ? { suggestedHandles } : {}),
     ...(Object.keys(suggestedHandleValidation).length > 0 ? { suggestedHandleValidation } : {}),
+    ...(uniqueCandidates.length > 0 ? { suggestedHandleCandidates: uniqueCandidates } : {}),
+    ...(warnings.size > 0 ? { warnings: Array.from(warnings) } : {}),
     confirmationRequired: confirmationReasons.length > 0,
-    confirmationReasons,
+    confirmationReasons: Array.from(new Set(confirmationReasons)),
   };
-  return result;
 }
