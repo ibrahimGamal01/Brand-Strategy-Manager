@@ -4,6 +4,16 @@ import { buildChannelsFromHandles, extractHandleFromUrlOrRaw } from "../social-h
 import { IntakeStateV2, INITIAL_INTAKE_STATE_V2, IntakeWizardStepId } from "./intake-types";
 import { buildLinkItems, toLinkStrings } from "./link-utils";
 
+export type SuggestedHandleCandidate = {
+  platform: "instagram" | "tiktok" | "youtube" | "twitter" | "linkedin";
+  handle: string;
+  profileUrl?: string;
+  confidence: number;
+  reason: string;
+  source: string;
+  isLikelyClient: boolean;
+};
+
 function normalizeText(value: unknown): string {
   return String(value || "").trim();
 }
@@ -39,7 +49,37 @@ function normalizeWebsiteCandidate(rawValue: string): string {
   try {
     const parsed = new URL(candidate);
     if (!["http:", "https:"].includes(parsed.protocol)) return "";
-    if (isSocialHost(parsed.hostname)) return "";
+    const hostname = parsed.hostname.replace(/^www\./i, "").toLowerCase();
+    if (!hostname) return "";
+    if (/[, ]/.test(hostname)) return "";
+    if (isSocialHost(hostname)) return "";
+    parsed.hash = "";
+    const normalized = parsed.toString();
+    return normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
+  } catch {
+    return "";
+  }
+}
+
+function normalizeSocialReferenceCandidate(rawValue: string): string {
+  let candidate = String(rawValue || "").trim();
+  if (!candidate) return "";
+
+  candidate = candidate
+    .replace(/^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/i, "$2")
+    .replace(/[)\],;.!]+$/g, "");
+
+  if (!/^https?:\/\//i.test(candidate)) {
+    candidate = `https://${candidate}`;
+  }
+
+  try {
+    const parsed = new URL(candidate);
+    if (!["http:", "https:"].includes(parsed.protocol)) return "";
+    const hostname = parsed.hostname.replace(/^www\./i, "").toLowerCase();
+    if (!hostname) return "";
+    if (/[, ]/.test(hostname)) return "";
+    if (!isSocialHost(hostname)) return "";
     parsed.hash = "";
     const normalized = parsed.toString();
     return normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
@@ -59,7 +99,7 @@ function extractWebsiteCandidates(value: unknown): string[] {
     if (extracted) candidates.push(extracted);
   }
 
-  const urlMatches = text.match(/https?:\/\/[^\s)]+/gi) || [];
+  const urlMatches = text.match(/https?:\/\/[^\s),;]+/gi) || [];
   candidates.push(...urlMatches);
 
   const domainMatches = text.match(/\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[\w\-./?%&=]*)?/gi) || [];
@@ -73,23 +113,57 @@ function extractWebsiteCandidates(value: unknown): string[] {
 }
 
 function normalizeWebsiteList(values: unknown, maxItems = 8): string[] {
+  return classifyWebsiteInputs(values, maxItems, maxItems).crawlWebsites;
+}
+
+function normalizeSocialReferenceList(values: unknown, maxItems = 12): string[] {
+  return classifyWebsiteInputs(values, maxItems, maxItems).socialReferences;
+}
+
+export function classifyStateWebsiteInputs(
+  state: Pick<IntakeStateV2, "website" | "websites" | "socialReferences">
+): { crawlWebsites: string[]; socialReferences: string[] } {
+  return classifyWebsiteInputs([state.website, state.websites, state.socialReferences], 8, 12);
+}
+
+function classifyWebsiteInputs(
+  values: unknown,
+  maxWebsiteItems = 8,
+  maxSocialItems = 12
+): { crawlWebsites: string[]; socialReferences: string[] } {
   const chunks = Array.isArray(values) ? values : [values];
-  const output: string[] = [];
-  const seen = new Set<string>();
+  const crawlWebsites: string[] = [];
+  const socialReferences: string[] = [];
+  const seenWebsites = new Set<string>();
+  const seenSocial = new Set<string>();
 
   for (const chunk of chunks) {
     for (const candidate of extractWebsiteCandidates(chunk)) {
       const normalized = normalizeWebsiteCandidate(candidate);
-      if (!normalized) continue;
-      const key = normalized.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      output.push(normalized);
-      if (output.length >= maxItems) return output;
+      if (normalized) {
+        const key = normalized.toLowerCase();
+        if (!seenWebsites.has(key)) {
+          seenWebsites.add(key);
+          crawlWebsites.push(normalized);
+          if (crawlWebsites.length >= maxWebsiteItems) break;
+        }
+        continue;
+      }
+
+      const socialReference = normalizeSocialReferenceCandidate(candidate);
+      if (!socialReference) continue;
+      const socialKey = socialReference.toLowerCase();
+      if (seenSocial.has(socialKey)) continue;
+      seenSocial.add(socialKey);
+      socialReferences.push(socialReference);
+      if (socialReferences.length >= maxSocialItems) break;
     }
   }
 
-  return output;
+  return {
+    crawlWebsites,
+    socialReferences,
+  };
 }
 
 function splitList(value: unknown, maxItems = 20): string[] {
@@ -123,14 +197,23 @@ export function fromPrefillToV2(prefill?: WorkspaceIntakeFormData): IntakeStateV
     ...(prefill.handles || {}),
   };
 
-  const websiteStrings = normalizeWebsiteList([prefill.website, prefill.websites], 8);
+  const classifiedWebInputs = classifyWebsiteInputs(
+    [prefill.website, prefill.websites, prefill.socialReferences],
+    8,
+    12
+  );
+  const websiteStrings = classifiedWebInputs.crawlWebsites;
+  const socialReferences = classifiedWebInputs.socialReferences;
+  const websiteValue = normalizeText(prefill.website);
+  const normalizedWebsiteValue = normalizeWebsiteList([websiteValue], 1)[0] || "";
   const competitorStrings = splitList(prefill.competitorInspirationLinks, 5);
 
   return {
     ...INITIAL_INTAKE_STATE_V2,
     name: normalizeText(prefill.name),
-    website: normalizeText(prefill.website) || websiteStrings[0] || "",
+    website: normalizedWebsiteValue || websiteStrings[0] || "",
     websites: websiteStrings,
+    socialReferences,
     oneSentenceDescription: normalizeText(prefill.oneSentenceDescription),
     niche: normalizeText(prefill.niche),
     businessType: normalizeText(prefill.businessType),
@@ -169,6 +252,7 @@ export function ensureNormalizedHandles(handles: Record<PlatformId, string>): Re
     instagram: extractHandleFromUrlOrRaw("instagram", handles.instagram),
     tiktok: extractHandleFromUrlOrRaw("tiktok", handles.tiktok),
     youtube: extractHandleFromUrlOrRaw("youtube", handles.youtube),
+    linkedin: extractHandleFromUrlOrRaw("linkedin", handles.linkedin),
     twitter: extractHandleFromUrlOrRaw("twitter", handles.twitter),
   };
 }
@@ -185,12 +269,16 @@ function withCompetitorLinks(state: IntakeStateV2): IntakeStateV2 {
 export function toSuggestPayloadV2(state: IntakeStateV2): Record<string, unknown> {
   const normalizedHandles = ensureNormalizedHandles(state.handles);
   const withLinks = withCompetitorLinks(state);
-  const websites = normalizeWebsiteList([state.website, state.websites], 8);
+  const classifiedWebInputs = classifyStateWebsiteInputs(state);
+  const websites = classifiedWebInputs.crawlWebsites;
+  const socialReferences = classifiedWebInputs.socialReferences;
 
   return {
     name: state.name,
     website: websites[0] || state.website,
     websites,
+    socialReferences,
+    includeSocialProfileCrawl: state.includeSocialProfileCrawl,
     oneSentenceDescription: state.oneSentenceDescription,
     niche: state.niche,
     businessType: state.businessType,
@@ -251,6 +339,7 @@ export function toSubmitPayloadV2(state: IntakeStateV2): Record<string, unknown>
 
 export const LIST_FIELD_KEYS: Array<keyof IntakeStateV2> = [
   "websites",
+  "socialReferences",
   "servicesList",
   "secondaryGoals",
   "topProblems",
@@ -262,8 +351,22 @@ export const LIST_FIELD_KEYS: Array<keyof IntakeStateV2> = [
   "competitorInspirationLinks",
 ];
 
+const LIST_FIELD_MAX_ITEMS: Partial<Record<keyof IntakeStateV2, number>> = {
+  websites: 5,
+  socialReferences: 12,
+  servicesList: 20,
+  secondaryGoals: 10,
+  topProblems: 3,
+  resultsIn90Days: 2,
+  questionsBeforeBuying: 3,
+  brandVoiceWords: 20,
+  topicsToAvoid: 20,
+  excludedCategories: 15,
+  competitorInspirationLinks: 5,
+};
+
 const STEP_FIELD_MAP: Record<IntakeWizardStepId, Array<keyof IntakeStateV2>> = {
-  brand: ["name", "website", "websites", "oneSentenceDescription", "niche", "businessType"],
+  brand: ["name", "website", "websites", "socialReferences", "oneSentenceDescription", "niche", "businessType"],
   channels: ["primaryChannel", "handles"],
   offer: ["mainOffer", "servicesList", "primaryGoal", "budgetSensitivity", "secondaryGoals", "futureGoal"],
   audience: [
@@ -307,14 +410,31 @@ export function applySuggestedToState(
 
     const key = rawKey as keyof IntakeStateV2;
     if (LIST_FIELD_KEYS.includes(key)) {
-      const listValue =
-        key === "websites"
-          ? normalizeWebsiteList(rawValue, 8)
-          : splitList(rawValue, key === "competitorInspirationLinks" ? 5 : 20);
-      (next[key] as unknown) = listValue;
       if (key === "websites") {
-        next.website = next.website || listValue[0] || "";
+        const classifiedWebInputs = classifyWebsiteInputs(
+          [rawValue, next.socialReferences, next.website],
+          8,
+          12
+        );
+        next.websites = classifiedWebInputs.crawlWebsites;
+        next.socialReferences = classifiedWebInputs.socialReferences;
+        next.website = next.website || classifiedWebInputs.crawlWebsites[0] || "";
+        suggestedKeys.add(rawKey);
+        continue;
       }
+
+      if (key === "socialReferences") {
+        const mergedSocialReferences = normalizeSocialReferenceList(
+          [rawValue, next.socialReferences, next.websites, next.website],
+          12
+        );
+        next.socialReferences = mergedSocialReferences;
+        suggestedKeys.add(rawKey);
+        continue;
+      }
+
+      const listValue = splitList(rawValue, LIST_FIELD_MAX_ITEMS[key] ?? 20);
+      (next[key] as unknown) = listValue;
       if (key === "competitorInspirationLinks") {
         next.competitorLinks = buildLinkItems(listValue);
       }
@@ -351,18 +471,21 @@ export function applySuggestedHandles(
   const suggestedPlatforms = new Set<string>();
 
   for (const [platform, handle] of Object.entries(suggestedHandles)) {
-    if (!["instagram", "tiktok", "youtube", "twitter"].includes(platform)) continue;
+    if (!["instagram", "tiktok", "youtube", "twitter", "linkedin"].includes(platform)) continue;
     const key = platform as PlatformId;
+    const existing = extractHandleFromUrlOrRaw(key, handles[key]);
+    if (existing.length > 0) continue;
     handles[key] = normalizeText(handle);
     suggestedPlatforms.add(key);
   }
 
   const normalizedHandles = ensureNormalizedHandles(handles);
+  const nextPrimaryChannel = state.primaryChannel || pickPrimaryChannel(normalizedHandles);
   return {
     next: {
       ...state,
       handles,
-      primaryChannel: pickPrimaryChannel(normalizedHandles),
+      primaryChannel: nextPrimaryChannel,
     },
     suggestedPlatforms,
   };

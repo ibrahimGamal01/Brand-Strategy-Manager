@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 const plans = [
   {
     name: "Starter",
@@ -49,8 +51,12 @@ export default function PricingPage() {
                 </li>
               ))}
             </ul>
-            <button
-              type="button"
+            <Link
+              href={
+                plan.name === "Scale"
+                  ? "/signup?plan=scale&intent=sales"
+                  : `/signup?plan=${encodeURIComponent(plan.name.toLowerCase())}`
+              }
               className="mt-5 w-full rounded-full px-4 py-2 text-sm font-semibold"
               style={{
                 background: plan.name === "Scale" ? "var(--bat-surface-muted)" : "var(--bat-accent)",
@@ -58,7 +64,7 @@ export default function PricingPage() {
               }}
             >
               {plan.name === "Scale" ? "Talk to Sales" : "Start with " + plan.name}
-            </button>
+            </Link>
           </article>
         ))}
       </div>

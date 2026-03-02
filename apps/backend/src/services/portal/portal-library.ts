@@ -206,6 +206,7 @@ export async function listPortalWorkspaceLibrary(
     communityInsights,
     news,
     calendarRuns,
+    workspaceDocuments,
     fileAttachments,
     aiBusinessAnalyses,
   ] = await Promise.all([
@@ -306,6 +307,26 @@ export async function listPortalWorkspaceLibrary(
       where: { researchJobId: workspaceId },
       orderBy: { createdAt: 'desc' },
       take: 24,
+    }),
+    prisma.workspaceDocument.findMany({
+      where: { researchJobId: workspaceId },
+      include: {
+        _count: {
+          select: {
+            versions: true,
+          },
+        },
+        versions: {
+          orderBy: { versionNumber: 'desc' },
+          take: 1,
+        },
+        exports: {
+          orderBy: { createdAt: 'desc' },
+          take: 8,
+        },
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: 40,
     }),
     prisma.fileAttachment.findMany({
       where: { researchJobId: workspaceId },
@@ -613,6 +634,42 @@ export async function listPortalWorkspaceLibrary(
       tags: ['calendar', String(run.status || '').toLowerCase()],
       evidenceLabel: 'Calendar run',
     })),
+    ...workspaceDocuments.map((doc) => {
+      const latestVersion = doc.versions[0] || null;
+      const previewText = compactInline(latestVersion?.contentMd || '', 460);
+      const links: Array<{ label: string; href: string }> = [];
+      const uploadHref = toStorageHref(doc.storagePath);
+      pushLink(links, 'Open original upload', uploadHref);
+      for (const [index, entry] of doc.exports.slice(0, 3).entries()) {
+        pushLink(links, `Download ${String(entry.format || 'file')}${index === 0 ? ' (latest)' : ''}`, toStorageHref(entry.storagePath));
+      }
+      const latestExport = doc.exports[0] || null;
+      const latestExportHref = latestExport ? toStorageHref(latestExport.storagePath) : undefined;
+
+      return {
+        id: `deliverable:workspace-document:${doc.id}`,
+        collection: 'deliverables' as const,
+        title: compactText(doc.title || doc.originalFileName || 'Workspace document', 140),
+        summary: compactText(
+          `${doc.mimeType} • parser ${String(doc.parserStatus || 'PENDING').toLowerCase()}${doc.parserQualityScore !== null && doc.parserQualityScore !== undefined ? ` • quality ${Math.round(Number(doc.parserQualityScore) * 100)}%` : ''}`,
+          240
+        ),
+        freshness: toIso(doc.updatedAt || doc.createdAt),
+        tags: ['workspace-document', String(doc.parserStatus || '').toLowerCase()].filter(Boolean),
+        evidenceLabel: doc.originalFileName || 'Document',
+        ...(uploadHref ? { evidenceHref: uploadHref } : {}),
+        ...(latestExportHref || uploadHref ? { downloadHref: latestExportHref || uploadHref } : {}),
+        ...(links.length ? { links } : {}),
+        ...(previewText ? { previewText } : {}),
+        details: [
+          `Document id: ${doc.id.slice(0, 8)}`,
+          `Original file: ${doc.originalFileName}`,
+          `Versions: ${doc._count?.versions ?? 0}`,
+          `Exports: ${doc.exports.length}`,
+          latestExport ? `Latest export: ${latestExport.format}` : 'Latest export: n/a',
+        ],
+      };
+    }),
     ...fileAttachments.map((file) => ({
       id: `deliverable:file:${file.id}`,
       collection: 'deliverables' as const,

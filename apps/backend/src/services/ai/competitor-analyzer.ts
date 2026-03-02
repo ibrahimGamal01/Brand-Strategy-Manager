@@ -1,17 +1,5 @@
-import { OpenAI } from 'openai';
 import { prisma } from '../../lib/prisma';
-import { resolveModelForTask } from './model-router';
-
-let openaiClient: OpenAI | null = null;
-function getOpenAiClient(): OpenAI | null {
-  if (openaiClient) return openaiClient;
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return null;
-  openaiClient = new OpenAI({ apiKey });
-  return openaiClient;
-}
-
-const COMPETITOR_ANALYZER_MODEL = resolveModelForTask('analysis_quality');
+import { openai as openaiClient, OpenAI } from './openai-client';
 
 /**
  * Competitor Gap Analysis
@@ -82,16 +70,14 @@ Identify:
 Return comprehensive JSON analysis.`;
 
   try {
-    const openai = getOpenAiClient();
-    if (!openai) {
+    if (!process.env.OPENAI_API_KEY && !process.env.OPENAI_API_KEY_FALLBACK) {
       throw new Error('OPENAI_API_KEY not configured');
     }
-    const response = await openai.chat.completions.create({
-      model: COMPETITOR_ANALYZER_MODEL,
+    const response = (await openaiClient.bat.chatCompletion('analysis_quality', {
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
       temperature: 0.4,
-    });
+    })) as OpenAI.Chat.Completions.ChatCompletion;
 
     const gapAnalysis = JSON.parse(response.choices[0].message.content || '{}');
 
@@ -169,16 +155,14 @@ Provide:
 Return JSON.`;
 
   try {
-    const openai = getOpenAiClient();
-    if (!openai) {
+    if (!process.env.OPENAI_API_KEY && !process.env.OPENAI_API_KEY_FALLBACK) {
       throw new Error('OPENAI_API_KEY not configured');
     }
-    const response = await openai.chat.completions.create({
-      model: COMPETITOR_ANALYZER_MODEL,
+    const response = (await openaiClient.bat.chatCompletion('analysis_quality', {
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
       temperature: 0.3,
-    });
+    })) as OpenAI.Chat.Completions.ChatCompletion;
 
     return JSON.parse(response.choices[0].message.content || '{}');
   } catch (error: any) {

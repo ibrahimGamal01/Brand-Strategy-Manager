@@ -1,4 +1,3 @@
-import { OpenAI } from 'openai';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -8,18 +7,10 @@ import { transcribeVideoOrAudio } from '../media/audio-transcription';
 import { extractOnScreenTextFromVideo, type OnScreenTextEntry } from '../media/video-text-extraction';
 import { isR2Configured } from '../storage/r2-client';
 import { downloadFromR2 } from '../storage/r2-storage';
+import { openai as openaiClient, OpenAI } from './openai-client';
 import { resolveModelForTask } from './model-router';
 
-let openaiClient: OpenAI | null = null;
 const MEDIA_ANALYZER_MODEL = resolveModelForTask('media_analysis');
-
-function getOpenAiClient(): OpenAI | null {
-  if (openaiClient) return openaiClient;
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return null;
-  openaiClient = new OpenAI({ apiKey });
-  return openaiClient;
-}
 
 const STORAGE_BASE = path.join(process.cwd(), 'storage');
 
@@ -127,8 +118,7 @@ export async function analyzeMediaAsset(
     const isVideo = asset.mediaType === 'VIDEO';
     const isAudio = asset.mediaType === 'AUDIO';
 
-    const openai = getOpenAiClient();
-    if (!openai) {
+    if (!process.env.OPENAI_API_KEY && !process.env.OPENAI_API_KEY_FALLBACK) {
       return {
         mediaAssetId: asset.id,
         success: false,
@@ -274,8 +264,7 @@ async function runVisualAnalysis(
   imagePath: string,
   context?: AnalyzeMediaContext
 ): Promise<Record<string, unknown> | null> {
-  const client = getOpenAiClient();
-  if (!client) return null;
+  if (!process.env.OPENAI_API_KEY && !process.env.OPENAI_API_KEY_FALLBACK) return null;
   try {
     const imageData = fs.readFileSync(imagePath);
     const base64Image = imageData.toString('base64');
@@ -295,8 +284,7 @@ Analyze this social media post visual. Return JSON with:
 - composition (balance, rule of thirds, layout), color_use (palette, contrast), typography (readability, hierarchy if text present), visual_hierarchy, cta_clarity, brand_consistency, emotional_appeal, accessibility_notes (contrast/legibility).
 - confidence_score: number 0-1.`;
 
-    const response = await client.chat.completions.create({
-      model: MEDIA_ANALYZER_MODEL,
+    const response = (await openaiClient.bat.chatCompletion('media_analysis', {
       messages: [
         {
           role: 'user',
@@ -308,7 +296,7 @@ Analyze this social media post visual. Return JSON with:
       ],
       response_format: { type: 'json_object' },
       temperature: 0.3,
-    });
+    })) as OpenAI.Chat.Completions.ChatCompletion;
     const raw = (response.choices[0] as any).message?.content;
     return raw ? (JSON.parse(raw) as Record<string, unknown>) : null;
   } catch (e) {
@@ -322,8 +310,7 @@ async function runTranscriptAnalysis(
   onScreenText?: OnScreenTextEntry[],
   context?: AnalyzeMediaContext
 ): Promise<Record<string, unknown> | null> {
-  const client = getOpenAiClient();
-  if (!client || !transcript.trim()) return null;
+  if ((!process.env.OPENAI_API_KEY && !process.env.OPENAI_API_KEY_FALLBACK) || !transcript.trim()) return null;
   try {
     let body = `Transcript:\n"${transcript.slice(0, 12000)}"`;
     if (onScreenText && onScreenText.length > 0) {
@@ -343,12 +330,11 @@ Return JSON with:
 - main_topic, themes (array), key_points (array), tone, sentiment (positive/negative/neutral), call_to_action, target_audience, hook_pattern, content_pillar (education/entertainment/inspiration/promotion/authority), psychological_triggers, emotional_appeal, cta_clarity.
 - confidence_score: number 0-1.`;
 
-    const response = await client.chat.completions.create({
-      model: MEDIA_ANALYZER_MODEL,
+    const response = (await openaiClient.bat.chatCompletion('media_analysis', {
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
       temperature: 0.3,
-    });
+    })) as OpenAI.Chat.Completions.ChatCompletion;
     const raw = (response.choices[0] as any).message?.content;
     return raw ? (JSON.parse(raw) as Record<string, unknown>) : null;
   } catch (e) {
@@ -363,8 +349,7 @@ async function runOverallAnalysis(
   onScreenText?: OnScreenTextEntry[],
   jobContext?: AnalyzeMediaContext
 ): Promise<Record<string, unknown> | null> {
-  const client = getOpenAiClient();
-  if (!client) return null;
+  if (!process.env.OPENAI_API_KEY && !process.env.OPENAI_API_KEY_FALLBACK) return null;
   try {
     let contentContext = '';
     if (transcript) contentContext += `Transcript summary: ${transcript.slice(0, 3000)}\n`;
@@ -388,12 +373,11 @@ Return JSON with:
 - main_topic, content_pillar, target_audience, content_strategy, effectiveness_rating (1-10), creative_and_design_summary (composition, color, hierarchy, cta_clarity, brand_consistency).
 - confidence_score: number 0-1.`;
 
-    const response = await client.chat.completions.create({
-      model: MEDIA_ANALYZER_MODEL,
+    const response = (await openaiClient.bat.chatCompletion('media_analysis', {
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
       temperature: 0.3,
-    });
+    })) as OpenAI.Chat.Completions.ChatCompletion;
     const raw = (response.choices[0] as any).message?.content;
     return raw ? (JSON.parse(raw) as Record<string, unknown>) : null;
   } catch (e) {

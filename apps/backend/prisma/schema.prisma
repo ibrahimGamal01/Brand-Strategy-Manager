@@ -2076,6 +2076,8 @@ model ChatBranchMessage {
   citationsJson   Json?                 @map("citations_json")
   reasoningJson   Json?                 @map("reasoning_json")
   inputOptionsJson Json?                @map("input_options_json")
+  attachmentIdsJson Json?               @map("attachment_ids_json")
+  documentIdsJson Json?                 @map("document_ids_json")
   parentMessageId String?               @map("parent_message_id")
   clientVisible   Boolean               @default(true) @map("client_visible")
   createdAt       DateTime              @default(now()) @map("created_at")
@@ -2119,6 +2121,8 @@ model AgentRun {
   policyJson       Json?               @map("policy_json")
   planJson         Json?               @map("plan_json")
   inputOptionsJson Json?               @map("input_options_json")
+  attachmentIdsJson Json?              @map("attachment_ids_json")
+  documentIdsJson Json?                @map("document_ids_json")
   startedAt        DateTime?           @map("started_at")
   endedAt          DateTime?           @map("ended_at")
   error            String?
@@ -2211,12 +2215,42 @@ enum MessageQueueItemStatus {
   CANCELLED
 }
 
+enum WorkspaceDocumentSourceKind {
+  UPLOADED
+  GENERATED
+  IMPORTED
+}
+
+enum WorkspaceDocumentParserStatus {
+  PENDING
+  PARSING
+  READY
+  NEEDS_REVIEW
+  FAILED
+}
+
+enum WorkspaceDocumentIngestionStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  NEEDS_REVIEW
+  FAILED
+}
+
+enum WorkspaceDocumentExportFormat {
+  PDF
+  DOCX
+  MD
+}
+
 model MessageQueueItem {
   id        String                 @id @default(uuid())
   branchId  String                 @map("branch_id")
   userId    String                 @map("user_id")
   content   String
   inputOptionsJson Json?           @map("input_options_json")
+  attachmentIdsJson Json?          @map("attachment_ids_json")
+  documentIdsJson Json?            @map("document_ids_json")
   steerJson Json?                  @map("steer_json")
   position  Int
   status    MessageQueueItemStatus @default(QUEUED)
@@ -2227,6 +2261,119 @@ model MessageQueueItem {
   @@index([branchId, status, position])
   @@index([branchId, createdAt])
   @@map("message_queue_items")
+}
+
+model WorkspaceDocument {
+  id                   String                      @id @default(uuid())
+  researchJobId        String                      @map("research_job_id")
+  clientId             String                      @map("client_id")
+  sourceKind           WorkspaceDocumentSourceKind @default(UPLOADED) @map("source_kind")
+  sourceAttachmentId   String?                     @map("source_attachment_id")
+  sourceClientDocumentId String?                   @map("source_client_document_id")
+  title                String
+  originalFileName     String                      @map("original_file_name")
+  mimeType             String                      @map("mime_type")
+  storagePath          String                      @map("storage_path")
+  parserStatus         WorkspaceDocumentParserStatus @default(PENDING) @map("parser_status")
+  parserQualityScore   Float?                      @map("parser_quality_score")
+  parserMetaJson       Json?                       @map("parser_meta_json")
+  latestVersionId      String?                     @map("latest_version_id")
+  createdAt            DateTime                    @default(now()) @map("created_at")
+  updatedAt            DateTime                    @updatedAt @map("updated_at")
+
+  versions      WorkspaceDocumentVersion[]
+  chunks        WorkspaceDocumentChunk[]
+  ingestionRuns WorkspaceDocumentIngestionRun[]
+  exports       WorkspaceDocumentExport[]
+
+  @@index([researchJobId, createdAt(sort: Desc)])
+  @@index([clientId, createdAt(sort: Desc)])
+  @@index([parserStatus, updatedAt(sort: Desc)])
+  @@index([sourceAttachmentId])
+  @@index([sourceClientDocumentId])
+  @@map("workspace_documents")
+}
+
+model WorkspaceDocumentVersion {
+  id            String   @id @default(uuid())
+  documentId    String   @map("document_id")
+  branchId      String   @map("branch_id")
+  versionNumber Int      @map("version_number")
+  contentMd     String   @map("content_md")
+  changeSummary String?  @map("change_summary")
+  patchJson     Json?    @map("patch_json")
+  createdBy     String   @map("created_by")
+  createdAt     DateTime @default(now()) @map("created_at")
+  runId         String?  @map("run_id")
+
+  document WorkspaceDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  chunks   WorkspaceDocumentChunk[]
+  exports  WorkspaceDocumentExport[]
+
+  @@unique([documentId, versionNumber], map: "workspace_document_versions_document_version_key")
+  @@index([branchId, createdAt(sort: Desc)])
+  @@index([runId, createdAt(sort: Desc)])
+  @@map("workspace_document_versions")
+}
+
+model WorkspaceDocumentChunk {
+  id                String   @id @default(uuid())
+  documentId        String   @map("document_id")
+  documentVersionId String   @map("document_version_id")
+  chunkIndex        Int      @map("chunk_index")
+  headingPath       String?  @map("heading_path")
+  text              String
+  tokenCount        Int      @map("token_count")
+  tableJson         Json?    @map("table_json")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  document        WorkspaceDocument        @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  documentVersion WorkspaceDocumentVersion @relation(fields: [documentVersionId], references: [id], onDelete: Cascade)
+
+  @@index([documentId, chunkIndex])
+  @@index([documentVersionId, chunkIndex])
+  @@map("workspace_document_chunks")
+}
+
+model WorkspaceDocumentIngestionRun {
+  id          String                         @id @default(uuid())
+  researchJobId String                       @map("research_job_id")
+  branchId    String?                        @map("branch_id")
+  documentId  String                         @map("document_id")
+  status      WorkspaceDocumentIngestionStatus @default(QUEUED)
+  parser      String
+  warningsJson Json?                         @map("warnings_json")
+  pagesTotal  Int?                           @map("pages_total")
+  pagesParsed Int?                           @map("pages_parsed")
+  startedAt   DateTime?                      @map("started_at")
+  endedAt     DateTime?                      @map("ended_at")
+  createdAt   DateTime                       @default(now()) @map("created_at")
+
+  document WorkspaceDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([researchJobId, createdAt(sort: Desc)])
+  @@index([documentId, createdAt(sort: Desc)])
+  @@index([branchId, createdAt(sort: Desc)])
+  @@map("workspace_document_ingestion_runs")
+}
+
+model WorkspaceDocumentExport {
+  id                String                     @id @default(uuid())
+  documentId        String                     @map("document_id")
+  documentVersionId String                     @map("document_version_id")
+  format            WorkspaceDocumentExportFormat
+  storagePath       String                     @map("storage_path")
+  mimeType          String                     @map("mime_type")
+  fileSizeBytes     Int?                       @map("file_size_bytes")
+  createdAt         DateTime                   @default(now()) @map("created_at")
+  createdBy         String                     @map("created_by")
+
+  document        WorkspaceDocument        @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  documentVersion WorkspaceDocumentVersion @relation(fields: [documentVersionId], references: [id], onDelete: Cascade)
+
+  @@index([documentId, createdAt(sort: Desc)])
+  @@index([documentVersionId, createdAt(sort: Desc)])
+  @@map("workspace_document_exports")
 }
 
 enum ChatMessageRole {

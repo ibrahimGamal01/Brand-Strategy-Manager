@@ -1,11 +1,13 @@
 import { buildAgentContext } from '../../ai/chat/chat-tool-runtime';
 import { getTool } from '../../ai/chat/tools/tool-registry';
 import { buildRuntimeAgentContext } from './context-assembler';
+import type { RuntimeAgentContext } from './agent-context';
 import { createRuntimeMutationAuditEntry } from './mutations/mutation-audit';
 import { buildRuntimeMutationOperationsFromIntelToolCall, evaluateRuntimeMutationGuard } from './mutations/mutation-guard';
 import { persistRuntimeEvidenceRefs } from '../../evidence/workspace-evidence-service';
 import { prisma } from '../../../lib/prisma';
 import type { RunPolicy, RuntimeContinuation, RuntimeDecision, RuntimeEvidenceItem, RuntimeToolArtifact, RuntimeToolResult } from './types';
+import type { AgentContext } from '../../ai/chat/agent-context';
 
 const CONFIRMATION_REQUIRED_MUTATION_TOOLS = new Set([
   'intel.stageMutation',
@@ -18,6 +20,8 @@ const TOOL_TIMEOUT_OVERRIDES_MS: Record<string, number> = {
   'web.fetch': 45_000,
   'search.web': 25_000,
   'document.generate': 180_000,
+  'document.export': 180_000,
+  'document.ingest': 120_000,
   'intel.list': 12_000,
   'intel.get': 12_000,
 };
@@ -26,12 +30,37 @@ const RUNTIME_EVIDENCE_LEDGER_ENABLED = String(process.env.RUNTIME_EVIDENCE_LEDG
   .trim()
   .toLowerCase() === 'true';
 
-const WEB_SEARCH_TOOLS = new Set(['search.web', 'research.gather', 'competitors.discover_v3']);
+const WEB_SEARCH_TOOLS = new Set(['search.web', 'research.gather', 'competitors.discover_v3', 'evidence.news']);
 const LIVE_CRAWL_TOOLS = new Set(['web.crawl', 'web.fetch']);
-const SOCIAL_INTEL_TOOLS = new Set(['evidence.posts', 'orchestration.run']);
+const SOCIAL_INTEL_TOOLS = new Set(['evidence.posts', 'evidence.videos', 'orchestration.run']);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function toToolAgentContext(runtimeContext: RuntimeAgentContext): AgentContext {
+  return {
+    researchJobId: runtimeContext.researchJobId,
+    sessionId: runtimeContext.syntheticSessionId,
+    userMessage: runtimeContext.userMessage,
+    chatRag: {
+      researchContext: {} as any,
+      researchContextText: '',
+      recentMessages: [],
+      historySummary: null,
+      pinnedBlocks: [],
+      viewedBlocks: [],
+      selectedDesigns: [],
+      recentAttachments: [],
+      sourceHandles: [],
+    },
+    userContexts: [],
+    links: runtimeContext.links,
+    runtime: {
+      nowIso: runtimeContext.nowISO,
+      requestId: runtimeContext.trace.requestId,
+    },
+  };
 }
 
 function resolveBranchIdFromSyntheticSessionId(syntheticSessionId: string): string {
@@ -222,6 +251,23 @@ function normalizeArtifacts(raw: Record<string, unknown>, toolName: string): Run
   }
   if (toolName === 'document.generate') {
     pushArtifact('deliverable', raw.docId, 'deliverables');
+  }
+  if (toolName === 'document.ingest' || toolName === 'document.read' || toolName === 'document.search') {
+    pushArtifact('workspace_document', raw.documentId, 'deliverables');
+    pushArtifact('workspace_document_version', raw.versionId, 'deliverables');
+  }
+  if (toolName === 'document.propose_edit') {
+    pushArtifact('workspace_document', raw.documentId, 'deliverables');
+    pushArtifact('workspace_document_version', raw.baseVersionId, 'deliverables');
+  }
+  if (toolName === 'document.apply_edit') {
+    pushArtifact('workspace_document', raw.documentId, 'deliverables');
+    pushArtifact('workspace_document_version', raw.versionId, 'deliverables');
+  }
+  if (toolName === 'document.export') {
+    pushArtifact('workspace_document', raw.documentId, 'deliverables');
+    pushArtifact('workspace_document_version', raw.versionId, 'deliverables');
+    pushArtifact('workspace_document_export', raw.exportId, 'deliverables');
   }
 
   return normalized;
@@ -514,6 +560,52 @@ function summarize(raw: Record<string, unknown>, toolName: string): string {
     }
   }
 
+  if (toolName === 'document.ingest') {
+    const docs = Array.isArray(raw.documents) ? raw.documents : [];
+    if (docs.length > 0) {
+      return `document.ingest processed ${docs.length} uploaded document(s).`;
+    }
+  }
+
+  if (toolName === 'document.read') {
+    const title = String(raw.title || '').trim();
+    const version = Number(raw.versionNumber);
+    if (title) {
+      return `document.read loaded ${title}${Number.isFinite(version) ? ` (v${Math.floor(version)})` : ''}.`;
+    }
+  }
+
+  if (toolName === 'document.search') {
+    const hits = Array.isArray(raw.hits) ? raw.hits.length : 0;
+    if (hits > 0) {
+      return `document.search found ${hits} relevant section(s).`;
+    }
+  }
+
+  if (toolName === 'document.propose_edit') {
+    const changed = Boolean(raw.changed);
+    return changed ? 'document.propose_edit prepared a change proposal.' : 'document.propose_edit found no effective changes.';
+  }
+
+  if (toolName === 'document.apply_edit') {
+    const version = Number(raw.versionNumber);
+    if (Number.isFinite(version)) {
+      return `document.apply_edit created version ${Math.floor(version)}.`;
+    }
+  }
+
+  if (toolName === 'document.export') {
+    const format = String(raw.format || '').trim().toUpperCase();
+    const exportId = String(raw.exportId || '').trim();
+    if (exportId) {
+      return `document.export generated ${format || 'document'} export ${exportId}.`;
+    }
+  }
+
+  if (toolName === 'document.compare_versions') {
+    return 'document.compare_versions summarized differences between versions.';
+  }
+
   if (Number.isFinite(Number(raw.count)) && String(raw.section || '').trim()) {
     return `${toolName} returned ${Math.max(0, Math.floor(Number(raw.count)))} row(s) from ${String(raw.section).trim()}.`;
   }
@@ -609,31 +701,48 @@ export async function executeToolWithContract(input: {
   }
 
   try {
+    const branchId = resolveBranchIdFromSyntheticSessionId(input.syntheticSessionId);
+    let runtimeContext: RuntimeAgentContext | null = null;
+    let runtimeContextWarning: string | null = null;
+    try {
+      runtimeContext = await buildRuntimeAgentContext({
+        researchJobId: input.researchJobId,
+        branchId,
+        syntheticSessionId: input.syntheticSessionId,
+        userMessage: input.userMessage,
+        ...(input.runId ? { runId: input.runId } : {}),
+        actor: {
+          userId: input.syntheticSessionId,
+          role: 'system',
+        },
+        permissionsOverride: {
+          canMutate: input.policy.allowMutationTools,
+        },
+      });
+    } catch (runtimeContextError: any) {
+      runtimeContextWarning = `Runtime context assembly failed: ${String(
+        runtimeContextError?.message || runtimeContextError || 'unknown error'
+      )}`;
+    }
+
     let mutationGuardWarnings: string[] = [];
     let mutationGuardDecision: RuntimeDecision | null = null;
     let mutationGuardAudit: Record<string, unknown> | null = null;
+    if (runtimeContextWarning) {
+      mutationGuardWarnings = mergeWarnings([runtimeContextWarning]);
+    }
 
     if (input.toolName === 'intel.stageMutation') {
-      const branchId = resolveBranchIdFromSyntheticSessionId(input.syntheticSessionId);
       const operations = buildRuntimeMutationOperationsFromIntelToolCall(input.toolName, input.args);
       if (!operations.length) {
         mutationGuardWarnings = ['Mutation guard could not infer operations from intel.stageMutation payload.'];
+      } else if (!runtimeContext) {
+        mutationGuardWarnings = mergeWarnings([
+          ...mutationGuardWarnings,
+          'Mutation guard context unavailable; mutation risk evaluation may be incomplete.',
+        ]);
       } else {
         try {
-          const runtimeContext = await buildRuntimeAgentContext({
-            researchJobId: input.researchJobId,
-            branchId,
-            syntheticSessionId: input.syntheticSessionId,
-            userMessage: input.userMessage,
-            actor: {
-              userId: input.syntheticSessionId,
-              role: 'system',
-            },
-            permissionsOverride: {
-              canMutate: input.policy.allowMutationTools,
-            },
-          });
-
           const guard = evaluateRuntimeMutationGuard({
             context: {
               permissions: runtimeContext.permissions,
@@ -681,11 +790,15 @@ export async function executeToolWithContract(input: {
       }
     }
 
-    const { agentContext } = await buildAgentContext(
-      input.researchJobId,
-      input.syntheticSessionId,
-      input.userMessage
-    );
+    const agentContext: AgentContext = runtimeContext
+      ? toToolAgentContext(runtimeContext)
+      : (
+          await buildAgentContext(
+            input.researchJobId,
+            input.syntheticSessionId,
+            input.userMessage
+          )
+        ).agentContext;
 
     const rawResult = await withTimeout(
       tool.execute(agentContext, input.args),

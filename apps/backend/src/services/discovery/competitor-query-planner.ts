@@ -1,6 +1,5 @@
-import OpenAI from 'openai';
 import { isOpenAiConfiguredForRealMode } from '../../lib/runtime-preflight';
-import { resolveModelForTask } from '../ai/model-router';
+import { openai as openaiClient, OpenAI } from '../ai/openai-client';
 
 type SupportedPlatform = 'instagram' | 'tiktok';
 
@@ -391,8 +390,6 @@ export async function buildCompetitorDiscoveryPlan(
   }
 
   try {
-    const model = resolveModelForTask('competitor_planner');
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const prompt = `
 You are an expert competitor discovery planner for social media research.
 You must produce direct-peer discovery instructions, not generic influencer searches.
@@ -443,16 +440,14 @@ JSON schema:
 }
 `;
 
-    const completion = await openai.chat.completions.create({
-      model,
-      temperature: 0.1,
+    const completion = (await openaiClient.bat.chatCompletion('competitor_planner', {
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: 'Return strict JSON only. No markdown.' },
         { role: 'user', content: prompt },
       ],
-      max_tokens: 1400,
-    });
+      max_completion_tokens: 1400,
+    })) as OpenAI.Chat.Completions.ChatCompletion;
 
     const raw = completion.choices[0]?.message?.content;
     if (!raw) return fallbackPlan;

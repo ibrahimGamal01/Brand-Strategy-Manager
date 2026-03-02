@@ -1,18 +1,5 @@
-import { OpenAI } from 'openai';
 import { prisma } from '../../lib/prisma';
-import { resolveModelForTask } from './model-router';
-
-let openaiClient: OpenAI | null = null;
-function getOpenAiClient(): OpenAI | null {
-  if (openaiClient) return openaiClient;
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return null;
-  openaiClient = new OpenAI({ apiKey });
-  return openaiClient;
-}
-
-const BRAND_ANALYSIS_MODEL = resolveModelForTask('analysis_quality');
-const BRAND_MENTION_MODEL = resolveModelForTask('analysis_fast');
+import { openai as openaiClient, OpenAI } from './openai-client';
 
 interface BrandMention {
   id: string;
@@ -64,14 +51,14 @@ Extract comprehensive brand insights:
 Return detailed JSON with all fields.`;
 
   try {
-    const openai = getOpenAiClient();
-    if (!openai) throw new Error('OPENAI_API_KEY not configured');
-    const response = await openai.chat.completions.create({
-      model: BRAND_ANALYSIS_MODEL,
+    if (!process.env.OPENAI_API_KEY && !process.env.OPENAI_API_KEY_FALLBACK) {
+      throw new Error('OPENAI_API_KEY not configured');
+    }
+    const response = (await openaiClient.bat.chatCompletion('analysis_quality', {
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
       temperature: 0.3,
-    });
+    })) as OpenAI.Chat.Completions.ChatCompletion;
 
     const analysis = JSON.parse(response.choices[0].message.content || '{}');
 
@@ -82,12 +69,12 @@ Return detailed JSON with all fields.`;
     if (mentions[0]) {
       await prisma.aiAnalysis.create({
         data: {
-          brandMentionId: mentions[0].id,
-          analysisType: 'OVERALL',
-          modelUsed: BRAND_ANALYSIS_MODEL,
-          topic: 'Brand Sentiment Analysis',
-          fullResponse: analysis,
-          confidenceScore: analysis.confidence_score || 0.8,
+        brandMentionId: mentions[0].id,
+        analysisType: 'OVERALL',
+        modelUsed: response.model || 'analysis_quality',
+        topic: 'Brand Sentiment Analysis',
+        fullResponse: analysis,
+        confidenceScore: analysis.confidence_score || 0.8,
         },
       });
     }
@@ -122,14 +109,14 @@ Extract:
 Return JSON.`;
 
   try {
-    const openai = getOpenAiClient();
-    if (!openai) throw new Error('OPENAI_API_KEY not configured');
-    const response = await openai.chat.completions.create({
-      model: BRAND_MENTION_MODEL,
+    if (!process.env.OPENAI_API_KEY && !process.env.OPENAI_API_KEY_FALLBACK) {
+      throw new Error('OPENAI_API_KEY not configured');
+    }
+    const response = (await openaiClient.bat.chatCompletion('analysis_fast', {
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
       temperature: 0.2,
-    });
+    })) as OpenAI.Chat.Completions.ChatCompletion;
 
     const analysis = JSON.parse(response.choices[0].message.content || '{}');
 
@@ -138,7 +125,7 @@ Return JSON.`;
       data: {
         brandMentionId: mention.id,
         analysisType: 'CONTENT',
-        modelUsed: BRAND_MENTION_MODEL,
+        modelUsed: response.model || 'analysis_fast',
         topic: mention.title || 'Brand Mention',
         fullResponse: analysis,
         confidenceScore: 0.75,

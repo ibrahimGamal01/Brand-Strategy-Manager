@@ -9,6 +9,7 @@ import { QuestionCard } from "./question-card";
 import { SmartListAnswer } from "./smart-list-answer";
 import { SmartTagsAnswer } from "./smart-tags-answer";
 import { SmartLinksAnswer } from "./smart-links-answer";
+import { classifyStateWebsiteInputs, SuggestedHandleCandidate } from "./intake-mappers";
 
 type IntakeWizardV2Props = {
   state: IntakeStateV2;
@@ -23,7 +24,14 @@ type IntakeWizardV2Props = {
   suggestedHandleValidation?: {
     instagram?: SuggestedHandleValidationItem;
     tiktok?: SuggestedHandleValidationItem;
+    youtube?: SuggestedHandleValidationItem;
+    linkedin?: SuggestedHandleValidationItem;
+    twitter?: SuggestedHandleValidationItem;
   };
+  suggestedHandleCandidates: SuggestedHandleCandidate[];
+  onAcceptHandleCandidate: (candidate: SuggestedHandleCandidate) => void;
+  onRejectHandleCandidate: (candidate: SuggestedHandleCandidate) => void;
+  onIgnoreHandleCandidate: (candidate: SuggestedHandleCandidate) => void;
   confirmationRequired: boolean;
   confirmationReasons: string[];
   channelsConfirmed: boolean;
@@ -98,6 +106,10 @@ export function IntakeWizardV2({
   suggestedFields,
   suggestedHandlePlatforms,
   suggestedHandleValidation,
+  suggestedHandleCandidates,
+  onAcceptHandleCandidate,
+  onRejectHandleCandidate,
+  onIgnoreHandleCandidate,
   confirmationRequired,
   confirmationReasons,
   channelsConfirmed,
@@ -123,6 +135,21 @@ export function IntakeWizardV2({
     (step.id === "voice" && (!hasOfferOrGoal || (requireChannelConfirmation && !channelsConfirmed)));
 
   function updateField<K extends keyof IntakeStateV2>(field: K, value: IntakeStateV2[K]) {
+    if (field === "website" || field === "websites" || field === "socialReferences") {
+      const draft = {
+        ...state,
+        [field]: value,
+      } as IntakeStateV2;
+      const classified = classifyStateWebsiteInputs(draft);
+      onChange({
+        ...draft,
+        website: classified.crawlWebsites[0] || "",
+        websites: classified.crawlWebsites,
+        socialReferences: classified.socialReferences,
+      });
+      return;
+    }
+
     onChange({ ...state, [field]: value });
   }
 
@@ -269,6 +296,20 @@ export function IntakeWizardV2({
           </QuestionCard>
 
           <QuestionCard
+            title="Social profile references"
+            description="Optional social URLs from your brand can improve channel detection (LinkedIn, Instagram, TikTok, YouTube, X)."
+            suggested={suggestedFields.has("socialReferences")}
+          >
+            <SmartListAnswer
+              value={state.socialReferences}
+              onChange={(next) => updateField("socialReferences", next)}
+              maxItems={8}
+              placeholder="Paste social profile URL and press Enter"
+              helperText="BAT uses these references for channel intelligence. They are not crawled unless social profile crawl is enabled."
+            />
+          </QuestionCard>
+
+          <QuestionCard
             title="One-sentence description"
             suggested={suggestedFields.has("oneSentenceDescription")}
             actions={
@@ -346,6 +387,70 @@ export function IntakeWizardV2({
               suggestedHandleValidation={suggestedHandleValidation}
             />
           </QuestionCard>
+
+          {suggestedHandleCandidates.length > 0 ? (
+            <QuestionCard
+              title="Suggested channels"
+              description="Review BAT channel candidates. High-confidence picks can be accepted quickly."
+            >
+              <div className="space-y-2">
+                {suggestedHandleCandidates.map((candidate) => (
+                  <article
+                    key={`${candidate.platform}:${candidate.handle}:${candidate.source}`}
+                    className="rounded-xl border px-3 py-2"
+                    style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-medium">
+                        {candidate.platform} @{candidate.handle}
+                      </p>
+                      <span className="bat-chip">{Math.round(candidate.confidence * 100)}% confidence</span>
+                    </div>
+                    <p className="mt-1 text-xs" style={{ color: "var(--bat-text-muted)" }}>
+                      {candidate.reason}
+                    </p>
+                    {candidate.profileUrl ? (
+                      <a
+                        href={candidate.profileUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-1 inline-block text-xs underline"
+                        style={{ color: "var(--bat-accent)" }}
+                      >
+                        {candidate.profileUrl}
+                      </a>
+                    ) : null}
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => onAcceptHandleCandidate(candidate)}
+                        className="rounded-full border px-3 py-1 text-xs"
+                        style={{ borderColor: "var(--bat-accent)", color: "var(--bat-accent)" }}
+                      >
+                        Accept
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onRejectHandleCandidate(candidate)}
+                        className="rounded-full border px-3 py-1 text-xs"
+                        style={{ borderColor: "var(--bat-border)" }}
+                      >
+                        Reject
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onIgnoreHandleCandidate(candidate)}
+                        className="rounded-full border px-3 py-1 text-xs"
+                        style={{ borderColor: "var(--bat-border)" }}
+                      >
+                        Ignore for now
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </QuestionCard>
+          ) : null}
 
           <p className="text-xs" style={{ color: "var(--bat-text-muted)" }}>
             {filledCount} channel{filledCount === 1 ? "" : "s"} selected.

@@ -1065,7 +1065,10 @@ Return a single JSON object with only these keys.`;
 
   const suggestedHandles: Record<string, string> = {};
   const suggestedHandleValidation: SuggestIntakeCompletionResult['suggestedHandleValidation'] = {};
-  const handleCandidates: SuggestedHandleCandidate[] = parseUserSocialReferenceCandidates(partialPayload);
+  const shouldSuggestHandles = !suggestionStep || suggestionStep === 'channels';
+  const handleCandidates: SuggestedHandleCandidate[] = shouldSuggestHandles
+    ? parseUserSocialReferenceCandidates(partialPayload)
+    : [];
   const hasUserProvidedSocialCandidate = handleCandidates.some(
     (candidate) => candidate.source === 'user_provided_social_url'
   );
@@ -1074,7 +1077,10 @@ Return a single JSON object with only these keys.`;
     String(process.env.SUGGEST_SOCIAL_DISCOVERY_WITH_USER_REFS || '')
       .trim()
       .toLowerCase() === 'true';
-  const shouldRunDomainDiscovery = Boolean(website) && (!hasUserProvidedSocialCandidate || allowDiscoveryWithProvidedSocialRefs);
+  const shouldRunDomainDiscovery =
+    shouldSuggestHandles &&
+    Boolean(website) &&
+    (!hasUserProvidedSocialCandidate || allowDiscoveryWithProvidedSocialRefs);
 
   if (shouldRunDomainDiscovery) {
     try {
@@ -1131,7 +1137,13 @@ Return a single JSON object with only these keys.`;
 
   const instagramHandle = normalizeHandle(handles.instagram);
   const tiktokHandle = normalizeHandle(handles.tiktok);
-  if (ENABLE_CROSS_PLATFORM_GUESS && instagramHandle && !tiktokHandle && !hasUserProvidedSocialCandidate) {
+  if (
+    shouldSuggestHandles &&
+    ENABLE_CROSS_PLATFORM_GUESS &&
+    instagramHandle &&
+    !tiktokHandle &&
+    !hasUserProvidedSocialCandidate
+  ) {
     handleCandidates.push({
       platform: 'tiktok',
       handle: instagramHandle,
@@ -1216,15 +1228,15 @@ Return a single JSON object with only these keys.`;
   const hasLowConfidenceSuggestion = uniqueCandidates.some(
     (candidate) => Number(candidate.confidence || 0) < HIGH_CONFIDENCE_THRESHOLD
   );
-  if (uniqueCandidates.length > 0 && !hasHighConfidenceSuggestedPrimary) {
+  if (shouldSuggestHandles && uniqueCandidates.length > 0 && !hasHighConfidenceSuggestedPrimary) {
     warnings.add('NO_HIGH_CONFIDENCE_CHANNELS');
   }
 
   const confirmationReasons: string[] = [];
-  if (!hasUserPrimaryHandle && !hasHighConfidenceSuggestedPrimary && !hasWebsite) {
+  if (shouldSuggestHandles && !hasUserPrimaryHandle && !hasHighConfidenceSuggestedPrimary && !hasWebsite) {
     confirmationReasons.push('MISSING_PRIMARY_CHANNEL');
   }
-  if (hasLowConfidenceSuggestion) {
+  if (shouldSuggestHandles && hasLowConfidenceSuggestion) {
     confirmationReasons.push('LOW_CONFIDENCE_SUGGESTION');
   }
   for (const warningCode of warnings) {

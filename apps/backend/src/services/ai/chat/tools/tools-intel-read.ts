@@ -12,9 +12,149 @@ type IntelReadArgs = Record<string, unknown> & {
 
 const SECTION_VALUES = Object.keys(SECTION_CONFIG);
 const MAX_LIST_LIMIT = 100;
+const MAX_SUMMARY_EXAMPLES = 3;
+const MAX_EVIDENCE_ITEMS = 8;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isNoisyEvidenceUrl(value: unknown): boolean {
+  const raw = String(value || '').trim();
+  if (!raw) return true;
+  if (/,https?:\/\//i.test(raw)) return true;
+
+  try {
+    const parsed = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+    const host = parsed.hostname.toLowerCase();
+    const path = parsed.pathname.toLowerCase();
+    if (!host || /[, ]/.test(host)) return true;
+    if (path === '/,' || path.endsWith(',') || path.includes(',https')) return true;
+
+    const isGoogleHost = host === 'google.com' || host.endsWith('.google.com');
+    if (isGoogleHost && (path.startsWith('/search') || path.startsWith('/httpservice/retry'))) {
+      return true;
+    }
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+function compactText(value: unknown, max = 140): string {
+  const text = String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text) return '';
+  if (text.length <= max) return text;
+  return `${text.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
+}
+
+function toEvidenceUrl(value: unknown): string | null {
+  const raw = String(value || '').trim();
+  if (!raw || isNoisyEvidenceUrl(raw)) return null;
+  try {
+    const normalized = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    return new URL(normalized).toString();
+  } catch {
+    return null;
+  }
+}
+
+function detectRowUrl(row: Record<string, unknown>): string | null {
+  const candidates = [row.url, row.finalUrl, row.profileUrl, row.href, row.sourceUrl, row.permalink];
+  for (const candidate of candidates) {
+    const next = toEvidenceUrl(candidate);
+    if (next) return next;
+  }
+  return null;
+}
+
+function detectRowTitle(row: Record<string, unknown>): string {
+  const metadata = isRecord(row.metadata) ? row.metadata : {};
+  const candidates = [
+    row.title,
+    row.headline,
+    row.handle,
+    row.canonicalName,
+    row.domain,
+    row.query,
+    row.source,
+    metadata.title,
+    row.url,
+    row.finalUrl,
+    row.profileUrl,
+    row.content,
+    row.body,
+    row.summary,
+  ];
+  for (const candidate of candidates) {
+    const next = compactText(candidate, 140);
+    if (next) return next;
+  }
+  return '';
+}
+
+function buildRowLabel(section: string, row: Record<string, unknown>): string {
+  if (section === 'competitors') {
+    const platform = compactText(row.platform, 20);
+    const handle = compactText(row.handle, 60);
+    const state = compactText(row.selectionState || row.status, 24);
+    const score = Number(row.relevanceScore);
+    const scorePart = Number.isFinite(score) ? `score ${Math.max(0, Math.round(score))}` : '';
+    const identity = handle ? `@${handle}${platform ? ` (${platform})` : ''}` : detectRowTitle(row);
+    return [identity, state, scorePart].filter(Boolean).join(' • ');
+  }
+
+  if (section === 'web_snapshots') {
+    const title = detectRowTitle(row);
+    const statusCode = Number(row.statusCode);
+    const status = Number.isFinite(statusCode) ? `HTTP ${Math.floor(statusCode)}` : '';
+    return [title, status].filter(Boolean).join(' • ');
+  }
+
+  if (section === 'web_sources') {
+    const title = compactText(row.domain || row.url, 120) || detectRowTitle(row);
+    const type = compactText(row.sourceType || row.discoveredBy, 32);
+    return [title, type].filter(Boolean).join(' • ');
+  }
+
+  return detectRowTitle(row);
+}
+
+function buildRowEvidence(section: string, rowRaw: unknown, index: number) {
+  if (!isRecord(rowRaw)) return null;
+  const label = buildRowLabel(section, rowRaw);
+  if (!label) return null;
+  const url = detectRowUrl(rowRaw);
+  return {
+    kind: 'record',
+    label: `${index + 1}. ${label}`,
+    ...(url ? { url } : {}),
+  };
+}
+
+function buildSectionSummary(section: string, rows: unknown[]): string {
+  if (!rows.length) {
+    return `No active records found in ${section}.`;
+  }
+  const examples = rows
+    .map((row) => (isRecord(row) ? buildRowLabel(section, row) : ''))
+    .filter(Boolean)
+    .slice(0, MAX_SUMMARY_EXAMPLES);
+  const base = `Loaded ${rows.length} record(s) from ${section}.`;
+  if (!examples.length) return base;
+  return `${base} Examples: ${examples.join('; ')}.`;
+}
+
+function qualityFilterRows(section: string, rows: any[]): any[] {
+  if (section === 'web_sources') {
+    return rows.filter((row) => !isNoisyEvidenceUrl(row?.url));
+  }
+  if (section === 'web_snapshots') {
+    return rows.filter((row) => !isNoisyEvidenceUrl(row?.finalUrl || row?.url));
+  }
+  return rows;
 }
 
 function normalizeSection(section: unknown): string {
@@ -82,6 +222,8 @@ async function listSection(context: AgentContext, args: IntelReadArgs): Promise<
   const limit = Number.isFinite(limitRaw)
     ? Math.max(1, Math.min(MAX_LIST_LIMIT, Math.floor(limitRaw)))
     : 25;
+  const shouldQualityFilter = section === 'web_sources' || section === 'web_snapshots';
+  const queryTake = shouldQualityFilter ? Math.min(MAX_LIST_LIMIT, limit * 3) : limit;
   const includeInactive = Boolean(args.includeInactive);
   const scopeWhere = await resolveScopeWhere(context, section);
   const rawWhere = isRecord(args.where) ? args.where : {};
@@ -103,30 +245,40 @@ async function listSection(context: AgentContext, args: IntelReadArgs): Promise<
     where.isActive = true;
   }
 
-  const rows = await delegate.findMany({
+  const rowsRaw = await delegate.findMany({
     where,
-    take: limit,
+    take: queryTake,
     orderBy: config.orderBy
       ? {
           [config.orderBy.field]: config.orderBy.direction,
         }
       : { updatedAt: 'desc' },
   });
+  const rows = qualityFilterRows(section, rowsRaw).slice(0, limit);
 
   const deepLink = context.links.moduleLink('intelligence', { intelSection: section });
+  const rowEvidence = rows
+    .map((row, index) => buildRowEvidence(section, row, index))
+    .filter((item): item is { kind: string; label: string; url?: string } => Boolean(item))
+    .slice(0, MAX_EVIDENCE_ITEMS);
+  const filteredOutCount = Math.max(0, rowsRaw.length - rows.length);
 
   return {
     section,
     count: rows.length,
     items: rows,
     data: rows,
-    summary: `Listed ${rows.length} item(s) from ${section}.`,
+    summary:
+      filteredOutCount > 0
+        ? `${buildSectionSummary(section, rows)} Filtered ${filteredOutCount} noisy record(s).`
+        : buildSectionSummary(section, rows),
     evidence: [
       {
         kind: 'internal',
         label: `Open ${section} in Intelligence`,
         url: deepLink,
       },
+      ...rowEvidence,
     ],
     includeInactive,
     deepLink,

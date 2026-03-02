@@ -19,6 +19,8 @@ export interface IntakeStateV2 {
   name: string;
   website: string;
   websites: string[];
+  socialReferences: string[];
+  includeSocialProfileCrawl: boolean;
   oneSentenceDescription: string;
   niche: string;
   businessType: string;
@@ -55,6 +57,8 @@ export const INITIAL_INTAKE_STATE_V2: IntakeStateV2 = {
   name: "",
   website: "",
   websites: [],
+  socialReferences: [],
+  includeSocialProfileCrawl: false,
   oneSentenceDescription: "",
   niche: "",
   businessType: "",
@@ -88,6 +92,7 @@ export const INITIAL_INTAKE_STATE_V2: IntakeStateV2 = {
     instagram: "",
     tiktok: "",
     youtube: "",
+    linkedin: "",
     twitter: "",
   },
 };

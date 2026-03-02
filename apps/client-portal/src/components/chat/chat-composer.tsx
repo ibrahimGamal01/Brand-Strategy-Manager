@@ -1,8 +1,8 @@
 "use client";
 
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, ListOrdered, SendHorizontal, Sparkles, Square, X } from "lucide-react";
-import { ChatInputOptions, ChatInputSourceScope, QueuedMessage } from "@/types/chat";
+import { ArrowDown, ArrowUp, FileText, ListOrdered, Paperclip, SendHorizontal, Sparkles, Square, X } from "lucide-react";
+import { ChatInputOptions, ChatInputSourceScope, QueuedMessage, UploadedDocumentChip } from "@/types/chat";
 
 const steerChipSet = [
   "Run V3 finder",
@@ -33,7 +33,12 @@ interface ChatComposerProps {
   onResponseModeChange: (mode: "fast" | "balanced" | "deep" | "pro") => void;
   onSourceScopeChange: (key: keyof ChatInputSourceScope, value: boolean) => void;
   queuedMessages: QueuedMessage[];
-  onSend: (content: string, mode: "send" | "queue" | "interrupt") => void;
+  onSend: (
+    content: string,
+    mode: "send" | "queue" | "interrupt",
+    options?: { attachmentIds?: string[]; documentIds?: string[] }
+  ) => void;
+  onUploadDocuments: (files: File[]) => Promise<UploadedDocumentChip[]>;
   onSteerRun: (note: string) => void;
   onSteerQueued: (id: string, input: {
     content?: string;
@@ -76,6 +81,7 @@ export function ChatComposer({
   onSourceScopeChange,
   queuedMessages,
   onSend,
+  onUploadDocuments,
   onSteerRun,
   onSteerQueued,
   onStop,
@@ -87,7 +93,10 @@ export function ChatComposer({
   const [showSteerChips, setShowSteerChips] = useState(false);
   const [expandedSteerId, setExpandedSteerId] = useState<string | null>(null);
   const [steerEdits, setSteerEdits] = useState<Record<string, string>>({});
+  const [uploadedDocs, setUploadedDocs] = useState<UploadedDocumentChip[]>([]);
+  const [uploading, setUploading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const currentInputOptions = useMemo<ChatInputOptions>(
     () => ({
@@ -110,12 +119,16 @@ export function ChatComposer({
 
   const dispatchMessage = (modeOverride?: "send" | "queue" | "interrupt") => {
     const content = draft.trim();
-    if (!content) {
+    if (!content && uploadedDocs.length === 0) {
       return false;
     }
 
-    onSend(content, modeOverride || (isStreaming ? "queue" : "send"));
+    onSend(content, modeOverride || (isStreaming ? "queue" : "send"), {
+      attachmentIds: uploadedDocs.map((item) => item.attachmentId).filter((value): value is string => Boolean(value)),
+      documentIds: uploadedDocs.map((item) => item.id).filter(Boolean),
+    });
     onDraftChange("");
+    setUploadedDocs([]);
     return true;
   };
 
@@ -143,6 +156,27 @@ export function ChatComposer({
     if (!content) return;
     onSteerRun(content);
     onDraftChange("");
+  };
+
+  const uploadFiles = async (files: File[]) => {
+    const valid = files.filter((file) => file.size > 0);
+    if (!valid.length) return;
+    setUploading(true);
+    try {
+      const uploaded = await onUploadDocuments(valid);
+      setUploadedDocs((previous) => {
+        const next = [...previous];
+        for (const item of uploaded) {
+          if (next.some((existing) => existing.id === item.id)) continue;
+          next.push(item);
+        }
+        return next.slice(0, 10);
+      });
+    } catch {
+      // handled upstream
+    } finally {
+      setUploading(false);
+    }
   };
 
   const readSteerDraft = (item: QueuedMessage): string => {
@@ -252,6 +286,16 @@ export function ChatComposer({
                           <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-600">
                             {options.targetLength}
                           </span>
+                          {item.documentIds?.length ? (
+                            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-600">
+                              Docs {item.documentIds.length}
+                            </span>
+                          ) : null}
+                          {item.attachmentIds?.length ? (
+                            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-600">
+                              Files {item.attachmentIds.length}
+                            </span>
+                          ) : null}
                           {scopeBadges.map((badge) => (
                             <span key={`${item.id}-${badge}`} className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-600">
                               {badge}
@@ -353,21 +397,84 @@ export function ChatComposer({
           </div>
         ) : null}
 
-        <form onSubmit={submit} className="relative">
+        <form
+          onSubmit={submit}
+          className="relative"
+          onDrop={(event) => {
+            event.preventDefault();
+            const dropped = Array.from(event.dataTransfer?.files || []);
+            void uploadFiles(dropped);
+          }}
+          onDragOver={(event) => event.preventDefault()}
+        >
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={(event) => {
+              const nextFiles = Array.from(event.target.files || []);
+              void uploadFiles(nextFiles);
+              event.currentTarget.value = "";
+            }}
+          />
           <textarea
             ref={textareaRef}
             value={draft}
             onChange={(event) => onDraftChange(event.target.value)}
             onKeyDown={onComposerKeyDown}
+            onPaste={(event) => {
+              const pastedFiles = Array.from(event.clipboardData?.files || []);
+              if (pastedFiles.length > 0) {
+                event.preventDefault();
+                void uploadFiles(pastedFiles);
+              }
+            }}
             placeholder="Message BAT..."
             className="min-h-24 w-full resize-none rounded-3xl border border-zinc-300 bg-white px-4 pb-12 pt-3 text-base text-zinc-900 outline-none transition focus:border-zinc-400 focus:ring-2 focus:ring-zinc-200 sm:min-h-28"
           />
+
+          {uploadedDocs.length > 0 ? (
+            <div className="pointer-events-auto absolute left-4 right-4 top-3.5 flex flex-wrap gap-2">
+              {uploadedDocs.map((doc) => (
+                <span
+                  key={doc.id}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-700"
+                >
+                  <FileText className="h-3.5 w-3.5 text-zinc-500" />
+                  <span className="max-w-[180px] truncate">{doc.fileName}</span>
+                  <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-zinc-500">
+                    {doc.status === "needs_review" ? "review" : doc.status}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setUploadedDocs((previous) => previous.filter((item) => item.id !== doc.id))
+                    }
+                    className="rounded-full p-0.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
+                    aria-label="Remove attached document"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
 
           <p className="pointer-events-none absolute bottom-3 left-4 text-xs text-zinc-400">
             Enter to send/queue, Shift+Enter for newline, Cmd/Ctrl+Enter to interrupt + send
           </p>
 
           <div className="absolute bottom-2.5 right-2.5 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-600 hover:bg-zinc-100"
+              title="Attach documents"
+            >
+              <Paperclip className="h-3.5 w-3.5" />
+              {uploading ? "Uploading..." : "Attach"}
+            </button>
             {isStreaming ? (
               <button
                 type="button"
@@ -390,7 +497,7 @@ export function ChatComposer({
             ) : null}
             <button
               type="submit"
-              disabled={!draft.trim()}
+              disabled={!draft.trim() && uploadedDocs.length === 0}
               className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-zinc-900 text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300"
               aria-label={isStreaming ? "Queue message" : "Send message"}
               title={isStreaming ? "Queue message" : "Send message"}

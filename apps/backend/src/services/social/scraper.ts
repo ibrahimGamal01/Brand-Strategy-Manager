@@ -8,7 +8,7 @@
  * 4. TRENDS: Extracts hashtags and trends from posts
  */
 
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
@@ -19,6 +19,8 @@ import { emitResearchJobEvent } from './research-job-events';
 
 const prisma = new PrismaClient();
 const execAsync = promisify(exec);
+const SCRAPER_TX_MAX_WAIT_MS = Math.max(5_000, Number(process.env.SCRAPER_TX_MAX_WAIT_MS || 30_000));
+const SCRAPER_TX_TIMEOUT_MS = Math.max(20_000, Number(process.env.SCRAPER_TX_TIMEOUT_MS || 180_000));
 
 export interface ScrapedPost {
   externalId: string;
@@ -64,6 +66,37 @@ export interface ScrapeExecutionContext {
   source?: string;
   entityType?: string;
   entityId?: string;
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error || 'unknown error');
+}
+
+function isTransactionNotFoundError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+  return (
+    message.includes('transaction not found') ||
+    message.includes('transaction already closed') ||
+    message.includes('transaction api error') ||
+    message.includes('p2028')
+  );
+}
+
+function isExpectedScraperNoiseError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+  return (
+    message.includes('certificate_verify_failed') ||
+    message.includes('self signed certificate') ||
+    message.includes('econnreset') ||
+    message.includes('etimedout') ||
+    message.includes('timeout') ||
+    message.includes('rate limit') ||
+    message.includes('429') ||
+    message.includes('403') ||
+    message.includes('transaction not found') ||
+    message.includes('transaction already closed')
+  );
 }
 
 // Concurrency Control
@@ -307,7 +340,7 @@ export async function scrapeProfileIncrementally(
           }),
         };
       } else {
-        console.warn(`[SocialScraper] TikTok scrape failed: ${result.error}`);
+        console.warn(`[SocialScraper] TikTok scrape degraded (non-blocking): ${result.error}`);
         return null;
       }
     } else {
@@ -366,7 +399,12 @@ export async function scrapeProfileIncrementally(
     return scrapedData;
     
   } catch (error: any) {
-    console.error(`[SocialScraper] Failed to scrape @${handle}:`, error.message);
+    const message = getErrorMessage(error);
+    if (isExpectedScraperNoiseError(error)) {
+      console.warn(`[SocialScraper] Transient scrape issue for @${handle}: ${message}`);
+    } else {
+      console.error(`[SocialScraper] Failed to scrape @${handle}:`, message);
+    }
     // Don't throw - return null so pipeline can continue
     return null;
   }
@@ -396,7 +434,7 @@ async function saveScrapedData(researchJobId: string, data: ScrapedProfile) {
   // Resolve whether this scrape is for the client or a competitor
   const context = await resolveProfileContext(researchJobId, data.platform, data.handle);
 
-  return prisma.$transaction(async (tx) => {
+  const persist = async (tx: Prisma.TransactionClient | PrismaClient) => {
     // 1. Upsert Profile
     const profile = await tx.socialProfile.upsert({
       where: {
@@ -802,7 +840,22 @@ async function saveScrapedData(researchJobId: string, data: ScrapedProfile) {
 
     console.log(`[SocialScraper] Saved profile @${data.handle} and ${newPosts} posts`);
     return profile;
-  });
+  };
+
+  try {
+    return await prisma.$transaction((tx) => persist(tx), {
+      maxWait: SCRAPER_TX_MAX_WAIT_MS,
+      timeout: SCRAPER_TX_TIMEOUT_MS,
+    });
+  } catch (error) {
+    if (isTransactionNotFoundError(error)) {
+      console.warn(
+        `[SocialScraper] Transaction timed out while persisting @${data.handle}; retrying in resilient mode.`
+      );
+      return persist(prisma);
+    }
+    throw error;
+  }
 }
 
 /**

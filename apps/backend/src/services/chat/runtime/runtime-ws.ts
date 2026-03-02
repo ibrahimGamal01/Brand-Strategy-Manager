@@ -85,7 +85,28 @@ export function attachRuntimeWebSocketServer(server: http.Server, isSchemaReady:
 
     const initialize = async () => {
       try {
-        let session = null as Awaited<ReturnType<typeof getPortalSessionFromToken>> | null;
+        const token = parseCookieValue(req.headers.cookie, PORTAL_SESSION_COOKIE_NAME);
+        if (!token) {
+          closeWithError('AUTH_REQUIRED');
+          return;
+        }
+
+        const session = await getPortalSessionFromToken(token);
+        if (!session) {
+          closeWithError('AUTH_REQUIRED');
+          return;
+        }
+
+        const hasAccess =
+          session.user.isAdmin ||
+          session.user.memberships.some(
+            (membership: { researchJobId: string }) => membership.researchJobId === researchJobId
+          );
+        if (!hasAccess) {
+          closeWithError('FORBIDDEN_WORKSPACE');
+          return;
+        }
+
         if (wsToken) {
           const verified = verifyRuntimeWsToken({
             token: wsToken,
@@ -94,28 +115,6 @@ export function attachRuntimeWebSocketServer(server: http.Server, isSchemaReady:
           });
           if (!verified.ok) {
             closeWithError('INVALID_WS_TOKEN', verified.reason);
-            return;
-          }
-        } else {
-          const token = parseCookieValue(req.headers.cookie, PORTAL_SESSION_COOKIE_NAME);
-          if (!token) {
-            closeWithError('AUTH_REQUIRED');
-            return;
-          }
-
-          session = await getPortalSessionFromToken(token);
-          if (!session) {
-            closeWithError('AUTH_REQUIRED');
-            return;
-          }
-
-          const hasAccess =
-            session.user.isAdmin ||
-            session.user.memberships.some(
-              (membership: { researchJobId: string }) => membership.researchJobId === researchJobId
-            );
-          if (!hasAccess) {
-            closeWithError('FORBIDDEN_WORKSPACE');
             return;
           }
         }

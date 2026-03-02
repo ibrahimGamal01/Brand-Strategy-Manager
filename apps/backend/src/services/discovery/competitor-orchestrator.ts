@@ -1,4 +1,3 @@
-import OpenAI from 'openai';
 import {
   CompetitorSelectionState,
   DiscoveredCompetitorStatus,
@@ -7,7 +6,7 @@ import {
 import { prisma } from '../../lib/prisma';
 import { isOpenAiConfiguredForRealMode } from '../../lib/runtime-preflight';
 import { suggestCompetitorsMultiPlatform } from '../ai/competitor-discovery';
-import { resolveModelForTask } from '../ai/model-router';
+import { openai as openaiClient, OpenAI } from '../ai/openai-client';
 import {
   performDirectCompetitorSearch,
   performDirectCompetitorSearchForPlatform,
@@ -884,7 +883,6 @@ async function runAiRanking(
   }
 
   try {
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const prompt = `
 You are a competitor-quality ranker for direct peers only.
 Brand: ${brandName}
@@ -906,16 +904,14 @@ Candidates:
 ${JSON.stringify(candidates, null, 2)}
 `;
 
-    const completion = await openai.chat.completions.create({
-      model: resolveModelForTask('competitor_discovery'),
+    const completion = (await openaiClient.bat.chatCompletion('competitor_discovery', {
       messages: [
         { role: 'system', content: 'Return JSON only.' },
         { role: 'user', content: prompt },
       ],
       response_format: { type: 'json_object' },
-      temperature: 0.1,
-      max_tokens: 1000,
-    });
+      max_completion_tokens: 1000,
+    })) as OpenAI.Chat.Completions.ChatCompletion;
 
     const raw = completion.choices[0]?.message?.content;
     if (!raw) return scores;

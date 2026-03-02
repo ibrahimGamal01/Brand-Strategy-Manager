@@ -22,6 +22,41 @@ except Exception:  # pragma: no cover - fallback mode when package unavailable
 app = FastAPI(title="BAT Scrapling Worker", version="1.0.0")
 
 
+def _configure_fetchers_once() -> None:
+    """
+    Scrapling >=0.3 expects class-level configure() before runtime fetch.
+    Calling this once at import time prevents deprecated runtime warnings.
+    """
+    for fetcher_cls in (Fetcher, DynamicFetcher):
+        if fetcher_cls is None:
+            continue
+        configure = getattr(fetcher_cls, "configure", None)
+        if not callable(configure):
+            continue
+        try:
+            configure()
+        except TypeError:
+            # Some versions expect keyword args; keep defaults without breaking startup.
+            try:
+                configure(**{})
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+
+_configure_fetchers_once()
+try:
+    HTTP_FETCHER = Fetcher() if Fetcher is not None else None
+except Exception:
+    HTTP_FETCHER = None
+
+try:
+    DYNAMIC_FETCHER = DynamicFetcher() if DynamicFetcher is not None else None
+except Exception:
+    DYNAMIC_FETCHER = None
+
+
 @app.get("/")
 def root() -> dict[str, str]:
     return {"status": "ok", "service": "scrapling-worker"}
@@ -181,7 +216,8 @@ def _scrapling_fetch(url: str, mode: str, timeout_ms: int) -> FetchResult:
 
     def run_http() -> FetchResult:
         start = time.time()
-        response = Fetcher().get(url, timeout=max(1, timeout_ms // 1000))
+        fetcher = HTTP_FETCHER or Fetcher()
+        response = fetcher.get(url, timeout=max(1, timeout_ms // 1000))
         html = _extract_html(response)
         status = _extract_status(response)
         text = _extract_text(response, html)
@@ -200,7 +236,8 @@ def _scrapling_fetch(url: str, mode: str, timeout_ms: int) -> FetchResult:
     def run_dynamic() -> FetchResult:
         if DynamicFetcher is None:
             return _basic_fetch(url, timeout_ms)
-        response = DynamicFetcher().get(url, timeout=max(1, timeout_ms // 1000))
+        fetcher = DYNAMIC_FETCHER or DynamicFetcher()
+        response = fetcher.get(url, timeout=max(1, timeout_ms // 1000))
         html = _extract_html(response)
         status = _extract_status(response)
         text = _extract_text(response, html)

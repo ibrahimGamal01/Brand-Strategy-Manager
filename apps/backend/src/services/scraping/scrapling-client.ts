@@ -12,6 +12,20 @@ import type {
 
 const DEFAULT_TIMEOUT_MS = Number(process.env.SCRAPLING_TIMEOUT_MS || 20_000);
 const WORKER_URL = String(process.env.SCRAPLING_WORKER_URL || '').replace(/\/$/, '');
+const SCRAPLING_WARNING_THROTTLE_MS = Math.max(10_000, Number(process.env.SCRAPLING_WARNING_THROTTLE_MS || 60_000));
+const scraplingWarningTimestamps = new Map<string, number>();
+
+function warnScraplingWithThrottle(key: string, message: string, detail?: unknown): void {
+  const now = Date.now();
+  const previous = scraplingWarningTimestamps.get(key) || 0;
+  if (now - previous < SCRAPLING_WARNING_THROTTLE_MS) return;
+  scraplingWarningTimestamps.set(key, now);
+  if (detail !== undefined) {
+    console.warn(message, detail);
+  } else {
+    console.warn(message);
+  }
+}
 
 function compactText(value: string, maxChars = 4000): string {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
@@ -316,7 +330,10 @@ export const scraplingClient = {
     try {
       const workerResult = await fetchViaWorker(payload);
       if (workerResult.ok && !workerResult.blockedSuspected && !hasUsableWorkerContent(workerResult)) {
-        console.warn('[ScraplingClient] Worker returned empty html/text, falling back to HTTP fetch.');
+        warnScraplingWithThrottle(
+          'worker-empty-fetch',
+          '[ScraplingClient] Worker returned empty html/text, falling back to HTTP fetch.'
+        );
         const fallback = await fetchViaFallback(payload);
         fallback.fallbackReason =
           workerResult.fallbackReason ||
@@ -330,7 +347,11 @@ export const scraplingClient = {
       }
       return workerResult;
     } catch (error: any) {
-      console.warn('[ScraplingClient] Worker fetch failed, falling back to lightweight mode:', error?.message || error);
+      warnScraplingWithThrottle(
+        'worker-fetch-failed',
+        '[ScraplingClient] Worker fetch failed, falling back to lightweight mode:',
+        error?.message || error
+      );
       const fallback = await fetchViaFallback(payload);
       fallback.fallbackReason = `Worker fetch failed: ${error?.message || 'unknown error'}`;
       return fallback;
@@ -378,7 +399,10 @@ export const scraplingClient = {
 
       const hasUsablePageContent = pages.some((page) => hasUsableWorkerContent(page));
       if (pages.length > 0 && !hasUsablePageContent) {
-        console.warn('[ScraplingClient] Worker crawl returned empty page payloads, falling back to HTTP crawl mode.');
+        warnScraplingWithThrottle(
+          'worker-empty-crawl',
+          '[ScraplingClient] Worker crawl returned empty page payloads, falling back to HTTP crawl mode.'
+        );
         const fallback = await fallbackCrawl(payload);
         fallback.fallbackReason =
           data.fallbackReason ||
@@ -397,7 +421,11 @@ export const scraplingClient = {
         pages,
       };
     } catch (error: any) {
-      console.warn('[ScraplingClient] Worker crawl failed, using fallback crawl mode:', error?.message || error);
+      warnScraplingWithThrottle(
+        'worker-crawl-failed',
+        '[ScraplingClient] Worker crawl failed, using fallback crawl mode:',
+        error?.message || error
+      );
       const fallback = await fallbackCrawl(payload);
       fallback.fallbackReason = `Worker crawl failed: ${error?.message || 'unknown error'}`;
       return fallback;

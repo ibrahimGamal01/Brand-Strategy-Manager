@@ -191,7 +191,7 @@ export async function gatherInformation(input: GatheringInput): Promise<Informat
     console.log(`[InfoGather] ✅ Smart Pipeline Success: ${ddgResult.totals.total} data points collected`);
     
   } catch (error: any) {
-    console.error(`[InfoGather] Smart pipeline failed, falling back:`, error.message);
+    console.warn(`[InfoGather] Smart pipeline degraded, using fallback: ${error.message}`);
     errors.push(`Smart Pipeline: ${error.message}`);
     
     // FALLBACK: Puppeteer (Legacy)
@@ -204,7 +204,7 @@ export async function gatherInformation(input: GatheringInput): Promise<Informat
           layersUsed.push('PUPPETEER_BRAND_CONTEXT');
         }
     } catch (err: any) {
-        console.error(`[InfoGather] Puppeteer fallback failed:`, err.message);
+        console.warn(`[InfoGather] Puppeteer fallback unavailable: ${err.message}`);
     }
     }
   }
@@ -226,7 +226,7 @@ export async function gatherInformation(input: GatheringInput): Promise<Informat
     console.log(`[InfoGather] Scraped ${socialContent.totals.images} images and ${socialContent.totals.videos} videos from social handles`);
     layersUsed.push('SITE_LIMITED_SOCIAL_CONTENT');
   } catch (error: any) {
-    console.error(`[InfoGather] Social content scrape failed:`, error.message);
+    console.warn(`[InfoGather] Social content scrape degraded: ${error.message}`);
     errors.push(`Social Content Scrape: ${error.message}`);
   }
 
@@ -514,7 +514,7 @@ export async function gatherInformation(input: GatheringInput): Promise<Informat
             console.log(`[InfoGather] Completed background scraping: ${success}/${results.length} successful`);
           })
           .catch(err => {
-            console.error(`[InfoGather] Background scraping error (non-blocking):`, err.message);
+            console.warn(`[InfoGather] Background scraping warning (non-blocking): ${err.message}`);
           });
         
         console.log(`[InfoGather] ✅ Competitor scraping queued (running in background)`);
@@ -561,13 +561,13 @@ export async function gatherInformation(input: GatheringInput): Promise<Informat
       
       // 1. Scrape User Instagram Profile
       await scrapeProfileIncrementally(input.researchJobId, 'instagram', input.handle)
-        .catch(e => console.error(`[InfoGather] Failed to scrape user Instagram: ${e.message}`));
+        .catch(e => console.warn(`[InfoGather] User Instagram scrape warning: ${e.message}`));
       
       // 2. Try TikTok Scraping (new!)
       try {
         const { tiktokService } = await import('../scraper/tiktok-service');
         await tiktokService.scrapeAndSave(input.researchJobId, input.handle, 20)
-          .catch(e => console.error(`[InfoGather] TikTok scrape failed: ${e.message}`));
+          .catch(e => console.warn(`[InfoGather] TikTok scrape warning: ${e.message}`));
         layersUsed.push('TIKTOK_SCRAPING');
       } catch (e: any) {
         console.log(`[InfoGather] TikTok service not available: ${e.message}`);
@@ -577,7 +577,7 @@ export async function gatherInformation(input: GatheringInput): Promise<Informat
       const topCompetitors = competitors.slice(0, 3);
       for (const comp of topCompetitors) {
         await scrapeProfileIncrementally(input.researchJobId, 'instagram', comp.handle)
-          .catch(e => console.error(`[InfoGather] Failed to scrape competitor @${comp.handle}: ${e.message}`));
+          .catch(e => console.warn(`[InfoGather] Competitor scrape warning @${comp.handle}: ${e.message}`));
       }
       
       layersUsed.push('INCREMENTAL_SCRAPING');
@@ -591,7 +591,7 @@ export async function gatherInformation(input: GatheringInput): Promise<Informat
        ];
        
       await analyzeSearchTrends(input.researchJobId, trendKeywords)
-        .catch(e => console.error(`[InfoGather] Trends analysis failed: ${e.message}`));
+        .catch(e => console.warn(`[InfoGather] Trends analysis warning: ${e.message}`));
       
       layersUsed.push('SEARCH_TRENDS');
       
@@ -601,7 +601,7 @@ export async function gatherInformation(input: GatheringInput): Promise<Informat
         mode: 'append',
         modules: ['community_insights'],
         runReason: 'resume',
-      }).catch(e => console.error(`[InfoGather] Community Detective failed: ${e.message}`));
+      }).catch(e => console.warn(`[InfoGather] Community Detective warning: ${e.message}`));
       
       layersUsed.push('COMMUNITY_DETECTIVE');
       

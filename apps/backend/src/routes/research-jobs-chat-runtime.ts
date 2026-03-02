@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { prisma } from '../lib/prisma';
 import {
   cancelQueueItem,
@@ -23,8 +24,26 @@ import { serializeRuntimeProcessEvent } from '../services/chat/runtime/event-con
 import { listWorkspaceEvidence } from '../services/evidence/workspace-evidence-service';
 import { getLatestKnowledgeLedgerVersion } from '../services/knowledge/knowledge-ledger-service';
 import { issueRuntimeWsToken } from '../services/chat/runtime/runtime-ws-auth';
+import {
+  applyRuntimeDocumentEdit,
+  compareRuntimeDocumentVersions,
+  exportRuntimeDocumentVersion,
+  getRuntimeDocumentDetail,
+  listRuntimeDocuments,
+  maxUploadBytes,
+  maxUploadFiles,
+  proposeRuntimeDocumentEdit,
+  searchRuntimeDocument,
+  uploadRuntimeDocuments,
+} from '../services/documents/workspace-document-service';
 
 const router = Router();
+const documentUpload = multer({
+  limits: {
+    fileSize: maxUploadBytes(),
+    files: maxUploadFiles(),
+  },
+});
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -45,9 +64,15 @@ router.get('/:id/runtime/threads', async (req, res) => {
 
 router.post('/:id/runtime/threads', async (req, res) => {
   try {
+    const authedReq = req as AuthedPortalRequest;
+    const sessionUserId = String(authedReq.portalSession?.user?.id || '').trim();
+    if (!sessionUserId) {
+      return res.status(401).json({ error: 'AUTH_REQUIRED' });
+    }
+
     const researchJobId = String(req.params.id || '').trim();
     const title = String(req.body?.title || 'Main workspace thread').trim().slice(0, 180);
-    const createdBy = String(req.body?.createdBy || 'system').trim().slice(0, 120);
+    const createdBy = `portal_user:${sessionUserId.slice(0, 120)}`;
 
     const job = await prisma.researchJob.findUnique({ where: { id: researchJobId }, select: { id: true } });
     if (!job) {
@@ -84,6 +109,12 @@ router.get('/:id/runtime/threads/:threadId', async (req, res) => {
 
 router.post('/:id/runtime/threads/:threadId/branches', async (req, res) => {
   try {
+    const authedReq = req as AuthedPortalRequest;
+    const sessionUserId = String(authedReq.portalSession?.user?.id || '').trim();
+    if (!sessionUserId) {
+      return res.status(401).json({ error: 'AUTH_REQUIRED' });
+    }
+
     const researchJobId = String(req.params.id || '').trim();
     const threadId = String(req.params.threadId || '').trim();
     const thread = await getThread(researchJobId, threadId);
@@ -92,7 +123,7 @@ router.post('/:id/runtime/threads/:threadId/branches', async (req, res) => {
     }
 
     const name = String(req.body?.name || '').trim().slice(0, 120);
-    const createdBy = String(req.body?.createdBy || 'system').trim().slice(0, 120);
+    const createdBy = `portal_user:${sessionUserId.slice(0, 120)}`;
     const forkedFromBranchId = req.body?.forkedFromBranchId ? String(req.body.forkedFromBranchId).trim() : null;
     const forkedFromMessageId = req.body?.forkedFromMessageId ? String(req.body.forkedFromMessageId).trim() : null;
 
@@ -320,17 +351,29 @@ router.get('/:id/runtime/branches/:branchId/queue', async (req, res) => {
 
 router.post('/:id/runtime/branches/:branchId/messages', async (req, res) => {
   try {
+    const authedReq = req as AuthedPortalRequest;
+    const session = authedReq.portalSession;
+    if (!session?.user?.id) {
+      return res.status(401).json({ error: 'AUTH_REQUIRED' });
+    }
+
     const researchJobId = String(req.params.id || '').trim();
     const branchId = String(req.params.branchId || '').trim();
     const content = String(req.body?.content || '').trim();
-    if (!content) {
-      return res.status(400).json({ error: 'content is required' });
-    }
 
-    const userId = String(req.body?.userId || 'portal_user').trim().slice(0, 120) || 'portal_user';
+    const userId = `portal_user:${String(session.user.id).trim().slice(0, 120)}`;
     const modeRaw = String(req.body?.mode || 'send').trim().toLowerCase();
     const mode = modeRaw === 'queue' || modeRaw === 'interrupt' ? modeRaw : 'send';
     const inputOptions = isRecord(req.body?.inputOptions) ? req.body.inputOptions : undefined;
+    const attachmentIds = Array.isArray(req.body?.attachmentIds)
+      ? req.body.attachmentIds.map((entry: unknown) => String(entry || '').trim()).filter(Boolean).slice(0, 20)
+      : undefined;
+    const documentIds = Array.isArray(req.body?.documentIds)
+      ? req.body.documentIds.map((entry: unknown) => String(entry || '').trim()).filter(Boolean).slice(0, 20)
+      : undefined;
+    if (!content && !attachmentIds?.length && !documentIds?.length) {
+      return res.status(400).json({ error: 'content is required when no attachments/documents are provided' });
+    }
 
     const result = await runtimeRunEngine.sendMessage({
       researchJobId,
@@ -343,6 +386,8 @@ router.post('/:id/runtime/branches/:branchId/messages', async (req, res) => {
           ? req.body.policy
           : undefined,
       ...(inputOptions ? { inputOptions } : {}),
+      ...(attachmentIds ? { attachmentIds } : {}),
+      ...(documentIds ? { documentIds } : {}),
     });
 
     return res.status(202).json(result);
@@ -419,13 +464,19 @@ router.post('/:id/runtime/branches/:branchId/steer', async (req, res) => {
 
 router.post('/:id/runtime/branches/:branchId/bootstrap', async (req, res) => {
   try {
+    const portalReq = req as AuthedPortalRequest;
+    const sessionUserId = String(portalReq.portalSession?.user?.id || '').trim();
+    if (!sessionUserId) {
+      return res.status(401).json({ error: 'AUTH_REQUIRED' });
+    }
+
     const researchJobId = String(req.params.id || '').trim();
     const branchId = String(req.params.branchId || '').trim();
     const policy =
       req.body?.policy && typeof req.body.policy === 'object' && !Array.isArray(req.body.policy)
         ? req.body.policy
         : undefined;
-    const initiatedBy = String(req.body?.initiatedBy || 'portal').trim() || 'portal';
+    const initiatedBy = `portal_user:${sessionUserId.slice(0, 120)}`;
 
     const result = await runtimeRunEngine.bootstrapBranch({
       researchJobId,
@@ -491,9 +542,23 @@ router.patch('/:id/runtime/branches/:branchId/queue/:itemId', async (req, res) =
     const content = req.body?.content === undefined ? undefined : String(req.body?.content || '').trim();
     const inputOptions = isRecord(req.body?.inputOptions) ? req.body.inputOptions : undefined;
     const steerNote = req.body?.steerNote === undefined ? undefined : String(req.body?.steerNote || '').trim();
+    const attachmentIds = Array.isArray(req.body?.attachmentIds)
+      ? req.body.attachmentIds.map((entry: unknown) => String(entry || '').trim()).filter(Boolean).slice(0, 20)
+      : undefined;
+    const documentIds = Array.isArray(req.body?.documentIds)
+      ? req.body.documentIds.map((entry: unknown) => String(entry || '').trim()).filter(Boolean).slice(0, 20)
+      : undefined;
 
-    if (content === undefined && inputOptions === undefined && steerNote === undefined) {
-      return res.status(400).json({ error: 'At least one field is required: content, inputOptions, or steerNote' });
+    if (
+      content === undefined &&
+      inputOptions === undefined &&
+      steerNote === undefined &&
+      attachmentIds === undefined &&
+      documentIds === undefined
+    ) {
+      return res.status(400).json({
+        error: 'At least one field is required: content, inputOptions, steerNote, attachmentIds, or documentIds',
+      });
     }
 
     await runtimeRunEngine.updateQueuedMessage({
@@ -503,6 +568,8 @@ router.patch('/:id/runtime/branches/:branchId/queue/:itemId', async (req, res) =
       ...(content !== undefined ? { content } : {}),
       ...(inputOptions ? { inputOptions } : {}),
       ...(steerNote !== undefined ? { steerNote } : {}),
+      ...(attachmentIds !== undefined ? { attachmentIds } : {}),
+      ...(documentIds !== undefined ? { documentIds } : {}),
     });
 
     const queue = await listQueue(branchId);
@@ -587,6 +654,225 @@ router.get('/:id/runtime/branches/:branchId/state', async (req, res) => {
   } catch (error: any) {
     const status = String(error?.message || '').includes('not found') ? 404 : 500;
     return res.status(status).json({ error: 'Failed to fetch branch state', details: error?.message || String(error) });
+  }
+});
+
+router.post(
+  '/:id/runtime/branches/:branchId/documents/upload',
+  documentUpload.array('files', maxUploadFiles()),
+  async (req, res) => {
+    try {
+      const researchJobId = String(req.params.id || '').trim();
+      const branchId = String(req.params.branchId || '').trim();
+      await runtimeRunEngine.getBranchState({ researchJobId, branchId });
+
+      const filesRaw = Array.isArray(req.files) ? req.files : [];
+      if (!filesRaw.length) {
+        return res.status(400).json({ error: 'files[] is required' });
+      }
+
+      const portalReq = req as AuthedPortalRequest;
+      const userId = String(portalReq.portalSession?.user?.id || 'portal_user').trim() || 'portal_user';
+      const title = typeof req.body?.title === 'string' ? req.body.title : undefined;
+
+      const files = filesRaw.map((file) => ({
+        originalname: String((file as any).originalname || 'document'),
+        mimetype: String((file as any).mimetype || 'application/octet-stream'),
+        size: Number((file as any).size || 0),
+        buffer: Buffer.from((file as any).buffer || Buffer.from('')),
+      }));
+
+      const uploaded = await uploadRuntimeDocuments({
+        researchJobId,
+        branchId,
+        userId,
+        files,
+        ...(title ? { title } : {}),
+      });
+
+      return res.status(202).json({
+        ok: true,
+        documents: uploaded.documents,
+      });
+    } catch (error: any) {
+      const message = String(error?.message || error || 'Upload failed');
+      const status =
+        message.includes('Workspace not found') || message.includes('not found')
+          ? 404
+          : message.includes('Unsupported file type') ||
+              message.includes('No files uploaded') ||
+              message.includes('up to') ||
+              message.includes('25MB')
+            ? 400
+            : 500;
+      return res.status(status).json({ error: 'Failed to upload runtime documents', details: message });
+    }
+  }
+);
+
+router.get('/:id/runtime/branches/:branchId/documents', async (req, res) => {
+  try {
+    const researchJobId = String(req.params.id || '').trim();
+    const branchId = String(req.params.branchId || '').trim();
+    await runtimeRunEngine.getBranchState({ researchJobId, branchId });
+
+    const limit = Number(req.query.limit || 40);
+    const documents = await listRuntimeDocuments({
+      researchJobId,
+      branchId,
+      ...(Number.isFinite(limit) ? { limit } : {}),
+    });
+
+    return res.json({ documents });
+  } catch (error: any) {
+    const status = String(error?.message || '').includes('not found') ? 404 : 500;
+    return res.status(status).json({ error: 'Failed to list runtime documents', details: error?.message || String(error) });
+  }
+});
+
+router.get('/:id/runtime/branches/:branchId/documents/:documentId', async (req, res) => {
+  try {
+    const researchJobId = String(req.params.id || '').trim();
+    const branchId = String(req.params.branchId || '').trim();
+    const documentId = String(req.params.documentId || '').trim();
+    await runtimeRunEngine.getBranchState({ researchJobId, branchId });
+    const document = await getRuntimeDocumentDetail({ researchJobId, branchId, documentId });
+    return res.json({ document });
+  } catch (error: any) {
+    const status = String(error?.message || '').includes('not found') ? 404 : 500;
+    return res.status(status).json({ error: 'Failed to load runtime document', details: error?.message || String(error) });
+  }
+});
+
+router.post('/:id/runtime/branches/:branchId/documents/:documentId/propose-edit', async (req, res) => {
+  try {
+    const researchJobId = String(req.params.id || '').trim();
+    const branchId = String(req.params.branchId || '').trim();
+    const documentId = String(req.params.documentId || '').trim();
+    const instruction = String(req.body?.instruction || '').trim();
+    if (!instruction) {
+      return res.status(400).json({ error: 'instruction is required' });
+    }
+    await runtimeRunEngine.getBranchState({ researchJobId, branchId });
+    const portalReq = req as AuthedPortalRequest;
+    const userId = String(portalReq.portalSession?.user?.id || 'portal_user').trim() || 'portal_user';
+    const proposal = await proposeRuntimeDocumentEdit({
+      researchJobId,
+      branchId,
+      documentId,
+      instruction,
+      userId,
+    });
+    return res.json({ proposal });
+  } catch (error: any) {
+    const message = String(error?.message || '');
+    const status = message.includes('not found') ? 404 : message.includes('required') ? 400 : 500;
+    return res.status(status).json({ error: 'Failed to propose runtime document edit', details: message || String(error) });
+  }
+});
+
+router.post('/:id/runtime/branches/:branchId/documents/:documentId/apply-edit', async (req, res) => {
+  try {
+    const researchJobId = String(req.params.id || '').trim();
+    const branchId = String(req.params.branchId || '').trim();
+    const documentId = String(req.params.documentId || '').trim();
+    const proposedContentMd = String(req.body?.proposedContentMd || '').trim();
+    if (!proposedContentMd) {
+      return res.status(400).json({ error: 'proposedContentMd is required' });
+    }
+    await runtimeRunEngine.getBranchState({ researchJobId, branchId });
+    const portalReq = req as AuthedPortalRequest;
+    const userId = String(portalReq.portalSession?.user?.id || 'portal_user').trim() || 'portal_user';
+    const applied = await applyRuntimeDocumentEdit({
+      researchJobId,
+      branchId,
+      documentId,
+      userId,
+      proposedContentMd,
+      changeSummary: typeof req.body?.changeSummary === 'string' ? req.body.changeSummary : undefined,
+      baseVersionId: typeof req.body?.baseVersionId === 'string' ? req.body.baseVersionId : undefined,
+      runId: typeof req.body?.runId === 'string' ? req.body.runId : undefined,
+    });
+    return res.json({ applied });
+  } catch (error: any) {
+    const message = String(error?.message || '');
+    const status = message.includes('not found') ? 404 : message.includes('required') ? 400 : 500;
+    return res.status(status).json({ error: 'Failed to apply runtime document edit', details: message || String(error) });
+  }
+});
+
+router.post('/:id/runtime/branches/:branchId/documents/:documentId/export', async (req, res) => {
+  try {
+    const researchJobId = String(req.params.id || '').trim();
+    const branchId = String(req.params.branchId || '').trim();
+    const documentId = String(req.params.documentId || '').trim();
+    const format = String(req.body?.format || '').trim().toUpperCase() || 'PDF';
+    await runtimeRunEngine.getBranchState({ researchJobId, branchId });
+    const portalReq = req as AuthedPortalRequest;
+    const userId = String(portalReq.portalSession?.user?.id || 'portal_user').trim() || 'portal_user';
+    const exported = await exportRuntimeDocumentVersion({
+      researchJobId,
+      branchId,
+      documentId,
+      format: format as 'PDF' | 'DOCX' | 'MD',
+      versionId: typeof req.body?.versionId === 'string' ? req.body.versionId : undefined,
+      userId,
+    });
+    return res.json({ exported });
+  } catch (error: any) {
+    const message = String(error?.message || '');
+    const status = message.includes('not found') ? 404 : message.includes('format') || message.includes('required') ? 400 : 500;
+    return res.status(status).json({ error: 'Failed to export runtime document', details: message || String(error) });
+  }
+});
+
+router.post('/:id/runtime/branches/:branchId/documents/:documentId/compare-versions', async (req, res) => {
+  try {
+    const researchJobId = String(req.params.id || '').trim();
+    const branchId = String(req.params.branchId || '').trim();
+    const documentId = String(req.params.documentId || '').trim();
+    const fromVersionId = String(req.body?.fromVersionId || '').trim();
+    const toVersionId = String(req.body?.toVersionId || '').trim();
+    if (!fromVersionId || !toVersionId) {
+      return res.status(400).json({ error: 'fromVersionId and toVersionId are required' });
+    }
+    await runtimeRunEngine.getBranchState({ researchJobId, branchId });
+    const comparison = await compareRuntimeDocumentVersions({
+      researchJobId,
+      branchId,
+      documentId,
+      fromVersionId,
+      toVersionId,
+    });
+    return res.json({ comparison });
+  } catch (error: any) {
+    const message = String(error?.message || '');
+    const status = message.includes('not found') ? 404 : message.includes('required') ? 400 : 500;
+    return res.status(status).json({ error: 'Failed to compare runtime document versions', details: message || String(error) });
+  }
+});
+
+router.get('/:id/runtime/branches/:branchId/documents/:documentId/search', async (req, res) => {
+  try {
+    const researchJobId = String(req.params.id || '').trim();
+    const branchId = String(req.params.branchId || '').trim();
+    const documentId = String(req.params.documentId || '').trim();
+    const query = String(req.query.q || '').trim();
+    if (!query) {
+      return res.status(400).json({ error: 'q is required' });
+    }
+    await runtimeRunEngine.getBranchState({ researchJobId, branchId });
+    const results = await searchRuntimeDocument({
+      researchJobId,
+      documentId,
+      query,
+      limit: Number.isFinite(Number(req.query.limit || 8)) ? Number(req.query.limit) : undefined,
+    });
+    return res.json({ results });
+  } catch (error: any) {
+    const message = String(error?.message || '');
+    const status = message.includes('not found') ? 404 : message.includes('required') ? 400 : 500;
+    return res.status(status).json({ error: 'Failed to search runtime document', details: message || String(error) });
   }
 });
 

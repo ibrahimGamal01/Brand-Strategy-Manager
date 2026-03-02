@@ -2,9 +2,9 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { buildPlatformHandles, parseStringList } from '../intake/brain-intake-utils';
 import { getPortalWorkspaceIntakeStatus } from './portal-intake';
-import { resolveIntakeWebsites } from './portal-intake-websites';
+import { parseSocialReferenceList, resolveIntakeWebsites } from './portal-intake-websites';
 
-type IntakePlatform = 'instagram' | 'tiktok' | 'youtube' | 'twitter';
+type IntakePlatform = 'instagram' | 'tiktok' | 'youtube' | 'twitter' | 'linkedin';
 
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -109,6 +109,7 @@ export async function savePortalWorkspaceIntakeDraft(
     if (normalizedPlatform === 'instagram') platformHandles.instagram = normalizedHandle;
     if (normalizedPlatform === 'tiktok') platformHandles.tiktok = normalizedHandle;
     if (normalizedPlatform === 'youtube') platformHandles.youtube = normalizedHandle;
+    if (normalizedPlatform === 'linkedin') platformHandles.linkedin = normalizedHandle;
     if (normalizedPlatform === 'x') platformHandles.twitter = normalizedHandle;
   }
 
@@ -123,7 +124,7 @@ export async function savePortalWorkspaceIntakeDraft(
   const resultsIn90Days = parseList(nextPayload.resultsIn90Days, 2);
   const questionsBeforeBuying = parseList(nextPayload.questionsBeforeBuying, 3);
   const competitorInspirationLinks = parseList(nextPayload.competitorInspirationLinks, 5);
-  const { websites, primaryWebsite } = resolveIntakeWebsites(nextPayload);
+  const { websites, primaryWebsite, socialReferences } = resolveIntakeWebsites(nextPayload);
   const surfaces =
     channels.length > 0
       ? channels.map((item) => item.platform)
@@ -145,6 +146,9 @@ export async function savePortalWorkspaceIntakeDraft(
     businessType: stringify(nextPayload.businessType),
     website: primaryWebsite || stringify(nextPayload.website),
     websites: websites.length ? websites : undefined,
+    socialReferences: socialReferences.length
+      ? socialReferences
+      : parseSocialReferenceList([nextPayload.socialReferences], 12),
     description: stringify(nextPayload.oneSentenceDescription),
     businessOverview: stringify(nextPayload.oneSentenceDescription),
     mainOffer: stringify(nextPayload.mainOffer),

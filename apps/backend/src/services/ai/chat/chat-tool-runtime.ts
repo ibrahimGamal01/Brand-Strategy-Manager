@@ -278,8 +278,7 @@ async function runPlanner(params: {
       { role: 'system', content: plannerSystemPrompt },
       { role: 'user', content: plannerUserPrompt },
     ],
-    temperature: 0,
-    max_tokens: Math.min(350, COST_PROTECTION.maxTokensPerCall),
+    max_completion_tokens: Math.min(350, COST_PROTECTION.maxTokensPerCall),
   })) as OpenAI.Chat.Completions.ChatCompletion;
 
   if (plannerResponse.usage?.prompt_tokens && plannerResponse.usage?.completion_tokens) {

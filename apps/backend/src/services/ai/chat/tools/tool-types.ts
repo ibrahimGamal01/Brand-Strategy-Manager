@@ -25,7 +25,14 @@ export type ToolName =
   | 'web.extract'
   | 'document.plan'
   | 'document.generate'
-  | 'document.status';
+  | 'document.status'
+  | 'document.ingest'
+  | 'document.read'
+  | 'document.search'
+  | 'document.propose_edit'
+  | 'document.apply_edit'
+  | 'document.export'
+  | 'document.compare_versions';
 
 export type JsonSchema = Record<string, unknown>;
 

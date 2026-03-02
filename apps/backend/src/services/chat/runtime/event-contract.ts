@@ -26,7 +26,19 @@ export type RuntimeEventKind =
   | 'tool.started'
   | 'tool.output'
   | 'tool.failed'
-  | 'decision.required';
+  | 'decision.required'
+  | 'document.upload_received'
+  | 'document.parse_started'
+  | 'document.parse_progress'
+  | 'document.parse_completed'
+  | 'document.parse_needs_review'
+  | 'document.parse_failed'
+  | 'document.chunking_completed'
+  | 'document.edit_proposed'
+  | 'document.edit_applied'
+  | 'document.export_started'
+  | 'document.export_completed'
+  | 'document.export_failed';
 
 export type RuntimeEventStatus = 'info' | 'warn' | 'error';
 
@@ -100,7 +112,19 @@ function normalizeEvent(value: unknown): RuntimeEventKind | null {
     normalized === 'tool.started' ||
     normalized === 'tool.output' ||
     normalized === 'tool.failed' ||
-    normalized === 'decision.required'
+    normalized === 'decision.required' ||
+    normalized === 'document.upload_received' ||
+    normalized === 'document.parse_started' ||
+    normalized === 'document.parse_progress' ||
+    normalized === 'document.parse_completed' ||
+    normalized === 'document.parse_needs_review' ||
+    normalized === 'document.parse_failed' ||
+    normalized === 'document.chunking_completed' ||
+    normalized === 'document.edit_proposed' ||
+    normalized === 'document.edit_applied' ||
+    normalized === 'document.export_started' ||
+    normalized === 'document.export_completed' ||
+    normalized === 'document.export_failed'
   ) {
     return normalized;
   }

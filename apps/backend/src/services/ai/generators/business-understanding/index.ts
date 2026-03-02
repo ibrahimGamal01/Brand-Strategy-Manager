@@ -5,7 +5,6 @@
  * using RAG context and system prompts.
  */
 
-import OpenAI from 'openai';
 import { getFullResearchContext, formatContextForLLM } from '../../rag';
 import { SYSTEM_PROMPTS } from '../../prompts/system-prompts';
 import { validateContent } from '../../validation';
@@ -13,15 +12,7 @@ import { COST_PROTECTION, costTracker, checkCostLimit } from '../../validation/c
 import { GenerationResult, GenerationAttempt } from './types';
 import { generateMockBusinessUnderstanding } from './mock';
 import { resolveModelForTask } from '../../model-router';
-
-let openaiClient: OpenAI | null = null;
-function getOpenAiClient(): OpenAI | null {
-  if (openaiClient) return openaiClient;
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return null;
-  openaiClient = new OpenAI({ apiKey });
-  return openaiClient;
-}
+import { openai as openaiClient, OpenAI } from '../../openai-client';
 
 const MAX_ATTEMPTS = 3;
 const BUSINESS_UNDERSTANDING_MODEL = resolveModelForTask('content_generation');
@@ -159,8 +150,7 @@ async function callOpenAI(
   previousAttempt?: GenerationAttempt
 ): Promise<string> {
   
-  const openai = getOpenAiClient();
-  if (!openai) {
+  if (!process.env.OPENAI_API_KEY && !process.env.OPENAI_API_KEY_FALLBACK) {
     throw new Error('OPENAI_API_KEY not configured');
   }
   
@@ -200,17 +190,16 @@ async function callOpenAI(
     });
   }
 
-  const response = await openai.chat.completions.create({
-    model: BUSINESS_UNDERSTANDING_MODEL,
+  const response = (await openaiClient.bat.chatCompletion('content_generation', {
     messages,
     temperature: 0.7,
     max_tokens: Math.min(4000, COST_PROTECTION.maxTokensPerCall)
-  });
+  })) as OpenAI.Chat.Completions.ChatCompletion;
 
   // Track costs
   if (response.usage) {
     costTracker.addUsage(
-      BUSINESS_UNDERSTANDING_MODEL,
+      response.model || BUSINESS_UNDERSTANDING_MODEL,
       response.usage.prompt_tokens,
       response.usage.completion_tokens
     );

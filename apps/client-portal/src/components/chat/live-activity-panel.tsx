@@ -280,13 +280,29 @@ function RunningTab({
   const [manualSteer, setManualSteer] = useState("");
   const [insightIndex, setInsightIndex] = useState(0);
   const [detailRunId, setDetailRunId] = useState<string | null>(null);
+  const activeRuns = useMemo(
+    () => runs.filter((run) => run.status === "running" || run.status === "waiting_input"),
+    [runs]
+  );
+  const activeFeedItems = useMemo(
+    () =>
+      feedItems.filter(
+        (item) =>
+          item.phase === "queued" ||
+          item.phase === "planning" ||
+          item.phase === "tools" ||
+          item.phase === "writing" ||
+          item.phase === "waiting_input"
+      ),
+    [feedItems]
+  );
 
   const insightLines = useMemo(() => {
-    const fromFeed = feedItems.map((item) => item.message).filter(Boolean).slice(0, 8);
-    const fromRuns = runs.map((run) => `${run.label}: ${run.stage}`);
+    const fromFeed = activeFeedItems.map((item) => item.message).filter(Boolean).slice(0, 8);
+    const fromRuns = activeRuns.map((run) => `${run.label}: ${run.stage}`);
     const combined = [...fromFeed, ...fromRuns];
     return combined.length ? combined : ["BAT is reviewing workspace intelligence and preparing the next response."];
-  }, [feedItems, runs]);
+  }, [activeFeedItems, activeRuns]);
 
   useEffect(() => {
     if (insightLines.length <= 1) return;
@@ -296,7 +312,7 @@ function RunningTab({
     return () => clearInterval(timer);
   }, [insightLines.length]);
 
-  if (!runs.length) {
+  if (!activeRuns.length) {
     return (
       <div className="rounded-xl border p-4" style={{ borderColor: "var(--bat-border)" }}>
         <p className="text-sm font-semibold">No active runs right now.</p>
@@ -323,7 +339,7 @@ function RunningTab({
     "Show evidence first, then recommendation.",
     "Be detailed and action-oriented.",
   ];
-  const detailRun = runs.find((run) => run.id === detailRunId && run.v3Detail) || null;
+  const detailRun = activeRuns.find((run) => run.id === detailRunId && run.v3Detail) || null;
 
   return (
     <div className="relative flex h-full min-h-0 flex-col gap-3">
@@ -386,7 +402,7 @@ function RunningTab({
       </article>
 
       <div className="bat-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-        {runs.map((run) => (
+        {activeRuns.map((run) => (
           <article key={run.id} className="rounded-xl border p-3" style={{ borderColor: "var(--bat-border)" }}>
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">

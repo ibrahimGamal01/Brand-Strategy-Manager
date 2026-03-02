@@ -160,6 +160,8 @@ export async function createBranch(input: {
             citationsJson: toInputJson(message.citationsJson),
             reasoningJson: toInputJson(message.reasoningJson),
             inputOptionsJson: toInputJson(message.inputOptionsJson),
+            attachmentIdsJson: toInputJson(message.attachmentIdsJson),
+            documentIdsJson: toInputJson(message.documentIdsJson),
             parentMessageId: message.parentMessageId
               ? sourceToClonedId.get(message.parentMessageId) || null
               : null,
@@ -205,6 +207,8 @@ export async function createBranchMessage(input: {
   citationsJson?: unknown;
   reasoningJson?: unknown;
   inputOptionsJson?: unknown;
+  attachmentIdsJson?: unknown;
+  documentIdsJson?: unknown;
   parentMessageId?: string | null;
   clientVisible?: boolean;
 }) {
@@ -217,6 +221,8 @@ export async function createBranchMessage(input: {
       citationsJson: input.citationsJson === undefined ? undefined : toJson(input.citationsJson),
       reasoningJson: input.reasoningJson === undefined ? undefined : toJson(input.reasoningJson),
       inputOptionsJson: input.inputOptionsJson === undefined ? undefined : toJson(input.inputOptionsJson),
+      attachmentIdsJson: input.attachmentIdsJson === undefined ? undefined : toJson(input.attachmentIdsJson),
+      documentIdsJson: input.documentIdsJson === undefined ? undefined : toJson(input.documentIdsJson),
       parentMessageId: input.parentMessageId ?? null,
       clientVisible: input.clientVisible ?? true,
     },
@@ -236,6 +242,8 @@ export async function createAgentRun(input: {
   policy: RunPolicy;
   plan?: RuntimePlan | null;
   inputOptions?: unknown;
+  attachmentIds?: unknown;
+  documentIds?: unknown;
 }) {
   return prisma.agentRun.create({
     data: {
@@ -246,6 +254,8 @@ export async function createAgentRun(input: {
       policyJson: toJson(input.policy),
       planJson: input.plan ? toJson(input.plan) : undefined,
       inputOptionsJson: input.inputOptions === undefined ? undefined : toJson(input.inputOptions),
+      attachmentIdsJson: input.attachmentIds === undefined ? undefined : toJson(input.attachmentIds),
+      documentIdsJson: input.documentIds === undefined ? undefined : toJson(input.documentIds),
     },
     include: {
       branch: {
@@ -470,6 +480,8 @@ export async function enqueueMessage(input: {
   userId: string;
   content: string;
   inputOptions?: unknown;
+  attachmentIds?: unknown;
+  documentIds?: unknown;
   steer?: unknown;
 }) {
   const maxPosition = await prisma.messageQueueItem.aggregate({
@@ -490,6 +502,8 @@ export async function enqueueMessage(input: {
       userId: input.userId,
       content: input.content,
       inputOptionsJson: input.inputOptions === undefined ? undefined : toJson(input.inputOptions),
+      attachmentIdsJson: input.attachmentIds === undefined ? undefined : toJson(input.attachmentIds),
+      documentIdsJson: input.documentIds === undefined ? undefined : toJson(input.documentIds),
       steerJson: input.steer === undefined ? undefined : toJson(input.steer),
       position: nextPosition,
       status: MessageQueueItemStatus.QUEUED,
@@ -558,6 +572,8 @@ export async function updateQueueItem(
   data: {
     content?: string;
     inputOptions?: unknown;
+    attachmentIds?: unknown;
+    documentIds?: unknown;
     steer?: unknown;
   }
 ) {
@@ -586,6 +602,8 @@ export async function updateQueueItem(
     data: {
       ...(data.content !== undefined ? { content: data.content } : {}),
       ...(data.inputOptions !== undefined ? { inputOptionsJson: toJson(data.inputOptions) } : {}),
+      ...(data.attachmentIds !== undefined ? { attachmentIdsJson: toJson(data.attachmentIds) } : {}),
+      ...(data.documentIds !== undefined ? { documentIdsJson: toJson(data.documentIds) } : {}),
       ...(data.steer !== undefined ? { steerJson: toJson(data.steer) } : {}),
     },
   });
@@ -599,24 +617,33 @@ export async function markQueueItemStatus(itemId: string, status: MessageQueueIt
 }
 
 export async function popNextQueuedMessage(branchId: string) {
-  const next = await prisma.messageQueueItem.findFirst({
-    where: {
-      branchId,
-      status: MessageQueueItemStatus.QUEUED,
-    },
-    orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+  return prisma.$transaction(async (tx) => {
+    const next = await tx.messageQueueItem.findFirst({
+      where: {
+        branchId,
+        status: MessageQueueItemStatus.QUEUED,
+      },
+      orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+    });
+
+    if (!next) return null;
+
+    const claim = await tx.messageQueueItem.updateMany({
+      where: {
+        id: next.id,
+        status: MessageQueueItemStatus.QUEUED,
+      },
+      data: {
+        status: MessageQueueItemStatus.SENT,
+      },
+    });
+
+    if (claim.count === 0) return null;
+
+    return tx.messageQueueItem.findUnique({
+      where: { id: next.id },
+    });
   });
-
-  if (!next) return null;
-
-  const updated = await prisma.messageQueueItem.update({
-    where: { id: next.id },
-    data: {
-      status: MessageQueueItemStatus.SENT,
-    },
-  });
-
-  return updated;
 }
 
 export async function cancelActiveRuns(branchId: string) {

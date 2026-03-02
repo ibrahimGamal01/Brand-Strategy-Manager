@@ -13,12 +13,19 @@ import {
   WorkspaceIntakeLiveEvent,
   WorkspaceIntakeScanMode,
 } from "@/lib/runtime-api";
-import { buildChannelsFromHandles, getFilledHandlesList, SuggestedHandleValidationItem } from "./social-handles-fields";
+import {
+  buildChannelsFromHandles,
+  extractHandleFromUrlOrRaw,
+  getFilledHandlesList,
+  SuggestedHandleValidationItem,
+} from "./social-handles-fields";
 import { IntakeWizardV2 } from "./v2/intake-wizard-v2";
 import {
   applySuggestedHandles,
   applySuggestedToState,
+  classifyStateWebsiteInputs,
   fromPrefillToV2,
+  SuggestedHandleCandidate,
   toSubmitPayloadV2,
   toSuggestPayloadV2,
 } from "./v2/intake-mappers";
@@ -33,16 +40,26 @@ type WorkspaceIntakeFlowProps = {
 type SuggestedHandleValidationState = {
   instagram?: SuggestedHandleValidationItem;
   tiktok?: SuggestedHandleValidationItem;
+  youtube?: SuggestedHandleValidationItem;
+  linkedin?: SuggestedHandleValidationItem;
+  twitter?: SuggestedHandleValidationItem;
 };
 
 type IntakePhase = "wizard" | "starting";
 type ScanStatus = "idle" | "running" | "done" | "error";
 
 const MAX_FEED_EVENTS = 80;
+const SUGGEST_RETRY_ATTEMPTS = 2;
+const CONFIRMATION_REASON_NOTICE: Record<string, string> = {
+  MISSING_PRIMARY_CHANNEL: "No trusted primary channel found yet. Add a website or verified handle to improve suggestions.",
+  LOW_CONFIDENCE_SUGGESTION: "Suggestions were found but confidence is low, so BAT did not auto-apply risky channels.",
+  AI_UNAVAILABLE: "Autofill service is temporarily unavailable. You can continue manually.",
+  AI_NOT_CONFIGURED: "Autofill service is temporarily unavailable. You can continue manually.",
+};
 
 function hasWebsiteInput(state: IntakeStateV2): boolean {
-  if (state.website.trim().length > 0) return true;
-  return state.websites.some((entry) => String(entry || "").trim().length > 0);
+  const classified = classifyStateWebsiteInputs(state);
+  return classified.crawlWebsites.length > 0;
 }
 
 function formatRelativeTime(iso: string): string {
@@ -68,17 +85,76 @@ function eventTone(type: string): "info" | "warn" | "error" | "success" {
 }
 
 function toUniqueWebsiteList(state: IntakeStateV2): string[] {
-  const out: string[] = [];
+  return classifyStateWebsiteInputs(state).crawlWebsites.slice(0, 5);
+}
+
+function toSocialReferenceList(state: IntakeStateV2): string[] {
+  return classifyStateWebsiteInputs(state).socialReferences.slice(0, 12);
+}
+
+function candidateKey(candidate: Pick<SuggestedHandleCandidate, "platform" | "handle">): string {
+  return `${candidate.platform}:${String(candidate.handle || "").trim().toLowerCase()}`;
+}
+
+function isTransientSuggestError(message: string): boolean {
+  const text = String(message || "").toLowerCase();
+  return (
+    text.includes("request failed (502)") ||
+    text.includes("request failed (503)") ||
+    text.includes("request failed (504)") ||
+    text.includes("bad gateway") ||
+    text.includes("gateway timeout") ||
+    text.includes("failed to fetch")
+  );
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function inferPlatformFromReference(rawValue: string): SuggestedHandleCandidate["platform"] | null {
+  const lower = String(rawValue || "").toLowerCase();
+  if (lower.includes("instagram.com/")) return "instagram";
+  if (lower.includes("tiktok.com/")) return "tiktok";
+  if (lower.includes("youtube.com/") || lower.includes("youtu.be/")) return "youtube";
+  if (lower.includes("linkedin.com/")) return "linkedin";
+  if (lower.includes("x.com/") || lower.includes("twitter.com/")) return "twitter";
+  return null;
+}
+
+function deriveFallbackHandleCandidates(
+  socialReferences: string[],
+  handles: IntakeStateV2["handles"]
+): SuggestedHandleCandidate[] {
   const seen = new Set<string>();
-  for (const raw of [state.website, ...state.websites]) {
-    const candidate = String(raw || "").trim();
-    if (!candidate) continue;
-    const key = candidate.toLowerCase();
+  const results: SuggestedHandleCandidate[] = [];
+
+  for (const reference of socialReferences) {
+    const platform = inferPlatformFromReference(reference);
+    if (!platform) continue;
+
+    const existing = extractHandleFromUrlOrRaw(platform, handles[platform] || "");
+    if (existing) continue;
+
+    const handle = extractHandleFromUrlOrRaw(platform, reference);
+    if (!handle) continue;
+
+    const key = `${platform}:${handle.toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push(candidate);
+
+    results.push({
+      platform,
+      handle,
+      profileUrl: reference,
+      confidence: 0.99,
+      reason: "Detected from your provided social profile URL.",
+      source: "client_side_social_reference",
+      isLikelyClient: true,
+    });
   }
-  return out.slice(0, 5);
+
+  return results;
 }
 
 export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }: WorkspaceIntakeFlowProps) {
@@ -90,6 +166,9 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
   const [suggestedFields, setSuggestedFields] = useState<Set<string>>(new Set());
   const [suggestedHandlePlatforms, setSuggestedHandlePlatforms] = useState<Set<string>>(new Set());
   const [suggestedHandleValidation, setSuggestedHandleValidation] = useState<SuggestedHandleValidationState>();
+  const [suggestedHandleCandidates, setSuggestedHandleCandidates] = useState<SuggestedHandleCandidate[]>([]);
+  const [rejectedHandleCandidates, setRejectedHandleCandidates] = useState<Set<string>>(new Set());
+  const [ignoredHandleCandidates, setIgnoredHandleCandidates] = useState<Set<string>>(new Set());
   const [confirmationRequired, setConfirmationRequired] = useState(false);
   const [confirmationReasons, setConfirmationReasons] = useState<string[]>([]);
   const [channelsConfirmed, setChannelsConfirmed] = useState(false);
@@ -103,7 +182,20 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
 
   useEffect(() => {
     setState(fromPrefillToV2(initialPrefill));
+    setSuggestedHandleCandidates([]);
+    setRejectedHandleCandidates(new Set());
+    setIgnoredHandleCandidates(new Set());
   }, [initialPrefill]);
+
+  useEffect(() => {
+    setSuggestedHandleCandidates((previous) =>
+      previous.filter((candidate) => {
+        const current = extractHandleFromUrlOrRaw(candidate.platform, state.handles[candidate.platform] || "");
+        if (!current) return true;
+        return current !== String(candidate.handle || "").trim().toLowerCase();
+      })
+    );
+  }, [state.handles]);
 
   useEffect(() => {
     if (phase !== "starting") return;
@@ -237,7 +329,32 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
     setNotice("");
 
     try {
-      const suggestion = await suggestWorkspaceIntakeCompletion(workspaceId, toSuggestPayloadV2(state));
+      const suggestionPayload = toSuggestPayloadV2(state);
+      let suggestion: Awaited<ReturnType<typeof suggestWorkspaceIntakeCompletion>> | null = null;
+      let lastSuggestError: unknown = null;
+      for (let attempt = 0; attempt < SUGGEST_RETRY_ATTEMPTS; attempt += 1) {
+        try {
+          suggestion = await suggestWorkspaceIntakeCompletion(workspaceId, {
+            ...suggestionPayload,
+            step,
+            socialReferences: toSocialReferenceList(state),
+          });
+          lastSuggestError = null;
+          break;
+        } catch (retryError: unknown) {
+          lastSuggestError = retryError;
+          const retryable = isTransientSuggestError(String((retryError as Error)?.message || ""));
+          const isLastAttempt = attempt >= SUGGEST_RETRY_ATTEMPTS - 1;
+          if (!retryable || isLastAttempt) break;
+          await delay(500 * (attempt + 1));
+        }
+      }
+      if (!suggestion && lastSuggestError) {
+        throw lastSuggestError;
+      }
+      if (!suggestion) {
+        throw new Error("Suggestion failed");
+      }
       let next = state;
       let updatedFieldCount = 0;
       let updatedHandleCount = 0;
@@ -259,9 +376,34 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
       }
 
       const reasonCodes = Array.isArray(suggestion?.confirmationReasons) ? suggestion.confirmationReasons : [];
+      const warningCodes = Array.isArray(suggestion?.warnings) ? suggestion.warnings : [];
       const bypassMissingPrimary =
         hasWebsiteInput(next) && reasonCodes.length > 0 && reasonCodes.every((code) => code === "MISSING_PRIMARY_CHANNEL");
       const needsConfirmation = suggestion?.confirmationRequired === true && !bypassMissingPrimary;
+
+      if (step === "channels") {
+        const hiddenCandidateKeys = new Set<string>([
+          ...Array.from(rejectedHandleCandidates),
+          ...Array.from(ignoredHandleCandidates),
+        ]);
+        const nextCandidates = Array.isArray(suggestion?.suggestedHandleCandidates)
+          ? suggestion.suggestedHandleCandidates.filter((candidate) => {
+              const key = candidateKey(candidate);
+              if (hiddenCandidateKeys.has(key)) return false;
+              const existing = extractHandleFromUrlOrRaw(candidate.platform, next.handles[candidate.platform] || "");
+              if (!existing) return true;
+              return existing !== String(candidate.handle || "").trim().toLowerCase();
+            })
+          : [];
+        const fallbackCandidates = deriveFallbackHandleCandidates(next.socialReferences, next.handles).filter(
+          (candidate) => {
+            const key = candidateKey(candidate);
+            if (hiddenCandidateKeys.has(key)) return false;
+            return !nextCandidates.some((item) => candidateKey(item) === key);
+          }
+        );
+        setSuggestedHandleCandidates([...nextCandidates, ...fallbackCandidates]);
+      }
 
       setState(next);
       setSuggestedHandleValidation(
@@ -275,13 +417,30 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
 
       if (updatedFieldCount > 0 || updatedHandleCount > 0) {
         setNotice("Step suggestions applied.");
-      } else if (reasonCodes.includes("AI_UNAVAILABLE") || reasonCodes.includes("AI_NOT_CONFIGURED")) {
+      } else if (
+        reasonCodes.includes("AI_UNAVAILABLE") ||
+        reasonCodes.includes("AI_NOT_CONFIGURED") ||
+        warningCodes.includes("AI_UNAVAILABLE") ||
+        warningCodes.includes("AI_NOT_CONFIGURED")
+      ) {
         setNotice("Autofill service is temporarily unavailable. You can continue manually.");
+      } else if (warningCodes.includes("LOW_SIGNAL_COPY")) {
+        setNotice("BAT skipped low-signal copy and kept your existing text for this step.");
+      } else if (warningCodes.includes("NO_HIGH_CONFIDENCE_CHANNELS")) {
+        setNotice("BAT found channel candidates but none were high-confidence enough to auto-apply.");
+      } else if (reasonCodes.length > 0) {
+        const detail = reasonCodes.map((code) => CONFIRMATION_REASON_NOTICE[code] || code).join(" ");
+        setNotice(detail);
       } else {
         setNotice("No strong suggestions found for this step yet.");
       }
     } catch (suggestError: unknown) {
-      setError(String((suggestError as Error)?.message || "Suggestion failed"));
+      const rawMessage = String((suggestError as Error)?.message || "Suggestion failed");
+      if (/failed to fetch/i.test(rawMessage)) {
+        setError("Autofill could not reach the backend suggestion service. Please retry in a few seconds.");
+      } else {
+        setError(rawMessage);
+      }
     } finally {
       setLoading(false);
     }
@@ -322,6 +481,8 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
         website: websites[0],
         websites,
         mode: scanMode,
+        socialReferences: toSocialReferenceList(state),
+        includeSocialProfileCrawl: state.includeSocialProfileCrawl,
       });
       if (!result?.ok) {
         throw new Error("Failed to start website scan");
@@ -380,6 +541,52 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
     }
   }
 
+  function handleAcceptHandleCandidate(candidate: SuggestedHandleCandidate) {
+    const key = candidateKey(candidate);
+    setState((previous) => {
+      const nextHandles = { ...previous.handles };
+      nextHandles[candidate.platform] = String(candidate.handle || "").trim();
+      return {
+        ...previous,
+        handles: nextHandles,
+        primaryChannel: previous.primaryChannel || candidate.platform,
+      };
+    });
+    setSuggestedHandlePlatforms((previous) => new Set([...Array.from(previous), candidate.platform]));
+    setSuggestedHandleCandidates((previous) =>
+      previous.filter((item) => candidateKey(item) !== key)
+    );
+    setRejectedHandleCandidates((previous) => {
+      const next = new Set(Array.from(previous));
+      next.delete(key);
+      return next;
+    });
+    setIgnoredHandleCandidates((previous) => {
+      const next = new Set(Array.from(previous));
+      next.delete(key);
+      return next;
+    });
+    if (confirmationRequired) {
+      setChannelsConfirmed(false);
+    }
+  }
+
+  function handleRejectHandleCandidate(candidate: SuggestedHandleCandidate) {
+    const key = candidateKey(candidate);
+    setRejectedHandleCandidates((previous) => new Set([...Array.from(previous), key]));
+    setSuggestedHandleCandidates((previous) =>
+      previous.filter((item) => candidateKey(item) !== key)
+    );
+  }
+
+  function handleIgnoreHandleCandidate(candidate: SuggestedHandleCandidate) {
+    const key = candidateKey(candidate);
+    setIgnoredHandleCandidates((previous) => new Set([...Array.from(previous), key]));
+    setSuggestedHandleCandidates((previous) =>
+      previous.filter((item) => candidateKey(item) !== key)
+    );
+  }
+
   return (
     <section className="space-y-4">
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_330px]">
@@ -414,6 +621,10 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
                 suggestedFields={suggestedFields}
                 suggestedHandlePlatforms={suggestedHandlePlatforms}
                 suggestedHandleValidation={suggestedHandleValidation}
+                suggestedHandleCandidates={suggestedHandleCandidates}
+                onAcceptHandleCandidate={handleAcceptHandleCandidate}
+                onRejectHandleCandidate={handleRejectHandleCandidate}
+                onIgnoreHandleCandidate={handleIgnoreHandleCandidate}
                 confirmationRequired={confirmationRequired}
                 confirmationReasons={confirmationReasons}
                 channelsConfirmed={channelsConfirmed}
@@ -549,6 +760,20 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
                   {scanStatus === "running" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Globe className="h-4 w-4" />}
                   {scanStatus === "running" ? "Scanning websites..." : "Scan websites now"}
                 </button>
+                <label className="inline-flex items-start gap-2 text-xs" style={{ color: "var(--bat-text-muted)" }}>
+                  <input
+                    type="checkbox"
+                    checked={state.includeSocialProfileCrawl}
+                    onChange={(event) =>
+                      setState((previous) => ({
+                        ...previous,
+                        includeSocialProfileCrawl: event.target.checked,
+                      }))
+                    }
+                    className="mt-0.5"
+                  />
+                  Include social profile URLs from references in this scan.
+                </label>
               </div>
 
               <div className="max-h-56 space-y-2 overflow-y-auto pr-1">

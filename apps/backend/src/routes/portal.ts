@@ -40,7 +40,7 @@ import {
   subscribePortalIntakeEvents,
 } from '../services/portal/portal-intake-events';
 import {
-  parseWebsiteList,
+  classifyIntakeUrlInputs,
   PortalIntakeScanMode,
   queuePortalIntakeWebsiteScan,
 } from '../services/portal/portal-intake-websites';
@@ -125,6 +125,16 @@ function parseIntakeScanMode(value: unknown): PortalIntakeScanMode {
   return 'quick';
 }
 
+function parseBoolean(value: unknown, defaultValue = false): boolean {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return defaultValue;
+  if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) return false;
+  return defaultValue;
+}
+
 function parseLibraryCollection(value: unknown):
   | 'web'
   | 'competitors'
@@ -189,7 +199,9 @@ router.post('/auth/signup', async (req, res) => {
     const password = safeString(req.body?.password);
     const fullName = safeString(req.body?.fullName);
     const companyName = safeString(req.body?.companyName);
-    const websites = parseWebsiteList([req.body?.website, req.body?.websites], 5);
+    const websiteClassified = classifyIntakeUrlInputs([req.body?.website, req.body?.websites], 5, 8);
+    const websites = websiteClassified.crawlWebsites;
+    const socialReferences = websiteClassified.socialReferences;
 
     if (!isValidEmail(email)) {
       return res.status(400).json({ error: 'INVALID_EMAIL' });
@@ -230,6 +242,7 @@ router.post('/auth/signup', async (req, res) => {
           seedInputData: {
             website: websites[0] || '',
             websites,
+            socialReferences,
             source: 'portal_signup',
           },
         },
@@ -658,7 +671,15 @@ router.post(
           ? (req.body as Record<string, unknown>)
           : {};
       const mode = parseIntakeScanMode(payload.mode);
-      const websites = parseWebsiteList([payload.websites, payload.website], 5);
+      const includeSocialProfileCrawl = parseBoolean(payload.includeSocialProfileCrawl, false);
+      const classified = classifyIntakeUrlInputs(
+        [payload.websites, payload.website, payload.socialReferences],
+        5,
+        10
+      );
+      const websites = includeSocialProfileCrawl
+        ? Array.from(new Set([...classified.crawlWebsites, ...classified.socialReferences])).slice(0, 5)
+        : classified.crawlWebsites;
       if (!websites.length) {
         return res.status(400).json({ ok: false, error: 'At least one valid website is required to scan' });
       }
@@ -673,6 +694,8 @@ router.post(
         workspaceId,
         mode: queued.mode,
         websites: queued.websites,
+        socialReferences: classified.socialReferences,
+        includeSocialProfileCrawl,
         scanRunId: queued.scanRunId,
         status: 'accepted',
       });

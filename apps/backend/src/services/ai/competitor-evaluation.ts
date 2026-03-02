@@ -1,16 +1,4 @@
-import OpenAI from 'openai';
-import { resolveModelForTask } from './model-router';
-
-let openaiClient: OpenAI | null = null;
-function getOpenAiClient(): OpenAI | null {
-  if (openaiClient) return openaiClient;
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return null;
-  openaiClient = new OpenAI({ apiKey });
-  return openaiClient;
-}
-
-const COMPETITOR_EVALUATION_MODEL = resolveModelForTask('analysis_quality');
+import { openai as openaiClient, OpenAI } from './openai-client';
 
 export interface CompetitorCandidate {
     handleOrUrl: string;
@@ -58,15 +46,13 @@ export async function evaluateCompetitorRelevance(
     `;
 
     try {
-        const openai = getOpenAiClient();
-        if (!openai) {
+        if (!process.env.OPENAI_API_KEY && !process.env.OPENAI_API_KEY_FALLBACK) {
           throw new Error('OPENAI_API_KEY not configured');
         }
-        const completion = await openai.chat.completions.create({
+        const completion = (await openaiClient.bat.chatCompletion('analysis_quality', {
             messages: [{ role: 'system', content: prompt }],
-            model: COMPETITOR_EVALUATION_MODEL,
             response_format: { type: "json_object" },
-        });
+        })) as OpenAI.Chat.Completions.ChatCompletion;
 
         const content = completion.choices[0].message.content;
         if (!content) return [];

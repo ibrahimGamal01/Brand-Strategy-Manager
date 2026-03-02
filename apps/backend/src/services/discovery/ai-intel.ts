@@ -9,20 +9,7 @@
  * ALWAYS guarantees results - AI never returns empty
  */
 
-import OpenAI from 'openai';
-import { resolveModelForTask } from '../ai/model-router';
-
-let openaiClient: OpenAI | null = null;
-function getOpenAiClient(): OpenAI | null {
-  if (openaiClient) return openaiClient;
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return null;
-  openaiClient = new OpenAI({ apiKey });
-  return openaiClient;
-}
-
-const AI_INTEL_MODEL_QUALITY = resolveModelForTask('analysis_quality');
-const AI_INTEL_MODEL_FAST = resolveModelForTask('analysis_fast');
+import { openai as openaiClient, OpenAI } from '../ai/openai-client';
 
 export interface TargetIntel {
   handle: string;
@@ -91,14 +78,14 @@ Return JSON:
 }`;
 
   try {
-    const openai = getOpenAiClient();
-    if (!openai) throw new Error('OPENAI_API_KEY not configured');
-    const response = await openai.chat.completions.create({
-      model: AI_INTEL_MODEL_QUALITY,
+    if (!process.env.OPENAI_API_KEY && !process.env.OPENAI_API_KEY_FALLBACK) {
+      throw new Error('OPENAI_API_KEY not configured');
+    }
+    const response = (await openaiClient.bat.chatCompletion('analysis_quality', {
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
       temperature: 0.3, // Lower temperature for factual extraction
-    });
+    })) as OpenAI.Chat.Completions.ChatCompletion;
 
     const content = response.choices[0].message.content;
     return content ? JSON.parse(content) : {};
@@ -154,14 +141,14 @@ Provide a detailed analysis in JSON format:
 
 Be specific and insightful. Return ONLY valid JSON.`;
 
-  const openai = getOpenAiClient();
-  if (!openai) throw new Error('OPENAI_API_KEY not configured');
-  const response = await openai.chat.completions.create({
-    model: AI_INTEL_MODEL_QUALITY,
+  if (!process.env.OPENAI_API_KEY && !process.env.OPENAI_API_KEY_FALLBACK) {
+    throw new Error('OPENAI_API_KEY not configured');
+  }
+  const response = (await openaiClient.bat.chatCompletion('analysis_quality', {
     messages: [{ role: 'user', content: prompt }],
     response_format: { type: 'json_object' },
     temperature: 0.5,
-  });
+  })) as OpenAI.Chat.Completions.ChatCompletion;
 
   const content = response.choices[0].message.content;
   if (!content) {
@@ -227,14 +214,14 @@ IMPORTANT:
 
 Return ONLY valid JSON.`;
 
-  const openai = getOpenAiClient();
-  if (!openai) throw new Error('OPENAI_API_KEY not configured');
-  const response = await openai.chat.completions.create({
-    model: AI_INTEL_MODEL_QUALITY,
+  if (!process.env.OPENAI_API_KEY && !process.env.OPENAI_API_KEY_FALLBACK) {
+    throw new Error('OPENAI_API_KEY not configured');
+  }
+  const response = (await openaiClient.bat.chatCompletion('analysis_quality', {
     messages: [{ role: 'user', content: prompt }],
     response_format: { type: 'json_object' },
     temperature: 0.7,
-  });
+  })) as OpenAI.Chat.Completions.ChatCompletion;
 
   const content = response.choices[0].message.content;
   if (!content) {
@@ -248,8 +235,7 @@ Return ONLY valid JSON.`;
   if (competitors.length < minCount) {
     console.log(`[AIIntel] Only got ${competitors.length}, need ${minCount}. Retrying...`);
     // Retry with more emphasis
-    const retryResponse = await openai.chat.completions.create({
-      model: AI_INTEL_MODEL_QUALITY,
+    const retryResponse = (await openaiClient.bat.chatCompletion('analysis_quality', {
       messages: [
         { role: 'user', content: prompt },
         { role: 'assistant', content: content },
@@ -257,7 +243,7 @@ Return ONLY valid JSON.`;
       ],
       response_format: { type: 'json_object' },
       temperature: 0.8,
-    });
+    })) as OpenAI.Chat.Completions.ChatCompletion;
 
     const retryContent = retryResponse.choices[0].message.content;
     if (retryContent) {
@@ -290,14 +276,14 @@ Return JSON:
 
 Use REAL Instagram handles for top creators. Return ONLY valid JSON.`;
 
-  const openai = getOpenAiClient();
-  if (!openai) throw new Error('OPENAI_API_KEY not configured');
-  const response = await openai.chat.completions.create({
-    model: AI_INTEL_MODEL_FAST,
+  if (!process.env.OPENAI_API_KEY && !process.env.OPENAI_API_KEY_FALLBACK) {
+    throw new Error('OPENAI_API_KEY not configured');
+  }
+  const response = (await openaiClient.bat.chatCompletion('analysis_fast', {
     messages: [{ role: 'user', content: prompt }],
     response_format: { type: 'json_object' },
     temperature: 0.5,
-  });
+  })) as OpenAI.Chat.Completions.ChatCompletion;
 
   const content = response.choices[0].message.content;
   if (!content) {

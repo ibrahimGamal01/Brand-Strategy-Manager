@@ -11,6 +11,7 @@ import {
   type AiModelTask,
   type AiProvider,
 } from './model-router';
+import { resolveTaskPolicy } from './model-config';
 
 // Ensure env vars are loaded
 dotenv.config();
@@ -40,14 +41,14 @@ type BatChatCompletionParams = Omit<ChatCompletionCreateParams, 'model'> & {
 
 function isGpt5Family(model: string): boolean {
   const normalized = String(model || '').trim().toLowerCase();
-  return normalized.startsWith('gpt-5');
+  return normalized.startsWith('gpt-5') || /(^|[/:_-])gpt-5/.test(normalized);
 }
 
 function applyTokenCompatibility(
-  params: ChatCompletionCreateParams,
+  params: ChatCompletionCreateParams | Record<string, unknown>,
   model: string,
 ): ChatCompletionCreateParams {
-  const payload = { ...((params as unknown) as Record<string, unknown>) };
+  const payload: Record<string, unknown> = { ...(params as Record<string, unknown>) };
   if (!isGpt5Family(model)) return payload as unknown as ChatCompletionCreateParams;
 
   const maxCompletion = payload.max_completion_tokens;
@@ -56,6 +57,13 @@ function applyTokenCompatibility(
     payload.max_completion_tokens = maxTokens;
   }
   delete payload.max_tokens;
+
+  // gpt-5 chat.completions currently rejects explicit non-default temperature values.
+  // Remove it and let API defaults apply to avoid hard failures that force heuristic fallbacks.
+  if (typeof payload.temperature === 'number') {
+    delete payload.temperature;
+  }
+
   return payload as unknown as ChatCompletionCreateParams;
 }
 
@@ -172,7 +180,18 @@ class EnhancedOpenAIClient {
     }
 
     if (provider === 'bedrock') {
-      console.warn('[AI] Bedrock provider requested but adapter is not wired yet; falling back to OpenAI provider.');
+      const allowOpenAiFallback = String(process.env.AI_ALLOW_BEDROCK_OPENAI_FALLBACK || 'false')
+        .trim()
+        .toLowerCase() === 'true';
+      if (!allowOpenAiFallback) {
+        throw new Error(
+          'BEDROCK_PROVIDER_NOT_CONFIGURED: Bedrock was requested by model policy but adapter is not wired. ' +
+            'Set AI_ALLOW_BEDROCK_OPENAI_FALLBACK=true only as a temporary mitigation.'
+        );
+      }
+      console.warn(
+        '[AI] Bedrock provider requested but adapter is not wired yet; using OpenAI fallback because AI_ALLOW_BEDROCK_OPENAI_FALLBACK=true.'
+      );
     }
 
     return {
@@ -221,12 +240,27 @@ class EnhancedOpenAIClient {
     const fallbackModels = task ? resolveFallbackModelsForTask(task, primaryModel) : [];
 
     const { batTask, ...rest } = params as any;
+    const taskPolicy = task ? resolveTaskPolicy(task) : null;
+    const routedPayload = {
+      ...rest,
+      model: primaryModel,
+    } as Record<string, unknown>;
+
+    if (taskPolicy) {
+      const hasTemperature = typeof routedPayload.temperature === 'number';
+      if (!hasTemperature && Number.isFinite(taskPolicy.temperature)) {
+        routedPayload.temperature = taskPolicy.temperature;
+      }
+      const hasMaxTokens =
+        typeof routedPayload.max_tokens === 'number' || typeof routedPayload.max_completion_tokens === 'number';
+      if (!hasMaxTokens && Number.isFinite(taskPolicy.maxTokens) && taskPolicy.maxTokens > 0) {
+        routedPayload.max_tokens = Math.floor(taskPolicy.maxTokens);
+      }
+    }
+
     return {
       params: applyTokenCompatibility(
-        {
-          ...rest,
-          model: primaryModel,
-        } as ChatCompletionCreateParams,
+        routedPayload,
         primaryModel,
       ),
       task,

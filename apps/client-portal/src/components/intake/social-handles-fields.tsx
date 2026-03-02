@@ -14,6 +14,9 @@ interface SocialHandlesFieldsProps {
   suggestedHandleValidation?: {
     instagram?: SuggestedHandleValidationItem;
     tiktok?: SuggestedHandleValidationItem;
+    youtube?: SuggestedHandleValidationItem;
+    linkedin?: SuggestedHandleValidationItem;
+    twitter?: SuggestedHandleValidationItem;
   };
 }
 
@@ -47,6 +50,11 @@ export function extractHandleFromUrlOrRaw(platform: PlatformId, value: string): 
 
     const shortUrl = raw.match(/(?:youtu\.be\/)([a-z0-9._-]{2,80})/i);
     if (shortUrl) return normalizeHandle(shortUrl[1]);
+  }
+
+  if (platform === "linkedin") {
+    const match = raw.match(/linkedin\.com\/(?:in|company)\/([a-z0-9-]{2,100})/i);
+    if (match) return normalizeHandle(match[1]);
   }
 
   if (platform === "twitter") {
@@ -117,11 +125,7 @@ export function SocialHandlesFields({
           const hasValue = normalizeHandle(value).length > 0;
           const isSuggested = suggestedPlatforms?.has(platform.id);
           const validation =
-            platform.id === "instagram"
-              ? suggestedHandleValidation?.instagram
-              : platform.id === "tiktok"
-                ? suggestedHandleValidation?.tiktok
-                : undefined;
+            suggestedHandleValidation?.[platform.id as keyof NonNullable<typeof suggestedHandleValidation>];
           const tone = getSuggestionTone(validation);
 
           return (

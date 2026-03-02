@@ -1,16 +1,5 @@
-import OpenAI from 'openai';
 import { isOpenAiConfiguredForRealMode } from '../../lib/runtime-preflight';
-import { resolveModelForTask } from './model-router';
-
-let openaiClient: OpenAI | null = null;
-
-function getOpenAiClient(): OpenAI | null {
-  if (openaiClient) return openaiClient;
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return null;
-  openaiClient = new OpenAI({ apiKey });
-  return openaiClient;
-}
+import { openai as openaiClient, OpenAI } from './openai-client';
 
 export interface AICompetitorSuggestion {
   name: string;
@@ -111,8 +100,7 @@ async function requestPlatformCompetitors(
   description?: string,
   context: CompetitorSuggestionContext = {}
 ): Promise<AICompetitorSuggestion[]> {
-  const openai = getOpenAiClient();
-  if (!openai || !isOpenAiConfiguredForRealMode()) {
+  if (!isOpenAiConfiguredForRealMode()) {
     return [];
   }
 
@@ -125,8 +113,6 @@ async function requestPlatformCompetitors(
 
   const platformLabel = platform === 'instagram' ? 'Instagram' : 'TikTok';
   const handlePattern = platform === 'instagram' ? '[a-z0-9._]{3,30}' : '[a-z0-9._]{2,24}';
-  const model = resolveModelForTask('competitor_discovery');
-
   const prompt = `
 You are a competitor finder for ${platformLabel} direct peers.
 
@@ -168,16 +154,14 @@ Response schema:
 `;
 
   try {
-  const response = await openai.chat.completions.create({
-      model,
+    const response = (await openaiClient.bat.chatCompletion('competitor_discovery', {
       messages: [
         { role: 'system', content: 'Return valid JSON only.' },
         { role: 'user', content: prompt },
       ],
       response_format: { type: 'json_object' },
-      temperature: 0.2,
-      max_tokens: 1200,
-    });
+      max_completion_tokens: 1200,
+    })) as OpenAI.Chat.Completions.ChatCompletion;
 
     const content = response.choices[0]?.message?.content || '{"competitors": []}';
     const parsed = JSON.parse(content) as {

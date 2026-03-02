@@ -48,7 +48,7 @@ import {
 import { visualAggregationService } from '../services/analytics/visual-aggregation';
 import { fileManager } from '../services/storage/file-manager';
 import { isOpenAiConfiguredForRealMode } from '../lib/runtime-preflight';
-import OpenAI from 'openai';
+import { openai as openaiClient, OpenAI } from '../services/ai/openai-client';
 import { applyBrainCommand } from '../services/brain/apply-brain-command';
 import {
   syncInputDataToBrainProfile,
@@ -59,17 +59,8 @@ import {
 import { syncBrainGoals } from '../services/intake/brain-intake-utils';
 import { runAiAnalysisForJob } from '../services/orchestration/run-job-media-analysis';
 import { getLatestMediaAnalysisRunSummary } from '../services/orchestration/media-analysis-runs';
-import { resolveModelForTask } from '../services/ai/model-router';
 
 const router = Router();
-let openaiClient: OpenAI | null = null;
-function getOpenAiClient(): OpenAI | null {
-  if (openaiClient) return openaiClient;
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return null;
-  openaiClient = new OpenAI({ apiKey });
-  return openaiClient;
-}
 const BRAIN_COMMAND_REPLY_ENABLED = process.env.BRAIN_COMMAND_REPLY_ENABLED === 'true';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -1273,11 +1264,9 @@ function buildCommandPatch(instruction: string): Record<string, unknown> {
 }
 
 async function generateBrainCommandReply(instruction: string, commandType: string): Promise<string | null> {
-  const openai = getOpenAiClient();
-  if (!BRAIN_COMMAND_REPLY_ENABLED || !openai) return null;
+  if (!BRAIN_COMMAND_REPLY_ENABLED || !isOpenAiConfiguredForRealMode()) return null;
   try {
-    const response = await openai.chat.completions.create({
-      model: resolveModelForTask('brain_command'),
+    const response = (await openaiClient.bat.chatCompletion('brain_command', {
       messages: [
         {
           role: 'system',
@@ -1289,9 +1278,8 @@ async function generateBrainCommandReply(instruction: string, commandType: strin
           content: `User instruction: "${instruction}" (command type: ${commandType}). Provide a clear execution update.`,
         },
       ],
-      max_tokens: 120,
-      temperature: 0.4,
-    });
+      max_completion_tokens: 120,
+    })) as OpenAI.Chat.Completions.ChatCompletion;
     const text = response.choices[0]?.message?.content?.trim();
     return text || null;
   } catch {

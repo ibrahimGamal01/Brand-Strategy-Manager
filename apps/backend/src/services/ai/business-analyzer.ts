@@ -8,20 +8,11 @@
  * - Layer 3: Instagram (later)
  */
 
-import OpenAI from 'openai';
 import { PrismaClient } from '@prisma/client';
 import { resolveModelForTask } from './model-router';
+import { openai as openaiClient, OpenAI } from './openai-client';
 
 const prisma = new PrismaClient();
-
-let openaiClient: OpenAI | null = null;
-function getOpenAiClient(): OpenAI | null {
-  if (openaiClient) return openaiClient;
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return null;
-  openaiClient = new OpenAI({ apiKey });
-  return openaiClient;
-}
 
 const BUSINESS_ANALYZER_MODEL = resolveModelForTask('analysis_fast');
 
@@ -73,12 +64,10 @@ export async function analyzeBusinessWithAI(
   try {
     console.log(`[AIAnalysis] Calling OpenAI...`);
     
-    const openai = getOpenAiClient();
-    if (!openai) {
+    if (!process.env.OPENAI_API_KEY && !process.env.OPENAI_API_KEY_FALLBACK) {
       throw new Error('OPENAI_API_KEY not configured');
     }
-    const response = await openai.chat.completions.create({
-      model: BUSINESS_ANALYZER_MODEL,
+    const response = (await openaiClient.bat.chatCompletion('analysis_fast', {
       messages: [
         {
           role: 'system',
@@ -90,9 +79,8 @@ export async function analyzeBusinessWithAI(
         }
       ],
       response_format: { type: 'json_object' },
-      temperature: 0.7,
-      max_tokens: 2000,
-    });
+      max_completion_tokens: 2000,
+    })) as OpenAI.Chat.Completions.ChatCompletion;
     
     const rawResponse = response.choices[0]?.message?.content || '{}';
     const tokensUsed = response.usage?.total_tokens || 0;
@@ -117,7 +105,7 @@ export async function analyzeBusinessWithAI(
         contentOpportunities: parsed.contentOpportunities || null,
         rawAiResponse: parsed as any,
         promptUsed: prompt,
-        modelUsed: BUSINESS_ANALYZER_MODEL,
+        modelUsed: response.model || BUSINESS_ANALYZER_MODEL,
         tokensUsed,
       },
     });

@@ -20,26 +20,17 @@
  * - COMPETITOR_DISCOVERY_METHOD
  */
 
-import OpenAI from 'openai';
+import { openai as openaiApi, OpenAI } from './openai-client';
 import { Prisma, PrismaClient, AiQuestionType } from '@prisma/client';
 import { emitResearchJobEvent } from '../social/research-job-events';
 import { isAiFallbackEnabled, isOpenAiConfiguredForRealMode } from '../../lib/runtime-preflight';
 import { resolveModelForTask } from './model-router';
 
 const prisma = new PrismaClient();
-let openaiClient: OpenAI | null = null;
 let mockModeBannerLogged = false;
 const AI_AUTH_FAILED_PREFIX = 'AI_AUTH_FAILED';
 const AI_CONFIG_INVALID_PREFIX = 'AI_CONFIG_INVALID';
 const DEEP_QUESTION_MODEL = resolveModelForTask('analysis_quality');
-
-function getOpenAiClient(): OpenAI | null {
-  if (openaiClient) return openaiClient;
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return null;
-  openaiClient = new OpenAI({ apiKey });
-  return openaiClient;
-}
 
 // Harsh system prefix enforcing critical, evidence-based analysis
 const HARSH_SYSTEM_PREFIX = `
@@ -732,21 +723,19 @@ ${context.rawSearchContext ? `\nWeb Research:\n${context.rawSearchContext}` : ''
   const startTime = Date.now();
   
   try {
-    const openai = getOpenAiClient();
-    if (!openai) {
+    if (!process.env.OPENAI_API_KEY && !process.env.OPENAI_API_KEY_FALLBACK) {
       throw new Error(
         `${AI_CONFIG_INVALID_PREFIX}: OPENAI_API_KEY is missing/invalid while AI_FALLBACK_MODE=off (mode=${aiMode})`
       );
     }
-    const response = await openai.chat.completions.create({
-      model: DEEP_QUESTION_MODEL,
+    const response = (await openaiApi.bat.chatCompletion('analysis_quality', {
       messages: [
         { role: 'system', content: HARSH_SYSTEM_PREFIX + promptConfig.systemPrompt },
         { role: 'user', content: fullPrompt },
       ],
       temperature: 0.8, // Increased from 0.7 for more critical/creative responses
       max_tokens: 2000, // Increased from 1500 for deeper analysis
-    });
+    })) as OpenAI.Chat.Completions.ChatCompletion;
     
     const answer = response.choices[0]?.message?.content || '';
     const answerJson =
@@ -766,7 +755,7 @@ ${context.rawSearchContext ? `\nWeb Research:\n${context.rawSearchContext}` : ''
       answerJson,
       tokensUsed,
       durationMs,
-      DEEP_QUESTION_MODEL
+      response.model || DEEP_QUESTION_MODEL
     );
     
     console.log(`[AIQuestions] ${questionType}: ${tokensUsed} tokens, ${durationMs}ms`);

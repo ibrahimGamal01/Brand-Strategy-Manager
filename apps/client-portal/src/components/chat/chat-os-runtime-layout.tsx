@@ -6,16 +6,21 @@ import { useRouter } from "next/navigation";
 import { useRuntimeWorkspace } from "@/hooks/use-runtime-workspace";
 import { LibraryCollection, SessionPreferences } from "@/types/chat";
 import {
+  applyRuntimeDocumentEdit,
+  exportRuntimeDocument,
   fetchRuntimeEvidence,
   fetchRuntimeLatestLedger,
+  proposeRuntimeDocumentEdit,
   RuntimeEvidenceRefDto,
   RuntimeLedgerDto,
+  uploadRuntimeDocuments,
 } from "@/lib/runtime-api";
 import { ChatComposer } from "./chat-composer";
 import { ChatThread } from "./chat-thread";
 import { CommandPalette } from "./command-palette";
 import { LiveActivityPanel } from "./live-activity-panel";
 import { LibraryDrawer } from "@/components/library/library-drawer";
+import type { UploadedDocumentChip } from "@/types/chat";
 
 const steerSystemPrompts: Record<
   string,
@@ -70,6 +75,15 @@ function formatPhaseLabel(phase?: string | null): string {
   if (!normalized) return "Running";
   if (normalized === "waiting_input") return "Waiting input";
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+function mapParserStatusToUploadChipStatus(
+  status: string | null | undefined
+): UploadedDocumentChip["status"] {
+  if (status === "READY") return "ready";
+  if (status === "NEEDS_REVIEW") return "needs_review";
+  if (status === "FAILED") return "failed";
+  return "parsing";
 }
 
 export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
@@ -191,8 +205,30 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     });
   };
 
-  const onSend = (content: string, mode: "send" | "queue" | "interrupt") => {
-    runAsync(sendMessage(content, mode));
+  const onSend = (
+    content: string,
+    mode: "send" | "queue" | "interrupt",
+    options?: { attachmentIds?: string[]; documentIds?: string[] }
+  ) => {
+    runAsync(sendMessage(content, mode, options));
+  };
+
+  const onUploadDocuments = async (files: File[]) => {
+    if (!activeBranchId) {
+      throw new Error("Open a branch before uploading documents.");
+    }
+    const payload = await uploadRuntimeDocuments(workspaceId, activeBranchId, { files });
+    const docs = Array.isArray(payload.documents) ? payload.documents : [];
+    await refreshNow();
+    return docs.map((doc) => ({
+      id: doc.id,
+      title: doc.title,
+      fileName: doc.originalFileName || doc.title,
+      status: mapParserStatusToUploadChipStatus(doc.parserStatus),
+      qualityScore: doc.parserQualityScore ?? null,
+      warnings: doc.warnings,
+      attachmentId: doc.attachmentId,
+    }));
   };
 
   const injectComposerText = (value: string, mode: "replace" | "append" = "append") => {
@@ -274,6 +310,67 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     if (action === "fork_branch") {
       onForkBranch();
       return;
+    }
+
+    if (action.startsWith("document.")) {
+      if (!activeBranchId) {
+        setActionError("Open a branch first to run document actions.");
+        return;
+      }
+      const documentId = String(payload?.documentId || "").trim();
+      if (!documentId) {
+        setActionError("Document action is missing documentId.");
+        return;
+      }
+      if (action === "document.propose_edit") {
+        const instruction = String(payload?.instruction || "").trim();
+        if (!instruction) {
+          injectComposerText(`Propose an edit for document ${documentId}: `, "replace");
+          return;
+        }
+        runAsync(
+          proposeRuntimeDocumentEdit(workspaceId, activeBranchId, documentId, { instruction }).then(() =>
+            refreshNow()
+          )
+        );
+        return;
+      }
+      if (action === "document.apply_edit") {
+        const proposedContentMd = String(payload?.proposedContentMd || "");
+        if (!proposedContentMd.trim()) {
+          setActionError("Apply edit is missing proposed content.");
+          return;
+        }
+        runAsync(
+          applyRuntimeDocumentEdit(workspaceId, activeBranchId, documentId, {
+            proposedContentMd,
+            ...(typeof payload?.changeSummary === "string" && payload.changeSummary.trim()
+              ? { changeSummary: payload.changeSummary.trim() }
+              : {}),
+            ...(typeof payload?.baseVersionId === "string" && payload.baseVersionId.trim()
+              ? { baseVersionId: payload.baseVersionId.trim() }
+              : {}),
+          }).then(() => refreshNow())
+        );
+        return;
+      }
+      if (action === "document.export") {
+        const formatRaw = String(payload?.format || "PDF").trim().toUpperCase();
+        const format = formatRaw === "DOCX" || formatRaw === "MD" ? formatRaw : "PDF";
+        runAsync(
+          exportRuntimeDocument(workspaceId, activeBranchId, documentId, {
+            format,
+            ...(typeof payload?.versionId === "string" && payload.versionId.trim()
+              ? { versionId: payload.versionId.trim() }
+              : {}),
+          }).then(() => refreshNow())
+        );
+        return;
+      }
+      if (action === "document.read") {
+        injectComposerText(`Summarize document ${documentId} with section-level citations.`, "replace");
+        return;
+      }
     }
 
     const normalizedCommand =
@@ -654,6 +751,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                   }
                   queuedMessages={queuedMessages}
                   onSend={onSend}
+                  onUploadDocuments={onUploadDocuments}
                   onSteerRun={(note) => runAsync(steerRun(note))}
                   onSteerQueued={(id, input) => runAsync(steerQueued(id, input))}
                   onStop={() => runAsync(interruptRun())}

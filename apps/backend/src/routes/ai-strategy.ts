@@ -177,10 +177,8 @@ async function generateStrategyDocChatReply(params: {
   }
 
   try {
-    const completion = (await openaiClient.chat.completions.create({
-      model: resolveModelForTask('strategy_doc_chat'),
-      temperature: 0.2,
-      max_tokens: 700,
+    const completion = (await openaiClient.bat.chatCompletion('strategy_doc_chat', {
+      max_completion_tokens: 700,
       messages: [
         {
           role: 'system',
