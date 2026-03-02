@@ -5,6 +5,7 @@ export type SupportedDocumentParser =
   | 'docx'
   | 'pptx'
   | 'pdf'
+  | 'image'
   | 'unknown';
 
 export type CanonicalSection = {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FileText, Library, Menu, PanelRight, MessageSquarePlus, RefreshCcw, Search, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRuntimeWorkspace } from "@/hooks/use-runtime-workspace";
@@ -8,6 +8,7 @@ import { LibraryCollection, ProcessFeedItem, SessionPreferences } from "@/types/
 import {
   applyRuntimeDocumentEdit,
   exportRuntimeDocument,
+  fetchRuntimeUploadCapabilities,
   fetchRuntimeEvidence,
   fetchRuntimeLatestLedger,
   proposeRuntimeDocumentEdit,
@@ -89,7 +90,11 @@ function mapParserStatusToUploadChipStatus(
 }
 
 export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
-  const [rightRailTab, setRightRailTab] = useState<"activity" | "docs">("activity");
+  const [rightRailMode, setRightRailMode] = useState<"activity" | "docs">(() => {
+    if (typeof window === "undefined") return "activity";
+    const stored = window.localStorage.getItem(`bat.runtime.rightRailMode.${workspaceId}`);
+    return stored === "docs" ? "docs" : "activity";
+  });
   const [rightRailCollapsed, setRightRailCollapsed] = useState(() => {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(`bat.runtime.rightRailCollapsed.${workspaceId}`) === "1";
@@ -115,6 +120,16 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   >(null);
   const [nameInput, setNameInput] = useState("");
   const [threadSearch, setThreadSearch] = useState("");
+  const [uploadCapabilities, setUploadCapabilities] = useState<{
+    maxFiles: number;
+    maxFileSizeBytes: number;
+    acceptedExtensions: string[];
+    acceptedMimePrefixes: string[];
+    imageUploadsEnabled: boolean;
+  } | null>(null);
+  const seenGeneratedDocumentIdsRef = useRef<Set<string>>(new Set());
+  const generatedDocumentsSeededRef = useRef(false);
+  const pendingGeneratedDocumentIdRef = useRef<string | null>(null);
   const router = useRouter();
 
   const {
@@ -200,6 +215,30 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     window.localStorage.setItem(storageKey, rightRailCollapsed ? "1" : "0");
   }, [rightRailCollapsed, workspaceId]);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!activeBranchId) return;
+    void fetchRuntimeUploadCapabilities(workspaceId, activeBranchId)
+      .then((payload) => {
+        if (cancelled) return;
+        if (!payload?.ok) return;
+        setUploadCapabilities(payload);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setUploadCapabilities(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, activeBranchId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const storageKey = `bat.runtime.rightRailMode.${workspaceId}`;
+    window.localStorage.setItem(storageKey, rightRailMode);
+  }, [rightRailMode, workspaceId]);
+
   const resolvedSelectedRuntimeDocumentId = useMemo(() => {
     if (!runtimeDocuments.length) return null;
     if (selectedRuntimeDocumentId && runtimeDocuments.some((document) => document.id === selectedRuntimeDocumentId)) {
@@ -207,6 +246,50 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     }
     return runtimeDocuments[0].id;
   }, [runtimeDocuments, selectedRuntimeDocumentId]);
+
+  const hasDocsContext = runtimeDocuments.length > 0;
+  const resolvedRightRailMode: "activity" | "docs" =
+    rightRailMode === "docs" && !hasDocsContext ? "activity" : rightRailMode;
+  const generatedDocumentIds = useMemo(
+    () =>
+      feedItems
+        .map((item) =>
+          item.toolName === "document.generate" && item.actionTarget?.kind === "document"
+            ? String(item.actionTarget.documentId || "").trim()
+            : ""
+        )
+        .filter(Boolean),
+    [feedItems]
+  );
+
+  useEffect(() => {
+    if (!generatedDocumentsSeededRef.current) {
+      for (const documentId of generatedDocumentIds) {
+        seenGeneratedDocumentIdsRef.current.add(documentId);
+      }
+      generatedDocumentsSeededRef.current = true;
+      return;
+    }
+
+    for (const documentId of generatedDocumentIds) {
+      if (seenGeneratedDocumentIdsRef.current.has(documentId)) continue;
+      seenGeneratedDocumentIdsRef.current.add(documentId);
+      pendingGeneratedDocumentIdRef.current = documentId;
+      break;
+    }
+
+    const pendingDocumentId = pendingGeneratedDocumentIdRef.current;
+    if (!pendingDocumentId || !hasDocsContext) return;
+
+    pendingGeneratedDocumentIdRef.current = null;
+    setSelectedRuntimeDocumentId(pendingDocumentId);
+    setRightRailMode("docs");
+    if (typeof window !== "undefined" && window.innerWidth < 1280) {
+      setActivityOpen(true);
+      return;
+    }
+    setRightRailCollapsed(false);
+  }, [generatedDocumentIds, hasDocsContext]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -241,19 +324,47 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     if (!activeBranchId) {
       throw new Error("Open a branch before uploading documents.");
     }
-    const payload = await uploadRuntimeDocuments(workspaceId, activeBranchId, { files });
-    const docs = Array.isArray(payload.documents) ? payload.documents : [];
-    await refreshNow();
-    return docs.map((doc) => ({
-      id: doc.id,
-      title: doc.title,
-      fileName: doc.originalFileName || doc.title,
-      status: mapParserStatusToUploadChipStatus(doc.parserStatus),
-      qualityScore: doc.parserQualityScore ?? null,
-      warnings: doc.warnings,
-      attachmentId: doc.attachmentId,
-    }));
+    try {
+      const payload = await uploadRuntimeDocuments(workspaceId, activeBranchId, { files });
+      const docs = Array.isArray(payload.documents) ? payload.documents : [];
+      await refreshNow();
+      return docs.map((doc) => ({
+        id: doc.id,
+        title: doc.title,
+        fileName: doc.originalFileName || doc.title,
+        status: mapParserStatusToUploadChipStatus(doc.parserStatus),
+        qualityScore: doc.parserQualityScore ?? null,
+        warnings: doc.warnings,
+        attachmentId: doc.attachmentId,
+      }));
+    } catch (error) {
+      const code =
+        typeof (error as { code?: unknown })?.code === "string"
+          ? String((error as { code?: unknown }).code)
+          : "";
+      let message = String((error as Error)?.message || "Upload failed");
+      if (code === "UPLOAD_UNSUPPORTED_TYPE") {
+        message =
+          "Unsupported file type. Upload PDF, DOCX, XLSX, CSV, TXT, MD, HTML, PPTX, PNG, JPG, WEBP, or GIF.";
+      } else if (code === "UPLOAD_TOO_LARGE") {
+        message = "One of the selected files is larger than the 25MB limit.";
+      } else if (code === "UPLOAD_NO_FILES") {
+        message = "No files were selected.";
+      } else if (code === "UPLOAD_BRANCH_NOT_READY") {
+        message = "Open or select a branch before uploading files.";
+      }
+      const nextError = new Error(message) as Error & { code?: string };
+      if (code) {
+        nextError.code = code;
+      }
+      throw nextError;
+    }
   };
+
+  const uploadAccept =
+    uploadCapabilities?.acceptedExtensions?.length
+      ? uploadCapabilities.acceptedExtensions.join(",")
+      : ".pdf,.docx,.xlsx,.csv,.txt,.md,.markdown,.html,.htm,.pptx,.png,.jpg,.jpeg,.webp,.gif";
 
   const injectComposerText = (value: string, mode: "replace" | "append" = "append") => {
     const next = value.trim();
@@ -302,21 +413,51 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     }
   };
 
-  const onUseLibraryItem = (item: { id: string; title: string }) => {
-    injectComposerText(`@libraryRef[${item.id}|${item.title}]`, "append");
+  const onUseLibraryItem = (item: { id: string; libraryRef?: string; title: string }) => {
+    const ref = String(item.libraryRef || item.id || "").trim();
+    if (!ref) return;
+    injectComposerText(`@libraryRef[${ref}|${item.title}]`, "append");
     setLibraryOpen(false);
   };
 
-  const openDocsRail = (documentId?: string) => {
-    setRightRailTab("docs");
-    if (documentId) {
-      setSelectedRuntimeDocumentId(documentId);
-    }
+  const openRightRailMode = (mode: "activity" | "docs") => {
+    setRightRailMode(mode);
     if (typeof window !== "undefined" && window.innerWidth < 1280) {
       setActivityOpen(true);
       return;
     }
     setRightRailCollapsed(false);
+  };
+
+  const toggleRightRailMode = (mode: "activity" | "docs") => {
+    if (typeof window !== "undefined" && window.innerWidth < 1280) {
+      if (activityOpen && rightRailMode === mode) {
+        setActivityOpen(false);
+        return;
+      }
+      setRightRailMode(mode);
+      setActivityOpen(true);
+      return;
+    }
+    if (!rightRailCollapsed && rightRailMode === mode) {
+      setRightRailCollapsed(true);
+      return;
+    }
+    setRightRailMode(mode);
+    setRightRailCollapsed(false);
+  };
+
+  const openDocsRail = (documentId?: string) => {
+    if (!hasDocsContext) {
+      setRightRailMode("activity");
+      setActiveLibraryCollection("deliverables");
+      setLibraryOpen(true);
+      return;
+    }
+    if (documentId) {
+      setSelectedRuntimeDocumentId(documentId);
+    }
+    openRightRailMode("docs");
   };
 
   const onQuoteDocumentInChat = (input: { document: RuntimeWorkspaceDocumentDto; quotedText: string }) => {
@@ -333,7 +474,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
         ? `v${input.document.latestVersion.versionNumber}`
         : "latest";
     injectComposerText(
-      `${quoteLines}\n\nSource: ${sourceTitle} (${versionLabel}, documentId: ${input.document.id})`,
+      `${quoteLines}\n\nSource: ${sourceTitle} (${versionLabel})`,
       "append"
     );
   };
@@ -796,34 +937,40 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    setRightRailTab("activity");
-                    setActivityOpen(true);
-                  }}
+                  onClick={() => toggleRightRailMode("activity")}
                   className="inline-flex items-center gap-1 rounded-full border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 xl:hidden"
                 >
                   <PanelRight className="h-3.5 w-3.5" />
                   Activity
                 </button>
+                {hasDocsContext ? (
+                  <button
+                    type="button"
+                    onClick={() => toggleRightRailMode("docs")}
+                    className="inline-flex items-center gap-1 rounded-full border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 xl:hidden"
+                  >
+                    <FileText className="h-3.5 w-3.5" />
+                    Docs
+                  </button>
+                ) : null}
                 <button
                   type="button"
-                  onClick={() => {
-                    setRightRailTab("docs");
-                    setActivityOpen(true);
-                  }}
-                  className="inline-flex items-center gap-1 rounded-full border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 xl:hidden"
-                >
-                  <FileText className="h-3.5 w-3.5" />
-                  Docs
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRightRailCollapsed((previous) => !previous)}
+                  onClick={() => toggleRightRailMode("activity")}
                   className="hidden items-center gap-1 rounded-full border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 xl:inline-flex"
                 >
                   <PanelRight className="h-3.5 w-3.5" />
-                  {rightRailCollapsed ? "Show panel" : "Hide panel"}
+                  {rightRailCollapsed ? "Activity" : resolvedRightRailMode === "activity" ? "Hide activity" : "Activity"}
                 </button>
+                {hasDocsContext ? (
+                  <button
+                    type="button"
+                    onClick={() => toggleRightRailMode("docs")}
+                    className="hidden items-center gap-1 rounded-full border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 xl:inline-flex"
+                  >
+                    <FileText className="h-3.5 w-3.5" />
+                    {rightRailCollapsed ? "Docs" : resolvedRightRailMode === "docs" ? "Hide docs" : "Docs"}
+                  </button>
+                ) : null}
                 {queuedMessages.length > 0 ? (
                   <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs text-zinc-600">
                     Queue {queuedMessages.length}
@@ -846,7 +993,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
               className={`grid min-h-0 flex-1 grid-cols-1 overflow-hidden ${
                 rightRailCollapsed
                   ? "xl:grid-cols-1"
-                  : "xl:grid-cols-[minmax(0,1fr)_22rem] 2xl:grid-cols-[minmax(0,1fr)_24rem]"
+                  : "xl:grid-cols-[minmax(0,1fr)_26rem] 2xl:grid-cols-[minmax(0,1fr)_30rem]"
               }`}
             >
               <div className="flex min-h-0 flex-col border-zinc-200 xl:border-r">
@@ -877,6 +1024,12 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                   contentWidthClassName="max-w-none"
                 />
 
+                {!activeBranchId ? (
+                  <div className="mx-5 mb-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 sm:mx-8 xl:mx-10">
+                    Open/select a branch to attach files.
+                  </div>
+                ) : null}
+
                 <ChatComposer
                   draft={composerDraft}
                   onDraftChange={setComposerDraft}
@@ -894,6 +1047,10 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                   queuedMessages={queuedMessages}
                   onSend={onSend}
                   onUploadDocuments={onUploadDocuments}
+                  onUploadError={(message) => setActionError(message)}
+                  canAttach={Boolean(activeBranchId)}
+                  attachDisabledReason={activeBranchId ? undefined : "Open/select a branch to attach files."}
+                  uploadAccept={uploadAccept}
                   onSteerRun={(note) => runAsync(steerRun(note))}
                   onSteerQueued={(id, input) => runAsync(steerQueued(id, input))}
                   onStop={() => runAsync(interruptRun())}
@@ -906,40 +1063,8 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
 
               {!rightRailCollapsed ? (
                 <div className="hidden min-h-0 border-l border-zinc-200 bg-[#f8fafc] xl:flex xl:flex-col">
-                  <div className="flex items-center gap-1 border-b border-zinc-200 px-3 py-2">
-                    <button
-                      type="button"
-                      onClick={() => setRightRailTab("activity")}
-                      className={`rounded-full border px-2.5 py-1 text-xs ${
-                        rightRailTab === "activity"
-                          ? "border-zinc-300 bg-white text-zinc-800"
-                          : "border-zinc-200 bg-transparent text-zinc-600 hover:bg-zinc-100"
-                      }`}
-                    >
-                      Activity
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setRightRailTab("docs")}
-                      className={`rounded-full border px-2.5 py-1 text-xs ${
-                        rightRailTab === "docs"
-                          ? "border-zinc-300 bg-white text-zinc-800"
-                          : "border-zinc-200 bg-transparent text-zinc-600 hover:bg-zinc-100"
-                      }`}
-                    >
-                      Docs
-                    </button>
-                    <div className="ml-auto" />
-                    <button
-                      type="button"
-                      onClick={() => setRightRailCollapsed(true)}
-                      className="rounded-full border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
-                    >
-                      Collapse
-                    </button>
-                  </div>
                   <div className="min-h-0 flex-1 overflow-hidden">
-                    {rightRailTab === "activity" ? (
+                    {resolvedRightRailMode === "activity" ? (
                       <LiveActivityPanel
                         runs={processRuns}
                         feedItems={feedItems}
@@ -971,11 +1096,11 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
         {rightRailCollapsed ? (
           <button
             type="button"
-            onClick={() => setRightRailCollapsed(false)}
+            onClick={() => openRightRailMode(resolvedRightRailMode)}
             className="absolute right-3 top-1/2 z-20 hidden -translate-y-1/2 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-700 shadow-sm hover:bg-zinc-100 xl:inline-flex"
           >
             <PanelRight className="mr-1 h-3.5 w-3.5" />
-            Open panel
+            Open {resolvedRightRailMode}
           </button>
         ) : null}
 
@@ -992,29 +1117,18 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
           <div className="absolute inset-0 z-40 flex justify-end bg-black/35 xl:hidden">
             <div className="flex h-full w-11/12 max-w-lg flex-col border-l border-zinc-200 bg-[#f8fafc] shadow-2xl">
               <div className="flex items-center justify-between border-b border-zinc-200 px-3 py-2">
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setRightRailTab("activity")}
-                    className={`rounded-full border px-2.5 py-1 text-xs ${
-                      rightRailTab === "activity"
-                        ? "border-zinc-300 bg-white text-zinc-800"
-                        : "border-zinc-200 bg-transparent text-zinc-600"
-                    }`}
-                  >
-                    Activity
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRightRailTab("docs")}
-                    className={`rounded-full border px-2.5 py-1 text-xs ${
-                      rightRailTab === "docs"
-                        ? "border-zinc-300 bg-white text-zinc-800"
-                        : "border-zinc-200 bg-transparent text-zinc-600"
-                    }`}
-                  >
-                    Docs
-                  </button>
+                <div className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-[0.08em] text-zinc-500">
+                  {resolvedRightRailMode === "activity" ? (
+                    <>
+                      <PanelRight className="h-3.5 w-3.5" />
+                      Activity
+                    </>
+                  ) : (
+                    <>
+                      <FileText className="h-3.5 w-3.5" />
+                      Docs
+                    </>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -1025,7 +1139,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                 </button>
               </div>
               <div className="min-h-0 flex-1 overflow-hidden">
-                {rightRailTab === "activity" ? (
+                {resolvedRightRailMode === "activity" ? (
                   <LiveActivityPanel
                     runs={processRuns}
                     feedItems={feedItems}

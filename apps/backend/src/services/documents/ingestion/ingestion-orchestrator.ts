@@ -10,6 +10,7 @@ import { parsePdfDocument } from './parsers/pdf-parser';
 import { parsePptxDocument } from './parsers/pptx-parser';
 import { parseTextDocument } from './parsers/text-parser';
 import { parseXlsxDocument } from './parsers/xlsx-parser';
+import { parseImageDocument } from './parsers/image-parser';
 import { scoreParseQuality } from './quality-scorer';
 import { toCanonicalMarkdown } from './canonicalize';
 import { buildDocumentChunks } from './chunker';
@@ -104,6 +105,8 @@ async function parseByParser(input: {
       return parsePptxDocument({ buffer: input.buffer });
     case 'pdf':
       return parsePdfDocument({ buffer: input.buffer });
+    case 'image':
+      return parseImageDocument({ buffer: input.buffer, mimeType: input.mimeType });
     default:
       return {
         parser: 'unknown',
@@ -169,7 +172,10 @@ export async function ingestWorkspaceDocument(input: DocumentIngestionInput): Pr
       branchId: input.branchId,
       type: ProcessEventType.PROCESS_PROGRESS,
       eventName: 'document.parse_started',
-      message: `Parsing ${parser.toUpperCase()} document ${input.fileName}`,
+      message:
+        parser === 'image'
+          ? `Parsing image with OCR ${input.fileName}`
+          : `Parsing ${parser.toUpperCase()} document ${input.fileName}`,
       payload: {
         documentId: input.documentId,
         ingestionRunId: ingestionRun.id,
@@ -202,6 +208,43 @@ export async function ingestWorkspaceDocument(input: DocumentIngestionInput): Pr
     }
 
     const quality = scoreParseQuality(normalized);
+    if (parser === 'image') {
+      await emitDocumentEvent({
+        branchId: input.branchId,
+        type: ProcessEventType.PROCESS_LOG,
+        level: quality.needsReview ? ProcessEventLevel.WARN : ProcessEventLevel.INFO,
+        eventName: 'CHAT_UPLOAD_IMAGE_OCR_COMPLETED',
+        message: quality.needsReview
+          ? `OCR completed with limited confidence (${Math.round(quality.score * 100)}%).`
+          : `OCR completed and extracted usable text (${Math.round(quality.score * 100)}%).`,
+        payload: {
+          documentId: input.documentId,
+          ingestionRunId: ingestionRun.id,
+          parser,
+          qualityScore: quality.score,
+          warnings: normalized.warnings,
+        },
+        status: quality.needsReview ? 'warn' : 'info',
+        toolName: 'document.ingest',
+      });
+      if (quality.needsReview) {
+        await emitDocumentEvent({
+          branchId: input.branchId,
+          type: ProcessEventType.PROCESS_LOG,
+          level: ProcessEventLevel.WARN,
+          eventName: 'CHAT_UPLOAD_NEEDS_REVIEW',
+          message: 'Image OCR needs review before factual claims.',
+          payload: {
+            documentId: input.documentId,
+            ingestionRunId: ingestionRun.id,
+            parser,
+            qualityScore: quality.score,
+          },
+          status: 'warn',
+          toolName: 'document.ingest',
+        });
+      }
+    }
     const canonical = toCanonicalMarkdown(normalized);
     const chunks = buildDocumentChunks({
       markdown: canonical.markdown,
@@ -287,9 +330,14 @@ export async function ingestWorkspaceDocument(input: DocumentIngestionInput): Pr
       type: quality.needsReview ? ProcessEventType.PROCESS_LOG : ProcessEventType.PROCESS_RESULT,
       level: quality.needsReview ? ProcessEventLevel.WARN : ProcessEventLevel.INFO,
       eventName: quality.needsReview ? 'document.parse_needs_review' : 'document.parse_completed',
-      message: quality.needsReview
-        ? `Document parsed with warnings and needs review (${Math.round(quality.score * 100)}%).`
-        : `Document parsed and ready (${Math.round(quality.score * 100)}%).`,
+      message:
+        parser === 'image'
+          ? quality.needsReview
+            ? `Image OCR needs review (${Math.round(quality.score * 100)}%).`
+            : `Image OCR ready (${Math.round(quality.score * 100)}%).`
+          : quality.needsReview
+            ? `Document parsed with warnings and needs review (${Math.round(quality.score * 100)}%).`
+            : `Document parsed and ready (${Math.round(quality.score * 100)}%).`,
       payload: {
         documentId: input.documentId,
         versionId: version.id,

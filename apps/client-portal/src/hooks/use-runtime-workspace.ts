@@ -142,6 +142,19 @@ function humanizeTriggerType(value: unknown): string {
   return `${humanizeToken(normalized.toLowerCase()) || "Workflow"} run`;
 }
 
+function stripInternalIdentifiers(value: unknown): string {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  return raw
+    .replace(/\b(run|snapshot|document|tool run)\s*[:#-]?\s*[a-f0-9]{6,}\b/gi, "$1")
+    .replace(/(^|[\s•(])[a-f0-9]{8,}(?=([\s•),]|$))/gi, "$1")
+    .replace(/\(\s*\)/g, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,.)])/g, "$1")
+    .replace(/•\s*•/g, "•")
+    .trim();
+}
+
 type RuntimeEventPhase = ProcessRun["phase"];
 type RuntimeEventStatus = "info" | "warn" | "error";
 
@@ -356,9 +369,9 @@ function buildRunStage(input: {
   if (input.phase === "failed") return "Failed";
   if (input.phase === "cancelled") return "Cancelled";
   if (input.inFlightToolNames.length) {
-    return `Running ${input.inFlightToolNames.join(", ")}`;
+    return stripInternalIdentifiers(`Running ${input.inFlightToolNames.join(", ")}`);
   }
-  if (input.latestMessage) return input.latestMessage;
+  if (input.latestMessage) return stripInternalIdentifiers(input.latestMessage);
   return `Running ${input.totalTools || 1} task(s)`;
 }
 
@@ -940,7 +953,7 @@ function toValueFirstToolMessage(
     return `${readableToolName(toolName)} completed.`;
   }
 
-  return raw;
+  return stripInternalIdentifiers(raw);
 }
 
 function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[] {
@@ -949,16 +962,19 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
     let message = event.message || "Runtime event";
     const documentPlanPreview = event.toolName === "document.plan" ? extractDocumentPlanPreview(event.payload) : null;
     const eventDocumentId = String(event.payload?.documentId || event.payload?.docId || "").trim() || undefined;
+    const parser = String(event.payload?.parser || "").trim().toLowerCase();
 
     if (event.event.startsWith("document.")) {
       if (event.event === "document.upload_received") {
         message = event.message || "Upload received.";
       } else if (event.event === "document.parse_started") {
-        message = event.message || "Parsing document.";
+        message = parser === "image" ? "Parsing image (OCR)." : event.message || "Parsing document.";
+      } else if (event.event === "document.image_ocr_completed") {
+        message = event.message || "OCR completed.";
       } else if (event.event === "document.parse_completed") {
-        message = event.message || "Document ready.";
+        message = parser === "image" ? event.message || "OCR completed and ready." : event.message || "Document ready.";
       } else if (event.event === "document.parse_needs_review") {
-        message = event.message || "Document parsed with warnings.";
+        message = parser === "image" ? event.message || "Needs review: OCR confidence is limited." : event.message || "Document parsed with warnings.";
       } else if (event.event === "document.chunking_completed") {
         message = event.message || "Chunking complete for citations.";
       } else if (event.event === "document.edit_proposed") {
@@ -972,6 +988,16 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
       } else if (event.event === "document.parse_failed" || event.event === "document.export_failed") {
         message = event.message || "Document processing failed.";
       }
+    } else if (event.event === "chat_upload_requested") {
+      message = event.message || "Upload accepted for parsing.";
+    } else if (event.event === "chat_upload_image_ocr_completed") {
+      message = event.message || "OCR completed.";
+    } else if (event.event === "chat_upload_needs_review") {
+      message = event.message || "Needs review: OCR confidence is limited.";
+    } else if (event.event === "chat_upload_unsupported_type") {
+      message = event.message || "Upload blocked: unsupported file type.";
+    } else if (event.event === "chat_upload_failed") {
+      message = event.message || "Upload failed.";
     } else if (event.event === "run.started") {
       message = `${humanizeTriggerType(event.triggerType || "workflow")} started.`;
     } else if (event.event === "run.planning") {
@@ -985,7 +1011,7 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
         message = toValueFirstToolMessage(event.toolName, event.message, event.payload);
       }
     } else if (event.event === "tool.failed" && event.toolName) {
-      const raw = String(event.message || "Failed").trim();
+      const raw = stripInternalIdentifiers(String(event.message || "Failed").trim());
       message = `${readableToolName(event.toolName)} failed: ${raw}`;
     } else if (event.event === "run.completed") {
       const toolRuns = Array.isArray(event.payload?.toolRuns) ? event.payload.toolRuns : [];
@@ -1021,15 +1047,18 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
           : event.event === "tool.failed" || event.phase === "failed"
             ? "Inspect issue"
             : undefined;
+    const details = documentPlanPreview
+      ? documentPlanDetailLines(documentPlanPreview).map((line) => stripInternalIdentifiers(line))
+      : undefined;
 
     return {
       id: event.id,
       timestamp: formatTime(event.createdAt),
-      message,
+      message: stripInternalIdentifiers(message),
       ...(actionLabel ? { actionLabel } : {}),
       ...(eventDocumentId ? { actionTarget: { kind: "document" as const, documentId: eventDocumentId } } : {}),
       ...(event.toolName ? { toolName: event.toolName } : {}),
-      ...(documentPlanPreview ? { details: documentPlanDetailLines(documentPlanPreview) } : {}),
+      ...(details?.length ? { details } : {}),
       phase: event.phase,
       level: event.level,
     };
@@ -1085,7 +1114,7 @@ function extractRunInsightsFromToolRuns(toolRuns: Array<Record<string, unknown>>
   const highlights: Array<{ label: string; url?: string }> = [];
 
   const pushDetail = (line: string) => {
-    const value = String(line || "").replace(/\s+/g, " ").trim();
+    const value = stripInternalIdentifiers(String(line || "").replace(/\s+/g, " ").trim());
     if (!value) return;
     if (!details.includes(value)) details.push(value);
   };
@@ -1382,7 +1411,20 @@ function mapRecentRunsFromEvents(events: Array<Record<string, unknown>>): Proces
     if (event.triggerType) {
       aggregate.triggerType = event.triggerType;
     }
-    aggregate.latestMessage = String(event.message || aggregate.latestMessage || "Recent runtime activity");
+    const mappedMessage =
+      event.event === "tool.output" && event.toolName
+        ? toValueFirstToolMessage(event.toolName, event.message, event.payload)
+        : event.event === "run.writing"
+          ? "Writing final response."
+          : String(event.message || aggregate.latestMessage || "Recent runtime activity");
+    const shouldKeepPreviousSpecificMessage =
+      event.event === "run.completed" &&
+      aggregate.tools.size > 0 &&
+      Boolean(aggregate.latestMessage) &&
+      !/run completed/i.test(aggregate.latestMessage);
+    if (!shouldKeepPreviousSpecificMessage) {
+      aggregate.latestMessage = stripInternalIdentifiers(mappedMessage);
+    }
     aggregate.latestAt = createdAt;
     aggregate.phase = event.phase;
 

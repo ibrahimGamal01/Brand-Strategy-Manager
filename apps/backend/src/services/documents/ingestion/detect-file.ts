@@ -13,6 +13,11 @@ const EXTENSION_TO_PARSER: Record<string, SupportedDocumentParser> = {
   '.docx': 'docx',
   '.pptx': 'pptx',
   '.pdf': 'pdf',
+  '.png': 'image',
+  '.jpg': 'image',
+  '.jpeg': 'image',
+  '.webp': 'image',
+  '.gif': 'image',
 };
 
 function parserFromMime(mimeType: string): SupportedDocumentParser {
@@ -24,6 +29,7 @@ function parserFromMime(mimeType: string): SupportedDocumentParser {
   if (mime.includes('wordprocessingml')) return 'docx';
   if (mime.includes('presentationml')) return 'pptx';
   if (mime.includes('application/pdf')) return 'pdf';
+  if (mime.includes('image/png') || mime.includes('image/jpeg') || mime.includes('image/webp') || mime.includes('image/gif')) return 'image';
   return 'unknown';
 }
 

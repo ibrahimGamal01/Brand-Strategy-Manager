@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
+import { ProcessEventLevel, ProcessEventType } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import {
   cancelQueueItem,
@@ -33,9 +34,11 @@ import {
   maxUploadBytes,
   maxUploadFiles,
   proposeRuntimeDocumentEdit,
+  runtimeUploadCapabilities,
   searchRuntimeDocument,
   uploadRuntimeDocuments,
 } from '../services/documents/workspace-document-service';
+import { emitWorkspaceDocumentRuntimeEvent } from '../services/documents/ingestion/ingestion-orchestrator';
 
 const router = Router();
 const documentUpload = multer({
@@ -44,12 +47,70 @@ const documentUpload = multer({
     files: maxUploadFiles(),
   },
 });
+const STRICT_UPLOAD_ERRORS = String(process.env.PORTAL_CHAT_UPLOAD_STRICT_ERRORS_V1 || 'true').toLowerCase() !== 'false';
+const UPLOAD_CAPABILITIES_ENABLED =
+  String(process.env.PORTAL_CHAT_UPLOAD_CAPABILITIES_V1 || 'true').toLowerCase() !== 'false';
+const documentUploadMiddleware = documentUpload.array('files', maxUploadFiles());
+
+function classifyUploadError(message: string): {
+  status: number;
+  code: 'UPLOAD_UNSUPPORTED_TYPE' | 'UPLOAD_TOO_LARGE' | 'UPLOAD_NO_FILES' | 'UPLOAD_BRANCH_NOT_READY' | 'UPLOAD_FAILED';
+} {
+  const lower = String(message || '').toLowerCase();
+  if (lower.includes('unsupported file type')) {
+    return { status: 400, code: 'UPLOAD_UNSUPPORTED_TYPE' };
+  }
+  if (lower.includes('25mb') || lower.includes('file exceeds') || lower.includes('file too large')) {
+    return { status: 400, code: 'UPLOAD_TOO_LARGE' };
+  }
+  if (lower.includes('files[] is required') || lower.includes('no files uploaded')) {
+    return { status: 400, code: 'UPLOAD_NO_FILES' };
+  }
+  if (lower.includes('workspace not found') || lower.includes('branch not found') || lower.includes('not found')) {
+    return { status: 404, code: 'UPLOAD_BRANCH_NOT_READY' };
+  }
+  return { status: 500, code: 'UPLOAD_FAILED' };
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 router.use('/:id/runtime', requirePortalAuth, requireWorkspaceMembership);
+
+function handleUploadMulterErrors(req: any, res: any, next: any) {
+  documentUploadMiddleware(req, res, async (error: any) => {
+    if (!error) return next();
+    const message = String(error?.message || 'Upload failed');
+    const classified =
+      String(error?.code || '').toUpperCase() === 'LIMIT_FILE_SIZE'
+        ? { status: 400, code: 'UPLOAD_TOO_LARGE' as const }
+        : classifyUploadError(message);
+
+    await emitWorkspaceDocumentRuntimeEvent({
+      branchId: String(req.params?.branchId || '').trim(),
+      processType: ProcessEventType.PROCESS_LOG,
+      level: ProcessEventLevel.WARN,
+      message: `Upload failed: ${classified.code}`,
+      eventName:
+        classified.code === 'UPLOAD_UNSUPPORTED_TYPE'
+          ? 'CHAT_UPLOAD_UNSUPPORTED_TYPE'
+          : 'CHAT_UPLOAD_FAILED',
+      payload: {
+        code: classified.code,
+        details: message,
+      },
+      status: 'warn',
+      toolName: 'document.ingest',
+    });
+
+    return res.status(classified.status).json({
+      error: 'Failed to upload runtime documents',
+      details: message,
+      ...(STRICT_UPLOAD_ERRORS ? { code: classified.code } : {}),
+    });
+  });
+}
 
 router.get('/:id/runtime/threads', async (req, res) => {
   try {
@@ -673,7 +734,7 @@ router.get('/:id/runtime/branches/:branchId/state', async (req, res) => {
 
 router.post(
   '/:id/runtime/branches/:branchId/documents/upload',
-  documentUpload.array('files', maxUploadFiles()),
+  handleUploadMulterErrors,
   async (req, res) => {
     try {
       const researchJobId = String(req.params.id || '').trim();
@@ -682,7 +743,11 @@ router.post(
 
       const filesRaw = Array.isArray(req.files) ? req.files : [];
       if (!filesRaw.length) {
-        return res.status(400).json({ error: 'files[] is required' });
+        return res.status(400).json({
+          error: 'Failed to upload runtime documents',
+          details: 'files[] is required',
+          ...(STRICT_UPLOAD_ERRORS ? { code: 'UPLOAD_NO_FILES' } : {}),
+        });
       }
 
       const portalReq = req as AuthedPortalRequest;
@@ -704,25 +769,77 @@ router.post(
         ...(title ? { title } : {}),
       });
 
+      await emitWorkspaceDocumentRuntimeEvent({
+        branchId,
+        processType: ProcessEventType.PROCESS_LOG,
+        message: `Accepted ${uploaded.documents.length} upload(s) for parsing.`,
+        eventName: 'CHAT_UPLOAD_REQUESTED',
+        payload: {
+          uploadedCount: uploaded.documents.length,
+          imageUploadsEnabled: runtimeUploadCapabilities().imageUploadsEnabled,
+        },
+        toolName: 'document.ingest',
+      });
+
       return res.status(202).json({
         ok: true,
         documents: uploaded.documents,
       });
     } catch (error: any) {
       const message = String(error?.message || error || 'Upload failed');
-      const status =
-        message.includes('Workspace not found') || message.includes('not found')
-          ? 404
-          : message.includes('Unsupported file type') ||
-              message.includes('No files uploaded') ||
-              message.includes('up to') ||
-              message.includes('25MB')
-            ? 400
-            : 500;
-      return res.status(status).json({ error: 'Failed to upload runtime documents', details: message });
+      const classified = classifyUploadError(message);
+      await emitWorkspaceDocumentRuntimeEvent({
+        branchId: String(req.params.branchId || '').trim(),
+        processType: ProcessEventType.PROCESS_LOG,
+        level: ProcessEventLevel.WARN,
+        message: `Upload failed: ${classified.code}`,
+        eventName:
+          classified.code === 'UPLOAD_UNSUPPORTED_TYPE'
+            ? 'CHAT_UPLOAD_UNSUPPORTED_TYPE'
+            : 'CHAT_UPLOAD_FAILED',
+        payload: {
+          code: classified.code,
+          details: message,
+        },
+        status: 'warn',
+        toolName: 'document.ingest',
+      });
+      return res.status(classified.status).json({
+        error: 'Failed to upload runtime documents',
+        details: message,
+        ...(STRICT_UPLOAD_ERRORS ? { code: classified.code } : {}),
+      });
     }
   }
 );
+
+router.get('/:id/runtime/branches/:branchId/documents/upload-capabilities', async (req, res) => {
+  try {
+    if (!UPLOAD_CAPABILITIES_ENABLED) {
+      return res.status(404).json({
+        ok: false,
+        error: 'Upload capabilities endpoint is disabled',
+        ...(STRICT_UPLOAD_ERRORS ? { code: 'UPLOAD_CAPABILITIES_DISABLED' } : {}),
+      });
+    }
+    const researchJobId = String(req.params.id || '').trim();
+    const branchId = String(req.params.branchId || '').trim();
+    await runtimeRunEngine.getBranchState({ researchJobId, branchId });
+    return res.json({
+      ok: true,
+      ...runtimeUploadCapabilities(),
+    });
+  } catch (error: any) {
+    const message = String(error?.message || error || 'Failed to load upload capabilities');
+    const classified = classifyUploadError(message);
+    return res.status(classified.status).json({
+      ok: false,
+      error: 'Failed to load upload capabilities',
+      details: message,
+      ...(STRICT_UPLOAD_ERRORS ? { code: classified.code } : {}),
+    });
+  }
+});
 
 router.get('/:id/runtime/branches/:branchId/documents', async (req, res) => {
   try {

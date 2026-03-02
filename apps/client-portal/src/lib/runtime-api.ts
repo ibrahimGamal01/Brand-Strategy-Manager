@@ -5,6 +5,12 @@ import {
   RuntimeWorkspace,
 } from "@/types/chat";
 
+export type RuntimeApiError = Error & {
+  status?: number;
+  code?: string;
+  details?: string;
+};
+
 async function parseJson<T>(response: Response): Promise<T> {
   const raw = await response.text().catch(() => "");
   let payload: Record<string, unknown> = {};
@@ -26,7 +32,15 @@ async function parseJson<T>(response: Response): Promise<T> {
             : raw && !/^\s*</.test(raw)
               ? raw.slice(0, 200)
               : `Request failed (${response.status})`;
-    throw new Error(message);
+    const nextError = new Error(message) as RuntimeApiError;
+    nextError.status = response.status;
+    if (typeof payload?.code === "string" && payload.code.trim()) {
+      nextError.code = payload.code.trim();
+    }
+    if (typeof payload?.details === "string" && payload.details.trim()) {
+      nextError.details = payload.details.trim();
+    }
+    throw nextError;
   }
   return payload as T;
 }
@@ -912,6 +926,25 @@ export async function uploadRuntimeDocuments(
       branchId: string;
       attachmentId?: string;
     }>;
+  }>(response);
+}
+
+export async function fetchRuntimeUploadCapabilities(workspaceId: string, branchId: string) {
+  const response = await fetch(
+    `/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/documents/upload-capabilities`,
+    {
+      method: "GET",
+      cache: "no-store",
+      credentials: "include",
+    }
+  );
+  return parseJson<{
+    ok: boolean;
+    maxFiles: number;
+    maxFileSizeBytes: number;
+    acceptedExtensions: string[];
+    acceptedMimePrefixes: string[];
+    imageUploadsEnabled: boolean;
   }>(response);
 }
 

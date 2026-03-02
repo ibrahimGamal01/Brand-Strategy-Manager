@@ -150,6 +150,8 @@ export interface UploadedDocumentChip {
   qualityScore?: number | null;
   warnings?: string[];
   attachmentId?: string;
+  errorCode?: string;
+  errorMessage?: string;
 }
 
 export interface ChatInputSourceScope {

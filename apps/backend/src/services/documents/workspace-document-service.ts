@@ -36,6 +36,39 @@ type SourceKind = 'UPLOADED' | 'GENERATED' | 'IMPORTED';
 
 const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024;
 const MAX_FILES_PER_MESSAGE = 10;
+const ENABLE_IMAGE_UPLOADS = String(process.env.PORTAL_CHAT_IMAGE_UPLOADS_V1 || 'true').toLowerCase() !== 'false';
+
+const ACCEPTED_UPLOAD_EXTENSIONS = [
+  '.pdf',
+  '.docx',
+  '.xlsx',
+  '.csv',
+  '.txt',
+  '.md',
+  '.markdown',
+  '.html',
+  '.htm',
+  '.pptx',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
+  '.gif',
+] as const;
+
+const DOCUMENT_MIME_PREFIXES = [
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'text/csv',
+  'text/plain',
+  'text/markdown',
+  'text/html',
+] as const;
+
+const IMAGE_MIME_PREFIXES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const;
 
 function sanitizeFileName(value: string): string {
   return String(value || '')
@@ -82,20 +115,30 @@ function toStorageHref(storagePath: string): string {
 function allowedMime(mimeType: string, fileName: string): boolean {
   const mime = String(mimeType || '').toLowerCase();
   const ext = String(path.extname(fileName || '') || '').toLowerCase();
-  if (['.pdf', '.docx', '.xlsx', '.csv', '.txt', '.md', '.markdown', '.html', '.htm', '.pptx'].includes(ext)) {
+  if ((ACCEPTED_UPLOAD_EXTENSIONS as readonly string[]).includes(ext)) {
+    if (!ENABLE_IMAGE_UPLOADS && ['.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(ext)) {
+      return false;
+    }
     return true;
   }
-  return (
-    mime.includes('application/pdf') ||
-    mime.includes('wordprocessingml') ||
-    mime.includes('spreadsheetml') ||
-    mime.includes('application/vnd.ms-excel') ||
-    mime.includes('text/csv') ||
-    mime.includes('text/plain') ||
-    mime.includes('text/markdown') ||
-    mime.includes('text/html') ||
-    mime.includes('presentationml')
-  );
+  if ((DOCUMENT_MIME_PREFIXES as readonly string[]).some((prefix) => mime.includes(prefix))) {
+    return true;
+  }
+  if (!ENABLE_IMAGE_UPLOADS) return false;
+  return (IMAGE_MIME_PREFIXES as readonly string[]).some((prefix) => mime.includes(prefix));
+}
+
+export function runtimeUploadCapabilities() {
+  return {
+    maxFiles: MAX_FILES_PER_MESSAGE,
+    maxFileSizeBytes: MAX_FILE_SIZE_BYTES,
+    acceptedExtensions: [...ACCEPTED_UPLOAD_EXTENSIONS],
+    acceptedMimePrefixes: [
+      ...DOCUMENT_MIME_PREFIXES,
+      ...(ENABLE_IMAGE_UPLOADS ? [...IMAGE_MIME_PREFIXES] : []),
+    ],
+    imageUploadsEnabled: ENABLE_IMAGE_UPLOADS,
+  };
 }
 
 function markdownToBasicHtml(markdown: string, title: string): string {
@@ -570,6 +613,8 @@ export async function uploadRuntimeDocuments(input: {
       },
     });
 
+    const lowConfidenceImage = ingestion.parser === 'image' && ingestion.status === 'NEEDS_REVIEW';
+
     await prisma.chatBranchMessage.create({
       data: {
         branchId: input.branchId,
@@ -577,6 +622,8 @@ export async function uploadRuntimeDocuments(input: {
         content:
           ingestion.status === 'FAILED'
             ? `I uploaded **${file.originalname}**, but parsing failed. You can still reference the raw file or retry parsing.`
+            : lowConfidenceImage
+              ? `I uploaded **${file.originalname}** and extracted text from the image, but OCR confidence is limited. You can proceed with a cautious summary, ask me to retry OCR, or request manual-summary mode before editing.`
             : ingestion.status === 'NEEDS_REVIEW'
               ? `I uploaded **${file.originalname}** and created a draft, but parsing quality needs review before heavy edits.`
               : `Your document **${file.originalname}** is ready. I parsed it into a canonical draft and linked quick actions below.`,
@@ -624,6 +671,177 @@ export async function uploadRuntimeDocuments(input: {
   }
 
   return { documents: uploaded };
+}
+
+export async function upsertGeneratedRuntimeDocument(input: {
+  researchJobId: string;
+  branchId: string;
+  userId: string;
+  title: string;
+  originalFileName: string;
+  mimeType: string;
+  storagePath: string;
+  sourceClientDocumentId?: string;
+  contentMd: string;
+}) {
+  const workspace = await prisma.researchJob.findUnique({
+    where: { id: input.researchJobId },
+    select: { id: true, clientId: true },
+  });
+  if (!workspace || !workspace.clientId) {
+    throw new Error('Workspace not found.');
+  }
+
+  const branchId = String(input.branchId || '').trim();
+  if (!branchId) {
+    throw new Error('branchId is required');
+  }
+  const contentMd = String(input.contentMd || '').trim();
+  if (!contentMd) {
+    throw new Error('contentMd is required');
+  }
+
+  const existing =
+    String(input.sourceClientDocumentId || '').trim()
+      ? await prisma.workspaceDocument.findFirst({
+          where: {
+            researchJobId: input.researchJobId,
+            sourceClientDocumentId: String(input.sourceClientDocumentId || '').trim(),
+          },
+          select: { id: true },
+        })
+      : null;
+  const sectionMap = [{ headingPath: 'Generated Document', startOffset: 0, endOffset: contentMd.length }];
+  const chunks = buildDocumentChunks({
+    markdown: contentMd,
+    sectionMap,
+  });
+
+  const persisted = await prisma.$transaction(async (tx) => {
+    const documentId =
+      existing?.id ||
+      (
+        await tx.workspaceDocument.create({
+          data: {
+            researchJobId: input.researchJobId,
+            clientId: workspace.clientId,
+            sourceKind: 'GENERATED',
+            sourceClientDocumentId: String(input.sourceClientDocumentId || '').trim() || null,
+            title: String(input.title || 'Generated document').trim() || 'Generated document',
+            originalFileName: String(input.originalFileName || 'generated-document.pdf').trim() || 'generated-document.pdf',
+            mimeType: String(input.mimeType || 'application/pdf').trim() || 'application/pdf',
+            storagePath: String(input.storagePath || '').trim(),
+            parserStatus: 'READY',
+            parserQualityScore: 1,
+            parserMetaJson: {
+              source: 'document.generate',
+              branchId,
+              generatedBy: input.userId,
+            },
+          },
+          select: { id: true },
+        })
+      ).id;
+
+    const latestAny = await tx.workspaceDocumentVersion.findFirst({
+      where: { documentId },
+      orderBy: { versionNumber: 'desc' },
+      select: { versionNumber: true, id: true, contentMd: true },
+    });
+    if (latestAny?.contentMd && latestAny.contentMd.trim() === contentMd) {
+      await tx.workspaceDocument.update({
+        where: { id: documentId },
+        data: {
+          parserStatus: 'READY',
+          parserQualityScore: 1,
+        },
+      });
+      return {
+        documentId,
+        versionId: latestAny.id,
+        versionNumber: latestAny.versionNumber,
+        chunkCount: chunks.length,
+        reused: true,
+      };
+    }
+
+    const nextVersionNumber = (latestAny?.versionNumber || 0) + 1;
+    const version = await tx.workspaceDocumentVersion.create({
+      data: {
+        documentId,
+        branchId,
+        versionNumber: nextVersionNumber,
+        contentMd,
+        changeSummary: nextVersionNumber === 1 ? 'Initial generated deliverable draft' : 'Generated deliverable refresh',
+        patchJson: {
+          source: 'document.generate',
+          createdBy: input.userId,
+        },
+        createdBy: input.userId,
+      },
+      select: { id: true, versionNumber: true },
+    });
+
+    if (chunks.length > 0) {
+      await tx.workspaceDocumentChunk.createMany({
+        data: chunks.map((chunk) => ({
+          documentId,
+          documentVersionId: version.id,
+          chunkIndex: chunk.chunkIndex,
+          headingPath: chunk.headingPath || null,
+          text: chunk.text,
+          tokenCount: chunk.tokenCount,
+          tableJson: chunk.tableJson ? (chunk.tableJson as any) : undefined,
+        })),
+      });
+    }
+
+    await tx.workspaceDocument.update({
+      where: { id: documentId },
+      data: {
+        latestVersionId: version.id,
+        parserStatus: 'READY',
+        parserQualityScore: 1,
+        title: String(input.title || 'Generated document').trim() || 'Generated document',
+        originalFileName: String(input.originalFileName || 'generated-document.pdf').trim() || 'generated-document.pdf',
+        mimeType: String(input.mimeType || 'application/pdf').trim() || 'application/pdf',
+        storagePath: String(input.storagePath || '').trim(),
+        parserMetaJson: {
+          source: 'document.generate',
+          branchId,
+          generatedBy: input.userId,
+          chunkCount: chunks.length,
+        },
+      },
+    });
+
+    return {
+      documentId,
+      versionId: version.id,
+      versionNumber: version.versionNumber,
+      chunkCount: chunks.length,
+      reused: false,
+    };
+  });
+
+  await emitWorkspaceDocumentRuntimeEvent({
+    branchId,
+    processType: ProcessEventType.PROCESS_RESULT,
+    eventName: persisted.reused ? 'document.generated_reused' : 'document.generated_ready',
+    message: persisted.reused
+      ? `Generated document already synced in Docs workspace (v${persisted.versionNumber}).`
+      : `Generated document is now available in Docs workspace (v${persisted.versionNumber}).`,
+    payload: {
+      documentId: persisted.documentId,
+      versionId: persisted.versionId,
+      versionNumber: persisted.versionNumber,
+      chunkCount: persisted.chunkCount,
+      sourceClientDocumentId: String(input.sourceClientDocumentId || '').trim() || null,
+    },
+    toolName: 'document.generate',
+  });
+
+  return persisted;
 }
 
 export async function listRuntimeDocuments(input: {

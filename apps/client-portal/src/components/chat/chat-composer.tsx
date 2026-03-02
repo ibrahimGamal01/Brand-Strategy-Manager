@@ -39,6 +39,10 @@ interface ChatComposerProps {
     options?: { attachmentIds?: string[]; documentIds?: string[] }
   ) => void;
   onUploadDocuments: (files: File[]) => Promise<UploadedDocumentChip[]>;
+  onUploadError?: (message: string, code?: string) => void;
+  canAttach?: boolean;
+  attachDisabledReason?: string;
+  uploadAccept?: string;
   onSteerRun: (note: string) => void;
   onSteerQueued: (id: string, input: {
     content?: string;
@@ -82,6 +86,10 @@ export function ChatComposer({
   queuedMessages,
   onSend,
   onUploadDocuments,
+  onUploadError,
+  canAttach = true,
+  attachDisabledReason,
+  uploadAccept = ".pdf,.docx,.xlsx,.csv,.txt,.md,.markdown,.html,.htm,.pptx,.png,.jpg,.jpeg,.webp,.gif",
   onSteerRun,
   onSteerQueued,
   onStop,
@@ -95,6 +103,7 @@ export function ChatComposer({
   const [steerEdits, setSteerEdits] = useState<Record<string, string>>({});
   const [uploadedDocs, setUploadedDocs] = useState<UploadedDocumentChip[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -159,8 +168,15 @@ export function ChatComposer({
   };
 
   const uploadFiles = async (files: File[]) => {
+    if (!canAttach) {
+      const message = attachDisabledReason || "Open or select a branch to attach files.";
+      setUploadError(message);
+      onUploadError?.(message, "UPLOAD_BRANCH_NOT_READY");
+      return;
+    }
     const valid = files.filter((file) => file.size > 0);
     if (!valid.length) return;
+    setUploadError(null);
     setUploading(true);
     try {
       const uploaded = await onUploadDocuments(valid);
@@ -172,10 +188,45 @@ export function ChatComposer({
         }
         return next.slice(0, 10);
       });
-    } catch {
-      // handled upstream
+    } catch (error) {
+      const message = String((error as Error)?.message || "Upload failed");
+      const code =
+        typeof (error as { code?: unknown })?.code === "string"
+          ? String((error as { code?: unknown }).code)
+          : undefined;
+      setUploadError(message);
+      onUploadError?.(message, code);
     } finally {
       setUploading(false);
+    }
+  };
+
+  const openFilePicker = () => {
+    if (!canAttach) {
+      const message = attachDisabledReason || "Open or select a branch to attach files.";
+      setUploadError(message);
+      onUploadError?.(message, "UPLOAD_BRANCH_NOT_READY");
+      return;
+    }
+    const input = fileInputRef.current;
+    if (!input) return;
+    setUploadError(null);
+    try {
+      const maybePicker = input as HTMLInputElement & { showPicker?: () => void };
+      if (typeof maybePicker.showPicker === "function") {
+        maybePicker.showPicker();
+        return;
+      }
+      input.click();
+    } catch (error) {
+      const message = String((error as Error)?.message || "Could not open file picker");
+      setUploadError(message);
+      onUploadError?.(message, "UPLOAD_PICKER_FAILED");
+      try {
+        input.click();
+      } catch {
+        // no-op
+      }
     }
   };
 
@@ -236,6 +287,7 @@ export function ChatComposer({
             ) : null}
             {isStreaming ? (
               <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-emerald-700">
+                Active run: Enter queues, Cmd/Ctrl+Enter interrupts + sends
               </span>
             ) : null}
           </div>
@@ -410,6 +462,7 @@ export function ChatComposer({
             ref={fileInputRef}
             type="file"
             multiple
+            accept={uploadAccept}
             className="hidden"
             onChange={(event) => {
               const nextFiles = Array.from(event.target.files || []);
@@ -463,12 +516,21 @@ export function ChatComposer({
           <p className="pointer-events-none absolute bottom-3 left-4 text-xs text-zinc-400">
             Enter to send/queue, Shift+Enter for newline, Cmd/Ctrl+Enter to interrupt + send
           </p>
+          {!canAttach && attachDisabledReason ? (
+            <p className="pointer-events-none absolute bottom-3 left-4 translate-y-4 text-[11px] text-amber-700">
+              {attachDisabledReason}
+            </p>
+          ) : null}
+          {uploadError ? (
+            <p className="pointer-events-none absolute bottom-3 left-4 translate-y-8 text-[11px] text-red-700">{uploadError}</p>
+          ) : null}
 
           <div className="absolute bottom-2.5 right-2.5 flex items-center gap-2">
             <button
               type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-600 hover:bg-zinc-100"
+              onClick={openFilePicker}
+              disabled={uploading || !canAttach}
+              className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-600 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
               title="Attach documents"
             >
               <Paperclip className="h-3.5 w-3.5" />
