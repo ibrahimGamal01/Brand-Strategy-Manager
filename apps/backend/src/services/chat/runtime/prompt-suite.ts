@@ -165,8 +165,95 @@ type WriterQualityResult = {
   notes?: string[];
 };
 
+const MAX_WRITER_ACTIONS = 8;
+const WRITER_ACTIONS_REQUIRING_DOCUMENT_ID = new Set([
+  'document.read',
+  'document.propose_edit',
+  'document.apply_edit',
+  'document.export',
+]);
+const WRITER_ACTION_ALIASES: Record<string, string> = {
+  'document.open_file': 'document.open',
+  'document.open_result': 'document.open',
+  'document.download_file': 'document.download',
+  'document.download_result': 'document.download',
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function sanitizeActionPayloadValue(value: unknown, depth = 0): unknown {
+  if (value === null) return null;
+  if (value === undefined) return undefined;
+  if (typeof value === 'string') return value.slice(0, 8_000);
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+  if (typeof value === 'boolean') return value;
+  if (depth >= 4) return undefined;
+  if (Array.isArray(value)) {
+    const entries = value
+      .slice(0, 24)
+      .map((entry) => sanitizeActionPayloadValue(entry, depth + 1))
+      .filter((entry) => entry !== undefined);
+    return entries;
+  }
+  if (!isRecord(value)) return undefined;
+
+  const sanitized: Record<string, unknown> = {};
+  for (const [rawKey, rawValue] of Object.entries(value).slice(0, 24)) {
+    const key = String(rawKey || '').trim().slice(0, 72);
+    if (!key) continue;
+    const nextValue = sanitizeActionPayloadValue(rawValue, depth + 1);
+    if (nextValue === undefined) continue;
+    sanitized[key] = nextValue;
+  }
+  return sanitized;
+}
+
+function normalizeWriterActionName(value: unknown): string {
+  const trimmed = String(value || '').trim().toLowerCase();
+  if (!trimmed) return '';
+  const withoutSlash = trimmed.replace(/^\/+/, '');
+  const normalized = withoutSlash
+    .replace(/\s+/g, '_')
+    .replace(/[^a-z0-9_./-]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/\.+/g, '.')
+    .replace(/^[_\-.]+/, '')
+    .slice(0, 120);
+  const alias = WRITER_ACTION_ALIASES[normalized];
+  return alias || normalized;
+}
+
+export function sanitizeWriterActions(value: unknown, maxActions = MAX_WRITER_ACTIONS): WriterOutput['actions'] {
+  if (!Array.isArray(value)) return [];
+  const cap = Number.isFinite(Number(maxActions))
+    ? Math.max(1, Math.min(MAX_WRITER_ACTIONS, Math.floor(Number(maxActions))))
+    : MAX_WRITER_ACTIONS;
+  const sanitized: WriterOutput['actions'] = [];
+  for (const entry of value) {
+    if (!isRecord(entry)) continue;
+    const label = String(entry.label || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 120);
+    const action = normalizeWriterActionName(entry.action);
+    if (!label || !action) continue;
+    if (!/^[a-z0-9][a-z0-9_./-]{0,119}$/i.test(action)) continue;
+
+    const payloadRaw = sanitizeActionPayloadValue(entry.payload);
+    const payload = isRecord(payloadRaw) ? payloadRaw : undefined;
+    const documentId = String(payload?.documentId || payload?.docId || '').trim();
+    if (WRITER_ACTIONS_REQUIRING_DOCUMENT_ID.has(action) && !documentId) continue;
+
+    sanitized.push({
+      label,
+      action,
+      ...(payload ? { payload } : {}),
+    });
+    if (sanitized.length >= cap) break;
+  }
+  return sanitized;
 }
 
 function extractJsonObject(raw: string): Record<string, unknown> | null {
@@ -1764,7 +1851,7 @@ function fallbackWriter(input: WriterInput): WriterOutput {
       evidence,
       quality: qualityGate.quality,
     },
-    actions,
+    actions: sanitizeWriterActions(actions, MAX_WRITER_ACTIONS),
     decisions: [],
   };
 }
@@ -2181,22 +2268,7 @@ export async function writeClientResponse(input: WriterInput): Promise<WriterOut
       .filter((entry): entry is { id: string; label: string; url?: string } => Boolean(entry))
       .slice(0, 20);
 
-    const actions = Array.isArray(parsed.actions)
-      ? parsed.actions
-          .map((entry) => {
-            if (!isRecord(entry)) return null;
-            const label = String(entry.label || '').trim();
-            const action = String(entry.action || '').trim();
-            if (!label || !action) return null;
-            return {
-              label,
-              action,
-              ...(isRecord(entry.payload) ? { payload: entry.payload } : {}),
-            };
-          })
-          .filter((entry): entry is { label: string; action: string; payload?: Record<string, unknown> } => Boolean(entry))
-          .slice(0, 8)
-      : [];
+    const actions = sanitizeWriterActions(parsed.actions, MAX_WRITER_ACTIONS);
 
     const qualityGate = applyWriterQualityGate({
       userMessage: input.userMessage,

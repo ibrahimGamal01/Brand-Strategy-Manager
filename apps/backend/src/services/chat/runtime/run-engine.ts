@@ -36,6 +36,7 @@ import {
   buildToolDigest,
   buildEvidenceLedger,
   generatePlannerPlan,
+  sanitizeWriterActions,
   validateClientResponse,
   writeClientResponse,
 } from './prompt-suite';
@@ -3853,7 +3854,7 @@ export class RuntimeRunEngine {
       }
     }
 
-    const actionButtons = [...writerOutput.actions];
+    const actionButtons = sanitizeWriterActions(writerOutput.actions, 8);
     if (libraryUpdates.hasUpdates && !actionButtons.some((action) => action.action === 'open_library')) {
       actionButtons.unshift({
         label: 'Open library',
@@ -3861,6 +3862,7 @@ export class RuntimeRunEngine {
         ...(libraryUpdates.collection ? { payload: { collection: libraryUpdates.collection } } : {}),
       });
     }
+    const persistedActionButtons = sanitizeWriterActions(actionButtons, 8);
 
     if (await isRunCancelled('response_persist')) return;
 
@@ -3878,10 +3880,10 @@ export class RuntimeRunEngine {
       branchId: run.branchId,
       content: finalResponseContent,
       blocksJson:
-        actionButtons.length || finalDecisions.length
+        persistedActionButtons.length || finalDecisions.length
           ? {
               type: 'action_buttons',
-              actions: actionButtons,
+              actions: persistedActionButtons,
               decisions: finalDecisions,
             }
           : undefined,
