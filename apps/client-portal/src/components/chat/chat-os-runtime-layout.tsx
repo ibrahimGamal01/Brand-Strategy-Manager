@@ -90,7 +90,10 @@ function mapParserStatusToUploadChipStatus(
 
 export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   const [rightRailTab, setRightRailTab] = useState<"activity" | "docs">("activity");
-  const [rightRailCollapsed, setRightRailCollapsed] = useState(false);
+  const [rightRailCollapsed, setRightRailCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(`bat.runtime.rightRailCollapsed.${workspaceId}`) === "1";
+  });
   const [selectedRuntimeDocumentId, setSelectedRuntimeDocumentId] = useState<string | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [activeLibraryCollection, setActiveLibraryCollection] = useState<LibraryCollection | "all">("all");
@@ -194,24 +197,15 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const storageKey = `bat.runtime.rightRailCollapsed.${workspaceId}`;
-    setRightRailCollapsed(window.localStorage.getItem(storageKey) === "1");
-  }, [workspaceId]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const storageKey = `bat.runtime.rightRailCollapsed.${workspaceId}`;
     window.localStorage.setItem(storageKey, rightRailCollapsed ? "1" : "0");
   }, [rightRailCollapsed, workspaceId]);
 
-  useEffect(() => {
-    if (!runtimeDocuments.length) {
-      setSelectedRuntimeDocumentId(null);
-      return;
-    }
+  const resolvedSelectedRuntimeDocumentId = useMemo(() => {
+    if (!runtimeDocuments.length) return null;
     if (selectedRuntimeDocumentId && runtimeDocuments.some((document) => document.id === selectedRuntimeDocumentId)) {
-      return;
+      return selectedRuntimeDocumentId;
     }
-    setSelectedRuntimeDocumentId(runtimeDocuments[0].id);
+    return runtimeDocuments[0].id;
   }, [runtimeDocuments, selectedRuntimeDocumentId]);
 
   useEffect(() => {
@@ -443,9 +437,9 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
           return;
         }
         runAsync(
-          proposeRuntimeDocumentEdit(workspaceId, activeBranchId, documentId, { instruction }).then(() =>
-            Promise.all([refreshNow(), refreshRuntimeDocuments()])
-          )
+          proposeRuntimeDocumentEdit(workspaceId, activeBranchId, documentId, { instruction }).then(async () => {
+            await Promise.all([refreshNow(), refreshRuntimeDocuments()]);
+          })
         );
         return;
       }
@@ -464,7 +458,9 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
             ...(typeof payload?.baseVersionId === "string" && payload.baseVersionId.trim()
               ? { baseVersionId: payload.baseVersionId.trim() }
               : {}),
-          }).then(() => Promise.all([refreshNow(), refreshRuntimeDocuments()]))
+          }).then(async () => {
+            await Promise.all([refreshNow(), refreshRuntimeDocuments()]);
+          })
         );
         return;
       }
@@ -477,7 +473,9 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
             ...(typeof payload?.versionId === "string" && payload.versionId.trim()
               ? { versionId: payload.versionId.trim() }
               : {}),
-          }).then(() => Promise.all([refreshNow(), refreshRuntimeDocuments()]))
+          }).then(async () => {
+            await Promise.all([refreshNow(), refreshRuntimeDocuments()]);
+          })
         );
         return;
       }
@@ -956,7 +954,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                         workspaceId={workspaceId}
                         branchId={activeBranchId}
                         documents={runtimeDocuments}
-                        selectedDocumentId={selectedRuntimeDocumentId}
+                        selectedDocumentId={resolvedSelectedRuntimeDocumentId}
                         onSelectDocument={setSelectedRuntimeDocumentId}
                         onQuoteInChat={onQuoteDocumentInChat}
                         onRefreshDocuments={refreshRuntimeDocuments}
@@ -1042,7 +1040,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                     workspaceId={workspaceId}
                     branchId={activeBranchId}
                     documents={runtimeDocuments}
-                    selectedDocumentId={selectedRuntimeDocumentId}
+                    selectedDocumentId={resolvedSelectedRuntimeDocumentId}
                     onSelectDocument={setSelectedRuntimeDocumentId}
                     onQuoteInChat={onQuoteDocumentInChat}
                     onRefreshDocuments={refreshRuntimeDocuments}
