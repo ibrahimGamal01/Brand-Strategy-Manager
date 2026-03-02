@@ -99,6 +99,8 @@ const DEFAULT_PREFERENCES: SessionPreferences = {
 
 const ACTIVE_POLL_INTERVAL_MS = 1200;
 const IDLE_POLL_INTERVAL_MS = 3200;
+const ACTIVE_POLL_INTERVAL_WITH_SOCKET_MS = 3000;
+const IDLE_POLL_INTERVAL_WITH_SOCKET_MS = 8000;
 const LIBRARY_POLL_INTERVAL_MS = 15_000;
 const WS_HEARTBEAT_INTERVAL_MS = 20_000;
 
@@ -1952,12 +1954,16 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
       pollerRef.current = null;
     }
 
-    if (!isSocketConnected) {
-      const intervalMs = isBranchHot ? ACTIVE_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS;
-      pollerRef.current = setInterval(() => {
-        void syncBranch(activeBranchId);
-      }, intervalMs);
-    }
+    const intervalMs = isSocketConnected
+      ? isBranchHot
+        ? ACTIVE_POLL_INTERVAL_WITH_SOCKET_MS
+        : IDLE_POLL_INTERVAL_WITH_SOCKET_MS
+      : isBranchHot
+        ? ACTIVE_POLL_INTERVAL_MS
+        : IDLE_POLL_INTERVAL_MS;
+    pollerRef.current = setInterval(() => {
+      void syncBranch(activeBranchId);
+    }, intervalMs);
 
     return () => {
       if (pollerRef.current) {
