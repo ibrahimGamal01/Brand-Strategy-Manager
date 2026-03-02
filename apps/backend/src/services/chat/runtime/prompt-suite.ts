@@ -534,9 +534,60 @@ function inferPlatformFromUrl(value: unknown): string {
   return '';
 }
 
+function reduceToRootDomain(hostname: string): string {
+  const host = String(hostname || '').trim().toLowerCase().replace(/^www\./, '');
+  if (!host) return '';
+  const parts = host.split('.').filter(Boolean);
+  if (parts.length <= 2) return host;
+  const secondLevelTlds = new Set([
+    'co.uk',
+    'org.uk',
+    'ac.uk',
+    'gov.uk',
+    'com.au',
+    'net.au',
+    'org.au',
+    'co.nz',
+    'com.br',
+    'com.mx',
+    'com.eg',
+    'co.in',
+    'co.jp',
+  ]);
+  const tail = parts.slice(-2).join('.');
+  if (secondLevelTlds.has(tail) && parts.length >= 3) {
+    return parts.slice(-3).join('.');
+  }
+  return parts.slice(-2).join('.');
+}
+
 function normalizeHandle(value: unknown): string {
   const raw = String(value || '').trim();
   if (!raw) return '';
+  try {
+    const candidate = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    const parsed = new URL(candidate);
+    const host = String(parsed.hostname || '').trim().toLowerCase().replace(/^www\./, '');
+    const pathParts = parsed.pathname
+      .split('/')
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    if (host.includes('instagram.com') || host.includes('tiktok.com') || host.includes('x.com') || host.includes('twitter.com')) {
+      const first = String(pathParts[0] || '').replace(/^@+/, '').trim().toLowerCase();
+      if (first && !['p', 'reel', 'reels', 'video', 'videos', 'explore', 'home'].includes(first)) {
+        return first.replace(/[^a-z0-9._-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+      }
+    }
+    if (host.includes('youtube.com')) {
+      const first = String(pathParts[pathParts[0] === '@' ? 1 : 0] || '').replace(/^@+/, '').trim().toLowerCase();
+      if (first && !['watch', 'shorts', 'channel', 'c'].includes(first)) {
+        return first.replace(/[^a-z0-9._-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+      }
+    }
+    if (host) return reduceToRootDomain(host);
+  } catch {
+    // Fall through to text normalization below.
+  }
   const normalized = raw
     .replace(/^https?:\/\//i, '')
     .replace(/^www\./i, '')
@@ -574,6 +625,16 @@ function extractRuntimeWebsiteHosts(runtimeContext?: Record<string, unknown>): s
     if (host) hosts.add(host);
   }
   return Array.from(hosts);
+}
+
+function extractCompetitorQueryTarget(message: string): string {
+  const raw = String(message || '').replace(/\s+/g, ' ').trim();
+  if (!raw) return '';
+  const forMatch = raw.match(/\bfor\s+([^.!?\n]{2,100})/i);
+  if (forMatch?.[1]) return forMatch[1].trim();
+  const ofMatch = raw.match(/\bof\s+([^.!?\n]{2,100})/i);
+  if (ofMatch?.[1]) return ofMatch[1].trim();
+  return '';
 }
 
 function normalizeScore(value: unknown): number {
@@ -1205,10 +1266,14 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
     pushIfMissing('intel.list', { section: 'competitors', limit: 12 });
   }
   if (isCompetitorBriefIntent) {
+    const competitorQueryTarget = extractCompetitorQueryTarget(originalMessage);
+    const competitorSearchQuery = competitorQueryTarget
+      ? `${competitorQueryTarget} competitors alternatives`
+      : 'direct competitors alternatives';
     pushIfMissing('intel.list', { section: 'competitors', limit: 12 });
     pushIfMissing('intel.list', { section: 'competitor_accounts', limit: 20 });
     pushIfMissing('search.web', {
-      query: `${messageWithMentions} competitors alternatives`,
+      query: competitorSearchQuery,
       count: 10,
       provider: 'auto',
     });
@@ -1665,7 +1730,9 @@ export async function generatePlannerPlan(input: PlannerInput): Promise<RuntimeP
               {
                 tool: 'search.web',
                 args: {
-                  query: `${input.userMessage} competitors alternatives`,
+                  query: `${
+                    extractCompetitorQueryTarget(input.userMessage) || compactDigestText(input.userMessage, 80)
+                  } competitors alternatives`,
                   count: 10,
                   provider: 'auto',
                 },

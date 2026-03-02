@@ -3200,6 +3200,8 @@ export class RuntimeRunEngine {
       maxToolRuns: policy.maxToolRuns,
     });
     const continuationCalls = continuationSourceScope.toolCalls;
+    const suppressAutoContinueForCompetitorBrief = detectWriterIntent(effectiveUserMessage) === 'competitor_brief';
+    const continuationCallsForRun = suppressAutoContinueForCompetitorBrief ? [] : continuationCalls;
     if (continuationSourceScope.blocked.length > 0) {
       for (const blocked of continuationSourceScope.blocked) {
         await this.emitEvent({
@@ -3226,7 +3228,7 @@ export class RuntimeRunEngine {
 
     if (
       policy.autoContinue &&
-      continuationCalls.length > 0 &&
+      continuationCallsForRun.length > 0 &&
       continuationDepth < policy.maxAutoContinuations
     ) {
       const nextPlan: RuntimePlan = {
@@ -3235,7 +3237,7 @@ export class RuntimeRunEngine {
           continuationDepth: continuationDepth + 1,
           ...(isRecord(plan.runtime?.contextSnapshot) ? { contextSnapshot: plan.runtime?.contextSnapshot } : {}),
         },
-        toolCalls: continuationCalls,
+        toolCalls: continuationCallsForRun,
       };
 
       await updateAgentRun(run.id, {
@@ -3250,7 +3252,7 @@ export class RuntimeRunEngine {
         message: 'Auto-continuing based on tool suggestions.',
         payload: {
           continuationDepth: nextPlan.runtime?.continuationDepth,
-          tools: continuationCalls.map((call) => call.tool),
+          tools: continuationCallsForRun.map((call) => call.tool),
         },
       });
 

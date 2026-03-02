@@ -236,7 +236,6 @@ export function ChatComposer({
             ) : null}
             {isStreaming ? (
               <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-emerald-700">
-                Active run: Enter queues, Cmd/Ctrl+Enter interrupts + sends
               </span>
             ) : null}
           </div>
