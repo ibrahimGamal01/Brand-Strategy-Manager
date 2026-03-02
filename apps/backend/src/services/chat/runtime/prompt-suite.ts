@@ -704,6 +704,38 @@ function derivePositioningGap(candidates: CompetitorCandidate[]): string {
   return 'Set appears mixed between direct and adjacent players. Positioning gap: claim the direct category explicitly with sharper problem-outcome language.';
 }
 
+function buildCompetitorSufficiencyDirectiveResponse(input: {
+  userMessage: string;
+  toolResults: RuntimeToolResult[];
+  runtimeContext?: Record<string, unknown>;
+}): string | null {
+  const message = String(input.userMessage || '');
+  const normalized = message.toLowerCase();
+  const asksCompetitorSufficiency =
+    /\bcompetitor\b/.test(normalized) &&
+    /\b(top\s*\d+|top five|top 5)\b/.test(normalized) &&
+    /\b(enough|sufficient|trustworthy)\b/.test(normalized);
+  if (!asksCompetitorSufficiency) return null;
+
+  const competitorCount = extractCompetitorCandidates(input.toolResults, input.runtimeContext).length;
+  const verdict = competitorCount >= 5 ? 'YES' : 'NO';
+  const strictOneLine =
+    /\b(exactly one line|single line|only one line|no extra text)\b/.test(normalized) &&
+    /\b(yes|no)\b/.test(normalized);
+  const token =
+    (message.match(/\b[A-Z][A-Z0-9_-]{3,24}\b/g) || []).find(
+      (entry) => !['YES', 'NO', 'TOP', 'DIRECT', 'COMPETITOR', 'BRIEF'].includes(entry)
+    ) || '';
+
+  if (strictOneLine) {
+    return token ? `${token} ${verdict}` : verdict;
+  }
+
+  return verdict === 'YES'
+    ? `Yes, current workspace evidence is sufficient for a trustworthy top-5 direct competitor brief (${competitorCount} competitors captured).`
+    : `No, current workspace evidence is not sufficient for a trustworthy top-5 direct competitor brief (${competitorCount} competitors captured).`;
+}
+
 function buildCompetitorBriefResponse(
   userMessage: string,
   toolResults: RuntimeToolResult[],
@@ -1286,6 +1318,11 @@ function fallbackWriter(input: WriterInput): WriterOutput {
   ).slice(0, concise ? 2 : deepMode ? 6 : 4);
   const hasToolResults = input.toolResults.length > 0;
   const runtimeContext = isRecord(input.runtimeContext) ? input.runtimeContext : {};
+  const directiveResponse = buildCompetitorSufficiencyDirectiveResponse({
+    userMessage: input.userMessage,
+    toolResults: input.toolResults,
+    runtimeContext,
+  });
   const contextSummary: string[] = [];
   const clientName = String(runtimeContext.clientName || '').trim();
   const websites = Array.isArray(runtimeContext.websites)
@@ -1308,7 +1345,9 @@ function fallbackWriter(input: WriterInput): WriterOutput {
   }
 
   const responseSections: string[] = [];
-  if (!hasToolResults) {
+  if (directiveResponse) {
+    responseSections.push(directiveResponse);
+  } else if (!hasToolResults) {
     if (contextSummary.length) {
       responseSections.push(`Grounded workspace snapshot:\n${contextSummary.map((line, idx) => `${idx + 1}. ${line}`).join('\n')}`);
     }
