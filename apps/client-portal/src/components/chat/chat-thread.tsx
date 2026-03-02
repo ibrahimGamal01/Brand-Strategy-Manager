@@ -20,6 +20,10 @@ function formatMessageTime(iso: string): string {
   return parsed.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
+function formatMessageContentForDisplay(content: string): string {
+  return content.replace(/@library\[([^\]|]+)\|([^\]]+)\]/g, (_match, _id, title: string) => `[Library source: ${title}]`);
+}
+
 function ReasoningPanel({ message }: { message: ChatMessage }) {
   const [open, setOpen] = useState(false);
 
@@ -118,6 +122,22 @@ function MessageBlocks({
   const isActionBlock = (
     block: ChatMessageBlock
   ): block is Extract<ChatMessageBlock, { type: "action_buttons" }> => block.type === "action_buttons";
+  const isDocumentReadyBlock = (
+    block: ChatMessageBlock
+  ): block is Extract<ChatMessageBlock, { type: "document_ready" | "document_parse_needs_review" }> =>
+    block.type === "document_ready" || block.type === "document_parse_needs_review";
+  const isDocumentEditAppliedBlock = (
+    block: ChatMessageBlock
+  ): block is Extract<ChatMessageBlock, { type: "document_edit_applied" }> =>
+    block.type === "document_edit_applied";
+  const isDocumentEditProposalBlock = (
+    block: ChatMessageBlock
+  ): block is Extract<ChatMessageBlock, { type: "document_edit_proposal" }> =>
+    block.type === "document_edit_proposal";
+  const isDocumentExportResultBlock = (
+    block: ChatMessageBlock
+  ): block is Extract<ChatMessageBlock, { type: "document_export_result" }> =>
+    block.type === "document_export_result";
 
   return (
     <div className="mt-4 space-y-2.5">
@@ -192,6 +212,171 @@ function MessageBlocks({
                   ))}
                 </div>
               ) : null}
+            </div>
+          );
+        }
+
+        if (isDocumentReadyBlock(block)) {
+          const review = block.type === "document_parse_needs_review";
+          return (
+            <div
+              key={`${message.id}-doc-ready-${index}`}
+              className={`rounded-2xl border p-3 ${
+                review ? "border-amber-200 bg-amber-50/70" : "border-emerald-200 bg-emerald-50/70"
+              }`}
+            >
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-zinc-600">
+                {review ? "Document needs review" : "Document ready"}
+              </p>
+              <p className="mt-1 text-sm font-semibold text-zinc-900">{block.title}</p>
+              {block.originalFileName ? (
+                <p className="text-xs text-zinc-600">Source: {block.originalFileName}</p>
+              ) : null}
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-600">
+                {typeof block.qualityScore === "number" ? (
+                  <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
+                    Quality {Math.round(block.qualityScore * 100)}%
+                  </span>
+                ) : null}
+                {block.parser ? (
+                  <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 uppercase">
+                    {block.parser}
+                  </span>
+                ) : null}
+                {block.versionId ? (
+                  <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
+                    Version {block.versionId.slice(0, 8)}
+                  </span>
+                ) : null}
+                {typeof block.chunkCount === "number" ? (
+                  <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
+                    Chunks {block.chunkCount}
+                  </span>
+                ) : null}
+                {typeof block.pagesParsed === "number" ? (
+                  <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
+                    Pages {block.pagesParsed}
+                    {typeof block.pagesTotal === "number" ? `/${block.pagesTotal}` : ""}
+                  </span>
+                ) : null}
+              </div>
+              {block.warnings?.length ? (
+                <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-amber-800">
+                  {block.warnings.map((warning) => (
+                    <li key={`${message.id}-${warning}`}>{warning}</li>
+                  ))}
+                </ul>
+              ) : null}
+              {block.actions?.length ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {block.actions.map((action) => (
+                    <button
+                      key={`${message.id}-${action.action}-${action.label}`}
+                      type="button"
+                      onClick={() => onRunAction?.(action.label, action.action, action.payload)}
+                      className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+                    >
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          );
+        }
+
+        if (isDocumentEditAppliedBlock(block)) {
+          return (
+            <div key={`${message.id}-doc-applied-${index}`} className="rounded-2xl border border-zinc-200 bg-zinc-50/80 p-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-zinc-500">Document edit applied</p>
+              <p className="mt-1 text-sm text-zinc-800">
+                Version {block.versionNumber} created for document {block.documentId.slice(0, 8)}.
+              </p>
+              {block.changeSummary ? <p className="mt-1 text-xs text-zinc-600">{block.changeSummary}</p> : null}
+              {block.actions?.length ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {block.actions.map((action) => (
+                    <button
+                      key={`${message.id}-${action.action}-${action.label}`}
+                      type="button"
+                      onClick={() => onRunAction?.(action.label, action.action, action.payload)}
+                      className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+                    >
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          );
+        }
+
+        if (isDocumentEditProposalBlock(block)) {
+          return (
+            <div key={`${message.id}-doc-proposal-${index}`} className="rounded-2xl border border-sky-200 bg-sky-50/70 p-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-sky-700">Document edit proposal</p>
+              <p className="mt-1 text-sm text-zinc-800">
+                Prepared changes for document {block.documentId.slice(0, 8)} on version {block.baseVersionNumber}.
+              </p>
+              <p className="mt-1 text-xs text-zinc-600">{block.changeSummary || block.instruction}</p>
+              {block.preview ? (
+                <div className="mt-2 flex flex-wrap gap-2 text-xs text-zinc-600">
+                  <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
+                    Before {block.preview.beforeChars} chars
+                  </span>
+                  <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
+                    After {block.preview.afterChars} chars
+                  </span>
+                  <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
+                    {block.changed ? "Changed" : "No content change"}
+                  </span>
+                </div>
+              ) : null}
+              {block.actions?.length ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {block.actions.map((action) => (
+                    <button
+                      key={`${message.id}-${action.action}-${action.label}`}
+                      type="button"
+                      onClick={() => onRunAction?.(action.label, action.action, action.payload)}
+                      className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+                    >
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          );
+        }
+
+        if (isDocumentExportResultBlock(block)) {
+          return (
+            <div key={`${message.id}-doc-export-${index}`} className="rounded-2xl border border-zinc-200 bg-zinc-50/80 p-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-zinc-500">Document export</p>
+              <p className="mt-1 text-sm text-zinc-800">
+                {block.format} export ready for document {block.documentId.slice(0, 8)}.
+              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-600">
+                  {block.format}
+                </span>
+                {typeof block.fileSizeBytes === "number" ? (
+                  <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-600">
+                    {Math.max(1, Math.round(block.fileSizeBytes / 1024))} KB
+                  </span>
+                ) : null}
+                {block.downloadHref ? (
+                  <a
+                    href={block.downloadHref}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+                  >
+                    Download
+                  </a>
+                ) : null}
+              </div>
             </div>
           );
         }
@@ -301,6 +486,10 @@ export function ChatThread({
       <div className={`mx-auto w-full ${contentWidthClassName} px-5 pb-24 pt-8 sm:px-8 xl:px-10`}>
         {visibleMessages.map((message) => {
           const isUser = message.role === "user";
+          const qualityNotes = message.reasoning?.quality?.notes || [];
+          const qualityRewriteApplied =
+            message.reasoning?.quality?.intent === "competitor_brief" &&
+            qualityNotes.some((note) => /rewritten to enforce competitor brief completeness/i.test(note));
           return (
             <article key={message.id} className="group mb-6">
               <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -315,9 +504,42 @@ export function ChatThread({
                     <p className="mb-2 text-xs font-medium uppercase tracking-[0.08em] text-zinc-400">Assistant</p>
                   ) : null}
                   <p className={`whitespace-pre-wrap break-words text-base leading-7 ${isUser ? "text-white" : "text-zinc-800"}`}>
-                    {message.content}
+                    {formatMessageContentForDisplay(message.content)}
                   </p>
+                  {!isUser && message.reasoning?.model?.used ? (
+                    <p className="mt-2 text-xs text-zinc-500">
+                      Model: {message.reasoning.model.used}
+                      {message.reasoning.model.fallbackUsed
+                        ? ` (fallback from ${message.reasoning.model.fallbackFrom || message.reasoning.model.requested})`
+                        : ""}
+                    </p>
+                  ) : null}
+                  {!isUser && qualityRewriteApplied ? (
+                    <p className="mt-1 text-xs text-amber-700">Quality pass: competitor brief was expanded for completeness.</p>
+                  ) : null}
                   <p className={`mt-2 text-xs ${isUser ? "text-zinc-300" : "text-zinc-400"}`}>{formatMessageTime(message.createdAt)}</p>
+                  {message.attachmentIds?.length || message.documentIds?.length ? (
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      {message.documentIds?.length ? (
+                        <span
+                          className={`rounded-full border px-2 py-0.5 text-[11px] ${
+                            isUser ? "border-zinc-500 text-zinc-200" : "border-zinc-200 bg-zinc-50 text-zinc-600"
+                          }`}
+                        >
+                          Docs {message.documentIds.length}
+                        </span>
+                      ) : null}
+                      {message.attachmentIds?.length ? (
+                        <span
+                          className={`rounded-full border px-2 py-0.5 text-[11px] ${
+                            isUser ? "border-zinc-500 text-zinc-200" : "border-zinc-200 bg-zinc-50 text-zinc-600"
+                          }`}
+                        >
+                          Files {message.attachmentIds.length}
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               </div>
 

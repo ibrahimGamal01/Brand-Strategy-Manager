@@ -13,6 +13,8 @@ export interface ChatMessage {
   createdAt: string;
   blocks?: ChatMessageBlock[];
   inputOptions?: ChatInputOptions;
+  attachmentIds?: string[];
+  documentIds?: string[];
   reasoning?: {
     plan: string[];
     tools: string[];
@@ -24,6 +26,11 @@ export interface ChatMessage {
       used: string;
       fallbackUsed: boolean;
       fallbackFrom?: string;
+    };
+    quality?: {
+      intent: "competitor_brief" | "general";
+      passed: boolean;
+      notes?: string[];
     };
     runId?: string;
     ledgerVersionId?: string;
@@ -55,7 +62,62 @@ export type ChatMessageBlock =
       decisions: ChatMessageDecision[];
     }
   | {
-      type: Exclude<string, "decision_requests" | "action_buttons">;
+      type: "document_ready" | "document_parse_needs_review";
+      documentId: string;
+      versionId?: string | null;
+      title: string;
+      originalFileName?: string;
+      qualityScore?: number | null;
+      parser?: string;
+      chunkCount?: number | null;
+      pagesParsed?: number | null;
+      pagesTotal?: number | null;
+      warnings?: string[];
+      actions?: ChatMessageAction[];
+    }
+  | {
+      type: "document_edit_proposal";
+      documentId: string;
+      baseVersionId: string;
+      baseVersionNumber: number;
+      instruction: string;
+      proposedContentMd: string;
+      changed: boolean;
+      changeSummary?: string;
+      preview?: {
+        beforeChars: number;
+        afterChars: number;
+      };
+      actions?: ChatMessageAction[];
+    }
+  | {
+      type: "document_edit_applied";
+      documentId: string;
+      versionId: string;
+      versionNumber: number;
+      changeSummary?: string;
+      actions?: ChatMessageAction[];
+    }
+  | {
+      type: "document_export_result";
+      documentId: string;
+      versionId: string;
+      exportId: string;
+      format: "PDF" | "DOCX" | "MD";
+      fileSizeBytes?: number;
+      downloadHref?: string;
+    }
+  | {
+      type: Exclude<
+        string,
+        | "decision_requests"
+        | "action_buttons"
+        | "document_ready"
+        | "document_parse_needs_review"
+        | "document_edit_proposal"
+        | "document_edit_applied"
+        | "document_export_result"
+      >;
       [key: string]: unknown;
     };
 
@@ -65,10 +127,22 @@ export interface QueuedMessage {
   createdAt: string;
   position?: number;
   inputOptions?: ChatInputOptions;
+  attachmentIds?: string[];
+  documentIds?: string[];
   steer?: {
     note?: string;
     updatedAt?: string;
   };
+}
+
+export interface UploadedDocumentChip {
+  id: string;
+  title: string;
+  fileName: string;
+  status: "uploading" | "parsing" | "ready" | "needs_review" | "failed";
+  qualityScore?: number | null;
+  warnings?: string[];
+  attachmentId?: string;
 }
 
 export interface ChatInputSourceScope {

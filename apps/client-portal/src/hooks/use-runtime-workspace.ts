@@ -61,7 +61,11 @@ type UseRuntimeWorkspaceResult = {
   createThread: (title: string) => Promise<void>;
   createBranch: (name: string, forkedFromMessageId?: string) => Promise<void>;
   pinBranch: (branchId: string) => Promise<void>;
-  sendMessage: (content: string, mode: "send" | "queue" | "interrupt") => Promise<void>;
+  sendMessage: (
+    content: string,
+    mode: "send" | "queue" | "interrupt",
+    options?: { attachmentIds?: string[]; documentIds?: string[] }
+  ) => Promise<void>;
   interruptRun: () => Promise<void>;
   reorderQueue: (from: number, to: number) => Promise<void>;
   removeQueued: (id: string) => Promise<void>;
@@ -365,6 +369,14 @@ function asArrayOfStrings(value: unknown, max = 12): string[] {
     .slice(0, max);
 }
 
+function normalizeIdList(value: unknown, max = 20): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .slice(0, max);
+}
+
 function normalizeDecisionBlockItems(value: unknown): Array<{
   id: string;
   title: string;
@@ -427,19 +439,8 @@ function normalizeMessageBlocks(value: unknown): ChatMessageBlock[] {
   const type = String(block.type || "").trim().toLowerCase();
   if (!type) return [];
 
-  if (type === "decision_requests") {
-    const items = normalizeDecisionBlockItems(block.items);
-    if (!items.length) return [];
-    return [
-      {
-        type: "decision_requests",
-        items,
-      },
-    ];
-  }
-
-  if (type === "action_buttons") {
-    const actions = Array.isArray(block.actions)
+  const parseActions = () =>
+    Array.isArray(block.actions)
       ? block.actions
           .map((action) => {
             if (!isRecord(action)) return null;
@@ -454,6 +455,20 @@ function normalizeMessageBlocks(value: unknown): ChatMessageBlock[] {
           })
           .filter((item): item is { label: string; action: string; payload?: Record<string, unknown> } => Boolean(item))
       : [];
+
+  if (type === "decision_requests") {
+    const items = normalizeDecisionBlockItems(block.items);
+    if (!items.length) return [];
+    return [
+      {
+        type: "decision_requests",
+        items,
+      },
+    ];
+  }
+
+  if (type === "action_buttons") {
+    const actions = parseActions();
     const decisions = normalizeDecisionBlockItems(block.decisions);
     if (!actions.length && !decisions.length) return [];
     return [
@@ -461,6 +476,110 @@ function normalizeMessageBlocks(value: unknown): ChatMessageBlock[] {
         type: "action_buttons",
         actions,
         decisions,
+      },
+    ];
+  }
+
+  if (type === "document_ready" || type === "document_parse_needs_review") {
+    const documentId = String(block.documentId || "").trim();
+    const title = String(block.title || block.originalFileName || "Document").trim();
+    if (!documentId || !title) return [];
+    const warnings = Array.isArray(block.warnings)
+      ? block.warnings.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 12)
+      : [];
+    const qualityScore = Number(block.qualityScore);
+    const chunkCount = Number(block.chunkCount);
+    const pagesParsed = Number(block.pagesParsed);
+    const pagesTotal = Number(block.pagesTotal);
+    return [
+      {
+        type,
+        documentId,
+        title,
+        ...(typeof block.versionId === "string" && block.versionId.trim() ? { versionId: block.versionId.trim() } : {}),
+        ...(typeof block.originalFileName === "string" && block.originalFileName.trim()
+          ? { originalFileName: block.originalFileName.trim() }
+          : {}),
+        ...(Number.isFinite(qualityScore) ? { qualityScore } : {}),
+        ...(typeof block.parser === "string" && block.parser.trim() ? { parser: block.parser.trim() } : {}),
+        ...(Number.isFinite(chunkCount) ? { chunkCount: Math.max(0, Math.floor(chunkCount)) } : {}),
+        ...(Number.isFinite(pagesParsed) ? { pagesParsed: Math.max(0, Math.floor(pagesParsed)) } : {}),
+        ...(Number.isFinite(pagesTotal) ? { pagesTotal: Math.max(0, Math.floor(pagesTotal)) } : {}),
+        ...(warnings.length ? { warnings } : {}),
+        ...(parseActions().length ? { actions: parseActions() } : {}),
+      },
+    ];
+  }
+
+  if (type === "document_edit_applied") {
+    const documentId = String(block.documentId || "").trim();
+    const versionId = String(block.versionId || "").trim();
+    const versionNumber = Number(block.versionNumber);
+    if (!documentId || !versionId || !Number.isFinite(versionNumber)) return [];
+    return [
+      {
+        type: "document_edit_applied",
+        documentId,
+        versionId,
+        versionNumber: Math.max(1, Math.floor(versionNumber)),
+        ...(typeof block.changeSummary === "string" && block.changeSummary.trim()
+          ? { changeSummary: block.changeSummary.trim() }
+          : {}),
+        ...(parseActions().length ? { actions: parseActions() } : {}),
+      },
+    ];
+  }
+
+  if (type === "document_edit_proposal") {
+    const documentId = String(block.documentId || "").trim();
+    const baseVersionId = String(block.baseVersionId || "").trim();
+    const instruction = String(block.instruction || "").trim();
+    const proposedContentMd = String(block.proposedContentMd || "");
+    const baseVersionNumber = Number(block.baseVersionNumber);
+    if (!documentId || !baseVersionId || !instruction || !Number.isFinite(baseVersionNumber)) return [];
+    const preview = isRecord(block.preview)
+      ? {
+          beforeChars: Number(block.preview.beforeChars) || 0,
+          afterChars: Number(block.preview.afterChars) || 0,
+        }
+      : undefined;
+    return [
+      {
+        type: "document_edit_proposal",
+        documentId,
+        baseVersionId,
+        baseVersionNumber: Math.max(1, Math.floor(baseVersionNumber)),
+        instruction,
+        proposedContentMd,
+        changed: Boolean(block.changed),
+        ...(typeof block.changeSummary === "string" && block.changeSummary.trim()
+          ? { changeSummary: block.changeSummary.trim() }
+          : {}),
+        ...(preview ? { preview } : {}),
+        ...(parseActions().length ? { actions: parseActions() } : {}),
+      },
+    ];
+  }
+
+  if (type === "document_export_result") {
+    const documentId = String(block.documentId || "").trim();
+    const versionId = String(block.versionId || "").trim();
+    const exportId = String(block.exportId || "").trim();
+    const formatRaw = String(block.format || "").trim().toUpperCase();
+    const format = formatRaw === "DOCX" || formatRaw === "MD" ? formatRaw : "PDF";
+    if (!documentId || !versionId || !exportId) return [];
+    const fileSizeBytes = Number(block.fileSizeBytes);
+    return [
+      {
+        type: "document_export_result",
+        documentId,
+        versionId,
+        exportId,
+        format,
+        ...(Number.isFinite(fileSizeBytes) ? { fileSizeBytes: Math.max(0, Math.floor(fileSizeBytes)) } : {}),
+        ...(typeof block.downloadHref === "string" && block.downloadHref.trim()
+          ? { downloadHref: block.downloadHref.trim() }
+          : {}),
       },
     ];
   }
@@ -504,8 +623,11 @@ function mapMessages(messages: Array<Record<string, unknown>>): ChatMessage[] {
     .map((message) => {
       const reasoningRaw = isRecord(message.reasoningJson) ? message.reasoningJson : null;
       const modelRaw = reasoningRaw && isRecord(reasoningRaw.model) ? reasoningRaw.model : null;
+      const qualityRaw = reasoningRaw && isRecord(reasoningRaw.quality) ? reasoningRaw.quality : null;
       const blocks = normalizeMessageBlocks(message.blocksJson);
       const inputOptions = normalizeMessageInputOptions(message.inputOptionsJson);
+      const attachmentIds = normalizeIdList(message.attachmentIdsJson);
+      const documentIds = normalizeIdList(message.documentIdsJson);
       const evidenceRaw = reasoningRaw && Array.isArray(reasoningRaw.evidence) ? reasoningRaw.evidence : [];
       const evidence = evidenceRaw
         .map((item) => {
@@ -527,6 +649,8 @@ function mapMessages(messages: Array<Record<string, unknown>>): ChatMessage[] {
         content: String(message.content || ""),
         createdAt: toIso(message.createdAt),
         ...(inputOptions ? { inputOptions } : {}),
+        ...(attachmentIds.length ? { attachmentIds } : {}),
+        ...(documentIds.length ? { documentIds } : {}),
         ...(blocks.length
           ? {
               blocks,
@@ -552,6 +676,19 @@ function mapMessages(messages: Array<Record<string, unknown>>): ChatMessage[] {
                         fallbackUsed: Boolean(modelRaw.fallbackUsed),
                         ...(typeof modelRaw.fallbackFrom === "string" && modelRaw.fallbackFrom.trim()
                           ? { fallbackFrom: modelRaw.fallbackFrom.trim() }
+                          : {}),
+                      },
+                    }
+                  : {}),
+                ...(qualityRaw &&
+                (qualityRaw.intent === "competitor_brief" || qualityRaw.intent === "general") &&
+                typeof qualityRaw.passed === "boolean"
+                  ? {
+                      quality: {
+                        intent: qualityRaw.intent,
+                        passed: qualityRaw.passed,
+                        ...(asArrayOfStrings(qualityRaw.notes).length
+                          ? { notes: asArrayOfStrings(qualityRaw.notes) }
                           : {}),
                       },
                     }
@@ -708,7 +845,29 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
   return latest.map((event) => {
     let message = event.message || "Runtime event";
 
-    if (event.event === "run.started") {
+    if (event.event.startsWith("document.")) {
+      if (event.event === "document.upload_received") {
+        message = event.message || "Upload received.";
+      } else if (event.event === "document.parse_started") {
+        message = event.message || "Parsing document.";
+      } else if (event.event === "document.parse_completed") {
+        message = event.message || "Document ready.";
+      } else if (event.event === "document.parse_needs_review") {
+        message = event.message || "Document parsed with warnings.";
+      } else if (event.event === "document.chunking_completed") {
+        message = event.message || "Chunking complete for citations.";
+      } else if (event.event === "document.edit_proposed") {
+        message = event.message || "Edit proposal prepared.";
+      } else if (event.event === "document.edit_applied") {
+        message = event.message || "Edit applied and versioned.";
+      } else if (event.event === "document.export_started") {
+        message = event.message || "Export started.";
+      } else if (event.event === "document.export_completed") {
+        message = event.message || "Export completed.";
+      } else if (event.event === "document.parse_failed" || event.event === "document.export_failed") {
+        message = event.message || "Document processing failed.";
+      }
+    } else if (event.event === "run.started") {
       message = `${humanizeTriggerType(event.triggerType || "workflow")} started.`;
     } else if (event.event === "run.planning") {
       message = "Planning execution steps.";
@@ -737,6 +896,13 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
     }
 
     const actionLabel =
+      event.event.startsWith("document.")
+        ? event.event.endsWith("failed")
+          ? "Inspect issue"
+          : event.event.endsWith("completed")
+            ? "Open result"
+            : undefined
+        :
       event.event === "tool.output"
         ? "View result"
         : event.event === "decision.required" || event.phase === "waiting_input"
@@ -1413,6 +1579,12 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
               content: String(item.content),
               createdAt: toIso(item.createdAt),
               position: Number.isFinite(Number(item.position)) ? Number(item.position) : undefined,
+              ...(normalizeIdList(item.attachmentIdsJson).length
+                ? { attachmentIds: normalizeIdList(item.attachmentIdsJson) }
+                : {}),
+              ...(normalizeIdList(item.documentIdsJson).length
+                ? { documentIds: normalizeIdList(item.documentIdsJson) }
+                : {}),
               ...(inputOptions ? { inputOptions } : {}),
               ...(isRecord(item.steerJson)
                 ? {
@@ -1478,18 +1650,25 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
   }, [activeBranchId, syncBranch, syncLibrary]);
 
   const sendMessage = useCallback(
-    async (content: string, mode: "send" | "queue" | "interrupt") => {
+    async (
+      content: string,
+      mode: "send" | "queue" | "interrupt",
+      options?: { attachmentIds?: string[]; documentIds?: string[] }
+    ) => {
       if (!activeBranchId) return;
       const trimmed = content.trim();
-      if (!trimmed) return;
+      const attachmentIds = Array.isArray(options?.attachmentIds) ? options.attachmentIds.filter(Boolean) : [];
+      const documentIds = Array.isArray(options?.documentIds) ? options.documentIds.filter(Boolean) : [];
+      if (!trimmed && attachmentIds.length === 0 && documentIds.length === 0) return;
 
       const inputOptions = buildInputOptionsFromPreferences(preferences);
       await sendRuntimeMessage(workspaceId, activeBranchId, {
         content: trimmed,
-        userId: "portal-user",
         mode,
         policy: buildPolicyFromPreferences(preferences),
         inputOptions,
+        ...(attachmentIds.length ? { attachmentIds } : {}),
+        ...(documentIds.length ? { documentIds } : {}),
       });
 
       await syncBranch(activeBranchId);
@@ -1568,6 +1747,8 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
           content,
           inputOptions: mergedInputOptions,
           ...(steerNote !== undefined ? { steerNote } : {}),
+          ...(Array.isArray(queued.attachmentIds) ? { attachmentIds: queued.attachmentIds } : {}),
+          ...(Array.isArray(queued.documentIds) ? { documentIds: queued.documentIds } : {}),
         });
         await cancelRuntimeQueueItem(workspaceId, activeBranchId, id);
         const runtimePreferences: SessionPreferences = {
@@ -1578,13 +1759,14 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
         };
         await sendRuntimeMessage(workspaceId, activeBranchId, {
           content,
-          userId: "portal-user",
           mode: "interrupt",
           policy: buildPolicyFromPreferences(runtimePreferences),
           inputOptions: {
             ...mergedInputOptions,
             ...(steerNote ? { steerNote } : {}),
           },
+          ...(Array.isArray(queued.attachmentIds) ? { attachmentIds: queued.attachmentIds } : {}),
+          ...(Array.isArray(queued.documentIds) ? { documentIds: queued.documentIds } : {}),
         });
         await syncBranch(activeBranchId);
         return;
@@ -1594,6 +1776,8 @@ export function useRuntimeWorkspace(workspaceId: string): UseRuntimeWorkspaceRes
         content,
         inputOptions: mergedInputOptions,
         ...(steerNote !== undefined ? { steerNote } : {}),
+        ...(Array.isArray(queued.attachmentIds) ? { attachmentIds: queued.attachmentIds } : {}),
+        ...(Array.isArray(queued.documentIds) ? { documentIds: queued.documentIds } : {}),
       });
       await syncBranch(activeBranchId);
     },

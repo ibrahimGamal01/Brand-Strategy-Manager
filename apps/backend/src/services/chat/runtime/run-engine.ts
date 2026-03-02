@@ -23,6 +23,7 @@ import {
   listBranchMessages,
   listActiveRuns,
   listToolRuns,
+  markQueueItemStatus,
   popNextQueuedMessage,
   runtimeEnums,
   updateQueueItem,
@@ -31,6 +32,7 @@ import {
 } from './repository';
 import { executeToolWithContract } from './tool-contract';
 import {
+  applyWriterQualityGate,
   buildToolDigest,
   buildEvidenceLedger,
   generatePlannerPlan,
@@ -54,6 +56,7 @@ import { buildRuntimeAgentContext } from './context-assembler';
 import type { RuntimeAgentContext } from './agent-context';
 import { createKnowledgeLedgerVersion } from '../../knowledge/knowledge-ledger-service';
 import { resolveModelForTask } from '../../ai/model-router';
+import { buildDocumentGroundingHint, hydrateDocumentIdsFromMessageInput, normalizeDocumentIds } from '../../documents/workspace-document-service';
 
 type SendMessageInput = {
   researchJobId: string;
@@ -63,6 +66,8 @@ type SendMessageInput = {
   mode?: SendMessageMode;
   policy?: Partial<RunPolicy>;
   inputOptions?: RuntimeInputOptions;
+  attachmentIds?: string[];
+  documentIds?: string[];
 };
 
 type SendMessageResult = {
@@ -164,8 +169,8 @@ const INTEL_LIST_SECTIONS = new Set([
 ]);
 
 const RUNTIME_PROMPT_STAGE_TIMEOUT_MS = Number.isFinite(Number(process.env.RUNTIME_PROMPT_STAGE_TIMEOUT_MS))
-  ? Math.max(5_000, Math.min(120_000, Math.floor(Number(process.env.RUNTIME_PROMPT_STAGE_TIMEOUT_MS))))
-  : 30_000;
+  ? Math.max(15_000, Math.min(180_000, Math.floor(Number(process.env.RUNTIME_PROMPT_STAGE_TIMEOUT_MS))))
+  : 60_000;
 const MAX_PROMPT_TOOL_RESULTS = 12;
 const MAX_PROMPT_ARRAY_ITEMS = 10;
 const MAX_PROMPT_OBJECT_KEYS = 18;
@@ -332,6 +337,14 @@ export function normalizePolicy(raw?: Partial<RunPolicy> | null, inputOptions?: 
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeIdList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => String(entry || '').trim())
+    .filter(Boolean)
+    .slice(0, 20);
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
@@ -539,15 +552,29 @@ function prefersConciseOutput(message: string): boolean {
   return /\b(concise|brief|short|tl;dr|tldr|in short|summarize quickly|quick summary)\b/.test(normalized);
 }
 
+function detectWriterIntent(message: string): 'competitor_brief' | 'general' {
+  const normalized = String(message || '').toLowerCase();
+  if (!/\bcompetitor|rival|alternative\b/.test(normalized)) return 'general';
+  const hasBriefSignals =
+    /\b(top\s*\d+|top five|top 5|best competitors?|direct competitors?|competitor brief|competitor analysis)\b/.test(
+      normalized
+    ) ||
+    /\bwhy (each|they|these)\b/.test(normalized) ||
+    /\b(positioning gap|market gap|white\s*space|whitespace|angle)\b/.test(normalized);
+  return hasBriefSignals ? 'competitor_brief' : 'general';
+}
+
 function fallbackWriterOutput(input: {
   toolDigest: RuntimeToolDigest;
   toolResults: RuntimeToolResult[];
   plan: RuntimePlan;
+  policy?: RunPolicy;
   userMessage?: string;
   runtimeContext?: Record<string, unknown>;
 }): RuntimeWriterOutput {
   const requestedWriterModel = resolveModelForTask('workspace_chat_writer');
-  const concise = prefersConciseOutput(input.userMessage || '');
+  const userMessage = String(input.userMessage || '');
+  const concise = prefersConciseOutput(userMessage);
   const hasToolResults = input.toolResults.length > 0;
   const highlights = input.toolDigest.highlights.filter(Boolean).slice(0, concise ? 4 : 8);
   const evidenceLines = input.toolResults
@@ -602,27 +629,42 @@ function fallbackWriterOutput(input: {
 
   const response = responseSections.filter(Boolean).join('\n\n');
   const hasCompetitorSignals = /\bcompetitor|adjacent|substitute|inspiration\b/i.test(String(input.userMessage || ''));
+  const sourceScope = input.policy?.sourceScope;
+  const allowWebSearch = sourceScope ? sourceScope.webSearch !== false : true;
 
   const actions: RuntimeWriterOutput['actions'] = [
     { label: 'Show sources', action: 'show_sources' },
     { label: 'Generate PDF', action: 'generate_pdf' },
   ];
-  if (hasCompetitorSignals) {
+  if (hasCompetitorSignals && allowWebSearch) {
     actions.unshift({
       label: 'Run V3 competitor finder',
       action: 'competitors.discover_v3',
       payload: { mode: 'standard', maxCandidates: 140, maxEnrich: 10 },
     });
-  } else {
+  } else if (allowWebSearch) {
     actions.unshift({
       label: 'Search web evidence',
       action: 'search.web',
       payload: { query: String(input.userMessage || '').slice(0, 180), count: 10, provider: 'auto' },
     });
+  } else {
+    actions.unshift({
+      label: 'Open library',
+      action: 'open_library',
+      payload: { collection: 'web' },
+    });
   }
 
-  return {
+  const qualityGate = applyWriterQualityGate({
+    userMessage,
     response,
+    toolResults: input.toolResults,
+    runtimeContext,
+  });
+
+  return {
+    response: qualityGate.response,
     model: {
       requested: requestedWriterModel || 'unknown',
       used: 'heuristic-fallback',
@@ -644,6 +686,7 @@ function fallbackWriterOutput(input: {
           label: compactPromptString(entry.label, 220),
           ...(entry.url ? { url: compactPromptString(entry.url, 260) } : {}),
         })),
+      quality: qualityGate.quality,
     },
     actions,
     decisions: [],
@@ -652,9 +695,15 @@ function fallbackWriterOutput(input: {
 
 function fallbackValidatorOutput(): RuntimeValidatorOutput {
   return {
-    pass: true,
-    issues: [],
-    suggestedFixes: [],
+    pass: false,
+    issues: [
+      {
+        code: 'VALIDATOR_UNAVAILABLE',
+        severity: 'high',
+        message: 'Validator fallback executed because the validation stage was unavailable.',
+      },
+    ],
+    suggestedFixes: ['Retry this run or request a shorter answer to reduce model-stage timeout risk.'],
   };
 }
 
@@ -1334,7 +1383,10 @@ function enforceToolSourceScope(input: {
     const tool = String(call.tool || '').trim();
     if (!tool) continue;
 
-    if (!sourceScope.webSearch && (tool === 'search.web' || tool === 'research.gather' || tool === 'competitors.discover_v3')) {
+    if (
+      !sourceScope.webSearch &&
+      (tool === 'search.web' || tool === 'research.gather' || tool === 'competitors.discover_v3' || tool === 'evidence.news')
+    ) {
       block({
         tool,
         lane: 'web_search',
@@ -1347,7 +1399,7 @@ function enforceToolSourceScope(input: {
       continue;
     }
 
-    if (!sourceScope.socialIntel && (tool === 'evidence.posts' || tool === 'orchestration.run')) {
+    if (!sourceScope.socialIntel && (tool === 'evidence.posts' || tool === 'evidence.videos' || tool === 'orchestration.run')) {
       block({
         tool,
         lane: 'social_intel',
@@ -1447,6 +1499,8 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   const originalMessage = String(message || '');
   const messageWithMentions = withLibraryMentionHints(originalMessage);
   const normalized = messageWithMentions.toLowerCase();
+  const writerIntent = detectWriterIntent(originalMessage);
+  const isCompetitorBriefIntent = writerIntent === 'competitor_brief';
   const calls: RuntimeToolCall[] = [];
   const firstUrl = findFirstUrl(messageWithMentions);
   const referencedCrawlRunId = findReferencedCrawlRunId(messageWithMentions);
@@ -1461,6 +1515,16 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
 
   const hasCompetitorSignals = /\b(competitor|rival|alternative|inspiration|accounts?|handles?)\b/.test(normalized);
   const hasAddIntent = /\b(add|include|save|insert|append|import|update)\b/.test(normalized);
+  const hasCompetitorMutationNegation =
+    /\b(do not|don't|dont|without|avoid|no need to)\b.{0,40}\b(add|include|save|import|append|insert|modify|change|update)\b/.test(
+      normalized
+    ) ||
+    /\b(do not|don't|dont)\b.{0,50}\bcompetitor(?:s)?\b.{0,25}\b(link|url|handle|account)s?\b/.test(normalized);
+  const hasExplicitCompetitorLinkMutationIntent =
+    /(?:\b(add|include|save|import|append|insert)\b.{0,80}\b(competitor|inspiration)\b.{0,80}\b(link|url|handle|account)s?\b)|(?:\bcompetitors?\s*(?:\/|or)\s*inspiration(?:\s+links?)?\b)/.test(
+      normalized
+    ) || (hasAddIntent && /\b(competitor|inspiration)\b/.test(normalized));
+  const shouldMutateCompetitorLinks = hasExplicitCompetitorLinkMutationIntent && !hasCompetitorMutationNegation;
   const hasCompetitorLinks = /(instagram\.com|tiktok\.com|youtube\.com|x\.com|twitter\.com|@[a-z0-9._-]+)/i.test(
     message
   );
@@ -1542,10 +1606,14 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
     pushIfMissing('intel.list', { section: 'competitors', limit: 12 });
   }
 
+  if (isCompetitorBriefIntent) {
+    pushIfMissing('intel.list', { section: 'competitors', limit: 12 });
+    pushIfMissing('intel.list', { section: 'competitor_accounts', limit: 20 });
+    pushIfMissing('evidence.posts', { platform: 'any', sort: 'engagement', limit: 8 });
+  }
+
   if (
-    ((hasAddIntent && hasCompetitorSignals) ||
-      /competitors?\s*(?:\/|or)\s*inspiration/i.test(messageWithMentions) ||
-      /\bcompetitor(?:s)?\b/.test(normalized)) &&
+    shouldMutateCompetitorLinks &&
     hasCompetitorLinks
   ) {
     pushIfMissing('competitors.add_links', { text: messageWithMentions });
@@ -2186,8 +2254,13 @@ export class RuntimeRunEngine {
         inputOptions: isRecord(nextQueued.inputOptionsJson)
           ? (nextQueued.inputOptionsJson as RuntimeInputOptions)
           : undefined,
+        attachmentIds: normalizeIdList((nextQueued as any).attachmentIdsJson),
+        documentIds: normalizeIdList((nextQueued as any).documentIdsJson),
       }).catch((error) => {
         console.error('[RuntimeRunEngine] Failed to process next queued message:', error);
+        void markQueueItemStatus(nextQueued.id, MessageQueueItemStatus.QUEUED).catch((statusError) => {
+          console.error('[RuntimeRunEngine] Failed to re-queue message after dispatch failure:', statusError);
+        });
       });
     });
 
@@ -2201,10 +2274,21 @@ export class RuntimeRunEngine {
     }
 
     const mode = input.mode || 'send';
+    const attachmentIds = normalizeDocumentIds(input.attachmentIds || []);
+    const documentIds = await hydrateDocumentIdsFromMessageInput({
+      researchJobId: input.researchJobId,
+      documentIds: normalizeDocumentIds(input.documentIds || []),
+      attachmentIds,
+    });
     const content = String(input.content || '').trim();
-    if (!content) {
+    if (!content && attachmentIds.length === 0 && documentIds.length === 0) {
       throw new Error('Message content is required');
     }
+    const normalizedContent =
+      content ||
+      (documentIds.length > 0
+        ? 'Please analyze the attached documents and continue the workflow with grounded recommendations.'
+        : 'Please analyze the attached files and continue the workflow with grounded recommendations.');
 
     const activeRuns = await listActiveRuns(input.branchId);
     if (mode === 'send' && activeRuns.length > 0) {
@@ -2226,20 +2310,24 @@ export class RuntimeRunEngine {
         const queueItem = await enqueueMessage({
           branchId: input.branchId,
           userId: input.userId,
-          content,
+          content: normalizedContent,
           ...(input.inputOptions ? { inputOptions: normalizeInputOptions(input.inputOptions) } : {}),
+          ...(attachmentIds.length ? { attachmentIds } : {}),
+          ...(documentIds.length ? { documentIds } : {}),
         });
 
         await this.emitEvent({
           branchId: input.branchId,
           type: ProcessEventType.PROCESS_LOG,
           message: 'Message queued because a run is already in progress.',
-          payload: {
-            queueItemId: queueItem.id,
-            position: queueItem.position,
-            reason: 'active_run',
-          },
-        });
+        payload: {
+          queueItemId: queueItem.id,
+          position: queueItem.position,
+          reason: 'active_run',
+          attachmentCount: attachmentIds.length,
+          documentCount: documentIds.length,
+        },
+      });
 
         return {
           branchId: input.branchId,
@@ -2253,8 +2341,10 @@ export class RuntimeRunEngine {
       const queueItem = await enqueueMessage({
         branchId: input.branchId,
         userId: input.userId,
-        content,
+        content: normalizedContent,
         ...(input.inputOptions ? { inputOptions: normalizeInputOptions(input.inputOptions) } : {}),
+        ...(attachmentIds.length ? { attachmentIds } : {}),
+        ...(documentIds.length ? { documentIds } : {}),
       });
 
       await this.emitEvent({
@@ -2264,6 +2354,8 @@ export class RuntimeRunEngine {
         payload: {
           queueItemId: queueItem.id,
           position: queueItem.position,
+          attachmentCount: attachmentIds.length,
+          documentCount: documentIds.length,
         },
       });
 
@@ -2285,8 +2377,10 @@ export class RuntimeRunEngine {
     const userMessage = await createBranchMessage({
       branchId: input.branchId,
       role: ChatBranchMessageRole.USER,
-      content,
+      content: normalizedContent,
       ...(input.inputOptions ? { inputOptionsJson: normalizeInputOptions(input.inputOptions) } : {}),
+      ...(attachmentIds.length ? { attachmentIdsJson: attachmentIds } : {}),
+      ...(documentIds.length ? { documentIdsJson: documentIds } : {}),
       clientVisible: true,
     });
 
@@ -2298,6 +2392,8 @@ export class RuntimeRunEngine {
       triggerMessageId: userMessage.id,
       policy: normalizedPolicy,
       ...(normalizedInputOptions ? { inputOptions: normalizedInputOptions } : {}),
+      ...(attachmentIds.length ? { attachmentIds } : {}),
+      ...(documentIds.length ? { documentIds } : {}),
     });
 
     await this.emitEvent({
@@ -2309,6 +2405,8 @@ export class RuntimeRunEngine {
         triggerType: run.triggerType,
         triggerMessageId: userMessage.id,
         inputOptions: normalizedInputOptions,
+        attachmentIds,
+        documentIds,
         policySummary: buildPolicySummary(normalizedPolicy),
       },
     });
@@ -2350,6 +2448,8 @@ export class RuntimeRunEngine {
     content?: string;
     inputOptions?: RuntimeInputOptions;
     steerNote?: string;
+    attachmentIds?: string[];
+    documentIds?: string[];
   }) {
     const branch = await getBranch(input.branchId, input.researchJobId);
     if (!branch) {
@@ -2361,6 +2461,16 @@ export class RuntimeRunEngine {
       throw new Error('Queue item content cannot be empty');
     }
     const normalizedInputOptions = normalizeInputOptions(input.inputOptions);
+    const attachmentIds =
+      input.attachmentIds === undefined ? undefined : normalizeDocumentIds(input.attachmentIds || []);
+    const documentIds =
+      input.documentIds === undefined
+        ? undefined
+        : await hydrateDocumentIdsFromMessageInput({
+            researchJobId: input.researchJobId,
+            documentIds: normalizeDocumentIds(input.documentIds || []),
+            attachmentIds: normalizeDocumentIds(input.attachmentIds || []),
+          });
     const steerNote = String(input.steerNote || '').trim();
     const steerPayload =
       input.steerNote === undefined
@@ -2372,6 +2482,8 @@ export class RuntimeRunEngine {
     await updateQueueItem(input.branchId, input.itemId, {
       ...(content !== undefined ? { content } : {}),
       ...(input.inputOptions !== undefined ? { inputOptions: normalizedInputOptions } : {}),
+      ...(attachmentIds !== undefined ? { attachmentIds } : {}),
+      ...(documentIds !== undefined ? { documentIds } : {}),
       ...(steerPayload !== undefined ? { steer: steerPayload } : {}),
     });
 
@@ -2384,6 +2496,8 @@ export class RuntimeRunEngine {
         queueItemId: input.itemId,
         hasContentUpdate: content !== undefined,
         hasInputOptionsUpdate: input.inputOptions !== undefined,
+        hasAttachmentsUpdate: attachmentIds !== undefined,
+        hasDocumentsUpdate: documentIds !== undefined,
         hasSteerNote: Boolean(steerNote),
       },
     });
@@ -2826,7 +2940,26 @@ export class RuntimeRunEngine {
     const run = await getAgentRun(runId);
     if (!run) return;
 
-    const triggerMessage = run.triggerMessage?.content || 'Continue with available results.';
+    const triggerMessageRaw = run.triggerMessage?.content || 'Continue with available results.';
+    const triggerAttachmentIds = normalizeDocumentIds([
+      ...normalizeIdList((run.triggerMessage as any)?.attachmentIdsJson),
+      ...normalizeIdList((run as any).attachmentIdsJson),
+    ]);
+    const triggerDocumentIds = await hydrateDocumentIdsFromMessageInput({
+      researchJobId: run.branch.thread.researchJobId,
+      documentIds: [
+        ...normalizeIdList((run.triggerMessage as any)?.documentIdsJson),
+        ...normalizeIdList((run as any).documentIdsJson),
+      ],
+      attachmentIds: triggerAttachmentIds,
+    });
+    const documentGroundingHint = triggerDocumentIds.length
+      ? await buildDocumentGroundingHint({
+          researchJobId: run.branch.thread.researchJobId,
+          documentIds: triggerDocumentIds,
+        })
+      : '';
+    const triggerMessage = documentGroundingHint ? `${triggerMessageRaw}\n\n${documentGroundingHint}` : triggerMessageRaw;
     const plan = normalizeRunPlan(run.planJson) || buildPlanFromMessage(triggerMessage);
     const runtimeContextSnapshot = isRecord(plan.runtime?.contextSnapshot)
       ? (plan.runtime.contextSnapshot as Record<string, unknown>)
@@ -3094,7 +3227,7 @@ export class RuntimeRunEngine {
 
     if (await isRunCancelled('writing')) return;
 
-    const writerOutput = await withTimeout(
+    const initialWriterOutput = await withTimeout(
       writeClientResponse({
         userMessage: effectiveUserMessage,
         plan,
@@ -3118,10 +3251,26 @@ export class RuntimeRunEngine {
         toolDigest,
         toolResults: promptToolResults,
         plan,
+        policy,
         userMessage: effectiveUserMessage,
         runtimeContext: runtimeContextSnapshot,
       });
     });
+
+    const writerQualityGate = applyWriterQualityGate({
+      userMessage: effectiveUserMessage,
+      response: initialWriterOutput.response,
+      toolResults: promptToolResults,
+      runtimeContext: runtimeContextSnapshot,
+    });
+    const writerOutput: RuntimeWriterOutput = {
+      ...initialWriterOutput,
+      response: writerQualityGate.response,
+      reasoning: {
+        ...initialWriterOutput.reasoning,
+        quality: writerQualityGate.quality,
+      },
+    };
 
     if (writerOutput.model?.fallbackUsed) {
       await this.emitEvent({
@@ -3135,6 +3284,22 @@ export class RuntimeRunEngine {
           usedModel: writerOutput.model.used,
           fallbackUsed: writerOutput.model.fallbackUsed,
           fallbackFrom: writerOutput.model.fallbackFrom || writerOutput.model.requested,
+        },
+      });
+    }
+
+    const qualityRewriteApplied =
+      writerQualityGate.quality.intent === 'competitor_brief' &&
+      writerOutput.response !== initialWriterOutput.response;
+    if (qualityRewriteApplied) {
+      await this.emitEvent({
+        branchId: run.branchId,
+        agentRunId: run.id,
+        type: ProcessEventType.PROCESS_LOG,
+        level: ProcessEventLevel.WARN,
+        message: 'Competitor brief quality gate rewrite applied.',
+        payload: {
+          quality: writerQualityGate.quality,
         },
       });
     }
@@ -3325,6 +3490,28 @@ export class RuntimeRunEngine {
         isRecord(fresh.policyJson) ? (fresh.policyJson as Partial<RunPolicy>) : undefined,
         isRecord(fresh.inputOptionsJson) ? (fresh.inputOptionsJson as RuntimeInputOptions) : undefined
       );
+      const triggerMessageRaw = fresh.triggerMessage?.content || 'Continue workflow';
+      const triggerAttachmentIds = normalizeDocumentIds([
+        ...normalizeIdList((fresh.triggerMessage as any)?.attachmentIdsJson),
+        ...normalizeIdList((fresh as any).attachmentIdsJson),
+      ]);
+      const triggerDocumentIds = await hydrateDocumentIdsFromMessageInput({
+        researchJobId: fresh.branch.thread.researchJobId,
+        documentIds: [
+          ...normalizeIdList((fresh.triggerMessage as any)?.documentIdsJson),
+          ...normalizeIdList((fresh as any).documentIdsJson),
+        ],
+        attachmentIds: triggerAttachmentIds,
+      });
+      const documentGroundingHint = triggerDocumentIds.length
+        ? await buildDocumentGroundingHint({
+            researchJobId: fresh.branch.thread.researchJobId,
+            documentIds: triggerDocumentIds,
+          })
+        : '';
+      const triggerMessageForPlanning = documentGroundingHint
+        ? `${triggerMessageRaw}\n\n${documentGroundingHint}`
+        : triggerMessageRaw;
 
       if (!fresh.startedAt) {
         await updateAgentRun(fresh.id, {
@@ -3342,7 +3529,7 @@ export class RuntimeRunEngine {
             researchJobId: fresh.branch.thread.researchJobId,
             branchId: fresh.branchId,
             syntheticSessionId: `runtime-${fresh.branchId}`,
-            userMessage: fresh.triggerMessage?.content || 'Continue workflow',
+            userMessage: triggerMessageForPlanning,
             runId: fresh.id,
             actor: {
               role: 'system',
@@ -3412,7 +3599,7 @@ export class RuntimeRunEngine {
         plan = await generatePlannerPlan({
           researchJobId: fresh.branch.thread.researchJobId,
           branchId: fresh.branchId,
-          userMessage: fresh.triggerMessage?.content || 'Continue workflow',
+          userMessage: triggerMessageForPlanning,
           ...(runtimeContextSnapshot ? { runtimeContext: runtimeContextSnapshot } : {}),
           policy,
           previousMessages: previousMessages.map((message) => ({
@@ -3433,7 +3620,7 @@ export class RuntimeRunEngine {
         await updateAgentRun(fresh.id, { plan });
       }
 
-      const triggerContent = fresh.triggerMessage?.content || 'Continue workflow';
+      const triggerContent = triggerMessageForPlanning;
       let sanitizedToolCalls = sanitizeToolCalls(plan.toolCalls, triggerContent, policy.maxToolRuns);
       if (
         sanitizedToolCalls.length === 0 &&

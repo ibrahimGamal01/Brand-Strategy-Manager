@@ -90,6 +90,11 @@ type WriterOutput = {
     assumptions: string[];
     nextSteps: string[];
     evidence: Array<{ id: string; label: string; url?: string }>;
+    quality?: {
+      intent: 'competitor_brief' | 'general';
+      passed: boolean;
+      notes?: string[];
+    };
   };
   actions: Array<{
     label: string;
@@ -119,7 +124,11 @@ type ValidatorOutput = {
 
 const ALLOWED_PLANNER_TOOL_NAMES = TOOL_REGISTRY.map((tool) => tool.name).sort();
 const SUPPORTED_TOOL_NAMES = new Set(TOOL_REGISTRY.map((tool) => tool.name));
-const PROMPT_STEP_TIMEOUT_MS = 30_000;
+const PROMPT_STEP_TIMEOUT_MS = Number.isFinite(Number(process.env.RUNTIME_PROMPT_STEP_TIMEOUT_MS))
+  ? Math.max(15_000, Math.min(180_000, Math.floor(Number(process.env.RUNTIME_PROMPT_STEP_TIMEOUT_MS))))
+  : 60_000;
+const GENERIC_TOOL_SUMMARY_RE =
+  /^(listed \d+ item\(s\)|fetched \d+ item\(s\)|no item found|intel\.(list|get) returned \d+ row\(s\)|\w+ returned \d+ item\(s\)|\w+ completed successfully\.?)$/i;
 
 const TOOL_NAME_ALIASES: Record<string, { tool: string; args: Record<string, unknown> }> = {
   competitoranalysis: { tool: 'orchestration.run', args: { targetCount: 12, mode: 'append' } },
@@ -138,6 +147,22 @@ type JsonRequestResult = {
   requestedModel: string;
   usedModel: string;
   fallbackUsed: boolean;
+};
+
+type CompetitorCandidate = {
+  handle: string;
+  platform: string;
+  selectionState: string;
+  competitorType: string;
+  relevanceScore: number;
+  selectionReason: string;
+  discoveryReason: string;
+};
+
+type WriterQualityResult = {
+  intent: 'competitor_brief' | 'general';
+  passed: boolean;
+  notes?: string[];
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -264,11 +289,22 @@ function normalizeModelName(value: unknown): string {
   return String(value || '').trim();
 }
 
+function canonicalModelName(value: unknown): string {
+  const normalized = normalizeModelName(value).toLowerCase();
+  if (!normalized) return '';
+  if (normalized.startsWith('gpt-5.2')) return 'gpt-5.2';
+  if (normalized.startsWith('gpt-5-mini')) return 'gpt-5-mini';
+  if (normalized.startsWith('gpt-5')) return 'gpt-5';
+  if (normalized.startsWith('gpt-4o-mini')) return 'gpt-4o-mini';
+  if (normalized.startsWith('gpt-4o')) return 'gpt-4o';
+  return normalized;
+}
+
 function modelNamesMatch(left: string, right: string): boolean {
-  const a = normalizeModelName(left);
-  const b = normalizeModelName(right);
+  const a = canonicalModelName(left);
+  const b = canonicalModelName(right);
   if (!a || !b) return false;
-  return a.toLowerCase() === b.toLowerCase();
+  return a === b;
 }
 
 function buildModelTelemetry(requestedModel: string, usedModel: string): WriterOutput['model'] {
@@ -307,8 +343,7 @@ async function requestJson(
   const completion = (await withTimeout(
     openai.bat.chatCompletion(task, {
       messages,
-      temperature: 0,
-      max_tokens: maxTokens,
+      max_completion_tokens: maxTokens,
     }) as Promise<OpenAI.Chat.Completions.ChatCompletion>,
     PROMPT_STEP_TIMEOUT_MS,
     `Prompt task ${task}`
@@ -340,8 +375,7 @@ async function requestJson(
           content: text,
         },
       ],
-      temperature: 0,
-      max_tokens: maxTokens,
+      max_completion_tokens: maxTokens,
     }) as Promise<OpenAI.Chat.Completions.ChatCompletion>,
     PROMPT_STEP_TIMEOUT_MS,
     `Prompt task ${task} (repair)`
@@ -356,16 +390,98 @@ async function requestJson(
   };
 }
 
+function compactDigestText(value: unknown, max = 180): string {
+  const normalized = String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!normalized) return '';
+  if (normalized.length <= max) return normalized;
+  return `${normalized.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
+}
+
+function toolSummaryIsGeneric(summary: string): boolean {
+  const normalized = compactDigestText(summary, 260);
+  if (!normalized) return true;
+  return GENERIC_TOOL_SUMMARY_RE.test(normalized);
+}
+
+function previewLabelFromRow(row: unknown): string {
+  if (!isRecord(row)) return '';
+  const metadata = isRecord(row.metadata) ? row.metadata : {};
+  const candidates = [
+    row.title,
+    row.headline,
+    row.handle,
+    row.canonicalName,
+    row.domain,
+    row.query,
+    row.url,
+    row.finalUrl,
+    row.profileUrl,
+    row.href,
+    metadata.title,
+    row.summary,
+    row.content,
+    row.body,
+  ];
+  for (const candidate of candidates) {
+    const next = compactDigestText(candidate, 160);
+    if (next) return next;
+  }
+  return '';
+}
+
+function extractRawPreviewLabels(raw: unknown, max = 3): string[] {
+  if (!isRecord(raw)) return [];
+  const rows = Array.isArray(raw.items)
+    ? raw.items
+    : Array.isArray(raw.data)
+      ? raw.data
+      : isRecord(raw.item)
+        ? [raw.item]
+        : [];
+  if (!rows.length) return [];
+  return rows
+    .map((row) => previewLabelFromRow(row))
+    .filter(Boolean)
+    .slice(0, max);
+}
+
+function mergeSummaryWithExamples(summary: string, examples: string[]): string {
+  const base = compactDigestText(summary, 260);
+  if (!examples.length) return base;
+  if (toolSummaryIsGeneric(base)) {
+    return `Evidence highlights: ${examples.join('; ')}.`;
+  }
+  return `${base} Examples: ${examples.join('; ')}.`;
+}
+
 export function buildToolDigest(input: ToolDigestInput): ToolDigestOutput {
-  const highlights = input.toolResults.slice(0, 6).map((result) => result.summary);
+  const highlights = input.toolResults
+    .slice(0, 6)
+    .map((result) => {
+      const summary = String(result.summary || '').trim();
+      const examples = extractRawPreviewLabels(result.raw, 3);
+      return mergeSummaryWithExamples(summary, examples);
+    })
+    .filter(Boolean);
+
   const facts = input.toolResults
-    .flatMap((result) =>
-      result.evidence.slice(0, 3).map((evidence) => ({
-        claim: result.summary,
-        evidence: [evidence.label],
-      }))
-    )
-    .slice(0, 8);
+    .flatMap((result) => {
+      const summary = String(result.summary || '').trim();
+      const examples = extractRawPreviewLabels(result.raw, 3);
+      const claim = mergeSummaryWithExamples(summary, examples);
+      const evidence = result.evidence
+        .slice(0, 4)
+        .map((item) => compactDigestText(item.label, 180))
+        .filter(Boolean);
+      if (!claim) return [];
+      if (!evidence.length && examples.length) {
+        return [{ claim, evidence: examples.map((entry) => compactDigestText(entry, 180)).filter(Boolean).slice(0, 3) }];
+      }
+      return [{ claim, evidence }];
+    })
+    .slice(0, 10);
 
   return {
     highlights: highlights.length ? highlights : ['No tool results were required for this response.'],
@@ -378,6 +494,296 @@ export function buildToolDigest(input: ToolDigestInput): ToolDigestOutput {
         ...((continuation.suggestedToolCalls || []).map((call) => String(call.tool || '').trim()).filter(Boolean)),
       ])
       .slice(0, 6),
+  };
+}
+
+function escapeRegExp(value: string): string {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function detectWriterIntent(message: string): 'competitor_brief' | 'general' {
+  const normalized = String(message || '').toLowerCase();
+  if (!/\bcompetitor|rival|alternative\b/.test(normalized)) return 'general';
+
+  const hasBriefSignals =
+    /\b(top\s*\d+|top five|top 5|best competitors?|direct competitors?|competitor brief|competitor analysis)\b/.test(
+      normalized
+    ) ||
+    /\bwhy (each|they|these)\b/.test(normalized) ||
+    /\b(positioning gap|market gap|white\s*space|whitespace|angle)\b/.test(normalized);
+
+  return hasBriefSignals ? 'competitor_brief' : 'general';
+}
+
+function inferPlatformFromUrl(value: unknown): string {
+  const raw = String(value || '').toLowerCase();
+  if (!raw) return '';
+  if (raw.includes('instagram.com')) return 'instagram';
+  if (raw.includes('tiktok.com')) return 'tiktok';
+  if (raw.includes('linkedin.com')) return 'linkedin';
+  if (raw.includes('youtube.com') || raw.includes('youtu.be')) return 'youtube';
+  if (raw.includes('x.com') || raw.includes('twitter.com')) return 'x';
+  return '';
+}
+
+function normalizeHandle(value: unknown): string {
+  return String(value || '')
+    .trim()
+    .replace(/^@+/, '')
+    .toLowerCase();
+}
+
+function normalizeScore(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  if (parsed <= 1) return Math.max(0, Math.min(100, parsed * 100));
+  return Math.max(0, Math.min(100, parsed));
+}
+
+function stateRank(value: string): number {
+  const normalized = String(value || '').trim().toUpperCase();
+  if (normalized === 'APPROVED') return 6;
+  if (normalized === 'TOP_PICK') return 5;
+  if (normalized === 'SHORTLISTED') return 4;
+  if (normalized === 'DISCOVERED') return 3;
+  if (normalized === 'SUGGESTED') return 2;
+  return 1;
+}
+
+function typeRank(value: string): number {
+  const normalized = String(value || '').trim().toUpperCase();
+  if (normalized === 'DIRECT') return 4;
+  if (normalized === 'INDIRECT') return 3;
+  if (normalized === 'ADJACENT') return 2;
+  return 1;
+}
+
+function extractRowsFromRaw(raw: Record<string, unknown>): Record<string, unknown>[] {
+  const rows: Record<string, unknown>[] = [];
+  const pushRows = (value: unknown) => {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (isRecord(item)) rows.push(item);
+      }
+      return;
+    }
+    if (isRecord(value)) rows.push(value);
+  };
+
+  pushRows(raw.items);
+  pushRows(raw.data);
+  pushRows(raw.item);
+  pushRows(raw.topCandidates);
+  pushRows(raw.shortlist);
+  pushRows(raw.topPicks);
+  pushRows(raw.candidates);
+  return rows;
+}
+
+function extractCompetitorCandidates(
+  toolResults: RuntimeToolResult[],
+  runtimeContext?: Record<string, unknown>
+): CompetitorCandidate[] {
+  const byKey = new Map<string, CompetitorCandidate>();
+  const upsert = (candidate: CompetitorCandidate) => {
+    const key = `${candidate.platform || 'unknown'}:${candidate.handle}`;
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, candidate);
+      return;
+    }
+    const currentScore =
+      stateRank(existing.selectionState) * 100 + typeRank(existing.competitorType) * 20 + existing.relevanceScore;
+    const nextScore =
+      stateRank(candidate.selectionState) * 100 + typeRank(candidate.competitorType) * 20 + candidate.relevanceScore;
+    if (nextScore > currentScore) {
+      byKey.set(key, candidate);
+    }
+  };
+
+  for (const result of toolResults) {
+    if (!isRecord(result.raw)) continue;
+    const raw = result.raw;
+    const section = String(raw.section || '').trim().toLowerCase();
+    const relevantSection =
+      section === 'competitors' || section === 'competitor_accounts' || section === 'competitor_entities';
+
+    for (const row of extractRowsFromRaw(raw)) {
+      const handle = normalizeHandle(row.handle || row.normalizedHandle || row.username || row.name);
+      const profileUrl = String(row.profileUrl || row.url || row.href || '').trim();
+      const platform = String(row.platform || inferPlatformFromUrl(profileUrl) || '').trim().toLowerCase();
+      if (!handle || handle.length < 2) continue;
+      if (!relevantSection && !row.selectionState && !row.competitorType && !row.relevanceScore) continue;
+      upsert({
+        handle,
+        platform: platform || 'unknown',
+        selectionState: String(row.selectionState || row.state || row.status || 'DISCOVERED')
+          .trim()
+          .toUpperCase(),
+        competitorType: String(row.competitorType || row.type || 'UNKNOWN')
+          .trim()
+          .toUpperCase(),
+        relevanceScore: normalizeScore(row.relevanceScore || row.score || row.totalScore),
+        selectionReason: String(row.selectionReason || row.stateReason || '').trim(),
+        discoveryReason: String(row.discoveryReason || row.reason || '').trim(),
+      });
+    }
+  }
+
+  const contextTop = isRecord(runtimeContext) && Array.isArray(runtimeContext.topCompetitors)
+    ? runtimeContext.topCompetitors
+    : [];
+  for (const entry of contextTop) {
+    const handle = normalizeHandle(entry);
+    if (!handle) continue;
+    upsert({
+      handle,
+      platform: 'unknown',
+      selectionState: 'TOP_PICK',
+      competitorType: 'UNKNOWN',
+      relevanceScore: 50,
+      selectionReason: 'Top competitor from workspace context.',
+      discoveryReason: '',
+    });
+  }
+
+  return Array.from(byKey.values())
+    .sort((left, right) => {
+      const leftScore = stateRank(left.selectionState) * 100 + typeRank(left.competitorType) * 20 + left.relevanceScore;
+      const rightScore =
+        stateRank(right.selectionState) * 100 + typeRank(right.competitorType) * 20 + right.relevanceScore;
+      return rightScore - leftScore;
+    })
+    .slice(0, 12);
+}
+
+function candidateDirectnessReason(candidate: CompetitorCandidate): string {
+  const reasons: string[] = [];
+  if (candidate.competitorType && candidate.competitorType !== 'UNKNOWN') {
+    reasons.push(`type=${candidate.competitorType.toLowerCase()}`);
+  }
+  if (candidate.selectionState) {
+    reasons.push(`state=${candidate.selectionState.toLowerCase()}`);
+  }
+  if (candidate.relevanceScore > 0) {
+    reasons.push(`relevance=${Math.round(candidate.relevanceScore)}/100`);
+  }
+  const rationale = candidate.selectionReason || candidate.discoveryReason;
+  if (rationale) reasons.push(rationale);
+  if (!reasons.length) return 'Mapped as a close substitute in the current workspace competitor set.';
+  return reasons.join('; ');
+}
+
+function derivePositioningGap(candidates: CompetitorCandidate[]): string {
+  if (!candidates.length) {
+    return 'No verified direct-competitor set yet. Biggest gap is to lock a validated direct list before positioning decisions.';
+  }
+  const directCount = candidates.filter((candidate) => candidate.competitorType === 'DIRECT').length;
+  const unknownCount = candidates.filter((candidate) => candidate.competitorType === 'UNKNOWN').length;
+  if (unknownCount >= Math.ceil(candidates.length / 2)) {
+    return 'Most competitors are weakly typed. Positioning gap: own a tightly-defined ICP + outcome promise while others stay broad.';
+  }
+  if (directCount >= 3) {
+    return 'Direct players cluster around similar broad messaging. Positioning gap: narrow to one high-intent segment and lead with proof-backed outcomes.';
+  }
+  return 'Set appears mixed between direct and adjacent players. Positioning gap: claim the direct category explicitly with sharper problem-outcome language.';
+}
+
+function buildCompetitorBriefResponse(
+  userMessage: string,
+  toolResults: RuntimeToolResult[],
+  runtimeContext?: Record<string, unknown>
+): string {
+  const candidates = extractCompetitorCandidates(toolResults, runtimeContext).slice(0, 5);
+  if (!candidates.length) {
+    return [
+      'I checked current workspace evidence, but I do not have enough validated direct competitors yet to produce a trustworthy top-5 brief.',
+      'Next best move: run/refresh competitor discovery, then I will return top direct competitors with why each is direct and a clear positioning gap.',
+    ].join('\n\n');
+  }
+
+  const lines = candidates.map((candidate, index) => {
+    const platformPart = candidate.platform && candidate.platform !== 'unknown' ? ` (${candidate.platform})` : '';
+    return `${index + 1}. @${candidate.handle}${platformPart}: ${candidateDirectnessReason(candidate)}`;
+  });
+
+  const gap = derivePositioningGap(candidates);
+  const lead = /\bpositioning gap\b/i.test(userMessage)
+    ? 'Here is the direct-competitor brief with explicit rationale and positioning gap.'
+    : 'Here are the strongest direct competitors from current workspace evidence and why they are direct.';
+
+  return [lead, `Top competitors:\n${lines.join('\n')}`, `Positioning gap:\n${gap}`].join('\n\n');
+}
+
+function assessCompetitorBriefQuality(response: string, competitors: CompetitorCandidate[]): WriterQualityResult {
+  const normalized = String(response || '').trim();
+  if (!normalized) {
+    return {
+      intent: 'competitor_brief',
+      passed: false,
+      notes: ['Response was empty.'],
+    };
+  }
+
+  const topHandles = competitors.slice(0, 5).map((candidate) => candidate.handle).filter(Boolean);
+  let handleMentions = 0;
+  for (const handle of topHandles) {
+    const pattern = new RegExp(`(^|[^a-z0-9_])@?${escapeRegExp(handle)}([^a-z0-9_]|$)`, 'i');
+    if (pattern.test(normalized)) handleMentions += 1;
+  }
+  const fallbackHandleMentions = (normalized.match(/@[a-z0-9._-]{2,40}/gi) || []).length;
+  const hasCompetitorNames = handleMentions >= Math.min(3, Math.max(1, topHandles.length)) || fallbackHandleMentions >= 3;
+  const hasDirectnessRationale =
+    /\b(direct|because|overlap|fit|audience|offer|category|state=|type=|relevance=)\b/i.test(normalized);
+  const hasGap = /\b(positioning gap|market gap|gap|whitespace|white\s*space|opportunity)\b/i.test(normalized);
+
+  const notes: string[] = [];
+  if (!hasCompetitorNames) notes.push('Missing enough named competitors.');
+  if (!hasDirectnessRationale) notes.push('Missing directness rationale.');
+  if (!hasGap) notes.push('Missing explicit positioning gap.');
+
+  return {
+    intent: 'competitor_brief',
+    passed: notes.length === 0,
+    ...(notes.length ? { notes } : {}),
+  };
+}
+
+export function applyWriterQualityGate(input: {
+  userMessage: string;
+  response: string;
+  toolResults: RuntimeToolResult[];
+  runtimeContext?: Record<string, unknown>;
+}): { response: string; quality: WriterQualityResult } {
+  const intent = detectWriterIntent(input.userMessage);
+  if (intent !== 'competitor_brief') {
+    return {
+      response: input.response,
+      quality: {
+        intent: 'general',
+        passed: true,
+      },
+    };
+  }
+
+  const competitors = extractCompetitorCandidates(input.toolResults, input.runtimeContext);
+  const quality = assessCompetitorBriefQuality(input.response, competitors);
+  if (quality.passed) {
+    return { response: input.response, quality };
+  }
+
+  const rewritten = buildCompetitorBriefResponse(input.userMessage, input.toolResults, input.runtimeContext);
+  const recheck = assessCompetitorBriefQuality(rewritten, competitors);
+  return {
+    response: rewritten,
+    quality: {
+      intent: 'competitor_brief',
+      passed: recheck.passed,
+      notes: [
+        ...(quality.notes || []),
+        'Rewritten to enforce competitor brief completeness.',
+      ],
+    },
   };
 }
 
@@ -561,11 +967,17 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   const originalMessage = String(message || '');
   const messageWithMentions = withLibraryMentionHints(originalMessage);
   const normalized = messageWithMentions.toLowerCase();
+  const writerIntent = detectWriterIntent(originalMessage);
+  const isCompetitorBriefIntent = writerIntent === 'competitor_brief';
   const calls: RuntimeToolCall[] = [];
   const firstUrl = findFirstUrl(messageWithMentions);
   const referencedCrawlRunId = findReferencedCrawlRunId(messageWithMentions);
   const libraryMentions = extractLibraryMentions(originalMessage);
   const slashCommand = parseSlashCommand(originalMessage);
+  const referencedDocumentIds = Array.from(
+    messageWithMentions.matchAll(/\[document:([a-z0-9-]{8,})\]/gi),
+    (match) => String(match[1] || '').trim()
+  ).filter(Boolean);
 
   const pushIfMissing = (tool: string, args: Record<string, unknown>) => {
     const key = `${tool}:${JSON.stringify(args)}`;
@@ -575,6 +987,16 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
 
   const hasCompetitorSignals = /\b(competitor|rival|alternative|inspiration|accounts?|handles?)\b/.test(normalized);
   const hasAddIntent = /\b(add|include|save|insert|append|import|update)\b/.test(normalized);
+  const hasCompetitorMutationNegation =
+    /\b(do not|don't|dont|without|avoid|no need to)\b.{0,40}\b(add|include|save|import|append|insert|modify|change|update)\b/.test(
+      normalized
+    ) ||
+    /\b(do not|don't|dont)\b.{0,50}\bcompetitor(?:s)?\b.{0,25}\b(link|url|handle|account)s?\b/.test(normalized);
+  const hasExplicitCompetitorLinkMutationIntent =
+    /(?:\b(add|include|save|import|append|insert)\b.{0,80}\b(competitor|inspiration)\b.{0,80}\b(link|url|handle|account)s?\b)|(?:\bcompetitors?\s*(?:\/|or)\s*inspiration(?:\s+links?)?\b)/.test(
+      normalized
+    ) || (hasAddIntent && /\b(competitor|inspiration)\b/.test(normalized));
+  const shouldMutateCompetitorLinks = hasExplicitCompetitorLinkMutationIntent && !hasCompetitorMutationNegation;
   const hasCompetitorLinks = /(instagram\.com|tiktok\.com|youtube\.com|x\.com|twitter\.com|@[a-z0-9._-]+)/i.test(
     messageWithMentions
   );
@@ -616,6 +1038,11 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
     /\b(what do (you|we) (see|have)|what['’]s (on|in) (the )?(app|application|workspace)|show (me )?(what|everything) (we|you) (have|see)|workspace status|workspace snapshot|summari[sz]e (the )?(workspace|app|application))\b/.test(
       normalized
     );
+  const hasDocumentSignals = /\b(document|doc|proposal|draft|uploaded file|attachment)\b/.test(normalized);
+  const hasDocumentEditIntent = /\b(edit|rewrite|refine|improve|change|update)\b/.test(normalized);
+  const hasDocumentReadIntent =
+    /\b(summarize|summarise|read|review|outline|extract|what does it say)\b/.test(normalized) || hasEvidenceReferenceIntent;
+  const hasDocumentExportIntent = /\b(export|download|pdf|docx|markdown|md)\b/.test(normalized);
 
   if (slashCommand) {
     if (slashCommand.command === 'show_sources') {
@@ -655,10 +1082,13 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   if (hasCompetitorSignals) {
     pushIfMissing('intel.list', { section: 'competitors', limit: 12 });
   }
+  if (isCompetitorBriefIntent) {
+    pushIfMissing('intel.list', { section: 'competitors', limit: 12 });
+    pushIfMissing('intel.list', { section: 'competitor_accounts', limit: 20 });
+    pushIfMissing('evidence.posts', { platform: 'any', sort: 'engagement', limit: 8 });
+  }
   if (
-    ((hasAddIntent && hasCompetitorSignals) ||
-      /competitors?\s*(?:\/|or)\s*inspiration/i.test(messageWithMentions) ||
-      /\bcompetitor(?:s)?\b/.test(normalized)) &&
+    shouldMutateCompetitorLinks &&
     hasCompetitorLinks
   ) {
     pushIfMissing('competitors.add_links', { text: messageWithMentions });
@@ -742,6 +1172,28 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
       includeCompetitors: true,
       includeEvidenceLinks: true,
     });
+  }
+
+  if (referencedDocumentIds.length > 0 && hasDocumentSignals) {
+    const primaryDocumentId = referencedDocumentIds[0];
+    if (hasDocumentEditIntent) {
+      pushIfMissing('document.propose_edit', {
+        documentId: primaryDocumentId,
+        instruction: originalMessage,
+      });
+    } else if (hasDocumentReadIntent) {
+      pushIfMissing('document.read', {
+        documentId: primaryDocumentId,
+      });
+    }
+
+    if (hasDocumentExportIntent) {
+      const format = /\bdocx\b/.test(normalized) ? 'DOCX' : /\bmarkdown|\bmd\b/.test(normalized) ? 'MD' : 'PDF';
+      pushIfMissing('document.export', {
+        documentId: primaryDocumentId,
+        format,
+      });
+    }
   }
 
   if (libraryMentions.length) {
@@ -920,26 +1372,41 @@ function fallbackWriter(input: WriterInput): WriterOutput {
           'Tell me if you want a narrow answer (single source) or a broad answer (web + social + news).',
       ];
   const hasCompetitorSignals = /\bcompetitor|adjacent|substitute|inspiration\b/i.test(String(input.userMessage || ''));
+  const allowWebSearch = input.policy.sourceScope.webSearch !== false;
   const actions: WriterOutput['actions'] = [
     { label: 'Show sources', action: 'show_sources' },
     { label: 'Generate PDF', action: 'generate_pdf' },
   ];
-  if (hasCompetitorSignals) {
+  if (hasCompetitorSignals && allowWebSearch) {
     actions.unshift({
       label: 'Run V3 competitor finder',
       action: 'competitors.discover_v3',
       payload: { mode: 'standard', maxCandidates: 140, maxEnrich: 10 },
     });
-  } else {
+  } else if (allowWebSearch) {
     actions.unshift({
       label: 'Search web evidence',
       action: 'search.web',
       payload: { query: String(input.userMessage || '').slice(0, 180), count: 10, provider: 'auto' },
     });
+  } else {
+    actions.unshift({
+      label: 'Open library',
+      action: 'open_library',
+      payload: { collection: 'web' },
+    });
   }
 
+  const fallbackResponse = responseSections.filter((section) => section.trim().length > 0).join('\n\n');
+  const qualityGate = applyWriterQualityGate({
+    userMessage: input.userMessage,
+    response: fallbackResponse,
+    toolResults: input.toolResults,
+    runtimeContext,
+  });
+
   return {
-    response: responseSections.filter((section) => section.trim().length > 0).join('\n\n'),
+    response: qualityGate.response,
     model: buildModelTelemetry(requestedModel, 'heuristic-fallback'),
     reasoning: {
       plan: input.plan.plan,
@@ -949,6 +1416,7 @@ function fallbackWriter(input: WriterInput): WriterOutput {
         : ['No tool results were available in this run.'],
       nextSteps,
       evidence,
+      quality: qualityGate.quality,
     },
     actions,
     decisions: [],
@@ -957,9 +1425,15 @@ function fallbackWriter(input: WriterInput): WriterOutput {
 
 function fallbackValidator(): ValidatorOutput {
   return {
-    pass: true,
-    issues: [],
-    suggestedFixes: [],
+    pass: false,
+    issues: [
+      {
+        code: 'VALIDATOR_UNAVAILABLE',
+        severity: 'high',
+        message: 'Validator fallback executed because the validation stage was unavailable.',
+      },
+    ],
+    suggestedFixes: ['Retry this run or ask for a shorter answer to reduce validation timeout risk.'],
   };
 }
 
@@ -967,9 +1441,9 @@ export async function generatePlannerPlan(input: PlannerInput): Promise<RuntimeP
   const fallback = fallbackPlannerPlan(input.userMessage, input.policy);
   const conciseRequested = prefersConciseOutput(input.userMessage);
   const disallowedTools = [
-    ...(input.policy.sourceScope.webSearch ? [] : ['search.web', 'research.gather', 'competitors.discover_v3']),
+    ...(input.policy.sourceScope.webSearch ? [] : ['search.web', 'research.gather', 'competitors.discover_v3', 'evidence.news']),
     ...(input.policy.sourceScope.liveWebsiteCrawl ? [] : ['web.crawl', 'web.fetch']),
-    ...(input.policy.sourceScope.socialIntel ? [] : ['evidence.posts', 'orchestration.run']),
+    ...(input.policy.sourceScope.socialIntel ? [] : ['evidence.posts', 'evidence.videos', 'orchestration.run']),
   ];
 
   const systemPrompt = [
@@ -1031,7 +1505,6 @@ export async function generatePlannerPlan(input: PlannerInput): Promise<RuntimeP
           [
             ...(hasDeepResearchIntent && fallbackResearchCall && !plannerHasResearchGather ? [fallbackResearchCall] : []),
             ...plannerToolCalls,
-            ...fallback.toolCalls,
           ],
           input.policy.maxToolRuns
         )
@@ -1345,8 +1818,15 @@ export async function writeClientResponse(input: WriterInput): Promise<WriterOut
           .slice(0, 8)
       : [];
 
-    return {
+    const qualityGate = applyWriterQualityGate({
+      userMessage: input.userMessage,
       response: String(parsed.response || fallback.response),
+      toolResults: input.toolResults,
+      runtimeContext: isRecord(input.runtimeContext) ? input.runtimeContext : {},
+    });
+
+    return {
+      response: qualityGate.response,
       model: buildModelTelemetry(writerRequest.requestedModel, writerRequest.usedModel),
       reasoning: {
         plan: normalizeStringArray(reasoningRaw.plan, 12),
@@ -1354,6 +1834,7 @@ export async function writeClientResponse(input: WriterInput): Promise<WriterOut
         assumptions: normalizeStringArray(reasoningRaw.assumptions, 10),
         nextSteps: normalizeStringArray(reasoningRaw.nextSteps, 10),
         evidence,
+        quality: qualityGate.quality,
       },
       actions,
       decisions: normalizeDecisions(parsed.decisions, 8),
