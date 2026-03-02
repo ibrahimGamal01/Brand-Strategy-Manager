@@ -516,9 +516,7 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
     }
 
     if (!state.mainOffer.trim() && !state.primaryGoal.trim()) {
-      setError("Add a primary goal or a main offer before starting BAT.");
-      setLoading(false);
-      return;
+      setNotice("No primary goal or offer was set yet. BAT will infer this in chat and you can refine it later.");
     }
 
     if (confirmationRequired && filledHandles.length > 0 && !channelsConfirmed) {
