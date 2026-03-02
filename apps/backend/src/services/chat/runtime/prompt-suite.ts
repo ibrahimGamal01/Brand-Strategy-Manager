@@ -535,10 +535,45 @@ function inferPlatformFromUrl(value: unknown): string {
 }
 
 function normalizeHandle(value: unknown): string {
-  return String(value || '')
-    .trim()
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const normalized = raw
+    .replace(/^https?:\/\//i, '')
+    .replace(/^www\./i, '')
     .replace(/^@+/, '')
-    .toLowerCase();
+    .split(/[?#]/)[0]
+    .split('/')[0]
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  return normalized;
+}
+
+function normalizeHostname(value: unknown): string {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try {
+    const candidate = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    const hostname = String(new URL(candidate).hostname || '').trim().toLowerCase();
+    return hostname.replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
+function extractRuntimeWebsiteHosts(runtimeContext?: Record<string, unknown>): string[] {
+  if (!isRecord(runtimeContext)) return [];
+  const websites = Array.isArray(runtimeContext.websites)
+    ? runtimeContext.websites.map((entry) => String(entry || '').trim()).filter(Boolean)
+    : [];
+  const hosts = new Set<string>();
+  for (const website of websites) {
+    const host = normalizeHostname(website);
+    if (host) hosts.add(host);
+  }
+  return Array.from(hosts);
 }
 
 function normalizeScore(value: unknown): number {
@@ -593,6 +628,11 @@ function extractCompetitorCandidates(
   runtimeContext?: Record<string, unknown>
 ): CompetitorCandidate[] {
   const byKey = new Map<string, CompetitorCandidate>();
+  const workspaceHosts = extractRuntimeWebsiteHosts(runtimeContext);
+  const isWorkspaceHost = (host: string): boolean =>
+    Boolean(host) && workspaceHosts.some((workspaceHost) => host === workspaceHost || host.endsWith(`.${workspaceHost}`));
+  const scoreFromRank = (rank: number): number => Math.max(12, 100 - Math.max(0, rank - 1) * 9);
+
   const upsert = (candidate: CompetitorCandidate) => {
     const key = candidate.handle;
     const existing = byKey.get(key);
@@ -620,29 +660,64 @@ function extractCompetitorCandidates(
     if (!isRecord(result.raw)) continue;
     const raw = result.raw;
     const section = String(raw.section || '').trim().toLowerCase();
+    const query = String(raw.query || '').trim();
+    const normalizedQuery = query.toLowerCase();
+    const isSearchCompetitorIntent = /\b(competitor|alternative|alternatives|rival|vs|similar)\b/.test(normalizedQuery);
     const relevantSection =
       section === 'competitors' || section === 'competitor_accounts' || section === 'competitor_entities';
 
-    for (const row of extractRowsFromRaw(raw)) {
-      const handle = normalizeHandle(row.handle || row.normalizedHandle || row.username || row.name);
+    const rows = extractRowsFromRaw(raw);
+    rows.forEach((row, index) => {
       const profileUrl = String(row.profileUrl || row.url || row.href || '').trim();
+      const hostFromRow = normalizeHostname(profileUrl || row.finalUrl || row.domain || row.site || '');
+      if (hostFromRow && isWorkspaceHost(hostFromRow)) return;
+
+      const identity =
+        row.handle ||
+        row.normalizedHandle ||
+        row.username ||
+        row.canonicalName ||
+        row.domain ||
+        row.name ||
+        hostFromRow;
+      const handle = normalizeHandle(identity);
       const platform = String(row.platform || inferPlatformFromUrl(profileUrl) || '').trim().toLowerCase();
-      if (!handle || handle.length < 2) continue;
-      if (!relevantSection && !row.selectionState && !row.competitorType && !row.relevanceScore) continue;
+      if (!handle || handle.length < 2) return;
+
+      const explicitType = String(row.competitorType || row.type || '')
+        .trim()
+        .toUpperCase();
+      const explicitState = String(row.selectionState || row.state || row.status || '')
+        .trim()
+        .toUpperCase();
+      const hasScoringHints =
+        row.selectionState != null || row.competitorType != null || row.relevanceScore != null || row.score != null;
+      if (!relevantSection && !isSearchCompetitorIntent && !hasScoringHints) return;
+
+      const rank = Number(row.rank);
+      const inferredRelevance =
+        normalizeScore(row.relevanceScore || row.score || row.totalScore) ||
+        (Number.isFinite(rank) ? scoreFromRank(rank) : scoreFromRank(index + 1));
+      const inferredType =
+        explicitType ||
+        (isSearchCompetitorIntent ? 'DIRECT' : relevantSection ? 'DIRECT' : 'UNKNOWN');
+      const inferredState =
+        explicitState ||
+        (isSearchCompetitorIntent ? 'SHORTLISTED' : relevantSection ? 'DISCOVERED' : 'SUGGESTED');
+      const fallbackReason = isSearchCompetitorIntent
+        ? `Candidate appeared in web competitor query${query ? `: ${compactDigestText(query, 120)}` : ''}.`
+        : '';
+
       upsert({
         handle,
         platform: platform || 'unknown',
-        selectionState: String(row.selectionState || row.state || row.status || 'DISCOVERED')
-          .trim()
-          .toUpperCase(),
-        competitorType: String(row.competitorType || row.type || 'UNKNOWN')
-          .trim()
-          .toUpperCase(),
-        relevanceScore: normalizeScore(row.relevanceScore || row.score || row.totalScore),
-        selectionReason: String(row.selectionReason || row.stateReason || '').trim(),
+        selectionState: inferredState,
+        competitorType: inferredType,
+        relevanceScore: inferredRelevance,
+        selectionReason: String(row.selectionReason || row.stateReason || row.reason || '').trim() || fallbackReason,
         discoveryReason: String(row.discoveryReason || row.reason || '').trim(),
       });
-    }
+    });
   }
 
   const contextTop = isRecord(runtimeContext) && Array.isArray(runtimeContext.topCompetitors)
@@ -1132,14 +1207,20 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   if (isCompetitorBriefIntent) {
     pushIfMissing('intel.list', { section: 'competitors', limit: 12 });
     pushIfMissing('intel.list', { section: 'competitor_accounts', limit: 20 });
-    pushIfMissing('evidence.posts', { platform: 'any', sort: 'engagement', limit: 8 });
-    // Competitor-brief asks should proactively run discovery instead of returning
-    // meta "run discovery first" answers when the workspace has little seeded data.
-    pushIfMissing('competitors.discover_v3', {
-      mode: hasDeepInvestigationIntent ? 'deep' : 'standard',
-      maxCandidates: hasDeepInvestigationIntent ? 120 : 60,
-      maxEnrich: hasDeepInvestigationIntent ? 10 : 6,
+    pushIfMissing('search.web', {
+      query: `${messageWithMentions} competitors alternatives`,
+      count: 10,
+      provider: 'auto',
     });
+    pushIfMissing('evidence.posts', { platform: 'any', sort: 'engagement', limit: 8 });
+    if (hasDeepInvestigationIntent || hasRunIntent || hasFindIntent || hasV3DiscoveryIntent) {
+      // Keep deep discovery optional for first-pass competitor briefs to avoid long-running stalls.
+      pushIfMissing('competitors.discover_v3', {
+        mode: hasDeepInvestigationIntent ? 'deep' : 'standard',
+        maxCandidates: hasDeepInvestigationIntent ? 120 : 60,
+        maxEnrich: hasDeepInvestigationIntent ? 10 : 6,
+      });
+    }
   }
   if (
     shouldMutateCompetitorLinks &&
@@ -1571,19 +1652,22 @@ export async function generatePlannerPlan(input: PlannerInput): Promise<RuntimeP
           input.policy.maxToolRuns
         )
       : fallback.toolCalls;
-    const plannerHasCompetitorDiscovery = mergedToolCalls.some(
-      (entry) => entry.tool === 'competitors.discover_v3' || entry.tool === 'orchestration.run'
+    const plannerHasCompetitorEvidenceCall = mergedToolCalls.some(
+      (entry) =>
+        entry.tool === 'competitors.discover_v3' ||
+        entry.tool === 'orchestration.run' ||
+        entry.tool === 'search.web'
     );
     const mergedWithCompetitorDiscovery =
-      hasCompetitorBriefIntent && !plannerHasCompetitorDiscovery
+      hasCompetitorBriefIntent && !plannerHasCompetitorEvidenceCall
         ? dedupeToolCalls(
             [
               {
-                tool: 'competitors.discover_v3',
+                tool: 'search.web',
                 args: {
-                  mode: hasDeepResearchIntent ? 'deep' : 'standard',
-                  maxCandidates: hasDeepResearchIntent ? 120 : 60,
-                  maxEnrich: hasDeepResearchIntent ? 10 : 6,
+                  query: `${input.userMessage} competitors alternatives`,
+                  count: 10,
+                  provider: 'auto',
                 },
               },
               ...mergedToolCalls,
