@@ -6,14 +6,26 @@ import {
 } from "@/types/chat";
 
 async function parseJson<T>(response: Response): Promise<T> {
-  const payload = await response.json().catch(() => ({}));
+  const raw = await response.text().catch(() => "");
+  let payload: Record<string, unknown> = {};
+  if (raw) {
+    try {
+      payload = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      payload = {};
+    }
+  }
   if (!response.ok) {
     const message =
       typeof payload?.error === "string"
         ? payload.error
         : typeof payload?.details === "string"
           ? payload.details
-          : `Request failed (${response.status})`;
+          : typeof payload?.message === "string"
+            ? payload.message
+            : raw && !/^\s*</.test(raw)
+              ? raw.slice(0, 200)
+              : `Request failed (${response.status})`;
     throw new Error(message);
   }
   return payload as T;
@@ -72,6 +84,7 @@ export type WorkspaceIntakeFormData = {
   name: string;
   website: string;
   websites?: string | string[];
+  socialReferences?: string | string[];
   oneSentenceDescription: string;
   niche: string;
   businessType: string;
@@ -104,6 +117,7 @@ export type WorkspaceIntakeFormData = {
     tiktok: string;
     youtube: string;
     twitter: string;
+    linkedin: string;
   };
 };
 
@@ -137,7 +151,20 @@ export type WorkspaceIntakeSuggestion = {
   suggestedHandleValidation?: {
     instagram?: IntakeSuggestedHandleValidationItem;
     tiktok?: IntakeSuggestedHandleValidationItem;
+    linkedin?: IntakeSuggestedHandleValidationItem;
+    youtube?: IntakeSuggestedHandleValidationItem;
+    twitter?: IntakeSuggestedHandleValidationItem;
   };
+  suggestedHandleCandidates?: Array<{
+    platform: "instagram" | "tiktok" | "youtube" | "twitter" | "linkedin";
+    handle: string;
+    profileUrl?: string;
+    confidence: number;
+    reason: string;
+    source: string;
+    isLikelyClient: boolean;
+  }>;
+  warnings?: string[];
   confirmationRequired?: boolean;
   confirmationReasons?: string[];
 };
@@ -179,7 +206,10 @@ export async function fetchWorkspaceIntakeStatus(workspaceId: string) {
 
 export async function suggestWorkspaceIntakeCompletion(
   workspaceId: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown> & {
+    step?: "brand" | "channels" | "offer" | "audience" | "voice";
+    socialReferences?: string[];
+  }
 ) {
   const response = await fetch(`/api/portal/workspaces/${workspaceId}/intake/suggest`, {
     method: "POST",
@@ -227,7 +257,9 @@ export async function scanWorkspaceIntakeWebsites(
   payload: {
     website?: string;
     websites?: string[];
+    socialReferences?: string[];
     mode?: WorkspaceIntakeScanMode;
+    includeSocialProfileCrawl?: boolean;
   }
 ) {
   const response = await fetch(`/api/portal/workspaces/${workspaceId}/intake/websites/scan`, {
@@ -241,6 +273,8 @@ export async function scanWorkspaceIntakeWebsites(
     workspaceId: string;
     mode: WorkspaceIntakeScanMode;
     websites: string[];
+    socialReferences?: string[];
+    includeSocialProfileCrawl?: boolean;
     scanRunId: string;
     status: "accepted";
   }>(response);
@@ -365,6 +399,8 @@ export type RuntimeMessageDto = {
   citationsJson?: unknown;
   reasoningJson?: unknown;
   inputOptionsJson?: unknown;
+  attachmentIdsJson?: unknown;
+  documentIdsJson?: unknown;
   createdAt: string;
 };
 
@@ -601,6 +637,8 @@ export type RuntimeQueueDto = {
   position: number;
   status: string;
   inputOptionsJson?: unknown;
+  attachmentIdsJson?: unknown;
+  documentIdsJson?: unknown;
   steerJson?: unknown;
 };
 
@@ -665,10 +703,11 @@ export async function sendRuntimeMessage(
   branchId: string,
   input: {
     content: string;
-    userId: string;
     mode: "send" | "queue" | "interrupt";
     policy?: Record<string, unknown>;
     inputOptions?: RuntimeInputOptionsDto;
+    attachmentIds?: string[];
+    documentIds?: string[];
   }
 ) {
   const response = await fetch(`/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/messages`, {
@@ -731,6 +770,8 @@ export async function patchRuntimeQueueItem(
     content?: string;
     inputOptions?: RuntimeInputOptionsDto;
     steerNote?: string;
+    attachmentIds?: string[];
+    documentIds?: string[];
   }
 ) {
   const response = await fetch(`/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/queue/${itemId}`, {
@@ -740,6 +781,302 @@ export async function patchRuntimeQueueItem(
     credentials: "include",
   });
   return parseJson<{ queue: RuntimeQueueDto[] }>(response);
+}
+
+export type RuntimeWorkspaceDocumentDto = {
+  id: string;
+  title: string;
+  originalFileName: string;
+  mimeType: string;
+  parserStatus: string;
+  parserQualityScore: number | null;
+  latestVersionId?: string | null;
+  storagePath: string;
+  storageHref?: string;
+  versionCount?: number;
+  latestVersion?: {
+    id: string;
+    versionNumber: number;
+    changeSummary?: string | null;
+    createdAt: string;
+    createdBy: string;
+    contentMd?: string;
+  } | null;
+  exports?: Array<{
+    id: string;
+    format: "PDF" | "DOCX" | "MD";
+    storagePath: string;
+    storageHref?: string;
+    mimeType: string;
+    fileSizeBytes?: number | null;
+    createdAt: string;
+  }>;
+  latestIngestion?: {
+    id: string;
+    status: string;
+    parser: string;
+    warnings: string[];
+    createdAt: string;
+  } | null;
+};
+
+export async function uploadRuntimeDocuments(
+  workspaceId: string,
+  branchId: string,
+  input: {
+    files: File[];
+    title?: string;
+  }
+) {
+  const form = new FormData();
+  for (const file of input.files) {
+    form.append("files", file);
+  }
+  if (typeof input.title === "string" && input.title.trim()) {
+    form.append("title", input.title.trim());
+  }
+  const response = await fetch(
+    `/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/documents/upload`,
+    {
+      method: "POST",
+      body: form,
+      credentials: "include",
+    }
+  );
+  return parseJson<{
+    ok: boolean;
+    documents: Array<{
+      id: string;
+      title: string;
+      originalFileName: string;
+      mimeType: string;
+      storagePath: string;
+      parserStatus: string;
+      parserQualityScore: number | null;
+      latestVersionId: string | null;
+      ingestionRunId?: string;
+      warnings: string[];
+      branchId: string;
+      attachmentId?: string;
+    }>;
+  }>(response);
+}
+
+export async function listRuntimeDocuments(workspaceId: string, branchId: string, limit = 40) {
+  const response = await fetch(
+    `/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/documents?limit=${Math.max(
+      1,
+      Math.min(120, Math.floor(limit))
+    )}`,
+    {
+      method: "GET",
+      cache: "no-store",
+      credentials: "include",
+    }
+  );
+  return parseJson<{ documents: RuntimeWorkspaceDocumentDto[] }>(response);
+}
+
+export async function getRuntimeDocument(workspaceId: string, branchId: string, documentId: string) {
+  const response = await fetch(
+    `/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/documents/${documentId}`,
+    {
+      method: "GET",
+      cache: "no-store",
+      credentials: "include",
+    }
+  );
+  return parseJson<{
+    document: RuntimeWorkspaceDocumentDto & {
+      versions: Array<{
+        id: string;
+        branchId: string;
+        versionNumber: number;
+        contentMd: string;
+        changeSummary?: string | null;
+        patchJson?: unknown;
+        createdBy: string;
+        createdAt: string;
+        runId?: string | null;
+      }>;
+      exports: Array<{
+        id: string;
+        format: "PDF" | "DOCX" | "MD";
+        storagePath: string;
+        storageHref?: string;
+        mimeType: string;
+        fileSizeBytes?: number | null;
+        createdAt: string;
+        createdBy: string;
+      }>;
+      ingestionRuns: Array<{
+        id: string;
+        status: string;
+        parser: string;
+        warnings: string[];
+        pagesTotal?: number | null;
+        pagesParsed?: number | null;
+        startedAt?: string | null;
+        endedAt?: string | null;
+        createdAt: string;
+      }>;
+    };
+  }>(response);
+}
+
+export async function proposeRuntimeDocumentEdit(
+  workspaceId: string,
+  branchId: string,
+  documentId: string,
+  input: { instruction: string }
+) {
+  const response = await fetch(
+    `/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/documents/${documentId}/propose-edit`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+      credentials: "include",
+    }
+  );
+  return parseJson<{
+    proposal: {
+      documentId: string;
+      baseVersionId: string;
+      baseVersionNumber: number;
+      instruction: string;
+      proposedContentMd: string;
+      changed: boolean;
+      changeSummary: string;
+      preview: { beforeChars: number; afterChars: number };
+    };
+  }>(response);
+}
+
+export async function applyRuntimeDocumentEdit(
+  workspaceId: string,
+  branchId: string,
+  documentId: string,
+  input: {
+    proposedContentMd: string;
+    changeSummary?: string;
+    baseVersionId?: string;
+    runId?: string;
+  }
+) {
+  const response = await fetch(
+    `/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/documents/${documentId}/apply-edit`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+      credentials: "include",
+    }
+  );
+  return parseJson<{
+    applied: {
+      documentId: string;
+      versionId: string;
+      versionNumber: number;
+      changeSummary: string;
+    };
+  }>(response);
+}
+
+export async function exportRuntimeDocument(
+  workspaceId: string,
+  branchId: string,
+  documentId: string,
+  input: { format: "PDF" | "DOCX" | "MD"; versionId?: string }
+) {
+  const response = await fetch(
+    `/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/documents/${documentId}/export`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+      credentials: "include",
+    }
+  );
+  return parseJson<{
+    exported: {
+      exportId: string;
+      documentId: string;
+      versionId: string;
+      format: "PDF" | "DOCX" | "MD";
+      mimeType: string;
+      storagePath: string;
+      downloadHref: string;
+      fileSizeBytes: number;
+      createdAt: string;
+    };
+  }>(response);
+}
+
+export async function searchRuntimeDocument(
+  workspaceId: string,
+  branchId: string,
+  documentId: string,
+  q: string,
+  limit = 8
+) {
+  const params = new URLSearchParams();
+  params.set("q", q);
+  params.set("limit", String(Math.max(1, Math.min(30, Math.floor(limit)))));
+  const response = await fetch(
+    `/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/documents/${documentId}/search?${params.toString()}`,
+    {
+      method: "GET",
+      cache: "no-store",
+      credentials: "include",
+    }
+  );
+  return parseJson<{
+    results: {
+      documentId: string;
+      title: string;
+      query: string;
+      hits: Array<{
+        chunkIndex: number;
+        headingPath?: string | null;
+        text: string;
+        score: number;
+        tokenCount: number;
+      }>;
+    };
+  }>(response);
+}
+
+export async function compareRuntimeDocumentVersions(
+  workspaceId: string,
+  branchId: string,
+  documentId: string,
+  input: { fromVersionId: string; toVersionId: string }
+) {
+  const response = await fetch(
+    `/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/documents/${documentId}/compare-versions`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+      credentials: "include",
+    }
+  );
+  return parseJson<{
+    comparison: {
+      documentId: string;
+      fromVersion: { id: string; versionNumber: number };
+      toVersion: { id: string; versionNumber: number };
+      summary: {
+        fromChars: number;
+        toChars: number;
+        addedLines: number;
+        removedLines: number;
+      };
+      added: string[];
+      removed: string[];
+    };
+  }>(response);
 }
 
 export async function cancelRuntimeQueueItem(workspaceId: string, branchId: string, itemId: string) {
