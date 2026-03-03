@@ -1109,6 +1109,12 @@ function deriveWorkLedgerStage(event: NormalizedRuntimeEvent): string | undefine
   const payloadStage = String(event.payload?.stage || "").trim();
   if (payloadStage) return payloadStage;
   const byEvent: Record<string, string> = {
+    "run.loop_started": "loop",
+    "run.loop_completed": "loop",
+    "run.stage_searching": "searching",
+    "run.stage_thinking": "thinking",
+    "run.stage_building": "building",
+    "run.stage_validating": "validation",
     "document.intent_routed": "intent",
     "document.spec_built": "doc_spec",
     "document.section_draft_started": "section_drafts",
@@ -1196,6 +1202,28 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
       message = event.message || "Upload failed.";
     } else if (event.event === "run.started") {
       message = `${humanizeTriggerType(event.triggerType || "workflow")} started.`;
+    } else if (event.event === "run.loop_started") {
+      const loopIndex = Number(event.payload?.loopIndex || 0);
+      const loopMax = Number(event.payload?.loopMax || 0);
+      message =
+        Number.isFinite(loopIndex) && Number.isFinite(loopMax) && loopIndex > 0 && loopMax > 0
+          ? `Loop ${loopIndex}/${loopMax} started.`
+          : "Progressive loop started.";
+    } else if (event.event === "run.loop_completed") {
+      const loopIndex = Number(event.payload?.loopIndex || 0);
+      const loopMax = Number(event.payload?.loopMax || 0);
+      message =
+        Number.isFinite(loopIndex) && Number.isFinite(loopMax) && loopIndex > 0 && loopMax > 0
+          ? `Loop ${loopIndex}/${loopMax} completed.`
+          : "Progressive loop completed.";
+    } else if (event.event === "run.stage_searching") {
+      message = "Searching sources.";
+    } else if (event.event === "run.stage_thinking") {
+      message = "Thinking and restructuring sections.";
+    } else if (event.event === "run.stage_building") {
+      message = "Building response and sections.";
+    } else if (event.event === "run.stage_validating") {
+      message = "Validating evidence links.";
     } else if (event.event === "run.planning") {
       message = "Planning execution steps.";
     } else if (event.event === "tool.started" && event.toolName) {
@@ -1247,6 +1275,13 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
       ? documentPlanDetailLines(documentPlanPreview).map((line) => stripInternalIdentifiers(line))
       : undefined;
     const stage = deriveWorkLedgerStage(event);
+    const loopIndex = Number(event.payload?.loopIndex || 0);
+    const loopMax = Number(event.payload?.loopMax || 0);
+    const coverageScore = Number(event.payload?.coverageScore);
+    const coverageDelta = Number(event.payload?.coverageDelta);
+    const sectionId = String(event.payload?.sectionId || "").trim();
+    const sectionTitle = String(event.payload?.sectionTitle || "").trim();
+    const docFamily = String(event.payload?.docFamily || "").trim();
 
     return {
       id: event.id,
@@ -1256,6 +1291,13 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
       ...(eventDocumentId ? { actionTarget: { kind: "document" as const, documentId: eventDocumentId } } : {}),
       ...(event.toolName ? { toolName: event.toolName } : {}),
       ...(stage ? { stage } : {}),
+      ...(Number.isFinite(loopIndex) && loopIndex > 0 ? { loopIndex: Math.floor(loopIndex) } : {}),
+      ...(Number.isFinite(loopMax) && loopMax > 0 ? { loopMax: Math.floor(loopMax) } : {}),
+      ...(Number.isFinite(coverageScore) ? { coverageScore: Math.round(coverageScore) } : {}),
+      ...(Number.isFinite(coverageDelta) ? { coverageDelta: Number(coverageDelta.toFixed(1)) } : {}),
+      ...(docFamily ? { docFamily } : {}),
+      ...(sectionId ? { sectionId } : {}),
+      ...(sectionTitle ? { sectionTitle } : {}),
       ...(details?.length ? { details } : {}),
       phase: event.phase,
       level: event.level,
@@ -1801,13 +1843,11 @@ function buildInputOptionsFromPreferences(
 }
 
 function buildPolicyFromPreferences(preferences: SessionPreferences): Record<string, unknown> {
-  const normalizedTone = preferences.tone === "concise" ? "balanced" : preferences.tone;
   const mode = preferences.responseMode || "balanced";
   const sourceScope = normalizeSourceScope(preferences.sourceScope);
   const targetLength = preferences.targetLength || defaultTargetLengthForMode(mode);
-  const modeMaxToolRuns =
-    mode === "fast" ? 3 : mode === "pro" ? 10 : mode === "deep" ? 8 : normalizedTone === "detailed" ? 6 : 4;
-  const modeMaxAutoContinuations = mode === "fast" ? 0 : mode === "pro" ? 2 : mode === "deep" ? 2 : 1;
+  const modeMaxToolRuns = mode === "fast" ? 4 : mode === "balanced" ? 6 : mode === "deep" ? 10 : 12;
+  const modeMaxAutoContinuations = mode === "fast" ? 1 : mode === "balanced" ? 2 : mode === "deep" ? 4 : 5;
   return {
     autoContinue: !preferences.askQuestionsFirst,
     maxAutoContinuations: modeMaxAutoContinuations,

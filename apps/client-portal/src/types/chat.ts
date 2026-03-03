@@ -254,6 +254,13 @@ export interface ProcessFeedItem {
   timestamp: string;
   message: string;
   stage?: string;
+  loopIndex?: number;
+  loopMax?: number;
+  coverageScore?: number;
+  coverageDelta?: number;
+  docFamily?: string;
+  sectionId?: string;
+  sectionTitle?: string;
   details?: string[];
   actionLabel?: string;
   actionTarget?: {

@@ -204,7 +204,7 @@ export function repairDocumentSpecV1(input: unknown): DocumentSpecV1 {
     title: 'Generated Document',
     audience: 'client',
     businessArchetype: 'generic',
-    depth: 'standard',
+    depth: 'deep',
     styleProfile: 'strategy_standard_v1',
     sections: [
       {

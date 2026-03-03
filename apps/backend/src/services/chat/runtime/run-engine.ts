@@ -178,6 +178,34 @@ const DEFAULT_POLICY: RunPolicy = {
   pauseAfterPlanning: false,
 };
 
+const MODE_EXECUTION_PROFILE: Record<RuntimeResponseMode, { maxToolRuns: number; maxAutoContinuations: number; targetLength: RuntimeTargetLength; strictValidation: boolean }> =
+  {
+    fast: {
+      maxToolRuns: 4,
+      maxAutoContinuations: 1,
+      targetLength: 'short',
+      strictValidation: false,
+    },
+    balanced: {
+      maxToolRuns: 6,
+      maxAutoContinuations: 2,
+      targetLength: 'medium',
+      strictValidation: false,
+    },
+    deep: {
+      maxToolRuns: 10,
+      maxAutoContinuations: 4,
+      targetLength: 'long',
+      strictValidation: false,
+    },
+    pro: {
+      maxToolRuns: 12,
+      maxAutoContinuations: 5,
+      targetLength: 'long',
+      strictValidation: true,
+    },
+  };
+
 const BOOTSTRAP_PROMPT =
   'Bootstrap this workspace by auditing existing intelligence and producing an actionable kickoff. ' +
   'Use tools to inspect web_sources, web_snapshots, competitors, social signals, community insights, and news. ' +
@@ -278,12 +306,27 @@ const DOCUMENT_RUN_BUDGET_DEEP_MS = envRuntimeNumber(
   4 * 60_000,
   20 * 60_000
 );
+const DOCUMENT_RUN_BUDGET_PRO_MS = envRuntimeNumber(
+  'RUNTIME_DOCUMENT_RUN_BUDGET_PRO_MS',
+  10 * 60_000,
+  6 * 60_000,
+  25 * 60_000
+);
 const DOCUMENT_ENRICHMENT_MIN_SCORE = envRuntimeNumber(
   'RUNTIME_DOCUMENT_ENRICHMENT_MIN_SCORE',
   65,
   0,
   100
 );
+const RUNTIME_PROGRESSIVE_LOOPS_ENABLED = String(process.env.RUNTIME_PROGRESSIVE_LOOPS_ENABLED || 'true')
+  .trim()
+  .toLowerCase() !== 'false';
+const DOCUMENT_ALWAYS_DEEP_ENABLED = String(process.env.DOCUMENT_ALWAYS_DEEP_ENABLED || 'true')
+  .trim()
+  .toLowerCase() !== 'false';
+const DEEP_RESPONSE_SECTION_GATE_ENABLED = String(process.env.DEEP_RESPONSE_SECTION_GATE_ENABLED || 'true')
+  .trim()
+  .toLowerCase() !== 'false';
 const RUNTIME_CONTINUATION_CALLS_V2 = String(process.env.RUNTIME_CONTINUATION_CALLS_V2 || 'true')
   .trim()
   .toLowerCase() === 'true';
@@ -388,34 +431,48 @@ function mergeLibraryRefs(...values: Array<unknown>): string[] {
   return refs;
 }
 
+function modeExecutionProfile(mode: RuntimeResponseMode) {
+  return MODE_EXECUTION_PROFILE[mode] || MODE_EXECUTION_PROFILE.balanced;
+}
+
+function applyModeExecutionProfile(policy: RunPolicy): RunPolicy {
+  const profile = modeExecutionProfile(policy.responseMode);
+  return {
+    ...policy,
+    maxToolRuns: profile.maxToolRuns,
+    maxAutoContinuations: profile.maxAutoContinuations,
+    targetLength: profile.targetLength,
+    strictValidation: profile.strictValidation || policy.strictValidation,
+  };
+}
+
 function mergePolicyWithInputOptions(
   policy: RunPolicy,
   inputOptions?: RuntimeInputOptions | null
 ): RunPolicy {
   const normalizedOptions = normalizeInputOptions(inputOptions);
-  if (!normalizedOptions) return policy;
+  if (!normalizedOptions) return applyModeExecutionProfile(policy);
 
   const responseMode = normalizedOptions.modeLabel || policy.responseMode;
-  const targetLengthFromMode: RuntimeTargetLength =
-    responseMode === 'fast' ? 'short' : responseMode === 'deep' || responseMode === 'pro' ? 'long' : 'medium';
-  let targetLength: RuntimeTargetLength = policy.targetLength;
-  if (normalizedOptions.modeLabel) {
-    targetLength = targetLengthFromMode;
-  }
+  const modeAwareBase = applyModeExecutionProfile({
+    ...policy,
+    responseMode,
+  });
+  let targetLength: RuntimeTargetLength = modeAwareBase.targetLength;
   if (normalizedOptions.targetLength) {
     targetLength = normalizedOptions.targetLength;
   }
   const strictValidation =
     typeof normalizedOptions.strictValidation === 'boolean'
       ? normalizedOptions.strictValidation
-      : responseMode === 'pro' || policy.strictValidation;
+      : modeAwareBase.strictValidation;
   const sourceScope = normalizeSourceScope({
     ...policy.sourceScope,
     ...(normalizedOptions.sourceScope || {}),
   });
 
   return {
-    ...policy,
+    ...modeAwareBase,
     responseMode,
     targetLength,
     strictValidation,
@@ -431,6 +488,8 @@ function buildPolicySummary(policy: RunPolicy) {
   return {
     responseMode: policy.responseMode,
     targetLength: policy.targetLength,
+    maxToolRuns: policy.maxToolRuns,
+    maxAutoContinuations: policy.maxAutoContinuations,
     strictValidation: policy.strictValidation,
     sourceScope: policy.sourceScope,
     pauseAfterPlanning: policy.pauseAfterPlanning,
@@ -451,10 +510,10 @@ export function normalizePolicy(raw?: Partial<RunPolicy> | null, inputOptions?: 
   const basePolicy: RunPolicy = {
     autoContinue: Boolean(policy.autoContinue),
     maxAutoContinuations: Number.isFinite(maxAutoContinuationsRaw)
-      ? Math.max(0, Math.min(4, Math.floor(maxAutoContinuationsRaw)))
+      ? Math.max(0, Math.min(5, Math.floor(maxAutoContinuationsRaw)))
       : DEFAULT_POLICY.maxAutoContinuations,
     maxToolRuns: Number.isFinite(maxToolRunsRaw)
-      ? Math.max(1, Math.min(8, Math.floor(maxToolRunsRaw)))
+      ? Math.max(1, Math.min(12, Math.floor(maxToolRunsRaw)))
       : DEFAULT_POLICY.maxToolRuns,
     toolConcurrency: Number.isFinite(toolConcurrencyRaw)
       ? Math.max(1, Math.min(3, Math.floor(toolConcurrencyRaw)))
@@ -479,7 +538,7 @@ export function normalizePolicy(raw?: Partial<RunPolicy> | null, inputOptions?: 
     pauseAfterPlanning: Boolean(policy.pauseAfterPlanning),
   };
   // Input options are message-scoped and should override persisted/session defaults.
-  return mergePolicyWithInputOptions(basePolicy, inputOptions);
+  return mergePolicyWithInputOptions(applyModeExecutionProfile(basePolicy), inputOptions);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -817,6 +876,8 @@ function fallbackWriterOutput(input: {
     response,
     toolResults: input.toolResults,
     runtimeContext,
+    responseMode: input.policy?.responseMode,
+    enforceDeepSections: DEEP_RESPONSE_SECTION_GATE_ENABLED,
   });
 
   return {
@@ -1465,7 +1526,16 @@ function normalizeToolArgs(tool: string, args: Record<string, unknown>, userMess
     } else {
       normalized.docType = 'BUSINESS_STRATEGY';
     }
-    if (!String(normalized.depth || '').trim()) normalized.depth = 'standard';
+    const depthRaw = String(normalized.depth || '').trim().toLowerCase();
+    const normalizedDepth = depthRaw === 'short' || depthRaw === 'standard' || depthRaw === 'deep' ? depthRaw : '';
+    const forceQuickDraft = normalized.forceQuickDraft === true;
+    if (!forceQuickDraft && DOCUMENT_ALWAYS_DEEP_ENABLED) {
+      normalized.depth = 'deep';
+    } else if (normalizedDepth) {
+      normalized.depth = normalizedDepth;
+    } else {
+      normalized.depth = forceQuickDraft ? 'standard' : 'deep';
+    }
     if (typeof normalized.includeCompetitors !== 'boolean') normalized.includeCompetitors = true;
     if (typeof normalized.includeEvidenceLinks !== 'boolean') normalized.includeEvidenceLinks = true;
     if (typeof normalized.requestedIntent === 'string') {
@@ -1751,10 +1821,25 @@ function maybeInjectDocumentEnrichmentToolCalls(input: {
   const needsWeb = coverage.counts.webSnapshots < coverage.targets.webSnapshots;
   const needsNews = coverage.counts.news < coverage.targets.news;
   const needsCommunity = coverage.counts.community < coverage.targets.community;
+  const previousQuality = isRecord(context.lastDocumentQuality) ? context.lastDocumentQuality : {};
+  const qualityReasons = Array.isArray(previousQuality.partialReasons)
+    ? previousQuality.partialReasons.map((entry) => String(entry || '').toLowerCase())
+    : [];
+  const shouldPrioritizeCompetitors = qualityReasons.some((reason) => reason.includes('competitor'));
+  const shouldPrioritizeWeb = qualityReasons.some((reason) => reason.includes('web snapshot') || reason.includes('web'));
+  const shouldPrioritizeNews = qualityReasons.some((reason) => reason.includes('news'));
 
   const candidates: RuntimeToolCall[] = [];
+  const prioritizedCandidates: RuntimeToolCall[] = [];
+  const enqueueCandidate = (call: RuntimeToolCall, prioritized = false) => {
+    if (prioritized) {
+      prioritizedCandidates.push(call);
+      return;
+    }
+    candidates.push(call);
+  };
   if (needsWeb || needsNews || needsCommunity || needsPosts || needsCompetitors) {
-    candidates.push({
+    enqueueCandidate({
       tool: 'research.gather',
       args: {
         query,
@@ -1763,20 +1848,20 @@ function maybeInjectDocumentEnrichmentToolCalls(input: {
         includeAccountContext: true,
         includeWorkspaceWebsites: true,
       },
-    });
+    }, shouldPrioritizeWeb || shouldPrioritizeNews);
   }
   if (needsCompetitors) {
-    candidates.push({
+    enqueueCandidate({
       tool: 'competitors.discover_v3',
       args: {
         mode: 'standard',
         maxCandidates: 60,
         maxEnrich: 4,
       },
-    });
+    }, shouldPrioritizeCompetitors);
   }
   if (needsPosts) {
-    candidates.push({
+    enqueueCandidate({
       tool: 'evidence.posts',
       args: {
         platform: 'any',
@@ -1786,18 +1871,19 @@ function maybeInjectDocumentEnrichmentToolCalls(input: {
     });
   }
   if (needsNews) {
-    candidates.push({
+    enqueueCandidate({
       tool: 'evidence.news',
       args: {
         limit: 6,
       },
-    });
+    }, shouldPrioritizeNews);
   }
+  const orderedCandidates = [...prioritizedCandidates, ...candidates];
 
   const existing = new Set(input.toolCalls.map((call) => `${call.tool}:${stableJson(call.args || {})}`));
   const addedCalls: RuntimeToolCall[] = [];
   const maxAddedTools = 3;
-  for (const candidate of candidates) {
+  for (const candidate of orderedCandidates) {
     if (addedCalls.length >= maxAddedTools) break;
     const key = `${candidate.tool}:${stableJson(candidate.args || {})}`;
     if (existing.has(key)) continue;
@@ -1844,6 +1930,50 @@ function maybeInjectDocumentEnrichmentToolCalls(input: {
     enrichmentApplied: true,
     coverage,
     addedTools: addedCalls.map((call) => call.tool),
+  };
+}
+
+function resolveDocFamilyFromPlan(plan: RuntimePlan | null): string | undefined {
+  const toolCalls = Array.isArray(plan?.toolCalls) ? plan!.toolCalls : [];
+  for (const call of toolCalls) {
+    const tool = String(call.tool || '').trim().toLowerCase();
+    if (tool !== 'document.generate' && tool !== 'document.plan' && tool !== 'document.build_spec' && tool !== 'document.render_pdf') {
+      continue;
+    }
+    const rawDocType = String((isRecord(call.args) ? call.args.docType : '') || '').trim();
+    if (!rawDocType) continue;
+    return canonicalDocFamily(rawDocType);
+  }
+  return undefined;
+}
+
+function buildLoopRuntimeState(input: {
+  plan: RuntimePlan;
+  policy: RunPolicy;
+  contextSnapshot?: Record<string, unknown>;
+}): {
+  loopIndex: number;
+  loopMax: number;
+  loopReason: string;
+  coverageDelta: number;
+  coverageScore?: number;
+} {
+  const continuationDepth = Number(input.plan.runtime?.continuationDepth || 0);
+  const loopIndex = Math.max(1, continuationDepth + 1);
+  const loopMax = Math.max(loopIndex, Number(input.policy.maxAutoContinuations || 0) + 1);
+  const context = isRecord(input.contextSnapshot) ? input.contextSnapshot : {};
+  const previousCoverage = Number(context.previousDocumentCoverageScore);
+  const coverageScore = Number(context.documentCoverageScore);
+  const coverageDelta =
+    Number.isFinite(coverageScore) && Number.isFinite(previousCoverage)
+      ? Math.round((coverageScore - previousCoverage) * 10) / 10
+      : 0;
+  return {
+    loopIndex,
+    loopMax,
+    loopReason: continuationDepth > 0 ? 'auto_continue' : 'initial',
+    coverageDelta,
+    ...(Number.isFinite(coverageScore) ? { coverageScore } : {}),
   };
 }
 
@@ -1974,10 +2104,11 @@ function resolveDocumentDepthFromPlan(plan: RuntimePlan | null): 'short' | 'stan
     if (depth === 'short' || depth === 'deep') return depth;
     if (depth === 'standard') return 'standard';
   }
-  return 'standard';
+  return DOCUMENT_ALWAYS_DEEP_ENABLED ? 'deep' : 'standard';
 }
 
-function resolveDocumentRunBudgetMs(plan: RuntimePlan | null): number {
+function resolveDocumentRunBudgetMs(plan: RuntimePlan | null, policy?: RunPolicy): number {
+  if (policy?.responseMode === 'pro') return DOCUMENT_RUN_BUDGET_PRO_MS;
   const depth = resolveDocumentDepthFromPlan(plan);
   if (depth === 'short') return DOCUMENT_RUN_BUDGET_SHORT_MS;
   if (depth === 'deep') return DOCUMENT_RUN_BUDGET_DEEP_MS;
@@ -3979,6 +4110,77 @@ export class RuntimeRunEngine {
     const toolResults = toolRuns
       .map((item) => (isRecord(item.resultJson) ? (item.resultJson as RuntimeToolResult) : null))
       .filter((item): item is RuntimeToolResult => Boolean(item));
+    const docFamily = resolveDocFamilyFromPlan(plan);
+    const loopState = buildLoopRuntimeState({
+      plan,
+      policy,
+      contextSnapshot: runtimeContextSnapshot,
+    });
+
+    const emitProgressiveLoopEvent = async (input: {
+      event: 'run.loop_started' | 'run.loop_completed' | 'run.stage_searching' | 'run.stage_thinking' | 'run.stage_building' | 'run.stage_validating';
+      message: string;
+      level?: ProcessEventLevel;
+      phase?: 'planning' | 'tools' | 'writing' | 'completed';
+      stage?: string;
+      extra?: Record<string, unknown>;
+    }) => {
+      if (!RUNTIME_PROGRESSIVE_LOOPS_ENABLED) return;
+      await this.emitEvent({
+        branchId: run.branchId,
+        agentRunId: run.id,
+        type: ProcessEventType.PROCESS_LOG,
+        level: input.level || ProcessEventLevel.INFO,
+        message: input.message,
+        payload: {
+          stage: input.stage || undefined,
+          loopIndex: loopState.loopIndex,
+          loopMax: loopState.loopMax,
+          loopReason: loopState.loopReason,
+          coverageDelta: loopState.coverageDelta,
+          ...(loopState.coverageScore !== undefined ? { coverageScore: loopState.coverageScore } : {}),
+          ...(docFamily ? { docFamily } : {}),
+          ...(input.extra || {}),
+          eventV2: {
+            version: 2,
+            event: input.event,
+            phase: input.phase || 'tools',
+            status: input.level === ProcessEventLevel.WARN ? 'warn' : input.level === ProcessEventLevel.ERROR ? 'error' : 'info',
+            runId: run.id,
+            createdAt: new Date().toISOString(),
+          },
+        },
+      });
+    };
+
+    if (RUNTIME_PROGRESSIVE_LOOPS_ENABLED) {
+      plan = {
+        ...plan,
+        runtime: {
+          continuationDepth: plan.runtime?.continuationDepth ?? 0,
+          loopIndex: loopState.loopIndex,
+          loopMax: loopState.loopMax,
+          loopReason: loopState.loopReason,
+          coverageDelta: loopState.coverageDelta,
+          ...(runtimeContextSnapshot && Object.keys(runtimeContextSnapshot).length
+            ? { contextSnapshot: runtimeContextSnapshot }
+            : {}),
+        },
+      };
+      await updateAgentRun(run.id, { plan });
+      await emitProgressiveLoopEvent({
+        event: 'run.loop_started',
+        message: `Loop ${loopState.loopIndex}/${loopState.loopMax} started.`,
+        phase: 'tools',
+        stage: 'loop',
+      });
+      await emitProgressiveLoopEvent({
+        event: 'run.stage_thinking',
+        message: `Thinking and restructuring sections (loop ${loopState.loopIndex}/${loopState.loopMax}).`,
+        phase: 'planning',
+        stage: 'thinking',
+      });
+    }
 
     if (
       isRecord(runtimeContextSnapshot) &&
@@ -3993,6 +4195,7 @@ export class RuntimeRunEngine {
       plan = {
         ...plan,
         runtime: {
+          ...(isRecord(plan.runtime) ? plan.runtime : {}),
           continuationDepth: plan.runtime?.continuationDepth ?? 0,
           contextSnapshot: runtimeContextSnapshot,
         },
@@ -4063,6 +4266,16 @@ export class RuntimeRunEngine {
         type: ProcessEventType.WAITING_FOR_INPUT,
         message: 'Waiting for user input.',
       });
+      await emitProgressiveLoopEvent({
+        event: 'run.loop_completed',
+        message: `Loop ${loopState.loopIndex}/${loopState.loopMax} paused for approval.`,
+        phase: 'tools',
+        stage: 'loop',
+        level: ProcessEventLevel.WARN,
+        extra: {
+          pausedForApproval: true,
+        },
+      });
 
       await this.dispatchNextQueuedMessage({
         researchJobId: run.branch.thread.researchJobId,
@@ -4075,7 +4288,7 @@ export class RuntimeRunEngine {
 
     if (isDocumentFocusedRun({ plan, toolRuns })) {
       const runElapsedMs = Date.now() - runStartedAt.getTime();
-      const budgetMs = resolveDocumentRunBudgetMs(plan);
+      const budgetMs = resolveDocumentRunBudgetMs(plan, policy);
       if (Number.isFinite(runElapsedMs) && runElapsedMs > budgetMs) {
         const partial = buildDocumentBudgetPartialMessage({
           runElapsedMs,
@@ -4156,6 +4369,16 @@ export class RuntimeRunEngine {
           message: `Run completed with budget guard after ${Math.round(runElapsedMs / 1000)}s.`,
           payload: {
             policySummary: buildPolicySummary(policy),
+          },
+        });
+        await emitProgressiveLoopEvent({
+          event: 'run.loop_completed',
+          message: `Loop ${loopState.loopIndex}/${loopState.loopMax} completed with budget fallback.`,
+          phase: 'completed',
+          stage: 'loop',
+          level: ProcessEventLevel.WARN,
+          extra: {
+            partialReturned: true,
           },
         });
 
@@ -4335,6 +4558,7 @@ export class RuntimeRunEngine {
       const nextPlan: RuntimePlan = {
         ...plan,
         runtime: {
+          ...(isRecord(plan.runtime) ? plan.runtime : {}),
           continuationDepth: continuationDepth + 1,
           ...(isRecord(plan.runtime?.contextSnapshot) ? { contextSnapshot: plan.runtime?.contextSnapshot } : {}),
         },
@@ -4356,6 +4580,35 @@ export class RuntimeRunEngine {
           tools: continuationCallsForRun.map((call) => call.tool),
         },
       });
+      await emitProgressiveLoopEvent({
+        event: 'run.loop_completed',
+        message: `Loop ${loopState.loopIndex}/${loopState.loopMax} completed; continuing with new evidence tasks.`,
+        phase: 'tools',
+        stage: 'loop',
+      });
+      if (RUNTIME_PROGRESSIVE_LOOPS_ENABLED) {
+        const nextLoopIndex = Math.max(1, Number(nextPlan.runtime?.continuationDepth || 0) + 1);
+        await this.emitEvent({
+          branchId: run.branchId,
+          agentRunId: run.id,
+          type: ProcessEventType.PROCESS_LOG,
+          message: `Searching sources (loop ${nextLoopIndex}/${loopState.loopMax}).`,
+          payload: {
+            stage: 'searching',
+            loopIndex: nextLoopIndex,
+            loopMax: loopState.loopMax,
+            ...(docFamily ? { docFamily } : {}),
+            eventV2: {
+              version: 2,
+              event: 'run.stage_searching',
+              phase: 'tools',
+              status: 'info',
+              runId: run.id,
+              createdAt: new Date().toISOString(),
+            },
+          },
+        });
+      }
 
       await this.ensureToolRuns(run.id, nextPlan.toolCalls, policy.maxToolRuns);
       await updateAgentRun(run.id, { status: AgentRunStatus.WAITING_TOOLS });
@@ -4364,6 +4617,12 @@ export class RuntimeRunEngine {
       return;
     }
 
+    await emitProgressiveLoopEvent({
+      event: 'run.stage_building',
+      message: `Building response from evidence (loop ${loopState.loopIndex}/${loopState.loopMax}).`,
+      phase: 'writing',
+      stage: 'building',
+    });
     await this.emitEvent({
       branchId: run.branchId,
       agentRunId: run.id,
@@ -4415,6 +4674,8 @@ export class RuntimeRunEngine {
       response: initialWriterOutput.response,
       toolResults: promptToolResults,
       runtimeContext: runtimeContextSnapshot,
+      responseMode: policy.responseMode,
+      enforceDeepSections: DEEP_RESPONSE_SECTION_GATE_ENABLED,
     });
     const writerOutput: RuntimeWriterOutput = {
       ...initialWriterOutput,
@@ -4458,6 +4719,13 @@ export class RuntimeRunEngine {
     }
 
     if (await isRunCancelled('validation')) return;
+
+    await emitProgressiveLoopEvent({
+      event: 'run.stage_validating',
+      message: `Validating grounded claims (loop ${loopState.loopIndex}/${loopState.loopMax}).`,
+      phase: 'writing',
+      stage: 'validation',
+    });
 
     const validatorOutput = await withTimeout(
       validateClientResponse({
@@ -4699,6 +4967,16 @@ export class RuntimeRunEngine {
         type: ProcessEventType.WAITING_FOR_INPUT,
         message: 'Waiting for user input.',
       });
+      await emitProgressiveLoopEvent({
+        event: 'run.loop_completed',
+        message: `Loop ${loopState.loopIndex}/${loopState.loopMax} paused for decision.`,
+        phase: 'tools',
+        stage: 'loop',
+        level: ProcessEventLevel.WARN,
+        extra: {
+          pausedForDecision: true,
+        },
+      });
 
       await this.dispatchNextQueuedMessage({
         researchJobId: run.branch.thread.researchJobId,
@@ -4738,6 +5016,15 @@ export class RuntimeRunEngine {
           };
         }),
         validation: validatorOutput,
+      },
+    });
+    await emitProgressiveLoopEvent({
+      event: 'run.loop_completed',
+      message: `Loop ${loopState.loopIndex}/${loopState.loopMax} completed.`,
+      phase: 'completed',
+      stage: 'loop',
+      extra: {
+        validationPass: validatorOutput.pass,
       },
     });
 
@@ -5030,6 +5317,7 @@ export class RuntimeRunEngine {
         plan = {
           ...plan,
           runtime: {
+            ...(isRecord(plan.runtime) ? plan.runtime : {}),
             continuationDepth: plan.runtime?.continuationDepth ?? 0,
             contextSnapshot: runtimeContextSnapshot,
           },
@@ -5091,6 +5379,7 @@ export class RuntimeRunEngine {
           plan = {
             ...plan,
             runtime: {
+              ...(isRecord(plan.runtime) ? plan.runtime : {}),
               continuationDepth: plan.runtime?.continuationDepth ?? 0,
               contextSnapshot: runtimeContextSnapshot,
             },
@@ -5118,6 +5407,7 @@ export class RuntimeRunEngine {
       if (runtimeContextSnapshot && enrichmentInjection.coverage) {
         runtimeContextSnapshot = {
           ...runtimeContextSnapshot,
+          previousDocumentCoverageScore: Number(runtimeContextSnapshot.documentCoverageScore || 0) || 0,
           documentCoverageScore: enrichmentInjection.coverage.score,
           documentCoverageCounts: enrichmentInjection.coverage.counts,
           documentCoverageTargets: enrichmentInjection.coverage.targets,
@@ -5263,6 +5553,7 @@ export class RuntimeRunEngine {
           ...(runtimeContextSnapshot
             ? {
                 runtime: {
+                  ...(isRecord(plan.runtime) ? plan.runtime : {}),
                   continuationDepth: plan.runtime?.continuationDepth ?? 0,
                   contextSnapshot: runtimeContextSnapshot,
                 },
@@ -5288,6 +5579,32 @@ export class RuntimeRunEngine {
           policySummary: buildPolicySummary(policy),
         },
       });
+
+      if (RUNTIME_PROGRESSIVE_LOOPS_ENABLED) {
+        const loopIndex = Math.max(1, Number(plan.runtime?.continuationDepth || 0) + 1);
+        const loopMax = Math.max(loopIndex, Number(policy.maxAutoContinuations || 0) + 1);
+        const docFamily = resolveDocFamilyFromPlan(plan);
+        await this.emitEvent({
+          branchId: fresh.branchId,
+          agentRunId: fresh.id,
+          type: ProcessEventType.PROCESS_LOG,
+          message: `Searching sources (loop ${loopIndex}/${loopMax}).`,
+          payload: {
+            stage: 'searching',
+            loopIndex,
+            loopMax,
+            ...(docFamily ? { docFamily } : {}),
+            eventV2: {
+              version: 2,
+              event: 'run.stage_searching',
+              phase: 'tools',
+              status: 'info',
+              runId: fresh.id,
+              createdAt: new Date().toISOString(),
+            },
+          },
+        });
+      }
 
       await this.ensureToolRuns(fresh.id, plan.toolCalls, policy.maxToolRuns);
 

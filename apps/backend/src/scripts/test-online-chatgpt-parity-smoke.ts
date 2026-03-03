@@ -183,6 +183,45 @@ async function waitForArtifactMessage(input: {
   throw new Error('Timed out waiting for assistant message with document_artifact block.');
 }
 
+async function waitForLoopStageEvents(input: {
+  baseUrl: string;
+  workspaceId: string;
+  branchId: string;
+  createdAfterMs: number;
+  jar: CookieJar;
+  timeoutMs?: number;
+}): Promise<void> {
+  const timeoutMs = Math.max(30_000, Number(input.timeoutMs || 180_000));
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    const eventsRes = await apiRequest<{ events?: Array<Record<string, unknown>> }>(
+      input.baseUrl,
+      `/api/research-jobs/${input.workspaceId}/runtime/branches/${input.branchId}/events?limit=220`,
+      { method: 'GET' },
+      input.jar
+    );
+    if (eventsRes.status !== 200 || !Array.isArray(eventsRes.data.events)) continue;
+    const recent = eventsRes.data.events.filter((row) => {
+      const createdAt = Date.parse(String(row.createdAt || ''));
+      return Number.isFinite(createdAt) && createdAt >= input.createdAfterMs;
+    });
+    const markers = new Set<string>();
+    for (const row of recent) {
+      const payload = isRecord(row.payloadJson) ? row.payloadJson : {};
+      const eventV2 = isRecord(payload.eventV2) ? payload.eventV2 : isRecord(row.eventV2) ? row.eventV2 : {};
+      const event = String(eventV2.event || '').trim().toLowerCase();
+      if (!event) continue;
+      markers.add(event);
+    }
+    const expected = ['run.stage_searching', 'run.stage_thinking', 'run.stage_building', 'run.stage_validating'];
+    if (expected.every((event) => markers.has(event))) {
+      return;
+    }
+  }
+  throw new Error('Timed out waiting for progressive loop stage events.');
+}
+
 async function main() {
   const baseUrl = String(
     process.env.CHATGPT_PARITY_BASE_URL ||
@@ -211,7 +250,7 @@ async function main() {
   const branchId = await ensureBranchId(baseUrl, workspaceId, jar);
   const createdAfterMs = Date.now() - 2000;
 
-  const prompt = `SWOT please for this workspace. Build a standard SWOT with evidence links and output a PDF artifact. (chatgpt-parity-smoke-${Date.now()})`;
+  const prompt = `SWOT please for this workspace. Run in deep/pro mode, show your sectioned analysis, and output a PDF artifact. (chatgpt-parity-smoke-${Date.now()})`;
   const sendRes = await apiRequest<{ runId?: string; queued?: boolean; userMessageId?: string }>(
     baseUrl,
     `/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/messages`,
@@ -221,6 +260,11 @@ async function main() {
       body: JSON.stringify({
         content: prompt,
         mode: 'interrupt',
+        inputOptions: {
+          modeLabel: 'pro',
+          targetLength: 'long',
+          strictValidation: true,
+        },
       }),
     },
     jar
@@ -236,7 +280,15 @@ async function main() {
     jar,
   });
 
-  assert.ok(assistantContent.length >= 80, 'Assistant markdown content is unexpectedly short.');
+  assert.ok(assistantContent.length >= 180, 'Assistant markdown content is unexpectedly short.');
+  assert.ok(
+    /##\s+What I searched/i.test(assistantContent) &&
+      /##\s+What I found/i.test(assistantContent) &&
+      /##\s+Synthesis/i.test(assistantContent) &&
+      /##\s+Recommendations/i.test(assistantContent) &&
+      /##\s+Next loop \/ next actions/i.test(assistantContent),
+    'Deep/pro response is missing required section headers.'
+  );
 
   const artifactTitle = String(artifact.title || '').trim();
   const artifactStorage = String(artifact.storagePath || '').trim();
@@ -259,6 +311,14 @@ async function main() {
     const found = (docsRes.data.documents || []).some((doc) => String(doc.id || '').trim() === artifactDocumentId);
     assert.ok(found, `Artifact documentId ${artifactDocumentId} not found in runtime docs list.`);
   }
+
+  await waitForLoopStageEvents({
+    baseUrl,
+    workspaceId,
+    branchId,
+    createdAfterMs,
+    jar,
+  });
 
   console.log('[Online ChatGPT Parity Smoke] Passed.');
   console.log(

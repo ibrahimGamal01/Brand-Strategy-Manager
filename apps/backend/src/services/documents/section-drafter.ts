@@ -16,6 +16,18 @@ export type DraftDocumentSectionsResult = {
   partialReasons: string[];
 };
 
+const MIN_SECTION_EVIDENCE_REFS: Record<
+  DocumentSpecV1['docFamily'],
+  Record<DocumentSpecV1['depth'], number>
+> = {
+  SWOT: { short: 1, standard: 2, deep: 3 },
+  BUSINESS_STRATEGY: { short: 1, standard: 2, deep: 3 },
+  PLAYBOOK: { short: 1, standard: 2, deep: 2 },
+  COMPETITOR_AUDIT: { short: 1, standard: 2, deep: 3 },
+  CONTENT_CALENDAR: { short: 1, standard: 2, deep: 2 },
+  GO_TO_MARKET: { short: 1, standard: 2, deep: 3 },
+};
+
 function firstItems(values: string[], fallback: string, max = 5): string[] {
   const cleaned = values
     .map((entry) => String(entry || '').trim())
@@ -310,12 +322,14 @@ export function draftDocumentSections(input: {
   payload: DocumentDataPayload;
 }): DraftDocumentSectionsResult {
   const partialReasons: string[] = [];
+  const minEvidenceRefs = MIN_SECTION_EVIDENCE_REFS[input.spec.docFamily]?.[input.spec.depth] ?? 1;
   const sections: DraftedDocumentSection[] = input.spec.sections.map((section) => {
     const evidenceRefIds = Array.from(new Set(section.evidenceRefIds.filter(Boolean))).slice(0, 30);
-    const status: DraftedDocumentSection['status'] = evidenceRefIds.length > 0 ? 'grounded' : 'insufficient_evidence';
+    const status: DraftedDocumentSection['status'] =
+      evidenceRefIds.length >= minEvidenceRefs ? 'grounded' : 'insufficient_evidence';
     const partialReason =
       status === 'insufficient_evidence'
-        ? `Section ${section.title} has insufficient evidence references.`
+        ? `Section ${section.title} has insufficient evidence references (${evidenceRefIds.length}/${minEvidenceRefs}).`
         : undefined;
     if (partialReason) {
       partialReasons.push(partialReason);

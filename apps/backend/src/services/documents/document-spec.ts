@@ -220,4 +220,11 @@ export type GeneratedDocument = {
   partial?: boolean;
   partialReasons?: string[];
   resumeDocumentId?: string;
+  iterationsUsed?: number;
+  depthApplied?: 'short' | 'standard' | 'deep';
+  sectionCoverage?: Array<{
+    sectionId: string;
+    status: 'grounded' | 'insufficient_evidence';
+    evidenceRefCount: number;
+  }>;
 };

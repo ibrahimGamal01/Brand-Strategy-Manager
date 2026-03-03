@@ -92,6 +92,10 @@ export type RuntimePlan = {
   };
   runtime?: {
     continuationDepth: number;
+    loopIndex?: number;
+    loopMax?: number;
+    loopReason?: string;
+    coverageDelta?: number;
     contextSnapshot?: Record<string, unknown>;
   };
 };

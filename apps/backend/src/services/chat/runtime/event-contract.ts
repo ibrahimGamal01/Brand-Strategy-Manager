@@ -17,6 +17,12 @@ export type RuntimeEventKind =
   | 'run.queued'
   | 'run.planning'
   | 'run.progress'
+  | 'run.loop_started'
+  | 'run.loop_completed'
+  | 'run.stage_searching'
+  | 'run.stage_thinking'
+  | 'run.stage_building'
+  | 'run.stage_validating'
   | 'run.writing'
   | 'run.waiting_input'
   | 'run.completed'
@@ -114,6 +120,12 @@ function normalizeEvent(value: unknown): RuntimeEventKind | null {
     normalized === 'run.queued' ||
     normalized === 'run.planning' ||
     normalized === 'run.progress' ||
+    normalized === 'run.loop_started' ||
+    normalized === 'run.loop_completed' ||
+    normalized === 'run.stage_searching' ||
+    normalized === 'run.stage_thinking' ||
+    normalized === 'run.stage_building' ||
+    normalized === 'run.stage_validating' ||
     normalized === 'run.writing' ||
     normalized === 'run.waiting_input' ||
     normalized === 'run.completed' ||

@@ -299,6 +299,22 @@ function runEventContractAssertions() {
 
   assert.equal(event.event, 'document.spec_built');
   assert.equal(event.phase, 'planning');
+
+  const loopEvent = normalizeRuntimeEventV2({
+    type: 'PROCESS_LOG',
+    level: 'INFO',
+    message: 'Searching sources (loop 1/5).',
+    payloadJson: {
+      eventV2: {
+        version: 2,
+        event: 'run.stage_searching',
+        phase: 'tools',
+        status: 'info',
+      },
+    },
+  });
+  assert.equal(loopEvent.event, 'run.stage_searching');
+  assert.equal(loopEvent.phase, 'tools');
 }
 
 function main() {

@@ -150,9 +150,21 @@ export function LiveActivityPanel({
                     {phaseLabel(item.phase)}
                   </span>
                 ) : null}
+                {item.loopIndex && item.loopMax ? (
+                  <span className="rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[10px] text-zinc-600">
+                    Loop {item.loopIndex}/{item.loopMax}
+                  </span>
+                ) : null}
               </div>
             </div>
             <p className="mt-1 text-sm text-zinc-800">{item.message}</p>
+            {item.docFamily || typeof item.coverageScore === "number" ? (
+              <p className="mt-1 text-[11px] text-zinc-500">
+                {[item.docFamily ? item.docFamily.replace(/_/g, " ") : "", typeof item.coverageScore === "number" ? `Coverage ${item.coverageScore}/100` : ""]
+                  .filter(Boolean)
+                  .join(" • ")}
+              </p>
+            ) : null}
             {item.details?.length ? (
               <ul className="mt-1.5 space-y-1 text-xs text-zinc-600">
                 {item.details.slice(0, 4).map((detail) => (

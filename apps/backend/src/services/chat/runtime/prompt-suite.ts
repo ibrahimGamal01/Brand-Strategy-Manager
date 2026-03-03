@@ -132,6 +132,9 @@ const PROMPT_STEP_TIMEOUT_MS = Number.isFinite(Number(process.env.RUNTIME_PROMPT
   : 60_000;
 const GENERIC_TOOL_SUMMARY_RE =
   /^(listed \d+ item\(s\)|fetched \d+ item\(s\)|no item found|intel\.(list|get) returned \d+ row\(s\)|\w+ returned \d+ item\(s\)|\w+ completed successfully\.?)$/i;
+const DEEP_RESPONSE_SECTION_GATE_ENABLED = String(process.env.DEEP_RESPONSE_SECTION_GATE_ENABLED || 'true')
+  .trim()
+  .toLowerCase() !== 'false';
 
 const TOOL_NAME_ALIASES: Record<string, { tool: string; args: Record<string, unknown> }> = {
   competitoranalysis: { tool: 'orchestration.run', args: { targetCount: 12, mode: 'append' } },
@@ -1027,15 +1030,35 @@ export function applyWriterQualityGate(input: {
   response: string;
   toolResults: RuntimeToolResult[];
   runtimeContext?: Record<string, unknown>;
+  responseMode?: 'fast' | 'balanced' | 'deep' | 'pro';
+  enforceDeepSections?: boolean;
 }): { response: string; quality: WriterQualityResult } {
   const intent = detectWriterIntent(input.userMessage);
   if (intent !== 'competitor_brief') {
+    const responseMode = input.responseMode || 'balanced';
+    const isDeepOrPro = responseMode === 'deep' || responseMode === 'pro';
+    const enforceSections = input.enforceDeepSections !== false && DEEP_RESPONSE_SECTION_GATE_ENABLED;
     const raw = String(input.response || '').trim();
     const genericSignals =
       (raw.match(/\bloaded\s+\d+\s+record\(s\)\b/gi) || []).length +
       (raw.match(/\btool completed successfully\b/gi) || []).length +
       (raw.match(/\bauto-continuing based on tool suggestions\b/gi) || []).length;
-    const hasLowSignal = genericSignals >= 2 || raw.length < 80;
+    const requiredHeaders = [
+      '## What I searched',
+      '## What I found',
+      '## Synthesis',
+      '## Recommendations',
+      '## Next loop / next actions',
+    ];
+    const missingHeaders =
+      isDeepOrPro && enforceSections
+        ? requiredHeaders.filter((header) => !new RegExp(`^${escapeRegExp(header)}\\s*$`, 'im').test(raw))
+        : [];
+    const recommendationSignals = /\brecommend|priority|next action|do now|should\b/i.test(raw);
+    const hasLowSignal =
+      genericSignals >= 2 ||
+      raw.length < (isDeepOrPro ? 260 : 80) ||
+      (isDeepOrPro && enforceSections && (missingHeaders.length > 0 || !recommendationSignals));
     if (!hasLowSignal) {
       return {
         response: input.response,
@@ -1054,26 +1077,58 @@ export function applyWriterQualityGate(input: {
       .flatMap((result) => result.evidence || [])
       .map((entry) => String(entry.url || entry.label || '').trim())
       .filter(Boolean)
-      .slice(0, 3);
+      .slice(0, isDeepOrPro ? 10 : 3);
     const clientName = String((input.runtimeContext || {}).clientName || '').trim();
-    const rewritten = [
-      clientName ? `I reviewed the latest workspace evidence for ${clientName}.` : 'I reviewed the latest workspace evidence.',
-      highlights.length
-        ? `What changed:\n${highlights.map((line, index) => `${index + 1}. ${line}`).join('\n')}`
-        : 'The latest run completed with fresh evidence updates.',
-      evidenceLinks.length
-        ? `Evidence references:\n${evidenceLinks.map((line, index) => `${index + 1}. ${line}`).join('\n')}`
-        : '',
-      'Tell me which direction you want next: deeper research, concise summary, or a client-ready deliverable.',
-    ]
-      .filter(Boolean)
-      .join('\n\n');
+    const rewritten = isDeepOrPro && enforceSections
+      ? [
+          '## What I searched',
+          highlights.length
+            ? highlights.slice(0, 6).map((line, index) => `${index + 1}. ${line}`).join('\n')
+            : '1. Reviewed the latest workspace evidence and recent tool outputs.',
+          '',
+          '## What I found',
+          highlights.length
+            ? highlights.map((line, index) => `- ${line}`).join('\n')
+            : '- The latest run completed with fresh evidence updates.',
+          evidenceLinks.length
+            ? `\nEvidence links:\n${evidenceLinks.map((line, index) => `${index + 1}. ${line}`).join('\n')}`
+            : '',
+          '',
+          '## Synthesis',
+          clientName
+            ? `For ${clientName}, the current signal set supports directional decisions now, with higher confidence after another evidence expansion loop.`
+            : 'The current signal set supports directional decisions now, with higher confidence after another evidence expansion loop.',
+          '',
+          '## Recommendations',
+          '1. Prioritize the highest-confidence lane and run a focused execution test this week.',
+          '2. Expand weak evidence lanes before making irreversible strategic commitments.',
+          '3. Keep every key claim tied to explicit evidence links.',
+          '',
+          '## Next loop / next actions',
+          '1. Run another search + validation loop for missing lanes.',
+          '2. Continue deepening if you want a fully expanded deliverable.',
+        ].join('\n')
+      : [
+          clientName ? `I reviewed the latest workspace evidence for ${clientName}.` : 'I reviewed the latest workspace evidence.',
+          highlights.length
+            ? `What changed:\n${highlights.map((line, index) => `${index + 1}. ${line}`).join('\n')}`
+            : 'The latest run completed with fresh evidence updates.',
+          evidenceLinks.length
+            ? `Evidence references:\n${evidenceLinks.map((line, index) => `${index + 1}. ${line}`).join('\n')}`
+            : '',
+          'Tell me which direction you want next: deeper research, concise summary, or a client-ready deliverable.',
+        ]
+          .filter(Boolean)
+          .join('\n\n');
     return {
       response: rewritten,
       quality: {
         intent: 'general',
         passed: false,
-        notes: ['Rewritten low-signal response to improve clarity and usefulness.'],
+        notes: [
+          ...(missingHeaders.length ? [`Added required deep/pro sections: ${missingHeaders.join(', ')}.`] : []),
+          'Rewritten low-signal response to improve clarity and usefulness.',
+        ],
       },
     };
   }
@@ -1868,6 +1923,8 @@ function fallbackWriter(input: WriterInput): WriterOutput {
     response: fallbackResponse,
     toolResults: input.toolResults,
     runtimeContext,
+    responseMode: input.policy.responseMode,
+    enforceDeepSections: DEEP_RESPONSE_SECTION_GATE_ENABLED,
   });
 
   return {
@@ -2202,6 +2259,12 @@ export async function writeClientResponse(input: WriterInput): Promise<WriterOut
     '- balanced: clear structure with moderate detail.',
     '- deep: richer reasoning artifacts and wider evidence integration.',
     '- pro: deep + strict caveats + explicit validation summary.',
+    'For deep/pro, response must include these markdown headers exactly:',
+    '## What I searched',
+    '## What I found',
+    '## Synthesis',
+    '## Recommendations',
+    '## Next loop / next actions',
     'Synthesize evidence into clear narrative and recommendations; do not just output sparse bullet points.',
     'Never output internal IDs, run IDs, or raw system identifiers.',
     'Avoid mechanical phrasing like "Loaded X records" unless the user explicitly asked for raw logs.',
@@ -2274,6 +2337,8 @@ export async function writeClientResponse(input: WriterInput): Promise<WriterOut
       response: String(parsed.response || fallback.response),
       toolResults: input.toolResults,
       runtimeContext: isRecord(input.runtimeContext) ? input.runtimeContext : {},
+      responseMode: input.policy.responseMode,
+      enforceDeepSections: DEEP_RESPONSE_SECTION_GATE_ENABLED,
     });
 
     return {

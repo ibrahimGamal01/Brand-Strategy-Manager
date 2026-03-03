@@ -62,12 +62,19 @@ function normalizeDocType(raw: unknown): DocumentPlan['docType'] {
 function normalizePlanInput(args: Record<string, unknown>): Partial<DocumentPlan> {
   const requestedType = String(args.docType || args.template || 'BUSINESS_STRATEGY').toUpperCase();
   const docType = SUPPORTED_DOC_TYPES.has(requestedType as DocumentPlan['docType']) ? normalizeDocType(requestedType) : 'BUSINESS_STRATEGY';
+  const forceQuickDraft = args.forceQuickDraft === true;
+  const rawDepth = typeof args.depth === 'string' ? String(args.depth).trim().toLowerCase() : '';
+  const parsedDepth: DocumentPlan['depth'] | undefined =
+    rawDepth === 'short' || rawDepth === 'standard' || rawDepth === 'deep'
+      ? (rawDepth as DocumentPlan['depth'])
+      : undefined;
+  const depth: DocumentPlan['depth'] = forceQuickDraft ? parsedDepth || 'standard' : 'deep';
   return {
     docType,
     title: typeof args.title === 'string' ? args.title : undefined,
     audience: typeof args.audience === 'string' ? args.audience : undefined,
     timeframeDays: Number.isFinite(Number(args.timeframeDays)) ? Number(args.timeframeDays) : undefined,
-    depth: typeof args.depth === 'string' ? (args.depth as DocumentPlan['depth']) : undefined,
+    depth,
     includeCompetitors: typeof args.includeCompetitors === 'boolean' ? args.includeCompetitors : undefined,
     includeEvidenceLinks: typeof args.includeEvidenceLinks === 'boolean' ? args.includeEvidenceLinks : undefined,
     requestedIntent: typeof args.requestedIntent === 'string' ? args.requestedIntent.trim() : undefined,
@@ -108,6 +115,7 @@ export const documentTools: ToolDefinition<Record<string, unknown>, Record<strin
         audience: { type: 'string' },
         timeframeDays: { type: 'number' },
         depth: { type: 'string', enum: ['short', 'standard', 'deep'] },
+        forceQuickDraft: { type: 'boolean' },
         includeCompetitors: { type: 'boolean' },
         includeEvidenceLinks: { type: 'boolean' },
         requestedIntent: { type: 'string' },
@@ -139,6 +147,7 @@ export const documentTools: ToolDefinition<Record<string, unknown>, Record<strin
         audience: { type: 'string' },
         timeframeDays: { type: 'number' },
         depth: { type: 'string', enum: ['short', 'standard', 'deep'] },
+        forceQuickDraft: { type: 'boolean' },
         includeCompetitors: { type: 'boolean' },
         includeEvidenceLinks: { type: 'boolean' },
         requestedIntent: { type: 'string' },
@@ -163,7 +172,7 @@ export const documentTools: ToolDefinition<Record<string, unknown>, Record<strin
           version: 'v1',
           docFamily: canonicalDocFamily(plan.docType),
           requestedIntent: plan.requestedIntent || null,
-          depth: plan.depth || 'standard',
+          depth: plan.depth || 'deep',
         },
       };
     },
@@ -215,6 +224,7 @@ export const documentTools: ToolDefinition<Record<string, unknown>, Record<strin
         audience: { type: 'string' },
         timeframeDays: { type: 'number' },
         depth: { type: 'string', enum: ['short', 'standard', 'deep'] },
+        forceQuickDraft: { type: 'boolean' },
         includeCompetitors: { type: 'boolean' },
         includeEvidenceLinks: { type: 'boolean' },
         requestedIntent: { type: 'string' },
@@ -256,6 +266,7 @@ export const documentTools: ToolDefinition<Record<string, unknown>, Record<strin
         audience: { type: 'string' },
         timeframeDays: { type: 'number' },
         depth: { type: 'string', enum: ['short', 'standard', 'deep'] },
+        forceQuickDraft: { type: 'boolean' },
         includeCompetitors: { type: 'boolean' },
         includeEvidenceLinks: { type: 'boolean' },
         requestedIntent: { type: 'string' },

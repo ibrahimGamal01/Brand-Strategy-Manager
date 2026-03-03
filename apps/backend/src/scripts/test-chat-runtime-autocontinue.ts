@@ -218,8 +218,8 @@ function testPolicyNormalization() {
     maxToolMs: 50,
   });
 
-  assert.equal(policy.maxAutoContinuations, 4, 'Policy must clamp continuation max to 4.');
-  assert.equal(policy.maxToolRuns, 1, 'Policy must clamp minimum tool runs to 1.');
+  assert.equal(policy.maxAutoContinuations, 2, 'Balanced mode should apply mode profile continuation cap.');
+  assert.equal(policy.maxToolRuns, 6, 'Balanced mode should apply mode profile tool-run cap.');
   assert.equal(policy.toolConcurrency, 3, 'Policy must clamp tool concurrency to 3.');
   assert.equal(policy.maxToolMs, 1000, 'Policy must clamp tool timeout to minimum 1000ms.');
 
@@ -248,6 +248,8 @@ function testPolicyNormalization() {
   assert.equal(modePolicy.responseMode, 'pro', 'Input options should override response mode.');
   assert.equal(modePolicy.targetLength, 'long', 'Pro mode should default to long target length.');
   assert.equal(modePolicy.strictValidation, true, 'Pro mode should enforce strict validation.');
+  assert.equal(modePolicy.maxToolRuns, 12, 'Pro mode should raise tool-run cap.');
+  assert.equal(modePolicy.maxAutoContinuations, 5, 'Pro mode should raise continuation cap.');
   assert.equal(modePolicy.sourceScope.webSearch, false, 'Input options should override source scope for webSearch.');
   assert.equal(modePolicy.sourceScope.socialIntel, false, 'Input options should override source scope for socialIntel.');
 }

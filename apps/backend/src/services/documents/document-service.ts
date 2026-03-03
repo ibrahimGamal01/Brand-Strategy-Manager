@@ -397,7 +397,7 @@ function normalizeSnippetForSignature(value: string): string {
 
 function normalizeDepth(value: DocumentPlan['depth'] | undefined): 'short' | 'standard' | 'deep' {
   if (value === 'short' || value === 'deep') return value;
-  return 'standard';
+  return 'deep';
 }
 
 function normalizeDocType(value: unknown): DocType {
@@ -1503,6 +1503,13 @@ export async function generateDocumentForResearchJob(
     enrichmentPerformed: payload.coverage.enriched,
     partial: payload.coverage.partial,
     partialReasons: payload.coverage.partialReasons,
+    iterationsUsed: 1,
+    depthApplied: plan.depth,
+    sectionCoverage: sectionDrafting.sections.map((section) => ({
+      sectionId: section.id,
+      status: section.status,
+      evidenceRefCount: Array.isArray(section.evidenceRefIds) ? section.evidenceRefIds.length : 0,
+    })),
     ...(runtimeDocumentId ? { resumeDocumentId: runtimeDocumentId } : {}),
   };
 }
