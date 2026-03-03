@@ -13,10 +13,7 @@ body {
 }
 
 body {
-  background:
-    radial-gradient(circle at 15% 10%, rgba(15, 118, 110, 0.15), transparent 32%),
-    radial-gradient(circle at 80% 15%, rgba(196, 125, 44, 0.13), transparent 40%),
-    linear-gradient(180deg, var(--bat-bg-soft) 0%, var(--bat-bg) 42%, #f4f1ea 100%);
+  background: var(--bat-bg);
   color: var(--bat-text);
   font-family: var(--font-body), sans-serif;
   line-height: 1.5;
@@ -52,8 +49,8 @@ a {
 .bat-surface {
   background: var(--bat-surface);
   border: 1px solid var(--bat-border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-card);
+  border-radius: var(--radius-sm);
+  box-shadow: none;
 }
 
 .bat-chip {
@@ -100,4 +97,38 @@ a {
 
 .bat-scrollbar::-webkit-scrollbar-track {
   background: transparent;
+}
+
+.signup-smart-shell {
+  --signup-sticky-offset: 5.4rem;
+  --signup-bottom-safe: calc(env(safe-area-inset-bottom, 0px) + 1rem);
+}
+
+.signup-section-anchor {
+  scroll-margin-top: calc(var(--signup-sticky-offset) + 4.25rem);
+}
+
+.signup-nav-sticky {
+  position: sticky;
+  top: var(--signup-sticky-offset);
+  z-index: 20;
+}
+
+.signup-action-sticky {
+  position: sticky;
+  bottom: 0;
+  z-index: 25;
+  padding-bottom: var(--signup-bottom-safe);
+}
+
+.signup-rail-sticky {
+  position: sticky;
+  top: calc(var(--signup-sticky-offset) + 0.5rem);
+}
+
+.signup-feedback-shell {
+  min-height: 3.25rem;
+  display: grid;
+  align-content: start;
+  gap: 0.5rem;
 }
