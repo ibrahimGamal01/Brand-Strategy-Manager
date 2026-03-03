@@ -525,6 +525,17 @@ function profileUrlFromHandle(platform: SuggestedHandleCandidate['platform'], ha
   return `https://x.com/${normalized}`;
 }
 
+function normalizeHttpUrl(value: unknown): string {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try {
+    const url = raw.startsWith('http://') || raw.startsWith('https://') ? raw : `https://${raw}`;
+    return new URL(url).toString();
+  } catch {
+    return '';
+  }
+}
+
 function candidateKey(candidate: Pick<SuggestedHandleCandidate, 'platform' | 'handle'>): string {
   return `${candidate.platform}:${normalizeHandle(candidate.handle)}`;
 }
@@ -557,7 +568,7 @@ function parseUserSocialReferenceCandidates(payload: Record<string, unknown>): S
     candidates.push({
       platform: normalizedPlatform,
       handle,
-      profileUrl: profileUrlFromHandle(normalizedPlatform, handle) || raw,
+      profileUrl: normalizeHttpUrl(raw) || profileUrlFromHandle(normalizedPlatform, handle),
       confidence: 0.98,
       reason: 'Detected directly from social profile URL provided in websites stage.',
       source: 'user_provided_social_url',
@@ -1247,9 +1258,9 @@ Return a single JSON object with only these keys.`;
       ? 0.7
       : 0.55;
   const allowDiscoveryWithProvidedSocialRefs =
-    String(process.env.SUGGEST_SOCIAL_DISCOVERY_WITH_USER_REFS || '')
+    String(process.env.SUGGEST_SOCIAL_DISCOVERY_WITH_USER_REFS || 'true')
       .trim()
-      .toLowerCase() === 'true';
+      .toLowerCase() !== 'false';
   const shouldRunDomainDiscovery =
     shouldSuggestHandles &&
     Boolean(website) &&
