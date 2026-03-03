@@ -210,7 +210,7 @@ export function buildPlatformQueries(handle: string): Record<string, string[]> {
     ],
     linkedin: [
       `site:linkedin.com "${h}"`,
-      `"${h}" linkedin`,
+      `"${h}" "linkedin"`,
     ],
   };
 }

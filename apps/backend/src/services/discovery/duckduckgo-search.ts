@@ -561,13 +561,37 @@ export async function searchSocialHandlesForWebsite(
   if (!cleanDomain) return out;
 
   try {
-    const queries = [
-      `${cleanDomain} instagram`,
-      `${cleanDomain} tiktok`,
-      `${cleanDomain} youtube`,
-      `${cleanDomain} linkedin`,
-      `${cleanDomain} twitter`,
-    ];
+    const rootToken = cleanDomain
+      .split('.')[0]
+      ?.trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, '');
+    const querySeeds = Array.from(
+      new Set(
+        [cleanDomain, rootToken]
+          .map((entry) => String(entry || '').trim())
+          .filter((entry) => entry.length >= 3)
+      )
+    );
+    const queries = Array.from(
+      new Set(
+        [
+          ...querySeeds.flatMap((seed) => [
+            `"${seed}" "instagram"`,
+            `"${seed}" "tiktok"`,
+            `"${seed}" "youtube"`,
+            `"${seed}" "linkedin"`,
+            `"${seed}" "twitter"`,
+          ]),
+          `${cleanDomain} instagram`,
+          `${cleanDomain} tiktok`,
+          `${cleanDomain} youtube`,
+          `${cleanDomain} linkedin`,
+          `${cleanDomain} twitter`,
+          ...querySeeds.map((seed) => `site:linkedin.com "${seed}"`),
+        ].filter(Boolean)
+      )
+    ).slice(0, 16);
     const { stdout, stderr } = await runDdgCommand(
       ['raw', ...queries],
       options?.timeoutMs ?? 30_000

@@ -74,6 +74,18 @@ function buildDdgQueries(input: { brandName: string; domain: string }): string[]
   const brandName = String(input.brandName || '').trim();
   const domain = String(input.domain || '').trim();
   const conservativeBrand = brandName.length >= 5 ? brandName : '';
+  const domainToken = domain.split('.')[0]?.replace(/[^a-z0-9-]/gi, '').trim();
+  const linkedinSeeds = Array.from(
+    new Set(
+      [conservativeBrand, domain, domainToken]
+        .map((entry) => String(entry || '').trim())
+        .filter((entry) => entry.length >= 3)
+    )
+  );
+  const linkedinQueries = linkedinSeeds.flatMap((seed) => [
+    `"${seed}" "linkedin"`,
+    `site:linkedin.com "${seed}"`,
+  ]);
   const queries = [
     domain ? `site:${domain}` : '',
     domain ? `site:${domain} services` : '',
@@ -82,6 +94,7 @@ function buildDdgQueries(input: { brandName: string; domain: string }): string[]
     [conservativeBrand, 'official website'].filter(Boolean).join(' ').trim(),
     domain ? `${domain} reviews` : '',
     [conservativeBrand, 'pricing'].filter(Boolean).join(' ').trim(),
+    ...linkedinQueries,
     [conservativeBrand, 'linkedin instagram tiktok youtube'].filter(Boolean).join(' ').trim(),
   ]
     .map((entry) => entry.trim())
