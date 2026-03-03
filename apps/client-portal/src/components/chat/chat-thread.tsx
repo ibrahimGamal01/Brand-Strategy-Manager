@@ -176,6 +176,7 @@ function ArtifactPreviewDialog({
     preview.previewModeDefault === "markdown" || !preview.href ? "markdown" : "pdf"
   );
   const [selectedQuote, setSelectedQuote] = useState("");
+  const [selectionToolbar, setSelectionToolbar] = useState<{ x: number; y: number } | null>(null);
   const markdownRef = useRef<HTMLDivElement | null>(null);
   const hasPdf = Boolean(preview.href);
 
@@ -184,25 +185,45 @@ function ArtifactPreviewDialog({
     const updateSelection = () => {
       if (activeView !== "markdown") {
         setSelectedQuote("");
+        setSelectionToolbar(null);
         return;
       }
       if (!markdownRef.current || typeof window === "undefined") return;
       const selection = window.getSelection();
       if (!selection || selection.rangeCount < 1 || selection.isCollapsed) {
         setSelectedQuote("");
+        setSelectionToolbar(null);
         return;
       }
       const anchorNode = selection.anchorNode;
       const focusNode = selection.focusNode;
       if (!anchorNode || !focusNode) {
         setSelectedQuote("");
+        setSelectionToolbar(null);
         return;
       }
       if (!markdownRef.current.contains(anchorNode) || !markdownRef.current.contains(focusNode)) {
         setSelectedQuote("");
+        setSelectionToolbar(null);
         return;
       }
-      setSelectedQuote(compactQuote(selection.toString()));
+      const quote = compactQuote(selection.toString());
+      setSelectedQuote(quote);
+      if (!quote) {
+        setSelectionToolbar(null);
+        return;
+      }
+      const range = selection.getRangeAt(0);
+      const rect = range.getBoundingClientRect();
+      if (!rect.width && !rect.height) {
+        setSelectionToolbar(null);
+        return;
+      }
+      const toolbarWidth = 240;
+      const viewportWidth = window.innerWidth;
+      const x = Math.min(viewportWidth - toolbarWidth / 2 - 8, Math.max(toolbarWidth / 2 + 8, rect.left + rect.width / 2));
+      const y = Math.max(12, rect.top - 40);
+      setSelectionToolbar({ x, y });
     };
     const handleSelectionChange = () => {
       if (frame) cancelAnimationFrame(frame);
@@ -214,6 +235,17 @@ function ArtifactPreviewDialog({
       document.removeEventListener("selectionchange", handleSelectionChange);
     };
   }, [activeView]);
+
+  useEffect(() => {
+    if (!selectionToolbar) return;
+    const clear = () => setSelectionToolbar(null);
+    window.addEventListener("scroll", clear, true);
+    window.addEventListener("resize", clear);
+    return () => {
+      window.removeEventListener("scroll", clear, true);
+      window.removeEventListener("resize", clear);
+    };
+  }, [selectionToolbar]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3">
@@ -287,46 +319,20 @@ function ArtifactPreviewDialog({
               <p className="text-xs text-zinc-500">
                 {preview.family || formatDocTypeLabel(preview.docType)} {typeof preview.versionNumber === "number" ? `• v${preview.versionNumber}` : ""}
               </p>
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  disabled={!selectedQuote}
-                  onClick={() =>
-                    selectedQuote &&
-                    onQuote?.({
-                      documentId: preview.documentId,
-                      title: preview.title,
-                      family: preview.family,
-                      versionNumber: preview.versionNumber,
-                      quotedText: selectedQuote,
-                    })
-                  }
-                  className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Quote className="h-3.5 w-3.5" />
-                  Quote in chat
-                </button>
-                <button
-                  type="button"
-                  disabled={!selectedQuote}
-                  onClick={() =>
-                    selectedQuote &&
-                    onAskEdit?.({
-                      documentId: preview.documentId,
-                      title: preview.title,
-                      family: preview.family,
-                      versionNumber: preview.versionNumber,
-                      quotedText: selectedQuote,
-                    })
-                  }
-                  className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Sparkles className="h-3.5 w-3.5" />
-                  Ask AI to edit
-                </button>
-              </div>
+              <p className="text-[11px] text-zinc-500">Highlight text to quote or edit</p>
             </div>
-            <div ref={markdownRef} className="bat-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-3">
+            <div
+              ref={markdownRef}
+              onMouseUp={() => {
+                const selection = typeof window !== "undefined" ? window.getSelection() : null;
+                setSelectedQuote(compactQuote(selection?.toString() || ""));
+              }}
+              onPointerUp={() => {
+                const selection = typeof window !== "undefined" ? window.getSelection() : null;
+                setSelectedQuote(compactQuote(selection?.toString() || ""));
+              }}
+              className="bat-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-3"
+            >
               {markdownLoading ? (
                 <p className="text-sm text-zinc-500">Loading document markdown...</p>
               ) : markdownError ? (
@@ -337,6 +343,47 @@ function ArtifactPreviewDialog({
                 <p className="text-sm text-zinc-500">No markdown content available for this document.</p>
               )}
             </div>
+            {selectionToolbar && selectedQuote ? (
+              <div
+                className="fixed z-50 flex -translate-x-1/2 items-center gap-1 rounded-md border border-zinc-300 bg-white/95 p-1 shadow-lg backdrop-blur"
+                style={{ left: `${selectionToolbar.x}px`, top: `${selectionToolbar.y}px` }}
+              >
+                <button
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() =>
+                    onQuote?.({
+                      documentId: preview.documentId,
+                      title: preview.title,
+                      family: preview.family,
+                      versionNumber: preview.versionNumber,
+                      quotedText: selectedQuote,
+                    })
+                  }
+                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+                >
+                  <Quote className="h-3.5 w-3.5" />
+                  Quote in chat
+                </button>
+                <button
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() =>
+                    onAskEdit?.({
+                      documentId: preview.documentId,
+                      title: preview.title,
+                      family: preview.family,
+                      versionNumber: preview.versionNumber,
+                      quotedText: selectedQuote,
+                    })
+                  }
+                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Ask AI to edit
+                </button>
+              </div>
+            ) : null}
           </div>
         )}
       </div>
@@ -647,39 +694,36 @@ function MessageBlocks({
           const previewHref = normalizeArtifactHref(String(block.previewHref || block.downloadHref || block.storagePath || "").trim());
           const downloadHref = normalizeArtifactHref(String(block.downloadHref || block.storagePath || "").trim());
           return (
-            <div key={`${message.id}-doc-artifact-${index}`} className="rounded-md border border-zinc-200 bg-zinc-50 p-2.5">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="text-xs font-medium uppercase tracking-[0.08em] text-zinc-500">Generated document</p>
-                  <p className="mt-1 text-sm font-semibold text-zinc-900">{block.title}</p>
+            <div key={`${message.id}-doc-artifact-${index}`} className="border border-zinc-200 bg-white p-2.5">
+              <div className="flex items-start gap-2.5">
+                <div className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center border border-zinc-200 bg-zinc-50 text-zinc-600">
+                  <FileText className="h-4 w-4" />
                 </div>
-                <FileText className="h-4 w-4 text-zinc-500" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-zinc-900">{block.title}</p>
+                  <p className="mt-0.5 text-xs text-zinc-600">
+                    {[
+                      formatDocTypeLabel(block.family || block.docType),
+                      block.format,
+                      typeof block.versionNumber === "number" ? `v${block.versionNumber}` : "",
+                      typeof block.coverageScore === "number" ? `coverage ${Math.round(block.coverageScore)}/100` : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" • ")}
+                  </p>
+                </div>
               </div>
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-600">
-                <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
-                  {formatDocTypeLabel(block.family || block.docType)}
-                </span>
-                <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">{block.format}</span>
-                {typeof block.versionNumber === "number" ? (
-                  <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">Version {block.versionNumber}</span>
-                ) : null}
-                {typeof block.coverageScore === "number" ? (
-                  <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
-                    Coverage {Math.round(block.coverageScore)}/100
-                  </span>
-                ) : null}
-                {block.partial ? (
-                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-800">Partial</span>
-                ) : null}
-              </div>
+              {block.partial ? (
+                <p className="mt-2 text-xs text-amber-800">Partial draft returned.</p>
+              ) : null}
               {block.partialReasons?.length ? (
-                <ul className="mt-2 space-y-1 text-xs text-amber-800">
+                <ul className="mt-1.5 space-y-0.5 text-xs text-amber-800">
                   {block.partialReasons.slice(0, 3).map((reason) => (
                     <li key={`${message.id}-${reason}`}>• {reason}</li>
                   ))}
                 </ul>
               ) : null}
-              <div className="mt-2 flex flex-wrap gap-2">
+              <div className="mt-2 flex flex-wrap gap-1.5">
                 {previewHref || block.documentId ? (
                   <button
                     type="button"
@@ -694,7 +738,7 @@ function MessageBlocks({
                         ...(block.previewModeDefault ? { previewModeDefault: block.previewModeDefault } : {}),
                       })
                     }
-                    className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+                    className="inline-flex items-center gap-1 border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
                   >
                     <ExternalLink className="h-3.5 w-3.5" />
                     Preview
@@ -705,7 +749,7 @@ function MessageBlocks({
                     href={downloadHref}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+                    className="inline-flex items-center gap-1 border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
                   >
                     <Download className="h-3.5 w-3.5" />
                     Download
@@ -719,7 +763,7 @@ function MessageBlocks({
                         documentId: block.documentId,
                       })
                     }
-                    className="rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+                    className="border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
                   >
                     Open in docs
                   </button>
@@ -729,7 +773,7 @@ function MessageBlocks({
                     key={`${message.id}-${action.action}-${action.label}`}
                     type="button"
                     onClick={() => onRunAction?.(action.label, action.action, action.payload)}
-                    className="rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+                    className="border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
                   >
                     {action.label}
                   </button>

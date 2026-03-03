@@ -735,6 +735,28 @@ function inferArtifactTitle(content: string): string {
 function ensureDocumentArtifactBlock(blocks: ChatMessageBlock[], content: string): ChatMessageBlock[] {
   if (blocks.some((block) => block.type === "document_artifact")) return blocks;
 
+  const exportBlock = blocks.find(
+    (block): block is Extract<ChatMessageBlock, { type: "document_export_result" }> =>
+      block.type === "document_export_result"
+  );
+  if (exportBlock) {
+    const normalizedHref = normalizeDocumentStorageHref(exportBlock.downloadHref);
+    if (normalizedHref || exportBlock.documentId) {
+      return [
+        {
+          type: "document_artifact",
+          title: inferArtifactTitle(content),
+          format: exportBlock.format || "PDF",
+          ...(normalizedHref ? { storagePath: normalizedHref, previewHref: normalizedHref, downloadHref: normalizedHref } : {}),
+          ...(exportBlock.documentId ? { documentId: exportBlock.documentId } : {}),
+          ...(exportBlock.versionId ? { versionId: exportBlock.versionId } : {}),
+          previewModeDefault: "pdf",
+        },
+        ...blocks,
+      ];
+    }
+  }
+
   const actionBlocks = blocks.filter(
     (block): block is Extract<ChatMessageBlock, { type: "action_buttons" }> => block.type === "action_buttons"
   );

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Download, ExternalLink, Quote, RefreshCcw, Search, Sparkles } from "lucide-react";
+import { Download, ExternalLink, Quote, RefreshCcw, Search, Sparkles } from "lucide-react";
 import { getRuntimeDocument, RuntimeWorkspaceDocumentDto } from "@/lib/runtime-api";
 import { ChatMarkdown } from "./chat-markdown";
 
@@ -316,82 +316,59 @@ export function DocumentWorkspacePanel({
 
           {selectedDocument ? (
             <>
-              <div className="mx-3 mb-1.5 rounded-md border border-zinc-200 bg-white px-2.5 py-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="truncate text-xs font-semibold text-zinc-900">
-                      {selectedDocument.title || selectedDocument.originalFileName}
-                    </p>
-                    <p className="mt-0.5 truncate text-[11px] text-zinc-600">
-                      {[selectedDocFamily || "Document", `v${selectedVersion}`, typeof selectedCoverage === "number" ? `Coverage ${Math.round(selectedCoverage)}/100` : ""]
-                        .filter(Boolean)
-                        .join(" • ")}
-                    </p>
-                  </div>
-                  <div className="relative shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => setActionMenuOpen((previous) => !previous)}
-                      className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
-                    >
-                      <Download className="h-3.5 w-3.5" />
-                      Actions
-                      <ChevronDown className="h-3.5 w-3.5" />
-                    </button>
-                    {actionMenuOpen ? (
-                      <div className="absolute right-0 z-20 mt-1.5 w-56 rounded-md border border-zinc-200 bg-white p-1 shadow-lg">
-                        {selectedStorageHref ? (
-                          <a
-                            href={selectedStorageHref}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
-                          >
-                            <ExternalLink className="h-3.5 w-3.5" />
-                            Open source file
-                          </a>
-                        ) : null}
-                        {selectedExports.map((item, index) => (
-                          <a
-                            key={`${item.id}-${item.format}`}
-                            href={item.href}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
-                          >
-                            <Download className="h-3.5 w-3.5" />
-                            Download {item.format}
-                            {index === 0 ? " (latest)" : ""}
-                          </a>
-                        ))}
-                        {!selectedStorageHref && !selectedExports.length ? (
-                          <p className="px-2 py-1.5 text-xs text-zinc-500">No download links yet.</p>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </div>
+              <div className="mx-3 mb-1 flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-semibold text-zinc-900">
+                    {selectedDocument.title || selectedDocument.originalFileName}
+                  </p>
+                  <p className="truncate text-[11px] text-zinc-500">
+                    {[selectedDocFamily || "Document", `v${selectedVersion}`, typeof selectedCoverage === "number" ? `Coverage ${Math.round(selectedCoverage)}/100` : ""]
+                      .filter(Boolean)
+                      .join(" • ")}
+                  </p>
                 </div>
-                {selectedDocument.generatedMeta?.partial ? (
-                  <div className="mt-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setShowPartialReasons((previous) => !previous)}
-                      className="text-[11px] text-amber-700 hover:underline"
-                    >
-                      Partial draft returned {showPartialReasons ? "▲" : "▼"}
-                    </button>
-                    {showPartialReasons ? (
-                      <ul className="mt-1 space-y-0.5 text-[11px] text-amber-800">
-                        {(selectedDocument.generatedMeta.partialReasons?.length
-                          ? selectedDocument.generatedMeta.partialReasons.slice(0, 3)
-                          : ["Evidence quality is below deep target for this version."]
-                        ).map((reason) => (
-                          <li key={reason}>• {reason}</li>
-                        ))}
-                      </ul>
-                    ) : null}
-                  </div>
-                ) : null}
+                <div className="relative shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setActionMenuOpen((previous) => !previous)}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-200 text-zinc-600 hover:bg-zinc-100"
+                    title="Document downloads"
+                    aria-label="Document downloads"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                  </button>
+                  {actionMenuOpen ? (
+                    <div className="absolute right-0 z-20 mt-1 w-52 rounded-md border border-zinc-200 bg-white p-1 shadow-md">
+                      {selectedStorageHref ? (
+                        <a
+                          href={selectedStorageHref}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          Open source file
+                        </a>
+                      ) : null}
+                      {selectedExports.map((item, index) => (
+                        <a
+                          key={`${item.id}-${item.format}`}
+                          href={item.href}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                          Download {item.format}
+                          {index === 0 ? " (latest)" : ""}
+                        </a>
+                      ))}
+                      {!selectedStorageHref && !selectedExports.length ? (
+                        <p className="px-2 py-1.5 text-xs text-zinc-500">No download links yet.</p>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
               </div>
 
               <div className="relative min-h-0 flex-1 border-y border-zinc-200">
@@ -404,6 +381,27 @@ export function DocumentWorkspacePanel({
                   className="bat-scrollbar h-full min-h-0 overflow-y-auto bg-white px-3 py-2 text-[13px] leading-6 text-zinc-800 select-text"
                   style={{ userSelect: "text" }}
                 >
+                  {selectedDocument.generatedMeta?.partial ? (
+                    <div className="mb-2 border-l-2 border-amber-300 pl-2 text-[11px] text-amber-800">
+                      <button
+                        type="button"
+                        onClick={() => setShowPartialReasons((previous) => !previous)}
+                        className="font-medium hover:underline"
+                      >
+                        Partial draft {showPartialReasons ? "▲" : "▼"}
+                      </button>
+                      {showPartialReasons ? (
+                        <ul className="mt-1 space-y-0.5">
+                          {(selectedDocument.generatedMeta.partialReasons?.length
+                            ? selectedDocument.generatedMeta.partialReasons.slice(0, 3)
+                            : ["Evidence quality is below deep target for this version."]
+                          ).map((reason) => (
+                            <li key={reason}>• {reason}</li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {hydrating ? (
                     "Loading document markdown..."
                   ) : selectedContent ? (

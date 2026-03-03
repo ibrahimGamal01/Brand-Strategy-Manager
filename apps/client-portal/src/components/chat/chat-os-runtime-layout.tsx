@@ -643,7 +643,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     actionKey: string,
     payload?: Record<string, unknown>
   ) => {
-    const action = actionKey.trim().toLowerCase();
+    const action = actionKey.trim().toLowerCase().replace(/^\/+/, "");
     if (action === "open_library") {
       const requestedCollection = String(payload?.collection || "").trim().toLowerCase();
       if (
@@ -766,7 +766,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
         ? "show_sources"
         : action === "generate_pdf"
           ? "generate_pdf"
-          : action.replace(/[^a-z0-9_./-]+/g, "_");
+          : action.replace(/[^a-z0-9_.-]+/g, "_");
     const payloadText = payload ? JSON.stringify(payload) : "";
     if (normalizedCommand === "generate_pdf") {
       runPriorityCommand("Generate a deep business strategy PDF using current workspace evidence and include citations.");

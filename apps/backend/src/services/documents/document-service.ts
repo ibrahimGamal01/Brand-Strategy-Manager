@@ -741,18 +741,22 @@ function filterLaneByRelevance<T, TWithScore extends T>(input: {
 
   const kept = scored
     .filter((entry) => {
-      if (!input.strictGateEnabled) return true;
       if (entry.hardRejected) return false;
+      if (!input.strictGateEnabled) return true;
       return entry.score >= input.minScore;
     })
     .map((entry) => input.withScore(entry.row, entry.score));
   const collisionRejected = scored.filter((entry) => entry.hardRejected).length;
-  const dropped = input.strictGateEnabled ? scored.length - kept.length : 0;
+  const dropped = scored.length - kept.length;
   const meanScore = kept.length ? kept.reduce((sum, entry) => sum + Number((entry as any).relevanceScore || 0), 0) / kept.length : 0;
   const ambiguousCount = scored.filter((entry) => entry.ambiguous).length;
   const reasons: string[] = [];
   if (!input.strictGateEnabled) {
     reasons.push(`${input.laneLabel}: strict relevance gate disabled by feature flag.`);
+    if (collisionRejected > 0) {
+      reasons.push(`${input.laneLabel}: rejected ${collisionRejected} probable entity-collision row(s).`);
+    }
+    if (dropped > collisionRejected) reasons.push(`${input.laneLabel}: dropped ${dropped - collisionRejected} low-relevance item(s).`);
   } else {
     if (collisionRejected > 0) {
       reasons.push(`${input.laneLabel}: rejected ${collisionRejected} probable entity-collision row(s).`);
