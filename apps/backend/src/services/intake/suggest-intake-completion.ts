@@ -1396,8 +1396,7 @@ Return a single JSON object with only these keys.`;
     const suppressedByLinkedinPriority =
       hasExplicitLinkedinReference &&
       candidate.platform !== 'linkedin' &&
-      !isUserProvided &&
-      Number(candidate.confidence || 0) < 0.9;
+      !isUserProvided;
     const discoveredAutoApplyAllowed =
       AUTO_APPLY_DISCOVERED_HANDLES &&
       candidate.isLikelyClient &&
