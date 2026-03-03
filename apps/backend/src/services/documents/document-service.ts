@@ -19,6 +19,8 @@ import { upsertGeneratedRuntimeDocument } from './workspace-document-service';
 import { buildDocumentSpecV1 } from './spec-builder';
 import { draftDocumentSections } from './section-drafter';
 import { persistDocumentQualityMemory } from '../chat/runtime/workspace-memory';
+import { buildDocSpecBuilderSystemPrompt } from '../chat/runtime/prompts/doc-spec-builder';
+import { buildSectionDrafterSystemPrompt } from '../chat/runtime/prompts/section-drafter';
 
 type DepthConfig = {
   competitorsTake: number;
@@ -1205,6 +1207,12 @@ export async function generateDocumentForResearchJob(
     title,
     docFamily,
   });
+  const specPromptGuide = buildDocSpecBuilderSystemPrompt({
+    docFamily,
+    businessArchetype: specBuild.spec.businessArchetype,
+    depth: specBuild.spec.depth,
+  });
+  const sectionPromptGuide = buildSectionDrafterSystemPrompt();
   const sectionDrafting = draftDocumentSections({
     spec: specBuild.spec,
     payload,
@@ -1265,6 +1273,8 @@ export async function generateDocumentForResearchJob(
         sectionCount: specBuild.spec.sections.length,
         repaired: specBuild.repaired,
         validationErrors: specBuild.validationErrors,
+        promptModule: 'doc-spec-builder',
+        promptPreview: specPromptGuide.slice(0, 320),
       },
       toolName: 'document.generate',
     });
@@ -1278,6 +1288,8 @@ export async function generateDocumentForResearchJob(
         stage: 'section_drafts',
         sectionCount: specBuild.spec.sections.length,
         docFamily,
+        promptModule: 'section-drafter',
+        promptPreview: sectionPromptGuide.slice(0, 220),
       },
       toolName: 'document.generate',
     });
