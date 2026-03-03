@@ -149,7 +149,10 @@ export function SocialHandlesFields({
       primary: normalizedHandles.includes(normalizedPrimary) ? normalizedPrimary : normalizedHandles[0] || "",
       handles: normalizedHandles,
     };
-    onChangeV2?.(platform, nextBucket);
+    if (onChangeV2) {
+      onChangeV2(platform, nextBucket);
+      return;
+    }
     onChange(platform, nextBucket.primary || "");
   }
 

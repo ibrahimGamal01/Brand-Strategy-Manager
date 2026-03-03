@@ -341,7 +341,7 @@ export function IntakeWizardV2({
               onChange={(next) => updateField("socialReferences", next)}
               maxItems={8}
               placeholder="Paste social profile URL and press Enter"
-              helperText="BAT uses these references for channel intelligence. They are not crawled unless social profile crawl is enabled."
+              helperText="BAT uses these references for continuous background channel enrichment and high-confidence suggestions."
             />
           </QuestionCard>
 

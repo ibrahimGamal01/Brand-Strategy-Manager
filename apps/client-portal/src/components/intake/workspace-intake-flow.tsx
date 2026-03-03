@@ -245,6 +245,20 @@ function normalizeCoverageFields(fields: unknown): string[] {
   return fields.map((field) => String(field || "").trim()).filter(Boolean);
 }
 
+function buildBackgroundSuggestFingerprint(state: IntakeStateV2): string {
+  const classified = classifyStateWebsiteInputs(state);
+  const handles = toHandleRows(state)
+    .map((row) => `${row.platform}:${String(row.handle || "").trim().toLowerCase()}`)
+    .filter(Boolean)
+    .sort();
+  return JSON.stringify({
+    name: String(state.name || "").trim().toLowerCase(),
+    websites: classified.crawlWebsites.map((entry) => String(entry || "").trim().toLowerCase()).sort(),
+    socialReferences: classified.socialReferences.map((entry) => String(entry || "").trim().toLowerCase()).sort(),
+    handles,
+  });
+}
+
 export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }: WorkspaceIntakeFlowProps) {
   const [phase, setPhase] = useState<IntakePhase>("wizard");
   const [loading, setLoading] = useState(false);
@@ -275,6 +289,10 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
   const [hasPreScanEvidence, setHasPreScanEvidence] = useState(false);
 
   const backgroundSyncTimerRef = useRef<number | null>(null);
+  const latestStateRef = useRef(state);
+  const latestFieldMetaRef = useRef(fieldMeta);
+  const backgroundSuggestInFlightRef = useRef(false);
+  const backgroundSuggestFingerprintRef = useRef<string>("");
 
   useEffect(() => {
     const next = fromPrefillToV2(initialPrefill);
@@ -290,6 +308,14 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
     });
     setHasPreScanEvidence(Boolean(next.website || next.websites.length || next.socialReferences.length));
   }, [initialPrefill]);
+
+  useEffect(() => {
+    latestStateRef.current = state;
+  }, [state]);
+
+  useEffect(() => {
+    latestFieldMetaRef.current = fieldMeta;
+  }, [fieldMeta]);
 
   useEffect(() => {
     setSuggestedHandleCandidates((previous) =>
@@ -325,6 +351,7 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
     if (backgroundSyncTimerRef.current) {
       window.clearTimeout(backgroundSyncTimerRef.current);
     }
+    const sourceFingerprint = buildBackgroundSuggestFingerprint(state);
     backgroundSyncTimerRef.current = window.setTimeout(() => {
       const payload = toSuggestPayloadV2(state);
       void saveWorkspaceIntakeDraft(workspaceId, {
@@ -333,6 +360,89 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
       })
         .then(() => {
           setHasPreScanEvidence(true);
+          if (backgroundSuggestInFlightRef.current) return;
+          if (backgroundSuggestFingerprintRef.current === sourceFingerprint) return;
+          backgroundSuggestInFlightRef.current = true;
+          void suggestWorkspaceIntakeCompletion(workspaceId, {
+            ...payload,
+            step: "brand",
+            scope: "global",
+            overwritePolicy: "missing_or_low_signal",
+            socialReferences: toSocialReferenceList(state),
+            fieldMeta: latestFieldMetaRef.current,
+          })
+            .then((suggestion) => {
+              if (!suggestion?.success) return;
+              if (buildBackgroundSuggestFingerprint(latestStateRef.current) !== sourceFingerprint) return;
+
+              let next = latestStateRef.current;
+              let nextMeta = latestFieldMetaRef.current;
+              let updatedFields = 0;
+              let updatedHandles = 0;
+
+              if (suggestion.suggested) {
+                const suggestedResult = applySuggestedToState(next, suggestion.suggested, "brand", {
+                  scope: "global",
+                  overwritePolicy: "missing_or_low_signal",
+                  fieldMeta: nextMeta,
+                });
+                next = suggestedResult.next;
+                nextMeta = suggestedResult.nextFieldMeta;
+                updatedFields = suggestedResult.suggestedKeys.size;
+                setSuggestedFields((previous) =>
+                  new Set([...Array.from(previous), ...Array.from(suggestedResult.suggestedKeys)])
+                );
+              }
+
+              if (suggestion.suggestedHandles) {
+                const handleResult = applySuggestedHandles(next, suggestion.suggestedHandles);
+                next = handleResult.next;
+                updatedHandles = handleResult.suggestedPlatforms.size;
+                setSuggestedHandlePlatforms((previous) =>
+                  new Set([...Array.from(previous), ...Array.from(handleResult.suggestedPlatforms)])
+                );
+              }
+
+              if (updatedFields > 0 || updatedHandles > 0) {
+                setState(next);
+                setFieldMeta(nextMeta);
+              }
+              setSuggestedHandleValidation(
+                suggestion?.suggestedHandleValidation && typeof suggestion.suggestedHandleValidation === "object"
+                  ? suggestion.suggestedHandleValidation
+                  : undefined
+              );
+              setLastCoverage({
+                inferableFields: normalizeCoverageFields(suggestion?.coverage?.inferableFields),
+                suggestedFields: normalizeCoverageFields(suggestion?.coverage?.suggestedFields),
+                blockedLowSignalFields: normalizeCoverageFields(suggestion?.coverage?.blockedLowSignalFields),
+              });
+              const warningCodes = Array.isArray(suggestion?.warnings) ? suggestion.warnings : [];
+              const reasonCodes = Array.isArray(suggestion?.confirmationReasons) ? suggestion.confirmationReasons : [];
+              const bypassMissingPrimary =
+                hasWebsiteInput(next) &&
+                reasonCodes.length > 0 &&
+                reasonCodes.every((code) => code === "MISSING_PRIMARY_CHANNEL");
+              const needsConfirmation = suggestion?.confirmationRequired === true && !bypassMissingPrimary;
+              setConfirmationRequired(needsConfirmation);
+              setConfirmationReasons(reasonCodes);
+              setChannelsConfirmed(!needsConfirmation);
+              if (warningCodes.includes("LOW_SIGNAL_COPY")) {
+                setNotice("BAT refreshed background suggestions and skipped low-signal copy.");
+              } else if (updatedFields > 0 || updatedHandles > 0) {
+                setNotice("BAT refreshed suggestions in the background.");
+              }
+              backgroundSuggestFingerprintRef.current = sourceFingerprint;
+            })
+            .catch((backgroundSuggestError: unknown) => {
+              const message = String((backgroundSuggestError as Error)?.message || "");
+              if (message) {
+                console.warn("[Intake] Background suggest warning:", message);
+              }
+            })
+            .finally(() => {
+              backgroundSuggestInFlightRef.current = false;
+            });
         })
         .catch((backgroundError: unknown) => {
           const message = String((backgroundError as Error)?.message || "");
