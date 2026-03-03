@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Quote, RefreshCcw, Search, Sparkles } from "lucide-react";
+import { ChevronDown, Download, ExternalLink, Quote, RefreshCcw, Search, Sparkles } from "lucide-react";
 import { getRuntimeDocument, RuntimeWorkspaceDocumentDto } from "@/lib/runtime-api";
 import { ChatMarkdown } from "./chat-markdown";
 
@@ -26,6 +26,22 @@ function compactQuote(value: string, maxChars = 380): string {
   if (!normalized) return "";
   if (normalized.length <= maxChars) return normalized;
   return `${normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
+}
+
+function normalizeStorageHref(value?: string | null): string {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^https?:\/\//i.test(raw)) return raw;
+  if (raw.startsWith("/storage/")) return raw;
+  if (raw.startsWith("storage/")) return `/${raw}`;
+  if (raw.startsWith("./storage/")) return `/${raw.slice(2)}`;
+  return raw;
+}
+
+function familyLabel(value?: string | null): string {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  return raw.replace(/_/g, " ");
 }
 
 export function DocumentWorkspacePanel({
@@ -57,6 +73,8 @@ export function DocumentWorkspacePanel({
   const [hydratedContentByDocument, setHydratedContentByDocument] = useState<Record<string, string>>({});
   const readerRef = useRef<HTMLDivElement | null>(null);
   const [selectionToolbar, setSelectionToolbar] = useState<{ x: number; y: number } | null>(null);
+  const [actionMenuOpen, setActionMenuOpen] = useState(false);
+  const [showPartialReasons, setShowPartialReasons] = useState(false);
 
   const scopedDocuments = useMemo(() => {
     if (showAllDocuments) return documents;
@@ -135,6 +153,25 @@ export function DocumentWorkspacePanel({
     return String(hydratedContentByDocument[selectedDocument.id] || "");
   }, [hydratedContentByDocument, selectedDocument]);
 
+  const selectedDocFamily = familyLabel(selectedDocument?.generatedMeta?.docFamily);
+  const selectedCoverage = selectedDocument?.generatedMeta?.coverageScore;
+  const selectedVersion = selectedDocument?.latestVersion?.versionNumber || 0;
+  const selectedStorageHref = useMemo(
+    () => normalizeStorageHref(selectedDocument?.storageHref || selectedDocument?.storagePath),
+    [selectedDocument?.storageHref, selectedDocument?.storagePath]
+  );
+  const selectedExports = useMemo(
+    () =>
+      [...(selectedDocument?.exports || [])]
+        .map((item) => ({
+          ...item,
+          href: normalizeStorageHref(item.storageHref || item.storagePath),
+        }))
+        .filter((item) => Boolean(item.href))
+        .sort((a, b) => Date.parse(String(b.createdAt || "")) - Date.parse(String(a.createdAt || ""))),
+    [selectedDocument?.exports]
+  );
+
   const updateSelection = useCallback(() => {
     if (!readerRef.current || typeof window === "undefined") return;
     const selection = window.getSelection();
@@ -193,6 +230,11 @@ export function DocumentWorkspacePanel({
     };
   }, [selectionToolbar]);
 
+  useEffect(() => {
+    setActionMenuOpen(false);
+    setShowPartialReasons(false);
+  }, [selectedDocument?.id]);
+
   return (
     <aside className="flex h-full min-h-0 flex-col bg-white">
       <div className="flex items-center justify-between gap-2 border-b border-zinc-200 px-3 py-2">
@@ -238,7 +280,7 @@ export function DocumentWorkspacePanel({
             />
           </label>
 
-          <div className="bat-scrollbar mx-3 mb-2.5 max-h-32 space-y-0.5 overflow-y-auto">
+          <div className="bat-scrollbar mx-3 mb-2 max-h-24 space-y-0.5 overflow-y-auto">
             {filteredDocuments.map((document) => {
               const active = document.id === selectedDocument?.id;
               return (
@@ -274,39 +316,83 @@ export function DocumentWorkspacePanel({
 
           {selectedDocument ? (
             <>
-              <div className="mx-3 mb-1.5 flex flex-wrap gap-1.5">
-                {selectedDocument.generatedMeta?.docFamily ? (
-                  <span className="rounded-md bg-zinc-100 px-2 py-0.5 text-[10px] uppercase text-zinc-600">
-                    {selectedDocument.generatedMeta.docFamily.replace(/_/g, " ")}
-                  </span>
-                ) : null}
-                <span className="rounded-md bg-zinc-100 px-2 py-0.5 text-[10px] uppercase text-zinc-600">
-                  {selectedDocument.mimeType || "document"}
-                </span>
-                <span className="rounded-md bg-zinc-100 px-2 py-0.5 text-[10px] text-zinc-600">
-                  Version {selectedDocument.latestVersion?.versionNumber || 0}
-                </span>
-                {typeof selectedDocument.generatedMeta?.coverageScore === "number" ? (
-                  <span className="rounded-md bg-zinc-100 px-2 py-0.5 text-[10px] text-zinc-600">
-                    Coverage {Math.round(selectedDocument.generatedMeta.coverageScore)}/100
-                  </span>
+              <div className="mx-3 mb-1.5 rounded-md border border-zinc-200 bg-white px-2.5 py-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-semibold text-zinc-900">
+                      {selectedDocument.title || selectedDocument.originalFileName}
+                    </p>
+                    <p className="mt-0.5 truncate text-[11px] text-zinc-600">
+                      {[selectedDocFamily || "Document", `v${selectedVersion}`, typeof selectedCoverage === "number" ? `Coverage ${Math.round(selectedCoverage)}/100` : ""]
+                        .filter(Boolean)
+                        .join(" • ")}
+                    </p>
+                  </div>
+                  <div className="relative shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setActionMenuOpen((previous) => !previous)}
+                      className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      Actions
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    </button>
+                    {actionMenuOpen ? (
+                      <div className="absolute right-0 z-20 mt-1.5 w-56 rounded-md border border-zinc-200 bg-white p-1 shadow-lg">
+                        {selectedStorageHref ? (
+                          <a
+                            href={selectedStorageHref}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                            Open source file
+                          </a>
+                        ) : null}
+                        {selectedExports.map((item, index) => (
+                          <a
+                            key={`${item.id}-${item.format}`}
+                            href={item.href}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            Download {item.format}
+                            {index === 0 ? " (latest)" : ""}
+                          </a>
+                        ))}
+                        {!selectedStorageHref && !selectedExports.length ? (
+                          <p className="px-2 py-1.5 text-xs text-zinc-500">No download links yet.</p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+                {selectedDocument.generatedMeta?.partial ? (
+                  <div className="mt-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setShowPartialReasons((previous) => !previous)}
+                      className="text-[11px] text-amber-700 hover:underline"
+                    >
+                      Partial draft returned {showPartialReasons ? "▲" : "▼"}
+                    </button>
+                    {showPartialReasons ? (
+                      <ul className="mt-1 space-y-0.5 text-[11px] text-amber-800">
+                        {(selectedDocument.generatedMeta.partialReasons?.length
+                          ? selectedDocument.generatedMeta.partialReasons.slice(0, 3)
+                          : ["Evidence quality is below deep target for this version."]
+                        ).map((reason) => (
+                          <li key={reason}>• {reason}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
-
-              {selectedDocument.generatedMeta?.partial ? (
-                <div className="mx-3 mb-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
-                  <p className="font-semibold">Partial draft returned</p>
-                  {selectedDocument.generatedMeta.partialReasons?.length ? (
-                    <ul className="mt-1 space-y-0.5">
-                      {selectedDocument.generatedMeta.partialReasons.slice(0, 4).map((reason) => (
-                        <li key={reason}>• {reason}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="mt-1">Evidence quality is below deep target for this version.</p>
-                  )}
-                </div>
-              ) : null}
 
               <div className="relative min-h-0 flex-1 border-y border-zinc-200">
                 <div
