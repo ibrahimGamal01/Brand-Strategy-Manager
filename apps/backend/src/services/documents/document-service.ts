@@ -346,21 +346,33 @@ function scoreSourceRelevance(input: {
   const lowerText = String(input.text || '').toLowerCase();
   const host = parseHostname(input.url);
   const normalizedWords = uniqueTokens(splitWords(lowerText));
+  const strongBrandTokens = input.anchors.brandTokens.filter((token) => token.length >= 5);
+  const weakBrandTokens = input.anchors.brandTokens.filter((token) => token.length > 0 && token.length < 5);
 
   const hasHostAnchor = Boolean(
     host &&
       input.anchors.workspaceHosts.some((workspaceHost) => host === workspaceHost || host.endsWith(`.${workspaceHost}`))
   );
-  const hasBrandToken = input.anchors.brandTokens.some((token) => normalizedWords.includes(token));
+  const hasStrongBrandToken = strongBrandTokens.some((token) => normalizedWords.includes(token));
+  const hasWeakBrandToken = weakBrandTokens.some((token) => normalizedWords.includes(token));
+  const hasBrandToken = hasStrongBrandToken || hasWeakBrandToken;
   const hasCompetitorToken = input.anchors.competitorTokens.some((token) => normalizedWords.includes(token));
-  const hasAmbiguousBrand = !hasBrandToken && normalizedWords.some((word) => looksAmbiguousBrandToken(word, input.anchors.brandTokens));
-  const hardRejected = ENTITY_COLLISION_GUARD_ENABLED && hasAmbiguousBrand && !hasHostAnchor && !hasBrandToken;
+  const hasAmbiguousBrand = !hasStrongBrandToken && normalizedWords.some((word) => looksAmbiguousBrandToken(word, input.anchors.brandTokens));
+  const weakBrandWithoutAnchor =
+    hasWeakBrandToken &&
+    !hasHostAnchor &&
+    !Boolean(host && strongBrandTokens.some((token) => host.includes(token)));
+  const hardRejected =
+    ENTITY_COLLISION_GUARD_ENABLED &&
+    ((hasAmbiguousBrand && !hasHostAnchor && !hasStrongBrandToken) || (weakBrandWithoutAnchor && !hasCompetitorToken));
 
   let score = 0;
   if (hasHostAnchor) score += 0.58;
-  if (hasBrandToken) score += 0.5;
+  if (hasStrongBrandToken) score += 0.5;
+  if (!hasStrongBrandToken && hasWeakBrandToken) score += 0.12;
   if (hasCompetitorToken) score += 0.18;
-  if (host && input.anchors.brandTokens.some((token) => host.includes(token))) score += 0.2;
+  if (host && strongBrandTokens.some((token) => host.includes(token))) score += 0.2;
+  if (weakBrandWithoutAnchor) score -= 0.25;
   if (hasAmbiguousBrand) score -= ENTITY_COLLISION_GUARD_ENABLED ? 0.5 : 0.2;
   if (hardRejected) score = 0;
 
@@ -901,11 +913,30 @@ async function buildPayload(
     String((job.inputData as Record<string, unknown> | null)?.website || ''),
     ...(((job.inputData as Record<string, unknown> | null)?.websites as unknown[]) || []).map((entry) => String(entry || '')),
   ].filter(Boolean);
+  const strongCompetitorRows = competitorsRaw.filter((row) => {
+    const state = String(row.selectionState || '').trim().toUpperCase();
+    return state === 'TOP_PICK' || state === 'APPROVED';
+  });
+  const filteredCompetitorsRaw =
+    competitorsRaw.filter((row) => {
+      const state = String(row.selectionState || '').trim().toUpperCase();
+      return state === 'TOP_PICK' || state === 'APPROVED' || state === 'SHORTLISTED';
+    }) || [];
+  const documentCompetitorsRaw =
+    filteredCompetitorsRaw.length > 0
+      ? filteredCompetitorsRaw
+      : competitorsRaw
+          .slice()
+          .sort((a, b) => Number(b.relevanceScore || 0) - Number(a.relevanceScore || 0))
+          .slice(0, Math.min(config.competitorsTake, 8));
   const anchors = buildRelevanceAnchors({
     clientName: job.client.name,
     websiteDomain: String(job.client.brainProfile?.websiteDomain || ''),
     workspaceWebsites,
-    competitorHandles: competitorsRaw.map((row) => row.handle),
+    competitorHandles:
+      strongCompetitorRows.length > 0
+        ? strongCompetitorRows.map((row) => row.handle)
+        : documentCompetitorsRaw.map((row) => row.handle),
   });
 
   const webSnapshotsCandidate = dedupeBySignature(
@@ -1016,7 +1047,7 @@ async function buildPayload(
 
   const coverage = computeCoverage({
     counts: {
-      competitors: includeCompetitors ? competitorsRaw.length : 0,
+      competitors: includeCompetitors ? documentCompetitorsRaw.length : 0,
       posts: topPosts.length,
       webSnapshots: webSnapshots.length,
       news: news.length,
@@ -1043,7 +1074,7 @@ async function buildPayload(
   const recommendations = buildRecommendations({
     clientName: job.client.name,
     topPosts,
-    competitors: competitorsRaw.map((row) => ({
+    competitors: documentCompetitorsRaw.map((row) => ({
       handle: row.handle,
       platform: row.platform,
       selectionState: row.selectionState,
@@ -1063,7 +1094,7 @@ async function buildPayload(
     websiteDomain: job.client.brainProfile?.websiteDomain || 'Not specified',
     audience: plan.audience || 'Marketing team',
     timeframeDays: plan.timeframeDays || 90,
-    competitors: competitorsRaw.map((row) => ({
+    competitors: documentCompetitorsRaw.map((row) => ({
       handle: row.handle,
       platform: row.platform,
       selectionState: row.selectionState,
