@@ -1,7 +1,9 @@
 import {
+  listGeneratedDocuments,
   generateDocumentForResearchJob,
   getGeneratedDocumentById,
 } from '../../../documents/document-service';
+import { canonicalDocFamily } from '../../../documents/document-spec';
 import {
   applyRuntimeDocumentEdit,
   compareRuntimeDocumentVersions,
@@ -15,15 +17,60 @@ import {
 import type { DocumentPlan } from '../../../documents/document-spec';
 import type { ToolDefinition } from './tool-types';
 
+const SUPPORTED_DOC_TYPES = new Set<DocumentPlan['docType']>([
+  'SWOT',
+  'BUSINESS_STRATEGY',
+  'PLAYBOOK',
+  'COMPETITOR_AUDIT',
+  'CONTENT_CALENDAR',
+  'GO_TO_MARKET',
+  'STRATEGY_BRIEF',
+  'SWOT_ANALYSIS',
+  'CONTENT_CALENDAR_LEGACY',
+  'GTM_PLAN',
+]);
+
+const DOCUMENT_TYPE_ENUM_VALUES = [
+  'SWOT',
+  'BUSINESS_STRATEGY',
+  'PLAYBOOK',
+  'COMPETITOR_AUDIT',
+  'CONTENT_CALENDAR',
+  'GO_TO_MARKET',
+  'STRATEGY_BRIEF',
+  'SWOT_ANALYSIS',
+  'CONTENT_CALENDAR_LEGACY',
+  'GTM_PLAN',
+] as const;
+
+function normalizeDocType(raw: unknown): DocumentPlan['docType'] {
+  const requestedType = String(raw || '').trim().toUpperCase();
+  if (requestedType === 'SWOT' || requestedType === 'SWOT_ANALYSIS') return 'SWOT';
+  if (requestedType === 'PLAYBOOK') return 'PLAYBOOK';
+  if (requestedType === 'CONTENT_CALENDAR' || requestedType === 'CONTENT_CALENDAR_LEGACY') return 'CONTENT_CALENDAR';
+  if (requestedType === 'COMPETITOR_AUDIT') return 'COMPETITOR_AUDIT';
+  if (requestedType === 'GO_TO_MARKET' || requestedType === 'GTM_PLAN') return 'GO_TO_MARKET';
+  if (
+    requestedType === 'BUSINESS_STRATEGY' ||
+    requestedType === 'STRATEGY_BRIEF'
+  ) {
+    return 'BUSINESS_STRATEGY';
+  }
+  return 'BUSINESS_STRATEGY';
+}
+
 function normalizePlanInput(args: Record<string, unknown>): Partial<DocumentPlan> {
+  const requestedType = String(args.docType || args.template || 'BUSINESS_STRATEGY').toUpperCase();
+  const docType = SUPPORTED_DOC_TYPES.has(requestedType as DocumentPlan['docType']) ? normalizeDocType(requestedType) : 'BUSINESS_STRATEGY';
   return {
-    docType: String(args.docType || args.template || 'STRATEGY_BRIEF').toUpperCase() as DocumentPlan['docType'],
+    docType,
     title: typeof args.title === 'string' ? args.title : undefined,
     audience: typeof args.audience === 'string' ? args.audience : undefined,
     timeframeDays: Number.isFinite(Number(args.timeframeDays)) ? Number(args.timeframeDays) : undefined,
     depth: typeof args.depth === 'string' ? (args.depth as DocumentPlan['depth']) : undefined,
     includeCompetitors: typeof args.includeCompetitors === 'boolean' ? args.includeCompetitors : undefined,
     includeEvidenceLinks: typeof args.includeEvidenceLinks === 'boolean' ? args.includeEvidenceLinks : undefined,
+    requestedIntent: typeof args.requestedIntent === 'string' ? args.requestedIntent.trim() : undefined,
   };
 }
 
@@ -53,13 +100,17 @@ export const documentTools: ToolDefinition<Record<string, unknown>, Record<strin
     argsSchema: {
       type: 'object',
       properties: {
-        docType: { type: 'string', enum: ['STRATEGY_BRIEF', 'COMPETITOR_AUDIT', 'CONTENT_CALENDAR'] },
+        docType: {
+          type: 'string',
+          enum: DOCUMENT_TYPE_ENUM_VALUES,
+        },
         title: { type: 'string' },
         audience: { type: 'string' },
         timeframeDays: { type: 'number' },
         depth: { type: 'string', enum: ['short', 'standard', 'deep'] },
         includeCompetitors: { type: 'boolean' },
         includeEvidenceLinks: { type: 'boolean' },
+        requestedIntent: { type: 'string' },
       },
       additionalProperties: true,
     },
@@ -75,18 +126,141 @@ export const documentTools: ToolDefinition<Record<string, unknown>, Record<strin
     execute: async (_context, args) => ({ plan: normalizePlanInput(args) }),
   },
   {
-    name: 'document.generate',
-    description: 'Generate a PDF document for the current research workspace.',
+    name: 'document.build_spec',
+    description: 'Build a normalized document spec envelope (without generating a PDF).',
     argsSchema: {
       type: 'object',
       properties: {
-        docType: { type: 'string', enum: ['STRATEGY_BRIEF', 'COMPETITOR_AUDIT', 'CONTENT_CALENDAR'] },
+        docType: {
+          type: 'string',
+          enum: DOCUMENT_TYPE_ENUM_VALUES,
+        },
         title: { type: 'string' },
         audience: { type: 'string' },
         timeframeDays: { type: 'number' },
         depth: { type: 'string', enum: ['short', 'standard', 'deep'] },
         includeCompetitors: { type: 'boolean' },
         includeEvidenceLinks: { type: 'boolean' },
+        requestedIntent: { type: 'string' },
+      },
+      additionalProperties: true,
+    },
+    returnsSchema: {
+      type: 'object',
+      properties: {
+        plan: { type: 'object' },
+        spec: { type: 'object' },
+      },
+      required: ['plan', 'spec'],
+      additionalProperties: true,
+    },
+    mutate: false,
+    execute: async (_context, args) => {
+      const plan = normalizePlanInput(args);
+      return {
+        plan,
+        spec: {
+          version: 'v1',
+          docFamily: canonicalDocFamily(plan.docType),
+          requestedIntent: plan.requestedIntent || null,
+          depth: plan.depth || 'standard',
+        },
+      };
+    },
+  },
+  {
+    name: 'document.preview',
+    description: 'List latest generated documents to preview deliverable availability.',
+    argsSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number' },
+      },
+      additionalProperties: false,
+    },
+    returnsSchema: {
+      type: 'object',
+      properties: {
+        items: { type: 'array', items: { type: 'object' } },
+      },
+      required: ['items'],
+      additionalProperties: true,
+    },
+    mutate: false,
+    execute: async (context, args) => {
+      const limit = Number.isFinite(Number(args.limit)) ? Math.max(1, Math.min(20, Number(args.limit))) : 8;
+      const docs = await listGeneratedDocuments(context.researchJobId);
+      return {
+        items: docs.slice(0, limit).map((row) => ({
+          docId: row.id,
+          fileName: row.fileName,
+          storagePath: row.filePath,
+          mimeType: row.mimeType,
+          createdAt: row.uploadedAt.toISOString(),
+        })),
+      };
+    },
+  },
+  {
+    name: 'document.generate',
+    description: 'Generate a PDF document for the current research workspace.',
+    argsSchema: {
+      type: 'object',
+      properties: {
+        docType: {
+          type: 'string',
+          enum: DOCUMENT_TYPE_ENUM_VALUES,
+        },
+        title: { type: 'string' },
+        audience: { type: 'string' },
+        timeframeDays: { type: 'number' },
+        depth: { type: 'string', enum: ['short', 'standard', 'deep'] },
+        includeCompetitors: { type: 'boolean' },
+        includeEvidenceLinks: { type: 'boolean' },
+        requestedIntent: { type: 'string' },
+        continueDeepening: { type: 'boolean' },
+        resumeDocumentId: { type: 'string' },
+      },
+      additionalProperties: true,
+    },
+    returnsSchema: {
+      type: 'object',
+      properties: {
+        docId: { type: 'string' },
+        title: { type: 'string' },
+        storagePath: { type: 'string' },
+        mimeType: { type: 'string' },
+      },
+      required: ['docId', 'title', 'storagePath', 'mimeType'],
+      additionalProperties: true,
+    },
+    mutate: true,
+    execute: async (context, args) =>
+      (generateDocumentForResearchJob(context.researchJobId, normalizePlanInput(args), {
+        branchId: resolveBranchId(context),
+        userId: 'runtime-tool',
+        enrichmentPerformed: typeof args.enrichmentPerformed === 'boolean' ? args.enrichmentPerformed : undefined,
+      }) as unknown as Record<string, unknown>),
+  },
+  {
+    name: 'document.render_pdf',
+    description: 'Render a PDF artifact using the same normalized generation path.',
+    argsSchema: {
+      type: 'object',
+      properties: {
+        docType: {
+          type: 'string',
+          enum: DOCUMENT_TYPE_ENUM_VALUES,
+        },
+        title: { type: 'string' },
+        audience: { type: 'string' },
+        timeframeDays: { type: 'number' },
+        depth: { type: 'string', enum: ['short', 'standard', 'deep'] },
+        includeCompetitors: { type: 'boolean' },
+        includeEvidenceLinks: { type: 'boolean' },
+        requestedIntent: { type: 'string' },
+        continueDeepening: { type: 'boolean' },
+        resumeDocumentId: { type: 'string' },
       },
       additionalProperties: true,
     },

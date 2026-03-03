@@ -610,6 +610,13 @@ export async function upsertGeneratedRuntimeDocument(input: {
   storagePath: string;
   sourceClientDocumentId?: string;
   contentMd: string;
+  generatedMeta?: {
+    docFamily?: string;
+    coverageScore?: number;
+    coverageBand?: string;
+    partial?: boolean;
+    partialReasons?: string[];
+  };
 }) {
   const workspace = await prisma.researchJob.findUnique({
     where: { id: input.researchJobId },
@@ -664,6 +671,18 @@ export async function upsertGeneratedRuntimeDocument(input: {
               source: 'document.generate',
               branchId,
               generatedBy: input.userId,
+              docFamily: String(input.generatedMeta?.docFamily || '').trim() || undefined,
+              coverageScore: Number.isFinite(Number(input.generatedMeta?.coverageScore))
+                ? Number(input.generatedMeta?.coverageScore)
+                : undefined,
+              coverageBand: String(input.generatedMeta?.coverageBand || '').trim() || undefined,
+              partial: typeof input.generatedMeta?.partial === 'boolean' ? input.generatedMeta.partial : undefined,
+              partialReasons: Array.isArray(input.generatedMeta?.partialReasons)
+                ? input.generatedMeta?.partialReasons
+                    ?.map((entry) => String(entry || '').trim())
+                    .filter(Boolean)
+                    .slice(0, 12)
+                : undefined,
             },
           },
           select: { id: true },
@@ -738,6 +757,18 @@ export async function upsertGeneratedRuntimeDocument(input: {
           branchId,
           generatedBy: input.userId,
           chunkCount: chunks.length,
+          docFamily: String(input.generatedMeta?.docFamily || '').trim() || undefined,
+          coverageScore: Number.isFinite(Number(input.generatedMeta?.coverageScore))
+            ? Number(input.generatedMeta?.coverageScore)
+            : undefined,
+          coverageBand: String(input.generatedMeta?.coverageBand || '').trim() || undefined,
+          partial: typeof input.generatedMeta?.partial === 'boolean' ? input.generatedMeta.partial : undefined,
+          partialReasons: Array.isArray(input.generatedMeta?.partialReasons)
+            ? input.generatedMeta?.partialReasons
+                ?.map((entry) => String(entry || '').trim())
+                .filter(Boolean)
+                .slice(0, 12)
+            : undefined,
         },
       },
     });
@@ -799,6 +830,25 @@ export async function listRuntimeDocuments(input: {
   });
 
   return docs.map((doc) => ({
+    ...(typeof doc.parserMetaJson === 'object' && doc.parserMetaJson !== null
+      ? {
+          generatedMeta: {
+            docFamily: String((doc.parserMetaJson as Record<string, unknown>).docFamily || '').trim() || undefined,
+            coverageScore: Number((doc.parserMetaJson as Record<string, unknown>).coverageScore || 0) || undefined,
+            coverageBand: String((doc.parserMetaJson as Record<string, unknown>).coverageBand || '').trim() || undefined,
+            partial:
+              typeof (doc.parserMetaJson as Record<string, unknown>).partial === 'boolean'
+                ? Boolean((doc.parserMetaJson as Record<string, unknown>).partial)
+                : undefined,
+            partialReasons: Array.isArray((doc.parserMetaJson as Record<string, unknown>).partialReasons)
+              ? ((doc.parserMetaJson as Record<string, unknown>).partialReasons as unknown[])
+                  .map((entry) => String(entry || '').trim())
+                  .filter(Boolean)
+                  .slice(0, 12)
+              : undefined,
+          },
+        }
+      : {}),
     id: doc.id,
     title: doc.title,
     originalFileName: doc.originalFileName,
@@ -870,6 +920,25 @@ export async function getRuntimeDocumentDetail(input: {
   if (!doc) throw new Error('Document not found');
 
   return {
+    ...(typeof doc.parserMetaJson === 'object' && doc.parserMetaJson !== null
+      ? {
+          generatedMeta: {
+            docFamily: String((doc.parserMetaJson as Record<string, unknown>).docFamily || '').trim() || undefined,
+            coverageScore: Number((doc.parserMetaJson as Record<string, unknown>).coverageScore || 0) || undefined,
+            coverageBand: String((doc.parserMetaJson as Record<string, unknown>).coverageBand || '').trim() || undefined,
+            partial:
+              typeof (doc.parserMetaJson as Record<string, unknown>).partial === 'boolean'
+                ? Boolean((doc.parserMetaJson as Record<string, unknown>).partial)
+                : undefined,
+            partialReasons: Array.isArray((doc.parserMetaJson as Record<string, unknown>).partialReasons)
+              ? ((doc.parserMetaJson as Record<string, unknown>).partialReasons as unknown[])
+                  .map((entry) => String(entry || '').trim())
+                  .filter(Boolean)
+                  .slice(0, 12)
+              : undefined,
+          },
+        }
+      : {}),
     id: doc.id,
     title: doc.title,
     originalFileName: doc.originalFileName,

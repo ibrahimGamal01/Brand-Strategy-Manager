@@ -19,8 +19,12 @@ const TOOL_TIMEOUT_OVERRIDES_MS: Record<string, number> = {
   'web.crawl': 120_000,
   'web.fetch': 45_000,
   'search.web': 25_000,
-  'document.generate': 90_000,
-  'document.export': 90_000,
+  'research.gather': 75_000,
+  'competitors.discover_v3': 65_000,
+  'evidence.news': 40_000,
+  'evidence.posts': 35_000,
+  'document.generate': 120_000,
+  'document.export': 120_000,
   'document.ingest': 120_000,
   'intel.list': 12_000,
   'intel.get': 12_000,
@@ -188,10 +192,6 @@ function resolveToolTimeoutMs(toolName: string, policyTimeoutMs: number): number
   const override = TOOL_TIMEOUT_OVERRIDES_MS[String(toolName || '').trim()];
   if (typeof override === 'number' && Number.isFinite(override)) {
     return Math.max(policyTimeoutMs, override);
-  }
-  // Deep discovery tools can require longer wall time due to DDG subprocesses and multi-page crawls.
-  if (toolName === 'research.gather') {
-    return Math.max(policyTimeoutMs, 180_000);
   }
   return policyTimeoutMs;
 }

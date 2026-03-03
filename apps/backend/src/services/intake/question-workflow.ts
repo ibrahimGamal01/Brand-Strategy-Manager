@@ -18,7 +18,15 @@ export type Question = {
 
 export type QuestionSet = {
   id: string;
-  trigger: 'post_intake' | 'intelligence_ready' | 'competitor_approved' | 'calendar_generated' | 'manual';
+  trigger:
+    | 'post_intake'
+    | 'intelligence_ready'
+    | 'competitor_approved'
+    | 'calendar_generated'
+    | 'swot_requested'
+    | 'business_strategy_requested'
+    | 'playbook_requested'
+    | 'manual';
   title: string;
   description?: string;
   questions: Question[];
@@ -102,6 +110,84 @@ const QUESTION_SETS: QuestionSet[] = [
     ],
   },
   {
+    id: 'swot_delivery_context',
+    trigger: 'swot_requested',
+    title: 'SWOT delivery context',
+    questions: [
+      {
+        key: 'swot_audience',
+        text: 'Who will review this SWOT first?',
+        type: 'single_select',
+        options: [
+          { value: 'internal_team', label: 'Internal team' },
+          { value: 'client', label: 'Client' },
+          { value: 'board', label: 'Board / investors' },
+        ],
+      },
+      {
+        key: 'swot_time_horizon',
+        text: 'What planning horizon should the SWOT prioritize?',
+        type: 'single_select',
+        options: [
+          { value: '30', label: '30 days' },
+          { value: '60', label: '60 days' },
+          { value: '90', label: '90 days' },
+          { value: '180', label: '180 days' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'business_strategy_context',
+    trigger: 'business_strategy_requested',
+    title: 'Business strategy context',
+    questions: [
+      {
+        key: 'strategy_primary_kpi',
+        text: 'What is the primary KPI this strategy should optimize?',
+        type: 'text',
+      },
+      {
+        key: 'strategy_ownership',
+        text: 'Who owns execution of this strategy?',
+        type: 'single_select',
+        options: [
+          { value: 'founder', label: 'Founder' },
+          { value: 'marketing_team', label: 'Marketing team' },
+          { value: 'agency_partner', label: 'Agency partner' },
+          { value: 'mixed', label: 'Mixed ownership' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'playbook_execution_context',
+    trigger: 'playbook_requested',
+    title: 'Playbook execution context',
+    questions: [
+      {
+        key: 'playbook_publish_cadence',
+        text: 'What weekly publish cadence is realistic right now?',
+        type: 'single_select',
+        options: [
+          { value: '2_per_week', label: '2 per week' },
+          { value: '3_per_week', label: '3 per week' },
+          { value: 'daily', label: 'Daily' },
+        ],
+      },
+      {
+        key: 'playbook_reporting_window',
+        text: 'How often should KPI review happen?',
+        type: 'single_select',
+        options: [
+          { value: 'weekly', label: 'Weekly' },
+          { value: 'biweekly', label: 'Bi-weekly' },
+          { value: 'monthly', label: 'Monthly' },
+        ],
+      },
+    ],
+  },
+  {
     id: 'calendar_preferences',
     trigger: 'calendar_generated',
     title: 'Calendar preferences',
@@ -135,13 +221,14 @@ const QUESTION_SETS: QuestionSet[] = [
 ];
 
 export async function evaluatePendingQuestionSets(researchJobId: string): Promise<QuestionSet[]> {
-  // For now, always return post_intake as pending unless answered; more triggers can be plugged in with job state.
+  // Trigger-specific orchestration can opt into additional sets later.
+  const autoEnabledTriggers = new Set<QuestionSet["trigger"]>(["post_intake"]);
   const answered = await prisma.clientIntakeAnswer.findMany({
     where: { researchJobId },
     select: { questionSetId: true },
   });
   const answeredSetIds = new Set(answered.map((a) => a.questionSetId));
-  return QUESTION_SETS.filter((set) => !answeredSetIds.has(set.id));
+  return QUESTION_SETS.filter((set) => autoEnabledTriggers.has(set.trigger) && !answeredSetIds.has(set.id));
 }
 
 export async function saveQuestionSetAnswers(params: {

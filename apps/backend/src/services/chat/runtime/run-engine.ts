@@ -40,6 +40,7 @@ import {
   validateClientResponse,
   writeClientResponse,
 } from './prompt-suite';
+import { routeRuntimeIntent } from './prompts/router';
 import type {
   RunPolicy,
   RuntimeDecision,
@@ -61,6 +62,7 @@ import {
   listPortalWorkspaceLibrary,
   resolvePortalWorkspaceLibraryRefs,
 } from '../../portal/portal-library';
+import { flattenMemoryForRuntimeContext, readWorkspaceMemoryContext } from './workspace-memory';
 
 type SendMessageInput = {
   researchJobId: string;
@@ -210,7 +212,7 @@ const TOOL_NAME_ALIASES: Record<string, { tool: string; args: Record<string, unk
   opportunityplanner: {
     tool: 'document.plan',
     args: {
-      docType: 'STRATEGY_BRIEF',
+      docType: 'BUSINESS_STRATEGY',
       depth: 'deep',
       includeCompetitors: true,
       includeEvidenceLinks: true,
@@ -252,12 +254,28 @@ const TOOL_TRANSIENT_MAX_RETRIES = envRuntimeNumber('CHAT_TOOL_MAX_RETRIES', 2, 
 const TOOL_TRANSIENT_RETRY_OVERRIDES: Record<string, number> = {
   'document.generate': 0,
   'document.export': 0,
+  'research.gather': 0,
+  'competitors.discover_v3': 0,
+  'evidence.news': 0,
+  'evidence.posts': 0,
 };
-const DOCUMENT_RUN_BUDGET_MS = envRuntimeNumber(
-  'RUNTIME_DOCUMENT_RUN_BUDGET_MS',
-  6 * 60_000,
+const DOCUMENT_RUN_BUDGET_SHORT_MS = envRuntimeNumber(
+  'RUNTIME_DOCUMENT_RUN_BUDGET_SHORT_MS',
+  2 * 60_000,
   60_000,
-  30 * 60_000
+  10 * 60_000
+);
+const DOCUMENT_RUN_BUDGET_STANDARD_MS = envRuntimeNumber(
+  'RUNTIME_DOCUMENT_RUN_BUDGET_STANDARD_MS',
+  4 * 60_000,
+  2 * 60_000,
+  15 * 60_000
+);
+const DOCUMENT_RUN_BUDGET_DEEP_MS = envRuntimeNumber(
+  'RUNTIME_DOCUMENT_RUN_BUDGET_DEEP_MS',
+  8 * 60_000,
+  4 * 60_000,
+  20 * 60_000
 );
 const DOCUMENT_ENRICHMENT_MIN_SCORE = envRuntimeNumber(
   'RUNTIME_DOCUMENT_ENRICHMENT_MIN_SCORE',
@@ -1426,11 +1444,32 @@ function normalizeToolArgs(tool: string, args: Record<string, unknown>, userMess
     return normalized;
   }
 
-  if (tool === 'document.plan') {
-    if (!String(normalized.docType || '').trim()) normalized.docType = 'STRATEGY_BRIEF';
+  if (tool === 'document.plan' || tool === 'document.generate' || tool === 'document.build_spec' || tool === 'document.render_pdf') {
+    const requestedDocType = String(normalized.docType || '').trim().toUpperCase();
+    if (requestedDocType === 'SWOT' || requestedDocType === 'SWOT_ANALYSIS') {
+      normalized.docType = 'SWOT';
+    } else if (requestedDocType === 'PLAYBOOK') {
+      normalized.docType = 'PLAYBOOK';
+    } else if (requestedDocType === 'CONTENT_CALENDAR' || requestedDocType === 'CONTENT_CALENDAR_LEGACY') {
+      normalized.docType = 'CONTENT_CALENDAR';
+    } else if (requestedDocType === 'COMPETITOR_AUDIT') {
+      normalized.docType = 'COMPETITOR_AUDIT';
+    } else if (requestedDocType === 'GO_TO_MARKET' || requestedDocType === 'GTM_PLAN') {
+      normalized.docType = 'GO_TO_MARKET';
+    } else if (
+      requestedDocType === 'BUSINESS_STRATEGY' ||
+      requestedDocType === 'STRATEGY_BRIEF'
+    ) {
+      normalized.docType = 'BUSINESS_STRATEGY';
+    } else {
+      normalized.docType = 'BUSINESS_STRATEGY';
+    }
     if (!String(normalized.depth || '').trim()) normalized.depth = 'standard';
     if (typeof normalized.includeCompetitors !== 'boolean') normalized.includeCompetitors = true;
     if (typeof normalized.includeEvidenceLinks !== 'boolean') normalized.includeEvidenceLinks = true;
+    if (typeof normalized.requestedIntent === 'string') {
+      normalized.requestedIntent = String(normalized.requestedIntent).trim().slice(0, 120);
+    }
     return normalized;
   }
 
@@ -1580,6 +1619,13 @@ type RuntimeDocumentCoverage = {
     news: number;
     community: number;
   };
+  targets: {
+    competitors: number;
+    posts: number;
+    webSnapshots: number;
+    news: number;
+    community: number;
+  };
   reasons: string[];
 };
 
@@ -1651,6 +1697,7 @@ function scoreRuntimeDocumentCoverage(contextSnapshot: Record<string, unknown>):
   return {
     score,
     counts,
+    targets,
     reasons: reasons.length ? reasons : ['Coverage is strong enough for deep document generation.'],
   };
 }
@@ -1698,44 +1745,59 @@ function maybeInjectDocumentEnrichmentToolCalls(input: {
   }
 
   const query = compactPromptString(input.triggerMessage, 220) || 'Collect additional validated evidence for the active workspace';
-  const candidates: RuntimeToolCall[] = [
-    {
+  const needsCompetitors = coverage.counts.competitors < coverage.targets.competitors;
+  const needsPosts = coverage.counts.posts < coverage.targets.posts;
+  const needsWeb = coverage.counts.webSnapshots < coverage.targets.webSnapshots;
+  const needsNews = coverage.counts.news < coverage.targets.news;
+  const needsCommunity = coverage.counts.community < coverage.targets.community;
+
+  const candidates: RuntimeToolCall[] = [];
+  if (needsWeb || needsNews || needsCommunity || needsPosts || needsCompetitors) {
+    candidates.push({
       tool: 'research.gather',
       args: {
         query,
         depth: 'standard',
-        includeScrapling: true,
+        includeScrapling: false,
         includeAccountContext: true,
         includeWorkspaceWebsites: true,
       },
-    },
-    {
+    });
+  }
+  if (needsCompetitors) {
+    candidates.push({
       tool: 'competitors.discover_v3',
       args: {
         mode: 'standard',
-        maxCandidates: 90,
-        maxEnrich: 8,
+        maxCandidates: 60,
+        maxEnrich: 4,
       },
-    },
-    {
+    });
+  }
+  if (needsPosts) {
+    candidates.push({
       tool: 'evidence.posts',
       args: {
         platform: 'any',
         sort: 'engagement',
-        limit: 10,
-      },
-    },
-    {
-      tool: 'evidence.news',
-      args: {
         limit: 8,
       },
-    },
-  ];
+    });
+  }
+  if (needsNews) {
+    candidates.push({
+      tool: 'evidence.news',
+      args: {
+        limit: 6,
+      },
+    });
+  }
 
   const existing = new Set(input.toolCalls.map((call) => `${call.tool}:${stableJson(call.args || {})}`));
   const addedCalls: RuntimeToolCall[] = [];
+  const maxAddedTools = 3;
   for (const candidate of candidates) {
+    if (addedCalls.length >= maxAddedTools) break;
     const key = `${candidate.tool}:${stableJson(candidate.args || {})}`;
     if (existing.has(key)) continue;
     existing.add(key);
@@ -1794,6 +1856,7 @@ function extractDocumentRuntimeTarget(toolResults: RuntimeToolResult[]): {
   runtimeDocumentId?: string;
   storagePath?: string;
   title?: string;
+  docType?: string;
   coverageScore?: number;
 } {
   for (let index = toolResults.length - 1; index >= 0; index -= 1) {
@@ -1802,11 +1865,13 @@ function extractDocumentRuntimeTarget(toolResults: RuntimeToolResult[]): {
     const runtimeDocumentId = String(raw.documentId || raw.runtimeDocumentId || '').trim();
     const storagePath = String(raw.storagePath || '').trim();
     const title = String(raw.title || '').trim();
+    const docType = String(raw.docType || raw.documentType || '').trim().toUpperCase();
     const coverageScore = Number(raw.coverageScore);
     return {
       ...(runtimeDocumentId ? { runtimeDocumentId } : {}),
       ...(storagePath ? { storagePath } : {}),
       ...(title ? { title } : {}),
+      ...(docType ? { docType } : {}),
       ...(Number.isFinite(coverageScore) ? { coverageScore } : {}),
     };
   }
@@ -1834,6 +1899,29 @@ function hasPartialDocumentResult(toolResults: RuntimeToolResult[]): boolean {
     if (coverageBand === 'moderate' || coverageBand === 'strong') return false;
   }
   return false;
+}
+
+function resolveDocumentDepthFromPlan(plan: RuntimePlan | null): 'short' | 'standard' | 'deep' {
+  const toolCalls = Array.isArray(plan?.toolCalls) ? plan!.toolCalls : [];
+  for (const call of toolCalls) {
+    const tool = String(call.tool || '').trim().toLowerCase();
+    if (tool !== 'document.generate' && tool !== 'document.plan' && tool !== 'document.build_spec' && tool !== 'document.render_pdf') {
+      continue;
+    }
+    const depth = String((isRecord(call.args) ? call.args.depth : '') || '')
+      .trim()
+      .toLowerCase();
+    if (depth === 'short' || depth === 'deep') return depth;
+    if (depth === 'standard') return 'standard';
+  }
+  return 'standard';
+}
+
+function resolveDocumentRunBudgetMs(plan: RuntimePlan | null): number {
+  const depth = resolveDocumentDepthFromPlan(plan);
+  if (depth === 'short') return DOCUMENT_RUN_BUDGET_SHORT_MS;
+  if (depth === 'deep') return DOCUMENT_RUN_BUDGET_DEEP_MS;
+  return DOCUMENT_RUN_BUDGET_STANDARD_MS;
 }
 
 function buildDocumentBudgetPartialMessage(input: {
@@ -1884,7 +1972,7 @@ function buildDocumentBudgetPartialMessage(input: {
     label: 'Continue Deepening Document',
     action: 'document.generate',
     payload: {
-      docType: 'STRATEGY_BRIEF',
+      docType: target.docType || 'BUSINESS_STRATEGY',
       depth: 'deep',
       continueDeepening: true,
       ...(target.runtimeDocumentId ? { resumeDocumentId: target.runtimeDocumentId } : {}),
@@ -2160,11 +2248,40 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   const hasDocumentKeyword = /\b(pdf|report|brief|document|doc)\b/.test(normalized);
   const hasDocumentGenerateVerb = /\b(generate|create|make|build|produce|draft|export)\b/.test(normalized);
   const hasDocumentGenerationIntent = hasDocumentKeyword && hasDocumentGenerateVerb;
+  const wantsSwot = /\bswot\b/.test(normalized);
+  const wantsPlaybook = /\bplaybook\b|\bcadence\b/.test(normalized);
+  const wantsCompetitorAudit = /\bcompetitor audit\b/.test(normalized);
+  const wantsContentCalendar = /\bcontent calendar\b/.test(normalized);
+  const wantsGoToMarket = /\bgo[-\s]?to[-\s]?market\b|\bgtm\b|\blaunch plan\b/.test(normalized);
+  const hasRequestedDocFamily =
+    wantsSwot || wantsPlaybook || wantsCompetitorAudit || wantsContentCalendar || wantsGoToMarket;
+  const inferredDocType = wantsSwot
+    ? 'SWOT'
+    : wantsGoToMarket
+      ? 'GO_TO_MARKET'
+    : wantsContentCalendar
+      ? 'CONTENT_CALENDAR'
+    : wantsCompetitorAudit
+      ? 'COMPETITOR_AUDIT'
+    : wantsPlaybook
+      ? 'PLAYBOOK'
+      : 'BUSINESS_STRATEGY';
   const defaultDocumentArgs: Record<string, unknown> = {
-    docType: 'STRATEGY_BRIEF',
+    docType: inferredDocType,
     depth: 'deep',
     includeCompetitors: true,
     includeEvidenceLinks: true,
+    requestedIntent: wantsSwot
+      ? 'swot_analysis'
+      : wantsGoToMarket
+        ? 'go_to_market'
+        : wantsContentCalendar
+          ? 'content_calendar'
+          : wantsCompetitorAudit
+            ? 'competitor_audit'
+            : wantsPlaybook
+              ? 'playbook'
+              : 'business_strategy',
   };
 
   if (slashCommand) {
@@ -2299,7 +2416,7 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
     pushIfMissing('evidence.posts', { platform: 'any', sort: 'engagement', limit: 8 });
   }
 
-  if (hasDocumentKeyword) {
+  if (hasDocumentKeyword || hasRequestedDocFamily) {
     if (slashCommand?.command === 'generate_pdf' || hasDocumentGenerationIntent) {
       pushIfMissing('document.generate', {
         ...defaultDocumentArgs,
@@ -3889,10 +4006,11 @@ export class RuntimeRunEngine {
 
     if (isDocumentFocusedRun({ plan, toolRuns })) {
       const runElapsedMs = Date.now() - runStartedAt.getTime();
-      if (Number.isFinite(runElapsedMs) && runElapsedMs > DOCUMENT_RUN_BUDGET_MS) {
+      const budgetMs = resolveDocumentRunBudgetMs(plan);
+      if (Number.isFinite(runElapsedMs) && runElapsedMs > budgetMs) {
         const partial = buildDocumentBudgetPartialMessage({
           runElapsedMs,
-          budgetMs: DOCUMENT_RUN_BUDGET_MS,
+          budgetMs,
           contextSnapshot: runtimeContextSnapshot,
           toolResults,
         });
@@ -3936,7 +4054,7 @@ export class RuntimeRunEngine {
           level: ProcessEventLevel.WARN,
           message: 'Returned best draft due to document runtime budget.',
           payload: {
-            budgetMs: DOCUMENT_RUN_BUDGET_MS,
+            budgetMs,
             elapsedMs: runElapsedMs,
             toolName: 'document.generate',
             eventV2: {
@@ -4099,7 +4217,12 @@ export class RuntimeRunEngine {
     });
     const continuationCalls = continuationSourceScope.toolCalls;
     const suppressAutoContinueForCompetitorBrief = detectWriterIntent(effectiveUserMessage) === 'competitor_brief';
-    const continuationCallsForRun = suppressAutoContinueForCompetitorBrief ? [] : continuationCalls;
+    const hasGeneratedDocumentDraft = toolRuns.some(
+      (toolRun) => toolRun.toolName === 'document.generate' && toolRun.status === ToolRunStatus.DONE
+    );
+    const suppressAutoContinueForDocumentRun = isDocumentFocusedRun({ plan, toolRuns }) && hasGeneratedDocumentDraft;
+    const continuationCallsForRun =
+      suppressAutoContinueForCompetitorBrief || suppressAutoContinueForDocumentRun ? [] : continuationCalls;
     if (continuationSourceScope.blocked.length > 0) {
       for (const blocked of continuationSourceScope.blocked) {
         await this.emitEvent({
@@ -4173,6 +4296,9 @@ export class RuntimeRunEngine {
     });
 
     if (await isRunCancelled('writing')) return;
+    const promptStageTimeoutMs = isDocumentFocusedRun({ plan, toolRuns })
+      ? Math.min(RUNTIME_PROMPT_STAGE_TIMEOUT_MS, 30_000)
+      : RUNTIME_PROMPT_STAGE_TIMEOUT_MS;
 
     const initialWriterOutput = await withTimeout(
       writeClientResponse({
@@ -4184,7 +4310,7 @@ export class RuntimeRunEngine {
         ...(evidenceLedger ? { evidenceLedger } : {}),
         toolResults: promptToolResults,
       }),
-      RUNTIME_PROMPT_STAGE_TIMEOUT_MS,
+      promptStageTimeoutMs,
       'writeClientResponse'
     ).catch(async (error: any) => {
       await this.emitEvent({
@@ -4261,7 +4387,7 @@ export class RuntimeRunEngine {
         writerOutput,
         toolResults: promptToolResults,
       }),
-      RUNTIME_PROMPT_STAGE_TIMEOUT_MS,
+      promptStageTimeoutMs,
       'validateClientResponse'
     ).catch(async (error: any) => {
       await this.emitEvent({
@@ -4382,7 +4508,7 @@ export class RuntimeRunEngine {
           label: 'Continue Deepening Document',
           action: 'document.generate',
           payload: {
-            docType: 'STRATEGY_BRIEF',
+            docType: target.docType || 'BUSINESS_STRATEGY',
             depth: 'deep',
             continueDeepening: true,
             ...(target.runtimeDocumentId ? { resumeDocumentId: target.runtimeDocumentId } : {}),
@@ -4599,6 +4725,48 @@ export class RuntimeRunEngine {
         }
       }
 
+      try {
+        const workspaceMemory = await readWorkspaceMemoryContext({
+          researchJobId: fresh.branch.thread.researchJobId,
+          branchId: fresh.branchId,
+          limitPerScope: 12,
+        });
+        const memoryContext = flattenMemoryForRuntimeContext({
+          byScope: workspaceMemory.byScope,
+        });
+        runtimeContextSnapshot = {
+          ...(runtimeContextSnapshot || {}),
+          ...memoryContext,
+        };
+        await this.emitEvent({
+          branchId: fresh.branchId,
+          agentRunId: fresh.id,
+          type: ProcessEventType.PROCESS_LOG,
+          message: 'Workspace memory loaded for routing and planning.',
+          payload: {
+            event: 'run.memory.loaded',
+            scopeCounts: {
+              workspace_profile: Object.keys(workspaceMemory.byScope.workspace_profile || {}).length,
+              deliverable_preferences: Object.keys(workspaceMemory.byScope.deliverable_preferences || {}).length,
+              approved_decisions: Object.keys(workspaceMemory.byScope.approved_decisions || {}).length,
+              family_defaults: Object.keys(workspaceMemory.byScope.family_defaults || {}).length,
+              quality_history: Object.keys(workspaceMemory.byScope.quality_history || {}).length,
+            },
+          },
+        });
+      } catch (memoryError) {
+        await this.emitEvent({
+          branchId: fresh.branchId,
+          agentRunId: fresh.id,
+          type: ProcessEventType.PROCESS_LOG,
+          level: ProcessEventLevel.WARN,
+          message: `Workspace memory load failed: ${compactPromptString((memoryError as Error)?.message || memoryError, 160)}`,
+          payload: {
+            event: 'run.memory.load_failed',
+          },
+        });
+      }
+
       const pinnedLibraryRefs = mergeLibraryRefs(
         normalizeIdList((fresh.inputOptionsJson as any)?.libraryRefs),
         extractLibraryRefsFromText(triggerMessageRaw)
@@ -4743,6 +4911,35 @@ export class RuntimeRunEngine {
         await updateAgentRun(fresh.id, { plan });
       }
 
+      const routedIntent = routeRuntimeIntent({
+        userMessage: triggerMessageForPlanning,
+        ...(runtimeContextSnapshot ? { runtimeContext: runtimeContextSnapshot } : {}),
+      });
+      if (routedIntent.docFamily) {
+        await this.emitEvent({
+          branchId: fresh.branchId,
+          agentRunId: fresh.id,
+          type: ProcessEventType.PROCESS_LOG,
+          message: `Intent routed to ${routedIntent.docFamily}.`,
+          payload: {
+            stage: 'intent',
+            intent: routedIntent.intent,
+            docFamily: routedIntent.docFamily,
+            businessArchetype: routedIntent.businessArchetype,
+            requiredEvidenceLanes: routedIntent.requiredEvidenceLanes,
+            requiredClarifications: routedIntent.requiredClarifications,
+            eventV2: {
+              version: 2,
+              event: 'document.intent_routed',
+              phase: 'planning',
+              status: 'info',
+              runId: fresh.id,
+              createdAt: new Date().toISOString(),
+            },
+          },
+        });
+      }
+
       if (!plan) {
         await this.emitEvent({
           branchId: fresh.branchId,
@@ -4800,6 +4997,7 @@ export class RuntimeRunEngine {
           ...runtimeContextSnapshot,
           documentCoverageScore: enrichmentInjection.coverage.score,
           documentCoverageCounts: enrichmentInjection.coverage.counts,
+          documentCoverageTargets: enrichmentInjection.coverage.targets,
           documentCoverageReasons: enrichmentInjection.coverage.reasons,
           documentEnrichmentApplied: enrichmentInjection.enrichmentApplied,
           documentEnrichmentCompleted: false,
@@ -4816,6 +5014,59 @@ export class RuntimeRunEngine {
         maxToolRuns: policy.maxToolRuns,
       });
       sanitizedToolCalls = sourceScopeEnforcement.toolCalls;
+
+      const hasDocumentGenerateCall = sanitizedToolCalls.some(
+        (call) => String(call.tool || '').trim().toLowerCase() === 'document.generate'
+      );
+      if (routedIntent.intent === 'document_request' && !hasDocumentGenerateCall) {
+        const inferredDocType =
+          routedIntent.docFamily === 'SWOT'
+            ? 'SWOT'
+            : routedIntent.docFamily === 'PLAYBOOK'
+              ? 'PLAYBOOK'
+              : routedIntent.docFamily === 'COMPETITOR_AUDIT'
+                ? 'COMPETITOR_AUDIT'
+                : routedIntent.docFamily === 'CONTENT_CALENDAR'
+                  ? 'CONTENT_CALENDAR'
+                  : routedIntent.docFamily === 'GO_TO_MARKET'
+                    ? 'GO_TO_MARKET'
+                    : 'BUSINESS_STRATEGY';
+        sanitizedToolCalls = [
+          ...sanitizedToolCalls.slice(0, Math.max(0, policy.maxToolRuns - 1)),
+          {
+            tool: 'document.generate',
+            args: {
+              docType: inferredDocType,
+              depth: 'deep',
+              includeCompetitors: true,
+              includeEvidenceLinks: true,
+              requestedIntent:
+                inferredDocType === 'SWOT'
+                  ? 'swot_analysis'
+                  : inferredDocType === 'PLAYBOOK'
+                    ? 'playbook'
+                    : inferredDocType === 'COMPETITOR_AUDIT'
+                      ? 'competitor_audit'
+                      : inferredDocType === 'CONTENT_CALENDAR'
+                        ? 'content_calendar'
+                        : inferredDocType === 'GO_TO_MARKET'
+                          ? 'go_to_market'
+                          : 'business_strategy',
+            },
+          },
+        ];
+        await this.emitEvent({
+          branchId: fresh.branchId,
+          agentRunId: fresh.id,
+          type: ProcessEventType.PROCESS_LOG,
+          message: 'Autopilot routed this request to document generation.',
+          payload: {
+            stage: 'intent',
+            docFamily: routedIntent.docFamily || 'BUSINESS_STRATEGY',
+            autopilotInjected: true,
+          },
+        });
+      }
 
       if (sourceScopeEnforcement.blocked.length > 0) {
         for (const blocked of sourceScopeEnforcement.blocked) {

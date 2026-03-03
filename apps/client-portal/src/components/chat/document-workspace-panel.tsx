@@ -321,13 +321,38 @@ export function DocumentWorkspacePanel({
           {selectedDocument ? (
             <>
               <div className="mb-2 flex flex-wrap gap-1.5">
+                {selectedDocument.generatedMeta?.docFamily ? (
+                  <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[10px] uppercase text-zinc-500">
+                    {selectedDocument.generatedMeta.docFamily.replace(/_/g, " ")}
+                  </span>
+                ) : null}
                 <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[10px] uppercase text-zinc-500">
                   {selectedDocument.mimeType || "document"}
                 </span>
                 <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[10px] text-zinc-500">
                   Version {selectedDocument.latestVersion?.versionNumber || 0}
                 </span>
+                {typeof selectedDocument.generatedMeta?.coverageScore === "number" ? (
+                  <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[10px] text-zinc-500">
+                    Coverage {Math.round(selectedDocument.generatedMeta.coverageScore)}/100
+                  </span>
+                ) : null}
               </div>
+
+              {selectedDocument.generatedMeta?.partial ? (
+                <div className="mb-2 rounded-xl border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+                  <p className="font-semibold">Partial draft returned</p>
+                  {selectedDocument.generatedMeta.partialReasons?.length ? (
+                    <ul className="mt-1 space-y-0.5">
+                      {selectedDocument.generatedMeta.partialReasons.slice(0, 4).map((reason) => (
+                        <li key={reason}>• {reason}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-1">Evidence quality is below deep target for this version.</p>
+                  )}
+                </div>
+              ) : null}
 
               <div
                 ref={readerRef}

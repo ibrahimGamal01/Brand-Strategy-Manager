@@ -26,7 +26,8 @@ export async function saveDocumentBuffer(
 ): Promise<StoredDocument> {
   const id = uuid();
   const safeTitle = sanitizeFileName(title);
-  const relDir = path.join('docs', researchJobId);
+  // Keep generated deliverables under /documents to match stable storage routing.
+  const relDir = path.join('documents', researchJobId, 'generated');
   const fileName = `${safeTitle}-${id}.pdf`;
   const relPath = path.join(relDir, fileName);
   const absDir = path.join(STORAGE_ROOT, relDir);

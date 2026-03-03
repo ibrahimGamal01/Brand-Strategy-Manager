@@ -923,6 +923,13 @@ export type RuntimeWorkspaceDocumentDto = {
     warnings: string[];
     createdAt: string;
   } | null;
+  generatedMeta?: {
+    docFamily?: string;
+    coverageScore?: number;
+    coverageBand?: string;
+    partial?: boolean;
+    partialReasons?: string[];
+  };
 };
 
 export async function uploadRuntimeDocuments(

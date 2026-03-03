@@ -4,8 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Clock3, Loader2, PauseCircle, X, XCircle } from "lucide-react";
 import { DecisionItem, ProcessFeedItem, ProcessRun } from "@/types/chat";
 
-type Tab = "running" | "feed" | "decisions";
-
 function humanizeToolName(toolName?: string): string {
   const normalized = String(toolName || "").trim().toLowerCase();
   if (!normalized) return "";
@@ -56,6 +54,15 @@ function phaseChipStyle(phase?: ProcessRun["phase"] | ProcessFeedItem["phase"]) 
     return { borderColor: "#9ac5f7", background: "#eef6ff", color: "#134a8a" };
   }
   return { borderColor: "var(--bat-border)", background: "var(--bat-surface)", color: "var(--bat-text-muted)" };
+}
+
+function workStageLabel(stage?: string) {
+  const normalized = String(stage || "").trim();
+  if (!normalized) return null;
+  return normalized
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function TypingDots() {
@@ -560,13 +567,43 @@ function RunningTab({
 
 function FeedTab({
   feedItems,
+  decisions,
   onFeedItemAction,
+  onResolve,
 }: {
   feedItems: ProcessFeedItem[];
+  decisions: DecisionItem[];
   onFeedItemAction?: (item: ProcessFeedItem) => void;
+  onResolve: (id: string, option: string) => void;
 }) {
   return (
     <div className="space-y-2">
+      {decisions.map((decision) => (
+        <article key={`approval-${decision.id}`} className="rounded-xl border p-3" style={{ borderColor: "var(--bat-border)" }}>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs uppercase tracking-[0.08em]" style={{ color: "var(--bat-text-muted)" }}>
+              Approval Required
+            </p>
+            <span className="rounded-full border px-2 py-0.5 text-xs" style={phaseChipStyle("waiting_input")}>
+              Waiting input
+            </span>
+          </div>
+          <p className="mt-1 text-sm font-medium">{decision.prompt}</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {decision.options.map((option) => (
+              <button
+                key={`${decision.id}-${option}`}
+                type="button"
+                onClick={() => onResolve(decision.id, option)}
+                className="rounded-full border px-3 py-1.5 text-xs"
+                style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+        </article>
+      ))}
       {feedItems.map((item) => (
         <article key={item.id} className="rounded-xl border p-3" style={{ borderColor: "var(--bat-border)" }}>
           <div className="flex items-center justify-between gap-2">
@@ -575,6 +612,14 @@ function FeedTab({
             </p>
             <div className="flex items-center gap-2">
               {item.toolName ? <span className="bat-chip">{humanizeToolName(item.toolName)}</span> : null}
+              {workStageLabel(item.stage) ? (
+                <span
+                  className="rounded-full border px-2 py-0.5 text-xs"
+                  style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)", color: "var(--bat-text-muted)" }}
+                >
+                  {workStageLabel(item.stage)}
+                </span>
+              ) : null}
               {phaseLabel(item.phase) ? (
                 <span className="rounded-full border px-2 py-0.5 text-xs" style={phaseChipStyle(item.phase)}>
                   {phaseLabel(item.phase)}
@@ -607,45 +652,6 @@ function FeedTab({
   );
 }
 
-function DecisionsTab({
-  decisions,
-  onResolve,
-}: {
-  decisions: DecisionItem[];
-  onResolve: (id: string, option: string) => void;
-}) {
-  if (!decisions.length) {
-    return (
-      <div className="rounded-xl border p-3 text-sm" style={{ borderColor: "var(--bat-border)", color: "var(--bat-text-muted)" }}>
-        No pending approvals right now.
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      {decisions.map((decision) => (
-        <article key={decision.id} className="rounded-xl border p-3" style={{ borderColor: "var(--bat-border)" }}>
-          <p className="text-sm font-semibold">{decision.prompt}</p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {decision.options.map((option) => (
-              <button
-                key={option}
-                type="button"
-                onClick={() => onResolve(decision.id, option)}
-                className="rounded-full border px-3 py-1.5 text-xs"
-                style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}
-              >
-                {option}
-              </button>
-            ))}
-          </div>
-        </article>
-      ))}
-    </div>
-  );
-}
-
 export function LiveActivityPanel({
   runs,
   feedItems,
@@ -663,60 +669,27 @@ export function LiveActivityPanel({
   onSteer?: (instruction: string) => void;
   onFeedItemAction?: (item: ProcessFeedItem) => void;
 }) {
-  const [tab, setTab] = useState<Tab>("running");
-  const tabs = useMemo(
-    () => [
-      { id: "running" as const, label: "Now Running" },
-      { id: "feed" as const, label: "Activity Feed" },
-      { id: "decisions" as const, label: "Approvals" }
-    ],
-    []
-  );
-
   return (
     <aside className="bat-surface flex h-full min-h-0 flex-col p-3.5 sm:p-4">
       <div className="mb-3 flex items-center justify-between gap-2">
-        <h2 className="text-base font-semibold">Live Activity</h2>
+        <h2 className="text-base font-semibold">Work Ledger</h2>
         <span className="bat-chip">Client Friendly View</span>
       </div>
-      <div className="mb-4 grid grid-cols-3 gap-1 rounded-full p-1" style={{ background: "var(--bat-surface-muted)" }}>
-        {tabs.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => setTab(item.id)}
-            className="rounded-full px-2 py-1 text-xs leading-tight"
-            style={{
-              background: tab === item.id ? "var(--bat-surface)" : "transparent",
-              border: tab === item.id ? "1px solid var(--bat-border)" : "1px solid transparent"
-            }}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-hidden">
-        {tab === "running" ? (
-          <RunningTab
-            runs={runs}
-            feedItems={feedItems}
-            decisions={decisions}
-            onResolve={onResolve}
-            onRunAudit={onRunAudit}
-            onSteer={onSteer}
-          />
-        ) : null}
-        {tab === "feed" ? (
-          <div className="bat-scrollbar h-full overflow-y-auto pr-1">
-            <FeedTab feedItems={feedItems} onFeedItemAction={onFeedItemAction} />
-          </div>
-        ) : null}
-        {tab === "decisions" ? (
-          <div className="bat-scrollbar h-full overflow-y-auto pr-1">
-            <DecisionsTab decisions={decisions} onResolve={onResolve} />
-          </div>
-        ) : null}
+      <div className="bat-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+        <RunningTab
+          runs={runs}
+          feedItems={feedItems}
+          decisions={decisions}
+          onResolve={onResolve}
+          onRunAudit={onRunAudit}
+          onSteer={onSteer}
+        />
+        <FeedTab
+          feedItems={feedItems}
+          decisions={decisions}
+          onFeedItemAction={onFeedItemAction}
+          onResolve={onResolve}
+        />
       </div>
     </aside>
   );

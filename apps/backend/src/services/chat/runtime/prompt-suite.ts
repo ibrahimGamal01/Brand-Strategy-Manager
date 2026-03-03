@@ -2,6 +2,9 @@ import { openai, OpenAI } from '../../ai/openai-client';
 import { resolveModelForTask } from '../../ai/model-router';
 import type { RunPolicy, RuntimeDecision, RuntimePlan, RuntimeToolCall, RuntimeToolResult } from './types';
 import { TOOL_REGISTRY } from '../../ai/chat/tools/tool-registry';
+import { buildPlannerSystemPrompt } from './prompts/planner';
+import { buildEvidenceBuilderSystemPrompt } from './prompts/evidence-builder';
+import { buildValidatorSystemPrompt } from './prompts/validator';
 
 type PlannerInput = {
   researchJobId: string;
@@ -1415,11 +1418,40 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   const hasDocumentKeyword = /\b(pdf|report|brief|document|doc)\b/.test(normalized);
   const hasDocumentGenerateVerb = /\b(generate|create|make|build|produce|draft|export)\b/.test(normalized);
   const hasDocumentGenerationIntent = hasDocumentKeyword && hasDocumentGenerateVerb;
+  const wantsSwot = /\bswot\b/.test(normalized);
+  const wantsPlaybook = /\bplaybook\b|\bcadence\b/.test(normalized);
+  const wantsCompetitorAudit = /\bcompetitor audit\b/.test(normalized);
+  const wantsContentCalendar = /\bcontent calendar\b/.test(normalized);
+  const wantsGoToMarket = /\bgo[-\s]?to[-\s]?market\b|\bgtm\b|\blaunch plan\b/.test(normalized);
+  const hasRequestedDocFamily =
+    wantsSwot || wantsPlaybook || wantsCompetitorAudit || wantsContentCalendar || wantsGoToMarket;
+  const inferredDocType = wantsSwot
+    ? 'SWOT'
+    : wantsGoToMarket
+      ? 'GO_TO_MARKET'
+    : wantsContentCalendar
+      ? 'CONTENT_CALENDAR'
+    : wantsCompetitorAudit
+      ? 'COMPETITOR_AUDIT'
+    : wantsPlaybook
+      ? 'PLAYBOOK'
+      : 'BUSINESS_STRATEGY';
   const defaultDocumentArgs: Record<string, unknown> = {
-    docType: 'STRATEGY_BRIEF',
+    docType: inferredDocType,
     depth: 'deep',
     includeCompetitors: true,
     includeEvidenceLinks: true,
+    requestedIntent: wantsSwot
+      ? 'swot_analysis'
+      : wantsGoToMarket
+        ? 'go_to_market'
+        : wantsContentCalendar
+          ? 'content_calendar'
+          : wantsCompetitorAudit
+            ? 'competitor_audit'
+            : wantsPlaybook
+              ? 'playbook'
+              : 'business_strategy',
   };
   const hasDocumentSignals = /\b(document|doc|proposal|draft|uploaded file|attachment)\b/.test(normalized);
   const hasDocumentEditIntent = /\b(edit|rewrite|refine|improve|change|update|replace)\b/.test(normalized);
@@ -1564,7 +1596,7 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   if (/post|example|tiktok|instagram|social/.test(normalized)) {
     pushIfMissing('evidence.posts', { platform: 'any', sort: 'engagement', limit: 8 });
   }
-  if (hasDocumentKeyword) {
+  if (hasDocumentKeyword || hasRequestedDocFamily) {
     if (slashCommand?.command === 'generate_pdf' || hasDocumentGenerationIntent) {
       pushIfMissing('document.generate', {
         ...defaultDocumentArgs,
@@ -1880,36 +1912,18 @@ export async function generatePlannerPlan(input: PlannerInput): Promise<RuntimeP
   ];
 
   const systemPrompt = [
-    'You are BAT Planner (Agency Operator).',
-    'Return strict JSON only.',
-    'No markdown. No prose outside JSON.',
-    'Always produce a plan and tool calls when evidence is needed.',
-    'Never claim findings without evidence-producing tools.',
-    'Prefer at least two evidence lanes when possible (web+social, web+community, etc.).',
-    'Default response depth should be deep and comfortable for real users.',
-    'Only choose fast depth when the user explicitly asks for concise/brief output.',
+    buildPlannerSystemPrompt({
+      policy: input.policy,
+      disallowedTools,
+      allowlist: ALLOWED_PLANNER_TOOL_NAMES,
+    }),
     'When the user asks for deeper research on people/accounts/handles or names DDG/Scraply, include research.gather.',
     'Use intel.get only when you have section + id/target. For overviews, use intel.list.',
     'Mutation tools require explicit approvals and should be represented via decisionRequests.',
-    `Response mode for this run: ${input.policy.responseMode}.`,
-    `Target response length: ${input.policy.targetLength}.`,
-    `Strict validation: ${input.policy.strictValidation ? 'enabled' : 'disabled'}.`,
-    `Source scope: ${JSON.stringify(input.policy.sourceScope)}.`,
     'If runtime context includes libraryPinnedRefs, treat those refs as the only admissible evidence set for factual synthesis.',
     'If runtime context indicates libraryLowTrustOnly=true, do not synthesize facts; request confirmation or fresher refs first.',
     'If the user asks for library-grounded/cited output and no pinned refs exist, ask for explicit ref selection before synthesis.',
-    `Disallowed tool names for this run: ${disallowedTools.length ? disallowedTools.join(', ') : 'none'}.`,
     'Never emit a tool listed as disallowed. If disallowed tools are needed, choose allowed fallback tools.',
-    `Only use tool names from this allowlist: ${ALLOWED_PLANNER_TOOL_NAMES.join(', ')}`,
-    'JSON schema:',
-    '{',
-    '  "goal": "string",',
-    '  "plan": ["step"],',
-    '  "toolCalls": [{"tool":"name","args":{},"dependsOn":[]}],',
-    '  "needUserInput": false,',
-    '  "decisionRequests": [{"id":"...","title":"...","options":["..."],"default":"...","blocking":true}],',
-    '  "responseStyle": {"depth":"fast|normal|deep","tone":"direct|friendly"}',
-    '}',
   ].join('\n');
 
   const userPrompt = [
@@ -2010,22 +2024,7 @@ export async function buildEvidenceLedger(input: EvidenceLedgerInput): Promise<E
     return fallbackEvidenceLedger(input);
   }
 
-  const systemPrompt = [
-    'You are BAT Evidence Builder.',
-    'Return strict JSON only.',
-    'Use only provided runtime context and tool outputs.',
-    `Source scope for this run: ${JSON.stringify(input.policy.sourceScope)}.`,
-    'Do not infer facts from sources that are outside the provided scope.',
-    'Every high-value fact must include evidenceRefIds when available.',
-    'JSON schema:',
-    '{',
-    '  "entities": [{"id":"...","type":"...","name":"...","aliases":["..."]}],',
-    '  "facts": [{"id":"...","type":"...","value":{},"confidence":0.0,"evidenceRefIds":["..."],"freshnessISO":"..."}],',
-    '  "relations": [{"from":"...","rel":"...","to":"...","evidenceRefIds":["..."]}],',
-    '  "gaps": [{"gap":"...","severity":"low|medium|high","recommendedSources":["..."]}],',
-    '  "suggestedToolCalls": [{"tool":"tool.name","args":{}}]',
-    '}',
-  ].join('\\n');
+  const systemPrompt = buildEvidenceBuilderSystemPrompt(input.policy);
 
   const payload = {
     userMessage: input.userMessage,
@@ -2301,21 +2300,9 @@ export async function validateClientResponse(input: ValidatorInput): Promise<Val
   const fallback = fallbackValidator();
 
   const systemPrompt = [
-    'You are BAT Validator (trust and safety).',
-    'Return strict JSON only.',
-    'Check grounding, fallback quality, mutation confirmations, and response completeness.',
-    `Strict validation mode: ${input.policy.strictValidation ? 'enabled' : 'disabled'}.`,
-    `Source scope for this run: ${JSON.stringify(input.policy.sourceScope)}.`,
-    'When strict validation is enabled, fail if claims lack evidence references.',
-    'Fail if the response makes factual claims while runtime context indicates libraryLowTrustOnly=true.',
+    buildValidatorSystemPrompt(input.policy),
     'Fail if user requested evidence/library grounding but response does not request explicit ref selection when refs are missing.',
     'Always check source-scope compliance for the proposed response and actions.',
-    'JSON schema:',
-    '{',
-    '  "pass": true,',
-    '  "issues": [{"code":"...","severity":"low|medium|high","message":"..."}],',
-    '  "suggestedFixes": ["..."]',
-    '}',
   ].join('\n');
 
   try {

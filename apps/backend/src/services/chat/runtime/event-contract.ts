@@ -35,6 +35,12 @@ export type RuntimeEventKind =
   | 'document.parse_failed'
   | 'document.chunking_completed'
   | 'document.preflight'
+  | 'document.intent_routed'
+  | 'document.spec_built'
+  | 'document.section_draft_started'
+  | 'document.section_draft_completed'
+  | 'document.validation_completed'
+  | 'document.artifact_rendered'
   | 'document.enrichment_started'
   | 'document.enrichment_completed'
   | 'document.draft_ready'
@@ -126,6 +132,12 @@ function normalizeEvent(value: unknown): RuntimeEventKind | null {
     normalized === 'document.parse_failed' ||
     normalized === 'document.chunking_completed' ||
     normalized === 'document.preflight' ||
+    normalized === 'document.intent_routed' ||
+    normalized === 'document.spec_built' ||
+    normalized === 'document.section_draft_started' ||
+    normalized === 'document.section_draft_completed' ||
+    normalized === 'document.validation_completed' ||
+    normalized === 'document.artifact_rendered' ||
     normalized === 'document.enrichment_started' ||
     normalized === 'document.enrichment_completed' ||
     normalized === 'document.draft_ready' ||

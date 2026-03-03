@@ -34,9 +34,14 @@ jobs:
           npm run lint --workspace=apps/client-portal
           npm run build --workspace=apps/client-portal
 
-      - name: Local contract checks
+      - name: Local reliability checks
         run: |
           npm run check:runtime-config --workspace=apps/backend
+          npm run test:chat-runtime-engine --workspace=apps/backend
+          npm run test:runtime-reliability-r1 --workspace=apps/backend
+          npm run test-document-generation-quality --workspace=apps/backend
+          npm run test:deliverable-engine-regression --workspace=apps/backend
+          npm run test:client-right-rail-regression --workspace=apps/backend
           npm run test:portal-auth-runtime-e2e --workspace=apps/backend
         env:
           PORTAL_E2E_BASE_URL: ${{ secrets.PORTAL_E2E_BASE_URL }}
@@ -45,6 +50,15 @@ jobs:
         run: npm run test:portal-ui-auth-flow:online --workspace=apps/backend
         env:
           PORTAL_UI_E2E_BASE_URL: ${{ secrets.PORTAL_UI_E2E_BASE_URL }}
+
+      - name: Online runtime smoke
+        run: npm run test:r1-online-smoke --workspace=apps/backend
+        env:
+          R1_BASE_URL: ${{ secrets.PORTAL_E2E_BASE_URL }}
+          R1_ADMIN_EMAIL: ${{ secrets.R1_ADMIN_EMAIL }}
+          R1_ADMIN_PASSWORD: ${{ secrets.R1_ADMIN_PASSWORD }}
+          R1_WORKSPACE_ID: ${{ secrets.R1_WORKSPACE_ID }}
+          R1_TEST_SCAN_URL: ${{ vars.R1_TEST_SCAN_URL }}
 
       - name: Rollout readiness preflight
         run: npm run check:portal-rollout --workspace=apps/backend | tee portal-rollout-readiness.json

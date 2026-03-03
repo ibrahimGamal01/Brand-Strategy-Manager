@@ -123,6 +123,10 @@ model ResearchJob {
   workspaceEvidenceLinks      WorkspaceEvidenceLink[]
   connectorRuns               ConnectorRun[]
   knowledgeLedgerVersions     KnowledgeLedgerVersion[]
+  workLedgerVersions          WorkLedgerVersion[]
+  documentSpecVersions        DocumentSpecVersion[]
+  documentSectionDrafts       DocumentSectionDraft[]
+  workspaceMemorySnapshots    WorkspaceMemorySnapshot[]
 
   @@map("research_jobs")
 }
@@ -1113,6 +1117,94 @@ model KnowledgeLedgerVersion {
   @@index([researchJobId, runId], map: "knowledge_ledger_versions_job_run_idx")
   @@index([researchJobId, source], map: "knowledge_ledger_versions_job_source_idx")
   @@map("knowledge_ledger_versions")
+}
+
+model WorkLedgerVersion {
+  id            String                   @id @default(uuid())
+  researchJobId String                   @map("research_job_id")
+  runId         String?                  @map("run_id")
+  documentId    String?                  @map("document_id")
+  versionId     String?                  @map("version_id")
+  stage         String
+  payloadJson   Json                     @map("payload_json")
+  createdAt     DateTime                 @default(now()) @map("created_at")
+  researchJob   ResearchJob              @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  document      WorkspaceDocument?       @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  version       WorkspaceDocumentVersion? @relation(fields: [versionId], references: [id], onDelete: SetNull)
+
+  @@index([researchJobId, createdAt(sort: Desc)], map: "work_ledger_versions_job_created_idx")
+  @@index([researchJobId, runId], map: "work_ledger_versions_job_run_idx")
+  @@index([researchJobId, stage], map: "work_ledger_versions_job_stage_idx")
+  @@index([documentId], map: "work_ledger_versions_document_idx")
+  @@index([versionId], map: "work_ledger_versions_version_idx")
+  @@map("work_ledger_versions")
+}
+
+model DocumentSpecVersion {
+  id                   String                   @id @default(uuid())
+  researchJobId        String                   @map("research_job_id")
+  runId                String?                  @map("run_id")
+  documentId           String?                  @map("document_id")
+  versionId            String?                  @map("version_id")
+  schemaVersion        String                   @default("v1") @map("schema_version")
+  specJson             Json                     @map("spec_json")
+  repaired             Boolean                  @default(false)
+  validationErrorsJson Json?                    @map("validation_errors_json")
+  createdAt            DateTime                 @default(now()) @map("created_at")
+  researchJob          ResearchJob              @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  document             WorkspaceDocument?       @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  version              WorkspaceDocumentVersion? @relation(fields: [versionId], references: [id], onDelete: SetNull)
+
+  @@index([researchJobId, createdAt(sort: Desc)], map: "document_spec_versions_job_created_idx")
+  @@index([researchJobId, runId], map: "document_spec_versions_job_run_idx")
+  @@index([documentId], map: "document_spec_versions_document_idx")
+  @@index([versionId], map: "document_spec_versions_version_idx")
+  @@map("document_spec_versions")
+}
+
+model DocumentSectionDraft {
+  id                 String                   @id @default(uuid())
+  researchJobId      String                   @map("research_job_id")
+  runId              String?                  @map("run_id")
+  documentId         String?                  @map("document_id")
+  versionId          String?                  @map("version_id")
+  sectionId          String                   @map("section_id")
+  sectionKind        String                   @map("section_kind")
+  title              String
+  contentMd          String                   @map("content_md")
+  evidenceRefIdsJson Json?                    @map("evidence_ref_ids_json")
+  status             String                   @default("insufficient_evidence")
+  partialReason      String?                  @map("partial_reason")
+  createdAt          DateTime                 @default(now()) @map("created_at")
+  researchJob        ResearchJob              @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  document           WorkspaceDocument?       @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  version            WorkspaceDocumentVersion? @relation(fields: [versionId], references: [id], onDelete: SetNull)
+
+  @@index([researchJobId, createdAt(sort: Desc)], map: "document_section_drafts_job_created_idx")
+  @@index([researchJobId, runId], map: "document_section_drafts_job_run_idx")
+  @@index([documentId], map: "document_section_drafts_document_idx")
+  @@index([versionId], map: "document_section_drafts_version_idx")
+  @@index([researchJobId, sectionKind], map: "document_section_drafts_job_kind_idx")
+  @@map("document_section_drafts")
+}
+
+model WorkspaceMemorySnapshot {
+  id            String      @id @default(uuid())
+  researchJobId String      @map("research_job_id")
+  branchId      String      @default("global") @map("branch_id")
+  scope         String
+  key           String
+  valueJson     Json        @map("value_json")
+  confidence    Float       @default(0.8)
+  sourceRunId   String?     @map("source_run_id")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+  researchJob   ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+
+  @@unique([researchJobId, branchId, scope, key], map: "workspace_memory_snapshot_unique_key")
+  @@index([researchJobId, scope, updatedAt(sort: Desc)], map: "workspace_memory_snapshot_job_scope_updated_idx")
+  @@index([researchJobId, branchId, updatedAt(sort: Desc)], map: "workspace_memory_snapshot_job_branch_updated_idx")
+  @@map("workspace_memory_snapshots")
 }
 
 model ClientAccount {
@@ -2285,6 +2377,9 @@ model WorkspaceDocument {
   chunks        WorkspaceDocumentChunk[]
   ingestionRuns WorkspaceDocumentIngestionRun[]
   exports       WorkspaceDocumentExport[]
+  workLedgerVersions   WorkLedgerVersion[]
+  documentSpecVersions DocumentSpecVersion[]
+  sectionDrafts        DocumentSectionDraft[]
 
   @@index([researchJobId, createdAt(sort: Desc)])
   @@index([clientId, createdAt(sort: Desc)])
@@ -2309,6 +2404,9 @@ model WorkspaceDocumentVersion {
   document WorkspaceDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
   chunks   WorkspaceDocumentChunk[]
   exports  WorkspaceDocumentExport[]
+  workLedgerVersions   WorkLedgerVersion[]
+  documentSpecVersions DocumentSpecVersion[]
+  sectionDrafts        DocumentSectionDraft[]
 
   @@unique([documentId, versionNumber], map: "workspace_document_versions_document_version_key")
   @@index([branchId, createdAt(sort: Desc)])

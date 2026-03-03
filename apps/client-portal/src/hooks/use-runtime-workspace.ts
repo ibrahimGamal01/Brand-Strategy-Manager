@@ -956,6 +956,25 @@ function toValueFirstToolMessage(
   return stripInternalIdentifiers(raw);
 }
 
+function deriveWorkLedgerStage(event: NormalizedRuntimeEvent): string | undefined {
+  const payloadStage = String(event.payload?.stage || "").trim();
+  if (payloadStage) return payloadStage;
+  const byEvent: Record<string, string> = {
+    "document.intent_routed": "intent",
+    "document.spec_built": "doc_spec",
+    "document.section_draft_started": "section_drafts",
+    "document.section_draft_completed": "section_drafts",
+    "document.validation_completed": "validation",
+    "document.artifact_rendered": "artifact",
+    "document.preflight": "preflight",
+    "document.enrichment_started": "enrichment",
+    "document.enrichment_completed": "enrichment",
+    "document.draft_ready": "draft",
+    "document.partial_returned": "partial",
+  };
+  return byEvent[event.event];
+}
+
 function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[] {
   const latest = normalizeRuntimeEvents(events).slice(-120).reverse();
   const mapped = latest.map((event) => {
@@ -967,6 +986,18 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
     if (event.event.startsWith("document.")) {
       if (event.event === "document.upload_received") {
         message = event.message || "Upload received.";
+      } else if (event.event === "document.intent_routed") {
+        message = event.message || "Intent routed for deliverable generation.";
+      } else if (event.event === "document.spec_built") {
+        message = event.message || "Document spec built.";
+      } else if (event.event === "document.section_draft_started") {
+        message = event.message || "Section drafting started.";
+      } else if (event.event === "document.section_draft_completed") {
+        message = event.message || "Section drafting completed.";
+      } else if (event.event === "document.validation_completed") {
+        message = event.message || "Validation completed.";
+      } else if (event.event === "document.artifact_rendered") {
+        message = event.message || "Artifact rendered and stored.";
       } else if (event.event === "document.preflight") {
         const score = Number(event.payload?.coverageScore || 0);
         const band = String(event.payload?.coverageBand || "").trim().toLowerCase();
@@ -1066,6 +1097,7 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
     const details = documentPlanPreview
       ? documentPlanDetailLines(documentPlanPreview).map((line) => stripInternalIdentifiers(line))
       : undefined;
+    const stage = deriveWorkLedgerStage(event);
 
     return {
       id: event.id,
@@ -1074,6 +1106,7 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
       ...(actionLabel ? { actionLabel } : {}),
       ...(eventDocumentId ? { actionTarget: { kind: "document" as const, documentId: eventDocumentId } } : {}),
       ...(event.toolName ? { toolName: event.toolName } : {}),
+      ...(stage ? { stage } : {}),
       ...(details?.length ? { details } : {}),
       phase: event.phase,
       level: event.level,

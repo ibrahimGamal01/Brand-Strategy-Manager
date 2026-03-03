@@ -234,6 +234,7 @@ export interface ProcessFeedItem {
   id: string;
   timestamp: string;
   message: string;
+  stage?: string;
   details?: string[];
   actionLabel?: string;
   actionTarget?: {

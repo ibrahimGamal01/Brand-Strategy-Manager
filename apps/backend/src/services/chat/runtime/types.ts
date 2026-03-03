@@ -111,3 +111,24 @@ export type RunPolicy = {
 };
 
 export type SendMessageMode = 'send' | 'queue' | 'interrupt';
+
+export type RuntimeIntentRouterOutput = {
+  intent: 'chat_answer' | 'analysis_request' | 'document_request' | 'document_edit_request' | 'mutation_request';
+  docFamily:
+    | 'SWOT'
+    | 'BUSINESS_STRATEGY'
+    | 'PLAYBOOK'
+    | 'COMPETITOR_AUDIT'
+    | 'CONTENT_CALENDAR'
+    | 'GO_TO_MARKET'
+    | null;
+  businessArchetype:
+    | 'b2b_saas'
+    | 'ecommerce'
+    | 'wellness'
+    | 'financial_services'
+    | 'professional_services'
+    | 'generic';
+  requiredEvidenceLanes: string[];
+  requiredClarifications: string[];
+};
