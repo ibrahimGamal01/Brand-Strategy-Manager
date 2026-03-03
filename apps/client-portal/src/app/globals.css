@@ -98,37 +98,3 @@ a {
 .bat-scrollbar::-webkit-scrollbar-track {
   background: transparent;
 }
-
-.signup-smart-shell {
-  --signup-sticky-offset: 5.4rem;
-  --signup-bottom-safe: calc(env(safe-area-inset-bottom, 0px) + 1rem);
-}
-
-.signup-section-anchor {
-  scroll-margin-top: calc(var(--signup-sticky-offset) + 4.25rem);
-}
-
-.signup-nav-sticky {
-  position: sticky;
-  top: var(--signup-sticky-offset);
-  z-index: 20;
-}
-
-.signup-action-sticky {
-  position: sticky;
-  bottom: 0;
-  z-index: 25;
-  padding-bottom: var(--signup-bottom-safe);
-}
-
-.signup-rail-sticky {
-  position: sticky;
-  top: calc(var(--signup-sticky-offset) + 0.5rem);
-}
-
-.signup-feedback-shell {
-  min-height: 3.25rem;
-  display: grid;
-  align-content: start;
-  gap: 0.5rem;
-}
