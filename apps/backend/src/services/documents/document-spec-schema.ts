@@ -198,37 +198,96 @@ export function validateDocumentSpecV1(input: unknown): DocumentSpecValidationRe
 
 export function repairDocumentSpecV1(input: unknown): DocumentSpecV1 {
   const record = isRecord(input) ? input : {};
+  const requestedFamily = String(record.docFamily || '').trim() as DocFamily;
+  const fallbackFamily: DocFamily = ALLOWED_DOC_FAMILIES.has(requestedFamily) ? requestedFamily : 'BUSINESS_STRATEGY';
+  const fallbackStyleProfileByFamily: Record<DocFamily, string> = {
+    SWOT: 'swot_standard_v1',
+    BUSINESS_STRATEGY: 'strategy_standard_generic_v1',
+    PLAYBOOK: 'playbook_standard_v1',
+    COMPETITOR_AUDIT: 'competitor_audit_v1',
+    CONTENT_CALENDAR: 'content_calendar_v1',
+    GO_TO_MARKET: 'go_to_market_v1',
+  };
+  const fallbackSectionsByFamily: Record<DocFamily, DocumentSpecSection[]> = {
+    SWOT: [
+      { id: 'executive-summary', kind: 'executive_summary', title: 'Executive Summary', requirements: ['Summarize objective and confidence.'], evidenceRefIds: [] },
+      { id: 'swot-matrix', kind: 'swot_matrix', title: 'SWOT Matrix', requirements: ['Provide a 2x2 SWOT matrix.'], evidenceRefIds: [] },
+      { id: 'swot-implications', kind: 'swot_implications', title: 'Strategic Implications', requirements: ['Translate SWOT into implications.'], evidenceRefIds: [] },
+      { id: 'market-context', kind: 'market_context', title: 'Market Context', requirements: ['Capture key market signals.'], evidenceRefIds: [] },
+      { id: 'signal-analysis', kind: 'signal_analysis', title: 'Signal Analysis', requirements: ['Summarize strongest audience signals.'], evidenceRefIds: [] },
+      { id: 'roadmap', kind: 'roadmap_30_60_90', title: '30/60/90 Plan', requirements: ['Define phased actions.'], evidenceRefIds: [] },
+      { id: 'risk-register', kind: 'risk_register', title: 'Risk Register', requirements: ['List top execution risks.'], evidenceRefIds: [] },
+      { id: 'evidence-gaps', kind: 'evidence_gaps', title: 'Evidence Gaps', requirements: ['Declare missing evidence.'], evidenceRefIds: [] },
+      { id: 'source-ledger', kind: 'source_ledger', title: 'Source Ledger', requirements: ['List auditable sources.'], evidenceRefIds: [] },
+    ],
+    BUSINESS_STRATEGY: [
+      { id: 'executive-summary', kind: 'executive_summary', title: 'Executive Summary', requirements: ['Summarize objective and confidence.'], evidenceRefIds: [] },
+      { id: 'market-context', kind: 'market_context', title: 'Market Context', requirements: ['Capture macro and category context.'], evidenceRefIds: [] },
+      { id: 'competitor-deep-dive', kind: 'competitor_deep_dive', title: 'Competitor Deep Dives', requirements: ['Describe direct/adjacent competitors.'], evidenceRefIds: [] },
+      { id: 'signal-analysis', kind: 'signal_analysis', title: 'Signal Analysis', requirements: ['Summarize audience/content signals.'], evidenceRefIds: [] },
+      { id: 'positioning', kind: 'positioning', title: 'Positioning', requirements: ['Define positioning hypothesis.'], evidenceRefIds: [] },
+      { id: 'offer-stack', kind: 'offer_stack', title: 'Offer Stack', requirements: ['Recommend offer architecture.'], evidenceRefIds: [] },
+      { id: 'channel-plan', kind: 'channel_plan', title: 'Channel Plan', requirements: ['Map channels and tactics.'], evidenceRefIds: [] },
+      { id: 'kpi-block', kind: 'kpi_block', title: 'KPI Block', requirements: ['Define KPI tree and owners.'], evidenceRefIds: [] },
+      { id: 'roadmap', kind: 'roadmap_30_60_90', title: '30/60/90 Plan', requirements: ['Define phased actions.'], evidenceRefIds: [] },
+      { id: 'risk-register', kind: 'risk_register', title: 'Risk Register', requirements: ['List top execution risks.'], evidenceRefIds: [] },
+      { id: 'evidence-gaps', kind: 'evidence_gaps', title: 'Evidence Gaps', requirements: ['Declare missing evidence.'], evidenceRefIds: [] },
+      { id: 'source-ledger', kind: 'source_ledger', title: 'Source Ledger', requirements: ['List auditable sources.'], evidenceRefIds: [] },
+    ],
+    PLAYBOOK: [
+      { id: 'playbook-summary', kind: 'executive_summary', title: 'Playbook Summary', requirements: ['Summarize outcome and audience.'], evidenceRefIds: [] },
+      { id: 'channel-plan', kind: 'channel_plan', title: 'Channel Plan', requirements: ['Map execution channels.'], evidenceRefIds: [] },
+      { id: 'playbook-cadence', kind: 'playbook_cadence', title: 'Weekly Cadence', requirements: ['Define weekly execution rhythm.'], evidenceRefIds: [] },
+      { id: 'signal-analysis', kind: 'signal_analysis', title: 'Signal Analysis', requirements: ['Use strongest existing signals.'], evidenceRefIds: [] },
+      { id: 'kpi-block', kind: 'kpi_block', title: 'KPI Block', requirements: ['Define KPIs and owners.'], evidenceRefIds: [] },
+      { id: 'roadmap', kind: 'roadmap_30_60_90', title: '30/60/90 Plan', requirements: ['Define phased actions.'], evidenceRefIds: [] },
+      { id: 'risk-register', kind: 'risk_register', title: 'Risk Register', requirements: ['List top execution risks.'], evidenceRefIds: [] },
+      { id: 'source-ledger', kind: 'source_ledger', title: 'Source Ledger', requirements: ['List auditable sources.'], evidenceRefIds: [] },
+    ],
+    COMPETITOR_AUDIT: [
+      { id: 'executive-summary', kind: 'executive_summary', title: 'Executive Summary', requirements: ['Summarize competitor landscape.'], evidenceRefIds: [] },
+      { id: 'market-map', kind: 'competitor_market_map', title: 'Competitor Market Map', requirements: ['Map major competitors.'], evidenceRefIds: [] },
+      { id: 'comparison-table', kind: 'competitor_comparison_table', title: 'Comparison Table', requirements: ['Compare top competitors.'], evidenceRefIds: [] },
+      { id: 'battlecards', kind: 'competitor_battlecards', title: 'Battlecards', requirements: ['Provide battlecards and counters.'], evidenceRefIds: [] },
+      { id: 'signal-delta', kind: 'signal_delta_analysis', title: 'Signal Delta Analysis', requirements: ['Explain momentum deltas.'], evidenceRefIds: [] },
+      { id: 'signal-analysis', kind: 'signal_analysis', title: 'Signal Analysis', requirements: ['Summarize high-signal examples.'], evidenceRefIds: [] },
+      { id: 'kpi-watchlist', kind: 'kpi_block', title: 'KPI Watchlist', requirements: ['Define KPI watchlist.'], evidenceRefIds: [] },
+      { id: 'risk-register', kind: 'risk_register', title: 'Risk Register', requirements: ['List audit risks.'], evidenceRefIds: [] },
+      { id: 'source-ledger', kind: 'source_ledger', title: 'Source Ledger', requirements: ['List auditable sources.'], evidenceRefIds: [] },
+    ],
+    CONTENT_CALENDAR: [
+      { id: 'calendar-summary', kind: 'executive_summary', title: 'Calendar Summary', requirements: ['Summarize objective and audience.'], evidenceRefIds: [] },
+      { id: 'cadence-assumptions', kind: 'cadence_assumptions', title: 'Cadence Assumptions', requirements: ['Set cadence assumptions.'], evidenceRefIds: [] },
+      { id: 'calendar-slots', kind: 'content_calendar_slots', title: 'Weekly Calendar', requirements: ['Provide dated slots.'], evidenceRefIds: [] },
+      { id: 'pillar-matrix', kind: 'channel_pillar_matrix', title: 'Channel/Pillar Matrix', requirements: ['Map channels to pillars.'], evidenceRefIds: [] },
+      { id: 'signal-analysis', kind: 'signal_analysis', title: 'Signal Analysis', requirements: ['Use strongest signal patterns.'], evidenceRefIds: [] },
+      { id: 'kpi-plan', kind: 'kpi_block', title: 'KPI Plan', requirements: ['Define KPI plan.'], evidenceRefIds: [] },
+      { id: 'risk-register', kind: 'risk_register', title: 'Risk Register', requirements: ['List execution risks.'], evidenceRefIds: [] },
+      { id: 'source-ledger', kind: 'source_ledger', title: 'Source Ledger', requirements: ['List auditable sources.'], evidenceRefIds: [] },
+    ],
+    GO_TO_MARKET: [
+      { id: 'executive-summary', kind: 'executive_summary', title: 'Executive Summary', requirements: ['Summarize launch objective.'], evidenceRefIds: [] },
+      { id: 'market-context', kind: 'market_context', title: 'Market Context', requirements: ['Capture market and category context.'], evidenceRefIds: [] },
+      { id: 'icp-definition', kind: 'icp_definition', title: 'ICP Definition', requirements: ['Define ICP segments.'], evidenceRefIds: [] },
+      { id: 'positioning', kind: 'positioning', title: 'Positioning', requirements: ['Define positioning strategy.'], evidenceRefIds: [] },
+      { id: 'messaging-house', kind: 'messaging_house', title: 'Messaging House', requirements: ['Define messaging layers.'], evidenceRefIds: [] },
+      { id: 'channel-strategy', kind: 'channel_plan', title: 'Channel Strategy', requirements: ['Define launch channels.'], evidenceRefIds: [] },
+      { id: 'launch-phases', kind: 'launch_phases', title: 'Launch Phases', requirements: ['Define phased launch.'], evidenceRefIds: [] },
+      { id: 'budget-kpi-tree', kind: 'budget_kpi_tree', title: 'Budget And KPI Tree', requirements: ['Define budget and KPI tree.'], evidenceRefIds: [] },
+      { id: 'roadmap', kind: 'roadmap_30_60_90', title: '30/60/90 Plan', requirements: ['Define phased actions.'], evidenceRefIds: [] },
+      { id: 'risk-register', kind: 'risk_register', title: 'Risk Register', requirements: ['List GTM risks.'], evidenceRefIds: [] },
+      { id: 'source-ledger', kind: 'source_ledger', title: 'Source Ledger', requirements: ['List auditable sources.'], evidenceRefIds: [] },
+    ],
+  };
   const fallback: DocumentSpecV1 = {
     version: 'v1',
-    docFamily: 'BUSINESS_STRATEGY',
+    docFamily: fallbackFamily,
     title: 'Generated Document',
     audience: 'client',
     businessArchetype: 'generic',
     depth: 'deep',
-    styleProfile: 'strategy_standard_v1',
-    sections: [
-      {
-        id: 'executive-summary',
-        kind: 'executive_summary',
-        title: 'Executive Summary',
-        requirements: ['Summarize objectives and evidence confidence.'],
-        evidenceRefIds: [],
-      },
-      {
-        id: 'analysis',
-        kind: 'signal_analysis',
-        title: 'Signal Analysis',
-        requirements: ['Highlight major evidence-backed signals.'],
-        evidenceRefIds: [],
-      },
-      {
-        id: 'roadmap',
-        kind: 'roadmap_30_60_90',
-        title: '30/60/90 Plan',
-        requirements: ['Provide immediate, mid-term, and long-term actions.'],
-        evidenceRefIds: [],
-      },
-    ],
+    styleProfile: fallbackStyleProfileByFamily[fallbackFamily],
+    sections: fallbackSectionsByFamily[fallbackFamily],
   };
 
   const candidate = {

@@ -43,7 +43,7 @@ const DEPTH_PROFILE: Record<'short' | 'standard' | 'deep', DepthProfile> = {
 
 function normalizeDepth(depth: DocumentPlan['depth'] | undefined): 'short' | 'standard' | 'deep' {
   if (depth === 'short' || depth === 'deep') return depth;
-  return 'standard';
+  return 'deep';
 }
 
 function cleanInline(value: string): string {

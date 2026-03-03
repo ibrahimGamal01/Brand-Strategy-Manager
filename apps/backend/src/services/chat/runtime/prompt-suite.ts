@@ -1055,10 +1055,18 @@ export function applyWriterQualityGate(input: {
         ? requiredHeaders.filter((header) => !new RegExp(`^${escapeRegExp(header)}\\s*$`, 'im').test(raw))
         : [];
     const recommendationSignals = /\brecommend|priority|next action|do now|should\b/i.test(raw);
+    const caveatSignals = /\b(caveat|risk|limitation|confidence|gap|uncertain|partial)\b/i.test(raw);
+    const bulletLikeLineCount = raw
+      .split('\n')
+      .filter((line) => /^(\s*[-*]\s+|\s*\d+\.\s+)/.test(String(line || '')))
+      .length;
+    const minimumLength = responseMode === 'pro' ? 1200 : isDeepOrPro ? 850 : 80;
     const hasLowSignal =
       genericSignals >= 2 ||
-      raw.length < (isDeepOrPro ? 260 : 80) ||
-      (isDeepOrPro && enforceSections && (missingHeaders.length > 0 || !recommendationSignals));
+      raw.length < minimumLength ||
+      (isDeepOrPro && enforceSections && (missingHeaders.length > 0 || !recommendationSignals)) ||
+      (isDeepOrPro && bulletLikeLineCount < 10) ||
+      (responseMode === 'pro' && !caveatSignals);
     if (!hasLowSignal) {
       return {
         response: input.response,
@@ -1078,35 +1086,58 @@ export function applyWriterQualityGate(input: {
       .map((entry) => String(entry.url || entry.label || '').trim())
       .filter(Boolean)
       .slice(0, isDeepOrPro ? 10 : 3);
+    const searchedTools = Array.from(
+      new Set(
+        input.toolResults
+          .map((result) => {
+            const raw = isRecord(result.raw) ? result.raw : {};
+            return String(raw.toolName || raw.tool || '').trim();
+          })
+          .filter(Boolean)
+      )
+    ).slice(0, isDeepOrPro ? 10 : 4);
+    const foundLines = Array.from(new Set([...highlights, ...evidenceLinks])).slice(0, isDeepOrPro ? 12 : 4);
+    const recommendationLines = [
+      'Prioritize one high-confidence execution lane and assign owner + KPI before next loop.',
+      'Expand weak lanes (competitors/news/community/web) before final strategic commitments.',
+      'Keep all major claims tied to explicit evidence references in the output.',
+      'Run a timed validation checkpoint to compare recommendation confidence against new evidence.',
+      'Promote only validated insights into final stakeholder-facing artifacts.',
+    ];
+    const nextLoopLines = [
+      'Run another searching loop on the thinnest evidence lane first.',
+      'Re-score coverage and relevance deltas before accepting final output.',
+      'Regenerate the deliverable with updated evidence and compare section-level confidence.',
+      'Stop only when confidence is acceptable or budget cap is reached.',
+    ];
     const clientName = String((input.runtimeContext || {}).clientName || '').trim();
     const rewritten = isDeepOrPro && enforceSections
       ? [
           '## What I searched',
-          highlights.length
-            ? highlights.slice(0, 6).map((line, index) => `${index + 1}. ${line}`).join('\n')
-            : '1. Reviewed the latest workspace evidence and recent tool outputs.',
+          searchedTools.length
+            ? searchedTools.map((line, index) => `${index + 1}. ${line}`).join('\n')
+            : '1. Reviewed workspace sources, tool outputs, and latest branch evidence snapshots.',
           '',
           '## What I found',
-          highlights.length
-            ? highlights.map((line, index) => `- ${line}`).join('\n')
-            : '- The latest run completed with fresh evidence updates.',
+          foundLines.length
+            ? foundLines.map((line, index) => `${index + 1}. ${line}`).join('\n')
+            : '1. The latest run completed with fresh evidence updates.',
           evidenceLinks.length
             ? `\nEvidence links:\n${evidenceLinks.map((line, index) => `${index + 1}. ${line}`).join('\n')}`
             : '',
           '',
           '## Synthesis',
           clientName
-            ? `For ${clientName}, the current signal set supports directional decisions now, with higher confidence after another evidence expansion loop.`
-            : 'The current signal set supports directional decisions now, with higher confidence after another evidence expansion loop.',
+            ? `For ${clientName}, current signals support directional planning now, but deeper confidence requires targeted lane expansion and contradiction checks.`
+            : 'Current signals support directional planning now, but deeper confidence requires targeted lane expansion and contradiction checks.',
+          '- Confidence should be treated as provisional when coverage/relevance lanes are below deep thresholds.',
+          '- Recommendations below are ranked for execution value and validation speed.',
           '',
           '## Recommendations',
-          '1. Prioritize the highest-confidence lane and run a focused execution test this week.',
-          '2. Expand weak evidence lanes before making irreversible strategic commitments.',
-          '3. Keep every key claim tied to explicit evidence links.',
+          ...recommendationLines.map((line, index) => `${index + 1}. ${line}`),
           '',
           '## Next loop / next actions',
-          '1. Run another search + validation loop for missing lanes.',
-          '2. Continue deepening if you want a fully expanded deliverable.',
+          ...nextLoopLines.map((line, index) => `${index + 1}. ${line}`),
         ].join('\n')
       : [
           clientName ? `I reviewed the latest workspace evidence for ${clientName}.` : 'I reviewed the latest workspace evidence.',

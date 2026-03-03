@@ -73,7 +73,34 @@ function sourceLedgerLines(payload: DocumentDataPayload, max = 10): string[] {
   return firstItems(lines, 'No source ledger rows available yet.', max);
 }
 
-function buildSectionContent(section: DraftedDocumentSection, payload: DocumentDataPayload): string {
+function sectionLimit(depth: DocumentSpecV1['depth'], standardMax: number, deepMax: number): number {
+  return depth === 'deep' ? deepMax : standardMax;
+}
+
+function addDeepeningNotes(input: {
+  contentMd: string;
+  depth: DocumentSpecV1['depth'];
+  status: DraftedDocumentSection['status'];
+  evidenceRefCount: number;
+  partialReason?: string;
+}): string {
+  if (input.depth !== 'deep') return input.contentMd;
+  const notes = [
+    `- Section coverage status: **${input.status === 'grounded' ? 'grounded' : 'partial'}**.`,
+    `- Evidence references mapped in spec: **${input.evidenceRefCount}**.`,
+    ...(input.partialReason ? [`- Gap: ${input.partialReason}`] : []),
+    input.status === 'grounded'
+      ? '- Next deepening move: expand contradictory evidence checks before final stakeholder circulation.'
+      : '- Next deepening move: run another targeted evidence loop for this section before final sign-off.',
+  ];
+  return [input.contentMd, '', '### Deepening Notes', ...notes].join('\n');
+}
+
+function buildSectionContent(
+  section: DraftedDocumentSection,
+  payload: DocumentDataPayload,
+  depth: DocumentSpecV1['depth']
+): string {
   if (section.kind === 'executive_summary') {
     return [
       `- Primary goal: ${payload.primaryGoal}.`,
@@ -84,7 +111,8 @@ function buildSectionContent(section: DraftedDocumentSection, payload: DocumentD
   }
 
   if (section.kind === 'market_context') {
-    return firstItems(topSignals(payload, 6), 'Insufficient market context evidence.', 6)
+    const max = sectionLimit(depth, 6, 10);
+    return firstItems(topSignals(payload, max), 'Insufficient market context evidence.', max)
       .map((line) => `- ${line}`)
       .join('\n');
   }
@@ -115,13 +143,15 @@ function buildSectionContent(section: DraftedDocumentSection, payload: DocumentD
   }
 
   if (section.kind === 'competitor_deep_dive') {
-    return firstItems(competitorLines(payload, 6), 'No competitor deep-dive evidence available yet.', 6)
+    const max = sectionLimit(depth, 6, 10);
+    return firstItems(competitorLines(payload, max), 'No competitor deep-dive evidence available yet.', max)
       .map((line) => `- ${line}`)
       .join('\n');
   }
 
   if (section.kind === 'competitor_market_map') {
-    return firstItems(competitorLines(payload, 10), 'No competitor market map evidence available.', 10)
+    const max = sectionLimit(depth, 10, 14);
+    return firstItems(competitorLines(payload, max), 'No competitor market map evidence available.', max)
       .map((line) => `- ${line}`)
       .join('\n');
   }
@@ -152,20 +182,22 @@ function buildSectionContent(section: DraftedDocumentSection, payload: DocumentD
   }
 
   if (section.kind === 'signal_delta_analysis') {
+    const max = sectionLimit(depth, 8, 12);
     return firstItems(
-      payload.topPosts.slice(0, 8).map((post) => {
+      payload.topPosts.slice(0, max).map((post) => {
         const weighted = Number(post.likes || 0) + Number(post.comments || 0) + Number(post.shares || 0);
         return `@${post.handle}: ${String(post.caption || '').slice(0, 120)} (weighted engagement ${weighted}).`;
       }),
       'No signal delta data available.',
-      8
+      max
     )
       .map((line) => `- ${line}`)
       .join('\n');
   }
 
   if (section.kind === 'signal_analysis') {
-    return firstItems(topSignals(payload, 8), 'No high-signal posts available yet.', 8)
+    const max = sectionLimit(depth, 8, 12);
+    return firstItems(topSignals(payload, max), 'No high-signal posts available yet.', max)
       .map((line) => `- ${line}`)
       .join('\n');
   }
@@ -205,8 +237,9 @@ function buildSectionContent(section: DraftedDocumentSection, payload: DocumentD
   }
 
   if (section.kind === 'content_calendar_slots') {
+    const max = sectionLimit(depth, 12, 18);
     const start = resolveCalendarStartDate(payload);
-    const rows = payload.topPosts.slice(0, 12).map((post, index) => {
+    const rows = payload.topPosts.slice(0, max).map((post, index) => {
       const week = Math.floor(index / 3) + 1;
       const day = (index % 3) + 1;
       const slotDate = new Date(start);
@@ -274,9 +307,10 @@ function buildSectionContent(section: DraftedDocumentSection, payload: DocumentD
   }
 
   if (section.kind === 'roadmap_30_60_90') {
-    const days30 = firstItems(payload.recommendations.days30, 'Define baseline hypotheses and KPI owners.', 5);
-    const days60 = firstItems(payload.recommendations.days60, 'Scale highest-performing narrative archetypes.', 5);
-    const days90 = firstItems(payload.recommendations.days90, 'Operationalize strategy refresh cadence.', 5);
+    const max = sectionLimit(depth, 5, 7);
+    const days30 = firstItems(payload.recommendations.days30, 'Define baseline hypotheses and KPI owners.', max);
+    const days60 = firstItems(payload.recommendations.days60, 'Scale highest-performing narrative archetypes.', max);
+    const days90 = firstItems(payload.recommendations.days90, 'Operationalize strategy refresh cadence.', max);
     return [
       '### 30 Days',
       ...days30.map((line) => `- ${line}`),
@@ -290,13 +324,15 @@ function buildSectionContent(section: DraftedDocumentSection, payload: DocumentD
   }
 
   if (section.kind === 'risk_register') {
-    return firstItems(payload.recommendations.risks, 'Validate engagement versus conversion quality continuously.', 8)
+    const max = sectionLimit(depth, 8, 12);
+    return firstItems(payload.recommendations.risks, 'Validate engagement versus conversion quality continuously.', max)
       .map((line) => `- ${line}`)
       .join('\n');
   }
 
   if (section.kind === 'evidence_gaps') {
-    return firstItems(payload.coverage.partialReasons, 'No critical evidence gaps currently flagged.', 8)
+    const max = sectionLimit(depth, 8, 12);
+    return firstItems(payload.coverage.partialReasons, 'No critical evidence gaps currently flagged.', max)
       .map((line) => `- ${line}`)
       .join('\n');
   }
@@ -311,7 +347,8 @@ function buildSectionContent(section: DraftedDocumentSection, payload: DocumentD
   }
 
   if (section.kind === 'source_ledger') {
-    return sourceLedgerLines(payload, 16).map((line) => `- ${line}`).join('\n');
+    const max = sectionLimit(depth, 16, 24);
+    return sourceLedgerLines(payload, max).map((line) => `- ${line}`).join('\n');
   }
 
   return '- Section content not mapped yet.';
@@ -335,22 +372,33 @@ export function draftDocumentSections(input: {
       partialReasons.push(partialReason);
     }
 
+    const baseContentMd = buildSectionContent(
+      {
+        id: section.id,
+        kind: section.kind,
+        title: section.title,
+        contentMd: '',
+        evidenceRefIds,
+        status,
+        partialReason,
+      },
+      input.payload,
+      input.spec.depth
+    );
+
+    const contentMd = addDeepeningNotes({
+      contentMd: baseContentMd,
+      depth: input.spec.depth,
+      status,
+      evidenceRefCount: evidenceRefIds.length,
+      ...(partialReason ? { partialReason } : {}),
+    });
+
     const drafted: DraftedDocumentSection = {
       id: section.id,
       kind: section.kind,
       title: section.title,
-      contentMd: buildSectionContent(
-        {
-          id: section.id,
-          kind: section.kind,
-          title: section.title,
-          contentMd: '',
-          evidenceRefIds,
-          status,
-          partialReason,
-        },
-        input.payload
-      ),
+      contentMd,
       evidenceRefIds,
       status,
       ...(partialReason ? { partialReason } : {}),
