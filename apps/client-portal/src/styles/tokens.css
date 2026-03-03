@@ -1,22 +1,22 @@
 :root {
-  --font-body: "Avenir Next", "Nunito Sans", "Segoe UI", sans-serif;
-  --font-display: "Iowan Old Style", "Baskerville", "Times New Roman", serif;
+  --font-body: "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-display: "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
 
-  --bat-bg: #f7f5f0;
-  --bat-bg-soft: #fdfbf7;
+  --bat-bg: #ffffff;
+  --bat-bg-soft: #ffffff;
   --bat-surface: #ffffff;
-  --bat-surface-muted: #f2efe8;
-  --bat-border: #d8d0c2;
+  --bat-surface-muted: #f8f9fb;
+  --bat-border: #e5e7eb;
   --bat-text: #1e1f1f;
-  --bat-text-muted: #5e625f;
-  --bat-accent: #0f766e;
-  --bat-accent-soft: #d6f2ef;
-  --bat-success: #2e7d32;
-  --bat-warning: #c47d2c;
+  --bat-text-muted: #6b7280;
+  --bat-accent: #111827;
+  --bat-accent-soft: #eef2ff;
+  --bat-success: #166534;
+  --bat-warning: #a16207;
 
-  --radius-sm: 10px;
-  --radius-md: 16px;
-  --radius-lg: 24px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
 
   --space-1: 0.25rem;
   --space-2: 0.5rem;
@@ -27,7 +27,7 @@
   --space-7: 2.5rem;
   --space-8: 3rem;
 
-  --shadow-card: 0 10px 30px rgba(27, 38, 35, 0.08);
+  --shadow-card: 0 2px 8px rgba(15, 23, 42, 0.06);
 }
 
 [data-theme="dark"] {

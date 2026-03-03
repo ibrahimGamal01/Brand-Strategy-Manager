@@ -62,6 +62,7 @@ import {
   listPortalWorkspaceLibrary,
   resolvePortalWorkspaceLibraryRefs,
 } from '../../portal/portal-library';
+import { canonicalDocFamily } from '../../documents/document-spec';
 import { flattenMemoryForRuntimeContext, readWorkspaceMemoryContext } from './workspace-memory';
 
 type SendMessageInput = {
@@ -1878,6 +1879,65 @@ function extractDocumentRuntimeTarget(toolResults: RuntimeToolResult[]): {
   return {};
 }
 
+function normalizeStorageHref(value: string): string {
+  const normalized = String(value || '').trim();
+  if (!normalized) return '';
+  if (/^https?:\/\//i.test(normalized)) return normalized;
+  if (normalized.startsWith('/storage/')) return normalized;
+  if (normalized.startsWith('storage/')) return `/${normalized}`;
+  if (normalized.startsWith('./storage/')) return `/${normalized.slice(2)}`;
+  return normalized;
+}
+
+function extractDocumentArtifact(toolResults: RuntimeToolResult[]): Record<string, unknown> | null {
+  for (let index = toolResults.length - 1; index >= 0; index -= 1) {
+    const raw = isRecord(toolResults[index].raw) ? (toolResults[index].raw as Record<string, unknown>) : null;
+    if (!raw) continue;
+    const storagePath = String(raw.storagePath || raw.downloadPath || raw.path || '').trim();
+    const runtimeDocumentId = String(raw.documentId || raw.runtimeDocumentId || raw.docId || '').trim();
+    const hasSignals = Boolean(storagePath || runtimeDocumentId || raw.docId || raw.coverageScore !== undefined);
+    if (!hasSignals) continue;
+
+    const title = String(raw.title || raw.fileName || raw.documentTitle || raw.docTitle || raw.docType || 'Generated document').trim();
+    const docType = String(raw.docType || raw.documentType || '').trim().toUpperCase();
+    const familyRaw = String(raw.family || raw.docFamily || '').trim().toUpperCase();
+    const family = familyRaw || (docType ? canonicalDocFamily(docType) : '');
+    const versionId = String(raw.versionId || '').trim();
+    const versionNumber = Number(raw.versionNumber || raw.version || raw.docVersionNumber);
+    const formatRaw = String(raw.format || 'PDF').trim().toUpperCase();
+    const format = formatRaw === 'DOCX' || formatRaw === 'MD' ? formatRaw : 'PDF';
+    const previewModeDefaultRaw = String(raw.previewModeDefault || '').trim().toLowerCase();
+    const previewModeDefault = previewModeDefaultRaw === 'markdown' ? 'markdown' : 'pdf';
+    const downloadHref = normalizeStorageHref(
+      String(raw.downloadHref || raw.storageHref || raw.href || raw.url || storagePath || '').trim()
+    );
+    const previewHref = normalizeStorageHref(String(raw.previewHref || downloadHref || storagePath || '').trim());
+    const partialReasons = Array.isArray(raw.partialReasons)
+      ? raw.partialReasons.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 6)
+      : [];
+    const coverageScore = Number(raw.coverageScore);
+
+    return {
+      type: 'document_artifact',
+      title: title || 'Generated document',
+      docType: docType || undefined,
+      ...(family ? { family } : {}),
+      format,
+      storagePath: storagePath || downloadHref || previewHref || '',
+      ...(downloadHref ? { downloadHref } : {}),
+      ...(previewHref ? { previewHref } : {}),
+      ...(runtimeDocumentId ? { documentId: runtimeDocumentId } : {}),
+      ...(versionId ? { versionId } : {}),
+      ...(Number.isFinite(versionNumber) ? { versionNumber: Math.max(1, Math.floor(versionNumber)) } : {}),
+      previewModeDefault,
+      ...(Number.isFinite(coverageScore) ? { coverageScore } : {}),
+      ...(typeof raw.partial === 'boolean' ? { partial: raw.partial } : {}),
+      ...(partialReasons.length ? { partialReasons } : {}),
+    };
+  }
+  return null;
+}
+
 function hasPartialDocumentResult(toolResults: RuntimeToolResult[]): boolean {
   for (let index = toolResults.length - 1; index >= 0; index -= 1) {
     const raw = isRecord(toolResults[index].raw) ? (toolResults[index].raw as Record<string, unknown>) : null;
@@ -2185,6 +2245,10 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
     messageWithMentions.matchAll(/\[document:([a-z0-9-]{8,})\]/gi),
     (match) => String(match[1] || '').trim()
   ).filter(Boolean);
+  const resumeDocumentIdFromText =
+    String(messageWithMentions.match(/\bresume(?: from)?(?: document)?(?: id)?[:\s]+([a-z0-9-]{8,})\b/i)?.[1] || '').trim() ||
+    referencedDocumentIds[0] ||
+    '';
 
   const pushIfMissing = (tool: string, args: Record<string, unknown>) => {
     const key = `${tool}:${JSON.stringify(args)}`;
@@ -2247,6 +2311,9 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
     );
   const hasDocumentKeyword = /\b(pdf|report|brief|document|doc)\b/.test(normalized);
   const hasDocumentGenerateVerb = /\b(generate|create|make|build|produce|draft|export)\b/.test(normalized);
+  const hasContinueDeepeningIntent =
+    /\bcontinue\b/.test(normalized) &&
+    /\b(deepen|deepening|improve|enrich|expand|refine)\b/.test(normalized);
   const hasDocumentGenerationIntent = hasDocumentKeyword && hasDocumentGenerateVerb;
   const wantsSwot = /\bswot\b/.test(normalized);
   const wantsPlaybook = /\bplaybook\b|\bcadence\b/.test(normalized);
@@ -2282,6 +2349,8 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
             : wantsPlaybook
               ? 'playbook'
               : 'business_strategy',
+    ...(hasContinueDeepeningIntent ? { continueDeepening: true } : {}),
+    ...(resumeDocumentIdFromText ? { resumeDocumentId: resumeDocumentIdFromText } : {}),
   };
 
   if (slashCommand) {
@@ -3067,7 +3136,7 @@ export class RuntimeRunEngine {
     branchId: string;
     content: string;
     contextSnapshot?: Record<string, unknown>;
-    blocksJson?: Record<string, unknown>;
+    blocksJson?: unknown;
     reasoningJson?: Record<string, unknown>;
     citationsJson?: unknown;
     clientVisible?: boolean;
@@ -4015,16 +4084,27 @@ export class RuntimeRunEngine {
           toolResults,
         });
         const actionButtons = sanitizeWriterActions(partial.actions, 8);
+        const documentArtifact = extractDocumentArtifact(toolResults);
+        const budgetBlocks: Record<string, unknown>[] = [];
+        if (documentArtifact) {
+          budgetBlocks.push(documentArtifact);
+        }
+        if (actionButtons.length) {
+          budgetBlocks.push({
+            type: 'action_buttons',
+            actions: actionButtons,
+            decisions: [],
+          });
+        }
         await this.persistAssistantMessage({
           branchId: run.branchId,
           content: partial.content,
-          blocksJson: actionButtons.length
-            ? {
-                type: 'action_buttons',
-                actions: actionButtons,
-                decisions: [],
-              }
-            : undefined,
+          blocksJson:
+            budgetBlocks.length === 0
+              ? undefined
+              : budgetBlocks.length === 1
+                ? budgetBlocks[0]
+                : budgetBlocks,
           reasoningJson: {
             plan: plan.plan,
             tools: toolRuns.map((item) => item.toolName),
@@ -4493,6 +4573,36 @@ export class RuntimeRunEngine {
     }
 
     const actionButtons = sanitizeWriterActions(writerOutput.actions, 8);
+    const documentArtifact = extractDocumentArtifact(toolResults);
+    if (documentArtifact) {
+      const artifactDocumentId = String(documentArtifact.documentId || '').trim();
+      const artifactDownloadHref = String(documentArtifact.downloadHref || documentArtifact.storagePath || '').trim();
+      if (
+        artifactDocumentId &&
+        !actionButtons.some((action) => {
+          const actionKey = String(action.action || '').trim().toLowerCase();
+          if (actionKey !== 'document.read') return false;
+          const payload = isRecord(action.payload) ? action.payload : {};
+          return String(payload.documentId || payload.docId || '').trim() === artifactDocumentId;
+        })
+      ) {
+        actionButtons.unshift({
+          label: 'Open in Docs',
+          action: 'document.read',
+          payload: { documentId: artifactDocumentId },
+        });
+      }
+      if (
+        artifactDownloadHref &&
+        !actionButtons.some((action) => String(action.action || '').trim().toLowerCase() === 'document.download')
+      ) {
+        actionButtons.unshift({
+          label: 'Download PDF',
+          action: 'document.download',
+          payload: { storagePath: artifactDownloadHref },
+        });
+      }
+    }
     if (isDocumentFocusedRun({ plan, toolRuns }) && hasPartialDocumentResult(toolResults)) {
       const hasContinueAction = actionButtons.some((action) => {
         if (String(action.action || '').trim().toLowerCase() !== 'document.generate') return false;
@@ -4537,17 +4647,27 @@ export class RuntimeRunEngine {
           }
         : writerOutput.reasoning.evidence;
 
+    const persistedBlocks: Record<string, unknown>[] = [];
+    if (documentArtifact) {
+      persistedBlocks.push(documentArtifact);
+    }
+    if (persistedActionButtons.length || finalDecisions.length) {
+      persistedBlocks.push({
+        type: 'action_buttons',
+        actions: persistedActionButtons,
+        decisions: finalDecisions,
+      });
+    }
+
     await this.persistAssistantMessage({
       branchId: run.branchId,
       content: finalResponseContent,
       blocksJson:
-        persistedActionButtons.length || finalDecisions.length
-          ? {
-              type: 'action_buttons',
-              actions: persistedActionButtons,
-              decisions: finalDecisions,
-            }
-          : undefined,
+        persistedBlocks.length === 0
+          ? undefined
+          : persistedBlocks.length === 1
+            ? persistedBlocks[0]
+            : persistedBlocks,
       reasoningJson: {
         ...writerOutput.reasoning,
         model: writerOutput.model,
@@ -4831,10 +4951,16 @@ export class RuntimeRunEngine {
         }
       }
 
+      const preGuardIntent = routeRuntimeIntent({
+        userMessage: triggerMessageForPlanning,
+        ...(runtimeContextSnapshot ? { runtimeContext: runtimeContextSnapshot } : {}),
+      });
+
       if (
         PORTAL_LIBRARY_TRUST_GUARD_ENABLED &&
         pinnedLibraryRefs.length === 0 &&
-        requestsExplicitLibraryGrounding(triggerMessageRaw)
+        requestsExplicitLibraryGrounding(triggerMessageRaw) &&
+        preGuardIntent.intent !== 'document_request'
       ) {
         const librarySnapshot = await listPortalWorkspaceLibrary(fresh.branch.thread.researchJobId, {
           version: 'v2',
@@ -4911,10 +5037,7 @@ export class RuntimeRunEngine {
         await updateAgentRun(fresh.id, { plan });
       }
 
-      const routedIntent = routeRuntimeIntent({
-        userMessage: triggerMessageForPlanning,
-        ...(runtimeContextSnapshot ? { runtimeContext: runtimeContextSnapshot } : {}),
-      });
+      const routedIntent = preGuardIntent;
       if (routedIntent.docFamily) {
         await this.emitEvent({
           branchId: fresh.branchId,

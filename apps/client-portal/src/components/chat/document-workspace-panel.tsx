@@ -1,40 +1,9 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Quote, RefreshCcw, Search, Sparkles } from "lucide-react";
-import {
-  applyRuntimeDocumentEdit,
-  getRuntimeDocument,
-  proposeRuntimeDocumentEdit,
-  RuntimeWorkspaceDocumentDto,
-  searchRuntimeDocument,
-} from "@/lib/runtime-api";
-
-type DocumentProposal = {
-  documentId: string;
-  baseVersionId: string;
-  baseVersionNumber: number;
-  instruction: string;
-  proposedContentMd: string;
-  changed: boolean;
-  changeSummary: string;
-  preview: { beforeChars: number; afterChars: number };
-  anchor?: {
-    quotedText: string;
-    replacementText?: string;
-    matched: boolean;
-    matchType?: "exact" | "whitespace";
-    matchCount?: number;
-  };
-};
-
-type DocumentSearchHit = {
-  chunkIndex: number;
-  headingPath?: string | null;
-  text: string;
-  score: number;
-  tokenCount: number;
-};
+import { getRuntimeDocument, RuntimeWorkspaceDocumentDto } from "@/lib/runtime-api";
+import { ChatMarkdown } from "./chat-markdown";
 
 function formatFreshness(iso?: string): string {
   const value = String(iso || "").trim();
@@ -66,6 +35,7 @@ export function DocumentWorkspacePanel({
   selectedDocumentId,
   onSelectDocument,
   onQuoteInChat,
+  onAskAiEdit,
   onRefreshDocuments,
   onRefreshRuntime,
 }: {
@@ -75,55 +45,53 @@ export function DocumentWorkspacePanel({
   selectedDocumentId: string | null;
   onSelectDocument: (documentId: string) => void;
   onQuoteInChat: (input: { document: RuntimeWorkspaceDocumentDto; quotedText: string }) => void;
+  onAskAiEdit?: (input: { document: RuntimeWorkspaceDocumentDto; quotedText: string }) => void;
   onRefreshDocuments: () => Promise<void>;
   onRefreshRuntime: () => Promise<void>;
 }) {
   const [listQuery, setListQuery] = useState("");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchHits, setSearchHits] = useState<DocumentSearchHit[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
+  const [showAllDocuments, setShowAllDocuments] = useState(false);
   const [selectionQuote, setSelectionQuote] = useState("");
-  const [instruction, setInstruction] = useState("");
-  const [proposal, setProposal] = useState<DocumentProposal | null>(null);
-  const [proposing, setProposing] = useState(false);
-  const [proposalError, setProposalError] = useState<string | null>(null);
-  const [applying, setApplying] = useState(false);
-  const [applyError, setApplyError] = useState<string | null>(null);
   const [hydrating, setHydrating] = useState(false);
   const [hydrationError, setHydrationError] = useState<string | null>(null);
   const [hydratedContentByDocument, setHydratedContentByDocument] = useState<Record<string, string>>({});
   const readerRef = useRef<HTMLDivElement | null>(null);
+  const [selectionToolbar, setSelectionToolbar] = useState<{ x: number; y: number } | null>(null);
+
+  const scopedDocuments = useMemo(() => {
+    if (showAllDocuments) return documents;
+    return documents.filter((document) => Boolean(document.latestVersion));
+  }, [documents, showAllDocuments]);
 
   const filteredDocuments = useMemo(() => {
     const query = listQuery.trim().toLowerCase();
-    if (!query) return documents;
-    return documents.filter((document) => {
+    if (!query) return scopedDocuments;
+    return scopedDocuments.filter((document) => {
       const title = String(document.title || "").toLowerCase();
       const fileName = String(document.originalFileName || "").toLowerCase();
       return title.includes(query) || fileName.includes(query);
     });
-  }, [documents, listQuery]);
+  }, [scopedDocuments, listQuery]);
 
   const selectedDocument = useMemo(
-    () => documents.find((document) => document.id === selectedDocumentId) || null,
-    [documents, selectedDocumentId]
+    () => scopedDocuments.find((document) => document.id === selectedDocumentId) || null,
+    [scopedDocuments, selectedDocumentId]
+  );
+
+  const selectDocument = useCallback(
+    (documentId: string) => {
+      setSelectionQuote("");
+      setSelectionToolbar(null);
+      onSelectDocument(documentId);
+    },
+    [onSelectDocument]
   );
 
   useEffect(() => {
-    if (selectedDocumentId && documents.some((document) => document.id === selectedDocumentId)) return;
-    if (!documents.length) return;
-    onSelectDocument(documents[0].id);
-  }, [documents, onSelectDocument, selectedDocumentId]);
-
-  useEffect(() => {
-    setSelectionQuote("");
-    setSearchHits([]);
-    setSearchError(null);
-    setProposal(null);
-    setProposalError(null);
-    setApplyError(null);
-  }, [selectedDocumentId]);
+    if (selectedDocumentId && scopedDocuments.some((document) => document.id === selectedDocumentId)) return;
+    if (!scopedDocuments.length) return;
+    selectDocument(scopedDocuments[0].id);
+  }, [scopedDocuments, selectDocument, selectedDocumentId]);
 
   useEffect(() => {
     const documentId = selectedDocument?.id;
@@ -133,10 +101,11 @@ export function DocumentWorkspacePanel({
     if (hydratedContentByDocument[documentId]) return;
 
     let cancelled = false;
-    setHydrating(true);
-    setHydrationError(null);
-    void getRuntimeDocument(workspaceId, branchId, documentId)
-      .then((payload) => {
+    const hydrateDocument = async () => {
+      setHydrating(true);
+      setHydrationError(null);
+      try {
+        const payload = await getRuntimeDocument(workspaceId, branchId, documentId);
         if (cancelled) return;
         const latest = payload.document.latestVersion?.contentMd;
         const fallback = Array.isArray(payload.document.versions) ? payload.document.versions[0]?.contentMd : "";
@@ -145,14 +114,14 @@ export function DocumentWorkspacePanel({
           ...previous,
           [documentId]: content,
         }));
-      })
-      .catch((error) => {
+      } catch (error) {
         if (cancelled) return;
         setHydrationError(String((error as Error)?.message || "Unable to load document content."));
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) setHydrating(false);
-      });
+      }
+    };
+    void hydrateDocument();
 
     return () => {
       cancelled = true;
@@ -169,113 +138,98 @@ export function DocumentWorkspacePanel({
   const updateSelection = useCallback(() => {
     if (!readerRef.current || typeof window === "undefined") return;
     const selection = window.getSelection();
-    if (!selection || selection.rangeCount < 1) {
+    if (!selection || selection.rangeCount < 1 || selection.isCollapsed) {
       setSelectionQuote("");
+      setSelectionToolbar(null);
+      return;
+    }
+    const anchorNode = selection.anchorNode;
+    const focusNode = selection.focusNode;
+    if (!anchorNode || !focusNode || !readerRef.current.contains(anchorNode) || !readerRef.current.contains(focusNode)) {
+      setSelectionQuote("");
+      setSelectionToolbar(null);
       return;
     }
     const range = selection.getRangeAt(0);
-    if (!readerRef.current.contains(range.commonAncestorContainer)) {
-      setSelectionQuote("");
-      return;
-    }
     const selectedText = compactQuote(selection.toString(), 1500);
     setSelectionQuote(selectedText);
+    if (!selectedText) {
+      setSelectionToolbar(null);
+      return;
+    }
+    const rect = range.getBoundingClientRect();
+    if (!rect.width && !rect.height) {
+      setSelectionToolbar(null);
+      return;
+    }
+    const toolbarWidth = 220;
+    const viewportWidth = window.innerWidth;
+    const x = Math.min(viewportWidth - toolbarWidth / 2 - 8, Math.max(toolbarWidth / 2 + 8, rect.left + rect.width / 2));
+    const y = Math.max(12, rect.top - 40);
+    setSelectionToolbar({ x, y });
   }, []);
 
-  const runSearch = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!branchId || !selectedDocument) return;
-    const query = searchQuery.trim();
-    if (!query) {
-      setSearchHits([]);
-      setSearchError(null);
-      return;
-    }
-    setSearching(true);
-    setSearchError(null);
-    try {
-      const payload = await searchRuntimeDocument(workspaceId, branchId, selectedDocument.id, query, 12);
-      setSearchHits(Array.isArray(payload.results?.hits) ? (payload.results.hits as DocumentSearchHit[]) : []);
-    } catch (error) {
-      setSearchHits([]);
-      setSearchError(String((error as Error)?.message || "Search failed."));
-    } finally {
-      setSearching(false);
-    }
-  };
+  useEffect(() => {
+    let frame = 0;
+    const handleSelectionChange = () => {
+      if (frame) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => updateSelection());
+    };
+    document.addEventListener("selectionchange", handleSelectionChange);
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      document.removeEventListener("selectionchange", handleSelectionChange);
+    };
+  }, [updateSelection]);
 
-  const proposeEdit = async () => {
-    if (!branchId || !selectedDocument) return;
-    const nextInstruction = instruction.trim();
-    if (!nextInstruction) {
-      setProposalError("Add an edit instruction first.");
-      return;
-    }
-    setProposing(true);
-    setProposalError(null);
-    setApplyError(null);
-    try {
-      const payload = await proposeRuntimeDocumentEdit(workspaceId, branchId, selectedDocument.id, {
-        instruction: nextInstruction,
-        ...(selectionQuote ? { quotedText: selectionQuote } : {}),
-      });
-      setProposal(payload.proposal);
-    } catch (error) {
-      setProposal(null);
-      setProposalError(String((error as Error)?.message || "Failed to create proposal."));
-    } finally {
-      setProposing(false);
-    }
-  };
-
-  const applyProposal = async () => {
-    if (!branchId || !selectedDocument || !proposal) return;
-    setApplying(true);
-    setApplyError(null);
-    try {
-      await applyRuntimeDocumentEdit(workspaceId, branchId, selectedDocument.id, {
-        proposedContentMd: proposal.proposedContentMd,
-        changeSummary: proposal.changeSummary,
-        baseVersionId: proposal.baseVersionId,
-      });
-      await Promise.all([onRefreshDocuments(), onRefreshRuntime()]);
-      setProposal(null);
-    } catch (error) {
-      setApplyError(String((error as Error)?.message || "Failed to apply proposal."));
-    } finally {
-      setApplying(false);
-    }
-  };
+  useEffect(() => {
+    if (!selectionToolbar) return;
+    const clear = () => setSelectionToolbar(null);
+    window.addEventListener("scroll", clear, true);
+    window.addEventListener("resize", clear);
+    return () => {
+      window.removeEventListener("scroll", clear, true);
+      window.removeEventListener("resize", clear);
+    };
+  }, [selectionToolbar]);
 
   return (
-    <aside className="bat-surface flex h-full min-h-0 flex-col p-3.5 sm:p-4">
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <h2 className="text-base font-semibold">Docs</h2>
-        <button
-          type="button"
-          onClick={() => {
-            void Promise.all([onRefreshDocuments(), onRefreshRuntime()]);
-          }}
-          className="rounded-full border px-2.5 py-1 text-xs"
-          style={{ borderColor: "var(--bat-border)" }}
-        >
-          <span className="inline-flex items-center gap-1">
-            <RefreshCcw className="h-3.5 w-3.5" />
-            Refresh
-          </span>
-        </button>
+    <aside className="flex h-full min-h-0 flex-col bg-white">
+      <div className="flex items-center justify-between gap-2 border-b border-zinc-200 px-3 py-2">
+        <h2 className="text-sm font-semibold text-zinc-900">Docs</h2>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowAllDocuments((previous) => !previous)}
+            className={`rounded-md border px-2 py-1 text-xs ${
+              showAllDocuments ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 text-zinc-700 hover:bg-zinc-100"
+            }`}
+          >
+            {showAllDocuments ? "Branch docs" : "Show all"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              void Promise.all([onRefreshDocuments(), onRefreshRuntime()]);
+            }}
+            className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+          >
+            <span className="inline-flex items-center gap-1">
+              <RefreshCcw className="h-3.5 w-3.5" />
+              Refresh
+            </span>
+          </button>
+        </div>
       </div>
 
       {!branchId ? (
-        <div className="rounded-xl border p-3 text-sm" style={{ borderColor: "var(--bat-border)", color: "var(--bat-text-muted)" }}>
-          Open a branch to access runtime documents.
-        </div>
+        <div className="px-3 py-3 text-sm text-zinc-600">Open a branch to access runtime documents.</div>
       ) : null}
 
       {branchId ? (
         <>
-          <label className="mb-2 flex items-center gap-2 rounded-xl border px-3 py-2 text-xs" style={{ borderColor: "var(--bat-border)" }}>
-            <Search className="h-3.5 w-3.5" />
+          <label className="mx-3 mt-2 mb-2 flex items-center gap-2 rounded-md border border-zinc-200 px-2.5 py-1.5 text-xs">
+            <Search className="h-3.5 w-3.5 text-zinc-500" />
             <input
               value={listQuery}
               onChange={(event) => setListQuery(event.target.value)}
@@ -284,27 +238,25 @@ export function DocumentWorkspacePanel({
             />
           </label>
 
-          <div className="bat-scrollbar mb-3 max-h-36 space-y-1 overflow-y-auto rounded-xl border p-1.5" style={{ borderColor: "var(--bat-border)" }}>
+          <div className="bat-scrollbar mx-3 mb-2.5 max-h-32 space-y-0.5 overflow-y-auto">
             {filteredDocuments.map((document) => {
               const active = document.id === selectedDocument?.id;
               return (
                 <button
                   key={document.id}
                   type="button"
-                  onClick={() => onSelectDocument(document.id)}
-                  className={`w-full rounded-lg border px-2.5 py-2 text-left ${
-                    active ? "border-zinc-300 bg-zinc-50" : "border-transparent hover:border-zinc-200 hover:bg-zinc-50/60"
-                  }`}
+                  onClick={() => selectDocument(document.id)}
+                  className={`w-full rounded-md px-2.5 py-2 text-left ${active ? "bg-zinc-100" : "hover:bg-zinc-50"}`}
                 >
                   <p className="line-clamp-1 text-xs font-semibold text-zinc-900">{document.title || document.originalFileName}</p>
                   <div className="mt-1 flex flex-wrap gap-1">
-                    <span className="rounded-full border border-zinc-200 bg-white px-1.5 py-0.5 text-[10px] uppercase text-zinc-500">
+                    <span className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10px] uppercase text-zinc-600">
                       {document.parserStatus || "unknown"}
                     </span>
-                    <span className="rounded-full border border-zinc-200 bg-white px-1.5 py-0.5 text-[10px] text-zinc-500">
+                    <span className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-600">
                       v{document.latestVersion?.versionNumber || 0}
                     </span>
-                    <span className="rounded-full border border-zinc-200 bg-white px-1.5 py-0.5 text-[10px] text-zinc-500">
+                    <span className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-600">
                       {formatFreshness(document.latestVersion?.createdAt)}
                     </span>
                   </div>
@@ -312,35 +264,37 @@ export function DocumentWorkspacePanel({
               );
             })}
             {!filteredDocuments.length ? (
-              <p className="px-2 py-2 text-xs" style={{ color: "var(--bat-text-muted)" }}>
-                No documents matched this filter.
+              <p className="px-2 py-2 text-xs text-zinc-500">
+                {showAllDocuments
+                  ? "No documents matched this filter."
+                  : "No document versions found on this branch. Toggle “Show all” to inspect workspace-wide docs."}
               </p>
             ) : null}
           </div>
 
           {selectedDocument ? (
             <>
-              <div className="mb-2 flex flex-wrap gap-1.5">
+              <div className="mx-3 mb-1.5 flex flex-wrap gap-1.5">
                 {selectedDocument.generatedMeta?.docFamily ? (
-                  <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[10px] uppercase text-zinc-500">
+                  <span className="rounded-md bg-zinc-100 px-2 py-0.5 text-[10px] uppercase text-zinc-600">
                     {selectedDocument.generatedMeta.docFamily.replace(/_/g, " ")}
                   </span>
                 ) : null}
-                <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[10px] uppercase text-zinc-500">
+                <span className="rounded-md bg-zinc-100 px-2 py-0.5 text-[10px] uppercase text-zinc-600">
                   {selectedDocument.mimeType || "document"}
                 </span>
-                <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[10px] text-zinc-500">
+                <span className="rounded-md bg-zinc-100 px-2 py-0.5 text-[10px] text-zinc-600">
                   Version {selectedDocument.latestVersion?.versionNumber || 0}
                 </span>
                 {typeof selectedDocument.generatedMeta?.coverageScore === "number" ? (
-                  <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[10px] text-zinc-500">
+                  <span className="rounded-md bg-zinc-100 px-2 py-0.5 text-[10px] text-zinc-600">
                     Coverage {Math.round(selectedDocument.generatedMeta.coverageScore)}/100
                   </span>
                 ) : null}
               </div>
 
               {selectedDocument.generatedMeta?.partial ? (
-                <div className="mb-2 rounded-xl border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+                <div className="mx-3 mb-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
                   <p className="font-semibold">Partial draft returned</p>
                   {selectedDocument.generatedMeta.partialReasons?.length ? (
                     <ul className="mt-1 space-y-0.5">
@@ -354,130 +308,58 @@ export function DocumentWorkspacePanel({
                 </div>
               ) : null}
 
-              <div
-                ref={readerRef}
-                onMouseUp={updateSelection}
-                onKeyUp={updateSelection}
-                className="bat-scrollbar min-h-0 flex-1 overflow-y-auto rounded-xl border bg-white p-3 text-xs leading-5 text-zinc-700"
-                style={{ borderColor: "var(--bat-border)", whiteSpace: "pre-wrap", userSelect: "text" }}
-              >
-                {hydrating ? "Loading document markdown..." : selectedContent || "No markdown content available yet for this document."}
+              <div className="relative min-h-0 flex-1 border-y border-zinc-200">
+                <div
+                  ref={readerRef}
+                  onMouseUp={updateSelection}
+                  onPointerUp={updateSelection}
+                  onTouchEnd={updateSelection}
+                  onKeyUp={updateSelection}
+                  className="bat-scrollbar h-full min-h-0 overflow-y-auto bg-white px-3 py-2 text-[13px] leading-6 text-zinc-800 select-text"
+                  style={{ userSelect: "text" }}
+                >
+                  {hydrating ? (
+                    "Loading document markdown..."
+                  ) : selectedContent ? (
+                    <ChatMarkdown content={selectedContent} compact />
+                  ) : (
+                    "No markdown content available yet for this document."
+                  )}
+                </div>
               </div>
 
               {hydrationError ? (
-                <div className="mt-2 rounded-xl border border-red-200 bg-red-50 p-2 text-xs text-red-700">{hydrationError}</div>
+                <div className="mx-3 mt-2 rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-700">{hydrationError}</div>
               ) : null}
-
-              {selectionQuote ? (
-                <div className="mt-2 rounded-xl border border-zinc-200 bg-zinc-50 p-2.5">
-                  <p className="text-[11px] uppercase tracking-[0.08em] text-zinc-500">Selected quote</p>
-                  <p className="mt-1 line-clamp-4 text-xs text-zinc-700">{selectionQuote}</p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => onQuoteInChat({ document: selectedDocument, quotedText: selectionQuote })}
-                      className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
-                    >
-                      <span className="inline-flex items-center gap-1">
-                        <Quote className="h-3.5 w-3.5" />
-                        Quote in chat
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSelectionQuote("")}
-                      className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
-                    >
-                      Clear
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-
-              <form onSubmit={runSearch} className="mt-2">
-                <label className="flex items-center gap-2 rounded-xl border px-3 py-2 text-xs" style={{ borderColor: "var(--bat-border)" }}>
-                  <Search className="h-3.5 w-3.5" />
-                  <input
-                    value={searchQuery}
-                    onChange={(event) => setSearchQuery(event.target.value)}
-                    placeholder="Search in document"
-                    className="w-full border-none bg-transparent text-sm outline-none"
-                  />
-                </label>
-              </form>
-
-              {searching ? <p className="mt-1 text-xs text-zinc-500">Searching...</p> : null}
-              {searchError ? (
-                <div className="mt-1 rounded-xl border border-red-200 bg-red-50 p-2 text-xs text-red-700">{searchError}</div>
-              ) : null}
-              {searchHits.length ? (
-                <div className="bat-scrollbar mt-1.5 max-h-28 space-y-1 overflow-y-auto rounded-xl border border-zinc-200 bg-zinc-50 p-1.5">
-                  {searchHits.map((hit) => (
-                    <article key={`${hit.chunkIndex}-${hit.score}`} className="rounded-lg border border-zinc-200 bg-white p-2">
-                      <p className="text-[11px] uppercase text-zinc-500">
-                        Chunk {hit.chunkIndex} • score {hit.score.toFixed(2)}
-                      </p>
-                      <p className="mt-1 line-clamp-3 text-xs text-zinc-700">{hit.text}</p>
-                    </article>
-                  ))}
-                </div>
-              ) : null}
-
-              <div className="mt-2 rounded-xl border border-zinc-200 bg-zinc-50 p-2.5">
-                <p className="text-[11px] uppercase tracking-[0.08em] text-zinc-500">AI edit</p>
-                <textarea
-                  value={instruction}
-                  onChange={(event) => setInstruction(event.target.value)}
-                  placeholder="Describe the edit you want..."
-                  className="mt-1.5 h-20 w-full resize-y rounded-lg border border-zinc-200 bg-white px-2.5 py-2 text-xs outline-none"
-                />
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void proposeEdit()}
-                    disabled={proposing}
-                    className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 disabled:opacity-60"
-                  >
-                    <span className="inline-flex items-center gap-1">
-                      <Sparkles className="h-3.5 w-3.5" />
-                      {proposing ? "Proposing..." : "Propose edit"}
-                    </span>
-                  </button>
-                </div>
-
-                {proposalError ? (
-                  <div className="mt-2 rounded-xl border border-red-200 bg-red-50 p-2 text-xs text-red-700">{proposalError}</div>
-                ) : null}
-                {proposal ? (
-                  <div className="mt-2 rounded-xl border border-sky-200 bg-sky-50 p-2.5 text-xs text-sky-900">
-                    <p className="font-semibold">{proposal.changeSummary || "Proposal ready"}</p>
-                    <p className="mt-1">
-                      Base v{proposal.baseVersionNumber} • {proposal.changed ? "content changed" : "no content change"}
-                    </p>
-                    {proposal.anchor?.quotedText ? (
-                      <p className="mt-1 text-sky-800">Quote anchor: “{compactQuote(proposal.anchor.quotedText, 220)}”</p>
-                    ) : null}
-                    <button
-                      type="button"
-                      onClick={() => void applyProposal()}
-                      disabled={applying}
-                      className="mt-2 rounded-full border border-sky-200 bg-white px-2.5 py-1 text-xs text-sky-800 hover:bg-sky-100 disabled:opacity-60"
-                    >
-                      {applying ? "Applying..." : "Apply proposal"}
-                    </button>
-                  </div>
-                ) : null}
-                {applyError ? (
-                  <div className="mt-2 rounded-xl border border-red-200 bg-red-50 p-2 text-xs text-red-700">{applyError}</div>
-                ) : null}
-              </div>
             </>
           ) : (
-            <div className="rounded-xl border p-3 text-sm" style={{ borderColor: "var(--bat-border)", color: "var(--bat-text-muted)" }}>
-              Select a document to read, quote, and edit.
-            </div>
+            <div className="px-3 py-3 text-sm text-zinc-600">Select a document to read.</div>
           )}
         </>
+      ) : null}
+
+      {selectionToolbar && selectionQuote && selectedDocument ? (
+        <div
+          className="fixed z-40 flex -translate-x-1/2 items-center gap-1 rounded-md border border-zinc-300 bg-white/95 p-1 shadow-lg backdrop-blur"
+          style={{ left: `${selectionToolbar.x}px`, top: `${selectionToolbar.y}px` }}
+        >
+          <button
+            type="button"
+            onClick={() => onQuoteInChat({ document: selectedDocument, quotedText: selectionQuote })}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+          >
+            <Quote className="h-3.5 w-3.5" />
+            Quote
+          </button>
+          <button
+            type="button"
+            onClick={() => onAskAiEdit?.({ document: selectedDocument, quotedText: selectionQuote })}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            Ask AI to edit
+          </button>
+        </div>
       ) : null}
     </aside>
   );

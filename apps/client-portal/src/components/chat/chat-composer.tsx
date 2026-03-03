@@ -98,7 +98,7 @@ export function ChatComposer({
   onSteer,
   contentWidthClassName = "max-w-3xl",
 }: ChatComposerProps) {
-  const [showSteerChips, setShowSteerChips] = useState(false);
+  const [showAdvancedControls, setShowAdvancedControls] = useState(false);
   const [expandedSteerId, setExpandedSteerId] = useState<string | null>(null);
   const [steerEdits, setSteerEdits] = useState<Record<string, string>>({});
   const [uploadedDocs, setUploadedDocs] = useState<UploadedDocumentChip[]>([]);
@@ -237,87 +237,88 @@ export function ChatComposer({
   };
 
   return (
-    <section className="sticky bottom-0 z-20 border-t border-zinc-200 bg-gradient-to-t from-white via-white/95 to-white/75 px-0 pb-3 pt-3 supports-[backdrop-filter]:backdrop-blur sm:pb-4">
-      <div className={`mx-auto w-full ${contentWidthClassName} px-5 sm:px-8 xl:px-10`}>
-        <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
-          <div className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-1 py-1">
-            {(["fast", "balanced", "deep", "pro"] as const).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => onResponseModeChange(mode)}
-                className={`rounded-full px-2.5 py-1 capitalize ${
-                  responseMode === mode ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"
-                }`}
-              >
-                {mode}
-              </button>
-            ))}
-          </div>
-
-          <div className="bat-scrollbar inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-full border border-zinc-200 bg-white px-1 py-1">
-            {sourceScopeOptions.map((option) => {
-              const active = sourceScope[option.key];
-              return (
+    <section className="sticky bottom-0 z-20 border-t border-zinc-200 bg-white/98 px-0 pb-1.5 pt-1.5 backdrop-blur">
+      <div className={`mx-auto w-full ${contentWidthClassName} px-3 sm:px-4 xl:px-6`}>
+        {showAdvancedControls ? (
+          <div className="mb-1.5 space-y-1.5">
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+            <div className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-1 py-1">
+              {(["fast", "balanced", "deep", "pro"] as const).map((mode) => (
                 <button
-                  key={option.key}
+                  key={mode}
                   type="button"
-                  onClick={() => onSourceScopeChange(option.key, !active)}
-                  className={`whitespace-nowrap rounded-full px-2.5 py-1 ${
-                    active ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"
+                  onClick={() => onResponseModeChange(mode)}
+                  className={`rounded-full px-2.5 py-1 capitalize ${
+                    responseMode === mode ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"
                   }`}
                 >
-                  {option.label}
+                  {mode}
                 </button>
-              );
-            })}
-          </div>
-        </div>
+              ))}
+            </div>
 
-        <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="bat-scrollbar inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-full border border-zinc-200 bg-white px-1 py-1">
+              {sourceScopeOptions.map((option) => {
+                const active = sourceScope[option.key];
+                return (
+                  <button
+                    key={option.key}
+                    type="button"
+                    onClick={() => onSourceScopeChange(option.key, !active)}
+                    className={`whitespace-nowrap rounded-full px-2.5 py-1 ${
+                      active ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+            </div>
+            <div className="bat-scrollbar flex gap-1.5 overflow-x-auto pb-1">
+              {steerChipSet.map((chip) => (
+                <button
+                  key={chip}
+                  type="button"
+                  onClick={() => onSteer(chip)}
+                  className="whitespace-nowrap rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
+                >
+                  {chip}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        <div className="mb-1 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 text-xs text-zinc-500">
-            <span className={`rounded-full px-2 py-1 ${isStreaming ? "bg-emerald-50 text-emerald-700" : "bg-zinc-100 text-zinc-600"}`}>
+            <span className={`rounded-md px-2 py-0.5 ${isStreaming ? "bg-emerald-50 text-emerald-700" : "bg-zinc-100 text-zinc-600"}`}>
               {isStreaming ? "Generating" : "Ready"}
             </span>
             {queuedMessages.length > 0 ? (
-              <span className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-2 py-1 text-zinc-600">
+              <span className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2 py-0.5 text-zinc-600">
                 <ListOrdered className="h-3.5 w-3.5" />
                 Queue {queuedMessages.length}
               </span>
             ) : null}
             {isStreaming ? (
-              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-emerald-700">
+              <span className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-700">
                 Active run: Enter queues, Cmd/Ctrl+Enter interrupts + sends
               </span>
             ) : null}
           </div>
           <button
             type="button"
-            onClick={() => setShowSteerChips((prev) => !prev)}
-            className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
+            onClick={() => setShowAdvancedControls((prev) => !prev)}
+            className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
           >
             <Sparkles className="h-3.5 w-3.5" />
-            Quick actions
+            {showAdvancedControls ? "Hide controls" : "Controls"}
           </button>
         </div>
 
-        {showSteerChips ? (
-          <div className="bat-scrollbar mb-2.5 flex gap-1.5 overflow-x-auto pb-1">
-            {steerChipSet.map((chip) => (
-              <button
-                key={chip}
-                type="button"
-                onClick={() => onSteer(chip)}
-                className="whitespace-nowrap rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
-              >
-                {chip}
-              </button>
-            ))}
-          </div>
-        ) : null}
-
-        {queuedMessages.length > 0 ? (
-          <div className="mb-2.5 rounded-2xl border border-zinc-200 bg-zinc-50/90 p-2.5">
+        {showAdvancedControls && queuedMessages.length > 0 ? (
+          <div className="mb-1.5 rounded-md border border-zinc-200 bg-zinc-50/90 p-2">
             <div className="bat-scrollbar max-h-56 space-y-1.5 overflow-y-auto pr-1">
               {queuedMessages.map((item, index) => {
                 const options = item.inputOptions || currentInputOptions;
@@ -325,7 +326,7 @@ export function ChatComposer({
                 const steerDraft = readSteerDraft(item);
                 const showSteerEditor = expandedSteerId === item.id;
                 return (
-                  <div key={item.id} className="rounded-xl border border-zinc-200 bg-white p-2">
+                  <div key={item.id} className="rounded-md border border-zinc-200 bg-white p-2">
                     <div className="flex items-start gap-2">
                       <div className="flex-1">
                         <p className="mb-1 text-[11px] uppercase tracking-wide text-zinc-400">Queued {item.position || index + 1}</p>
@@ -360,7 +361,7 @@ export function ChatComposer({
                           type="button"
                           aria-label="Move up"
                           onClick={() => onReorderQueue(index, index - 1)}
-                          className="rounded-full border border-zinc-200 p-1 text-zinc-600 hover:bg-zinc-100"
+                          className="rounded-md border border-zinc-200 p-1 text-zinc-600 hover:bg-zinc-100"
                         >
                           <ArrowUp className="h-3 w-3" />
                         </button>
@@ -368,7 +369,7 @@ export function ChatComposer({
                           type="button"
                           aria-label="Move down"
                           onClick={() => onReorderQueue(index, index + 1)}
-                          className="rounded-full border border-zinc-200 p-1 text-zinc-600 hover:bg-zinc-100"
+                          className="rounded-md border border-zinc-200 p-1 text-zinc-600 hover:bg-zinc-100"
                         >
                           <ArrowDown className="h-3 w-3" />
                         </button>
@@ -376,7 +377,7 @@ export function ChatComposer({
                           type="button"
                           aria-label="Remove"
                           onClick={() => onDeleteQueued(item.id)}
-                          className="rounded-full border border-zinc-200 p-1 text-zinc-600 hover:bg-zinc-100"
+                          className="rounded-md border border-zinc-200 p-1 text-zinc-600 hover:bg-zinc-100"
                         >
                           <X className="h-3 w-3" />
                         </button>
@@ -392,7 +393,7 @@ export function ChatComposer({
                               }));
                             }
                           }}
-                          className="rounded-full border border-zinc-200 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
+                          className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
                         >
                           Steer
                         </button>
@@ -400,7 +401,7 @@ export function ChatComposer({
                     </div>
 
                     {showSteerEditor ? (
-                      <div className="mt-2 rounded-xl border border-zinc-200 bg-zinc-50 p-2">
+                      <div className="mt-2 rounded-md border border-zinc-200 bg-zinc-50 p-2">
                         <textarea
                           value={steerDraft}
                           onChange={(event) =>
@@ -421,7 +422,7 @@ export function ChatComposer({
                                 inputOptions: options,
                               })
                             }
-                            className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
+                            className="rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
                           >
                             Save steer
                           </button>
@@ -434,7 +435,7 @@ export function ChatComposer({
                                 runNow: true,
                               })
                             }
-                            className="rounded-full bg-zinc-900 px-3 py-1.5 text-xs text-white hover:bg-zinc-800"
+                            className="rounded-md bg-zinc-900 px-2.5 py-1.5 text-xs text-white hover:bg-zinc-800"
                           >
                             Steer + run now
                           </button>
@@ -483,15 +484,15 @@ export function ChatComposer({
               }
             }}
             placeholder="Message BAT..."
-            className="min-h-24 w-full resize-none rounded-3xl border border-zinc-300 bg-white px-4 pb-12 pt-3 text-base text-zinc-900 outline-none transition focus:border-zinc-400 focus:ring-2 focus:ring-zinc-200 sm:min-h-28"
+            className="min-h-20 w-full resize-none rounded-md border border-zinc-300 bg-white px-3.5 pb-12 pt-2.5 text-[15px] text-zinc-900 outline-none transition focus:border-zinc-400 focus:ring-1 focus:ring-zinc-200 sm:min-h-24"
           />
 
           {uploadedDocs.length > 0 ? (
-            <div className="pointer-events-auto absolute left-4 right-4 top-3.5 flex flex-wrap gap-2">
+              <div className="pointer-events-auto absolute left-3.5 right-3.5 top-3 flex flex-wrap gap-2">
               {uploadedDocs.map((doc) => (
                 <span
                   key={doc.id}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-700"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-700"
                 >
                   <FileText className="h-3.5 w-3.5 text-zinc-500" />
                   <span className="max-w-[180px] truncate">{doc.fileName}</span>
@@ -513,26 +514,26 @@ export function ChatComposer({
             </div>
           ) : null}
 
-          <p className="pointer-events-none absolute bottom-3 left-4 text-xs text-zinc-400">
+          <p className="pointer-events-none absolute bottom-3 left-3.5 text-[11px] text-zinc-400">
             Enter to send/queue, Shift+Enter for newline, Cmd/Ctrl+Enter to interrupt + send
           </p>
           {!canAttach && attachDisabledReason ? (
-            <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
               {attachDisabledReason}
             </div>
           ) : null}
           {uploadError ? (
-            <div className="mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            <div className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
               {uploadError}
             </div>
           ) : null}
 
-          <div className="absolute bottom-2.5 right-2.5 flex items-center gap-2">
+          <div className="absolute bottom-2.5 right-2.5 flex items-center gap-1.5">
             <button
               type="button"
               onClick={openFilePicker}
               disabled={uploading || !canAttach}
-              className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-600 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 py-2 text-xs text-zinc-600 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
               title="Attach documents"
             >
               <Paperclip className="h-3.5 w-3.5" />
@@ -542,7 +543,7 @@ export function ChatComposer({
               <button
                 type="button"
                 onClick={onStop}
-                className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-600 hover:bg-zinc-100"
+                className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 py-2 text-xs text-zinc-600 hover:bg-zinc-100"
               >
                 <Square className="h-3.5 w-3.5" />
                 Stop
@@ -552,7 +553,7 @@ export function ChatComposer({
               <button
                 type="button"
                 onClick={steerRunNow}
-                className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-600 hover:bg-zinc-100"
+                className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 py-2 text-xs text-zinc-600 hover:bg-zinc-100"
               >
                 <Sparkles className="h-3.5 w-3.5" />
                 Steer

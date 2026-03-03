@@ -11,6 +11,7 @@ import {
   fetchRuntimeUploadCapabilities,
   fetchRuntimeEvidence,
   fetchRuntimeLatestLedger,
+  getRuntimeDocument,
   proposeRuntimeDocumentEdit,
   RuntimeEvidenceRefDto,
   RuntimeLedgerDto,
@@ -35,16 +36,23 @@ const steerSystemPrompts: Record<
   }
 > = {
   "Run V3 finder": {
-    composerText: '/competitors.discover_v3 {"mode":"standard","maxCandidates":140,"maxEnrich":10}',
+    composerText:
+      "Run the V3 competitor finder in standard mode and summarize direct plus adjacent competitors with evidence links.",
     steerPrompt: "Run a standard V3 competitor finder pass and summarize direct plus adjacent competitors.",
   },
   "Go deeper": {
     pref: ["tone", "detailed"],
-    composerText: '/competitors.discover_v3 {"mode":"deep","maxCandidates":200,"maxEnrich":20}',
+    composerText:
+      "Go deeper on competitor discovery (deep mode), enrich findings, and return a defensible ranked shortlist with evidence.",
     steerPrompt: "Go deeper with lane-by-lane recommendations and concrete competitor examples.",
   },
-  "Show sources": { pref: ["transparency", true], composerText: "/show_sources" },
-  "Make it a PDF": { composerText: "/generate_pdf" },
+  "Show sources": {
+    pref: ["transparency", true],
+    composerText: "Show sources for your last answer and include direct evidence links.",
+  },
+  "Make it a PDF": {
+    composerText: "Generate a deep business strategy PDF from the current workspace evidence.",
+  },
   "Focus on TikTok": {
     sourceScopePatch: {
       socialIntel: true,
@@ -487,6 +495,79 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     );
   };
 
+  const onAskAiEditFromDocumentReader = (input: { document: RuntimeWorkspaceDocumentDto; quotedText: string }) => {
+    const sourceTitle = input.document.title || input.document.originalFileName || "Document";
+    const versionLabel =
+      typeof input.document.latestVersion?.versionNumber === "number" && input.document.latestVersion.versionNumber > 0
+        ? `v${input.document.latestVersion.versionNumber}`
+        : "latest";
+    const quoteLines = input.quotedText
+      .split(/\r?\n/g)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => `> ${line}`)
+      .join("\n");
+    if (!quoteLines) return;
+    injectComposerText(
+      `Please propose an edit to improve clarity and strategic quality for this excerpt from ${sourceTitle} (${versionLabel}):\n\n${quoteLines}\n\nKeep the original meaning intact.`,
+      "append"
+    );
+  };
+
+  const onQuoteArtifactInChat = (input: {
+    title: string;
+    quotedText: string;
+    documentId?: string;
+    versionNumber?: number;
+  }) => {
+    const quoteLines = input.quotedText
+      .split(/\r?\n/g)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => `> ${line}`)
+      .join("\n");
+    if (!quoteLines) return;
+    const versionLabel = typeof input.versionNumber === "number" && input.versionNumber > 0 ? `v${input.versionNumber}` : "latest";
+    injectComposerText(`${quoteLines}\n\nSource: ${input.title} (${versionLabel})`, "append");
+  };
+
+  const onAskEditFromArtifact = (input: {
+    title: string;
+    quotedText: string;
+    documentId?: string;
+    versionNumber?: number;
+  }) => {
+    const quoteLines = input.quotedText
+      .split(/\r?\n/g)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => `> ${line}`)
+      .join("\n");
+    if (!quoteLines) return;
+    if (input.documentId) {
+      openDocsRail(input.documentId);
+    }
+    injectComposerText(
+      `Please propose an edit to improve clarity and strategic impact for this excerpt from "${input.title}"${
+        typeof input.versionNumber === "number" && input.versionNumber > 0 ? ` (v${input.versionNumber})` : ""
+      }:\n\n${quoteLines}\n\nKeep the meaning intact and provide the revised wording.`,
+      "append"
+    );
+  };
+
+  const loadRuntimeDocumentMarkdown = async (documentId: string): Promise<string> => {
+    const targetId = String(documentId || "").trim();
+    if (!targetId || !activeBranchId) return "";
+    const cached = runtimeDocuments.find((document) => document.id === targetId) || null;
+    const cachedMarkdown = String(cached?.latestVersion?.contentMd || "").trim();
+    if (cachedMarkdown) return cachedMarkdown;
+    const payload = await getRuntimeDocument(workspaceId, activeBranchId, targetId);
+    const latest = String(payload.document.latestVersion?.contentMd || "").trim();
+    if (latest) return latest;
+    const fallback = Array.isArray(payload.document.versions) ? String(payload.document.versions[0]?.contentMd || "").trim() : "";
+    return fallback;
+  };
+
   const onFeedItemAction = (item: ProcessFeedItem) => {
     if (item.actionTarget?.kind === "document") {
       openDocsRail(item.actionTarget.documentId);
@@ -496,6 +577,52 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
 
   const resolvePayloadDocumentId = (payload?: Record<string, unknown>): string =>
     String(payload?.documentId || payload?.docId || "").trim();
+
+  const buildDocumentGeneratePrompt = (payload?: Record<string, unknown>): string => {
+    const rawType = String(payload?.docType || payload?.documentType || "BUSINESS_STRATEGY")
+      .trim()
+      .toUpperCase();
+    const docType =
+      rawType === "SWOT" || rawType === "SWOT_ANALYSIS"
+        ? "SWOT"
+        : rawType === "PLAYBOOK"
+          ? "PLAYBOOK"
+          : rawType === "COMPETITOR_AUDIT"
+            ? "COMPETITOR_AUDIT"
+            : rawType === "CONTENT_CALENDAR" || rawType === "CONTENT_CALENDAR_LEGACY"
+              ? "CONTENT_CALENDAR"
+              : rawType === "GO_TO_MARKET" || rawType === "GTM_PLAN"
+                ? "GO_TO_MARKET"
+                : "BUSINESS_STRATEGY";
+    const depth = String(payload?.depth || "deep")
+      .trim()
+      .toLowerCase();
+    const title = String(payload?.title || "").trim();
+    const includeEvidenceLinks = payload?.includeEvidenceLinks !== false;
+    const continueDeepening = payload?.continueDeepening === true;
+    const resumeDocumentId = String(payload?.resumeDocumentId || "").trim();
+    const audience = String(payload?.audience || "").trim();
+    const timeframeDays = Number(payload?.timeframeDays);
+
+    const lines: string[] = [];
+    if (continueDeepening) {
+      lines.push(
+        `Continue deepening the ${docType.replace(/_/g, " ").toLowerCase()} deliverable and regenerate a PDF with stronger evidence density.`
+      );
+    } else {
+      lines.push(`Generate a ${depth} ${docType.replace(/_/g, " ").toLowerCase()} PDF for this workspace.`);
+    }
+    if (title) lines.push(`Use this title: "${title}".`);
+    if (audience) lines.push(`Audience: ${audience}.`);
+    if (Number.isFinite(timeframeDays) && timeframeDays > 0) {
+      lines.push(`Planning window: ${Math.floor(timeframeDays)} days.`);
+    }
+    lines.push(includeEvidenceLinks ? "Include source links and evidence ledger." : "Do not include source links.");
+    if (resumeDocumentId) {
+      lines.push(`Resume from document ID ${resumeDocumentId}.`);
+    }
+    return lines.join(" ");
+  };
 
   const resolveDocumentHrefFromPayload = (payload?: Record<string, unknown>): string | null => {
     if (!payload) return null;
@@ -562,8 +689,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
 
     if (action === "document.generate") {
       setActionError(null);
-      const payloadText = payload ? ` ${JSON.stringify(payload)}` : "";
-      runPriorityCommand(`/document.generate${payloadText}`);
+      runPriorityCommand(buildDocumentGeneratePrompt(payload));
       return;
     }
 
@@ -641,12 +767,25 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
         : action === "generate_pdf"
           ? "generate_pdf"
           : action.replace(/[^a-z0-9_./-]+/g, "_");
-    const payloadText = payload ? ` ${JSON.stringify(payload)}` : "";
-    const command = `/${normalizedCommand}${payloadText}`;
-    if (normalizedCommand === "generate_pdf" || normalizedCommand.startsWith("document.")) {
-      runPriorityCommand(command);
+    const payloadText = payload ? JSON.stringify(payload) : "";
+    if (normalizedCommand === "generate_pdf") {
+      runPriorityCommand("Generate a deep business strategy PDF using current workspace evidence and include citations.");
+    } else if (normalizedCommand === "show_sources") {
+      injectComposerText("Show sources and direct evidence links for your latest answer.", "replace");
+    } else if (normalizedCommand.startsWith("document.")) {
+      const readableAction = normalizedCommand.replace(/^document\./, "").replace(/[._-]+/g, " ");
+      runPriorityCommand(
+        payloadText
+          ? `Run document ${readableAction} using this payload and return user-facing output only: ${payloadText}`
+          : `Run document ${readableAction} and return user-facing output only.`
+      );
     } else {
-      injectComposerText(command, "append");
+      injectComposerText(
+        payloadText
+          ? `Run action ${normalizedCommand} with payload ${payloadText}`
+          : `Run action ${normalizedCommand}`,
+        "append"
+      );
     }
     setActionError(null);
   };
@@ -707,27 +846,36 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
 
   const onCommand = (command: string) => {
     if (command === "Run V3 competitor finder (standard)") {
-      injectComposerText('/competitors.discover_v3 {"mode":"standard","maxCandidates":140,"maxEnrich":10}', "replace");
+      injectComposerText(
+        "Run the V3 competitor finder in standard mode and summarize direct plus adjacent competitors with evidence.",
+        "replace"
+      );
       return;
     }
     if (command === "Run V3 competitor finder (deep)") {
-      injectComposerText('/competitors.discover_v3 {"mode":"deep","maxCandidates":220,"maxEnrich":20}', "replace");
+      injectComposerText(
+        "Run the V3 competitor finder in deep mode with enrichment and return a ranked shortlist backed by evidence.",
+        "replace"
+      );
       return;
     }
     if (command === "Run competitor discovery (legacy)") {
-      injectComposerText("/orchestration.run", "replace");
+      injectComposerText(
+        "Run competitor discovery across direct and adjacent players, then summarize positioning gaps and opportunities.",
+        "replace"
+      );
       return;
     }
     if (command === "Generate PDF deliverable") {
-      injectComposerText("/generate_pdf", "replace");
+      injectComposerText("Generate a deep business strategy PDF deliverable from this workspace evidence.", "replace");
       return;
     }
     if (command === "Show sources") {
-      injectComposerText("/show_sources", "replace");
+      injectComposerText("Show the evidence sources and links used for your latest answer.", "replace");
       return;
     }
     if (command === "Search web evidence") {
-      injectComposerText('/search.web {"query":"", "count":10, "provider":"auto"}', "replace");
+      injectComposerText("Search the web for additional evidence relevant to this workspace and summarize top findings.", "replace");
       return;
     }
     if (command === "Open library: Web") {
@@ -775,13 +923,13 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   return (
     <>
       {error || actionError ? (
-        <div className="mb-3 rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+        <div className="mb-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
           <p>{error || actionError}</p>
         </div>
       ) : null}
 
-      <div className="relative overflow-hidden rounded-3xl border border-zinc-200 bg-[#f3f4f6] shadow-2xl">
-        <div className="grid h-[86dvh] min-h-[32rem] w-full grid-cols-1 lg:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[19rem_minmax(0,1fr)]">
+      <div className="relative h-full overflow-hidden bg-white">
+        <div className="grid h-[calc(100dvh-5.5rem)] min-h-[34rem] w-full grid-cols-1 lg:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[19rem_minmax(0,1fr)]">
           <aside
             className={`${
               sidebarOpen ? "absolute inset-y-0 left-0 z-30 flex w-11/12 max-w-sm" : "hidden"
@@ -793,7 +941,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                 <button
                   type="button"
                   onClick={onNewThread}
-                  className="inline-flex items-center gap-1 rounded-full border border-zinc-700 px-2.5 py-1 text-xs text-zinc-100 hover:bg-zinc-800"
+                  className="inline-flex items-center gap-1 rounded-md border border-zinc-700 px-2.5 py-1 text-xs text-zinc-100 hover:bg-zinc-800"
                 >
                   <MessageSquarePlus className="h-3.5 w-3.5" />
                   New
@@ -822,7 +970,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                       setActiveThreadId(thread.id);
                       setSidebarOpen(false);
                     }}
-                    className={`w-full rounded-xl px-3 py-2 text-left transition ${
+                  className={`w-full rounded-md px-3 py-2 text-left transition ${
                       active ? "bg-zinc-800 text-zinc-100" : "text-zinc-300 hover:bg-zinc-800/70"
                     }`}
                   >
@@ -842,7 +990,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                   <button
                     type="button"
                     onClick={() => onForkBranch()}
-                    className="rounded-full border border-zinc-700 px-2 py-1 text-xs hover:bg-zinc-800"
+                    className="rounded-md border border-zinc-700 px-2 py-1 text-xs hover:bg-zinc-800"
                   >
                     New
                   </button>
@@ -858,7 +1006,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                           setComposerDraft("");
                           runAsync(pinBranch(branch.id));
                         }}
-                        className={`rounded-full border px-2.5 py-1 text-xs ${
+                        className={`rounded-md border px-2.5 py-1 text-xs ${
                           active
                             ? "border-emerald-400/50 bg-emerald-400/10 text-emerald-200"
                             : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"
@@ -874,7 +1022,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  className="rounded-full border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800"
+                  className="rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800"
                   onClick={() => runAsync(refreshNow())}
                 >
                   <span className="inline-flex items-center gap-1">
@@ -891,7 +1039,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                     setActiveLibraryCollection("all");
                     setLibraryOpen(true);
                   }}
-                  className="mb-2 inline-flex items-center gap-1 rounded-full border border-zinc-700 px-2.5 py-1 text-xs text-zinc-200 hover:bg-zinc-800"
+                  className="mb-2 inline-flex items-center gap-1 rounded-md border border-zinc-700 px-2.5 py-1 text-xs text-zinc-200 hover:bg-zinc-800"
                 >
                   <Library className="h-3.5 w-3.5" />
                   Open library
@@ -914,12 +1062,12 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
           </aside>
 
           <section className="relative flex min-h-0 flex-col overflow-hidden bg-white">
-            <header className="flex items-center justify-between gap-2 border-b border-zinc-200 px-5 py-3 sm:px-8 xl:px-10">
+            <header className="flex items-center justify-between gap-2 border-b border-zinc-200 px-3 py-2 sm:px-4 xl:px-6">
               <div className="min-w-0">
                 <div className="mb-0.5 flex items-center gap-2">
                   <button
                     type="button"
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-200 text-zinc-700 lg:hidden"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-200 text-zinc-700 lg:hidden"
                     onClick={() => setSidebarOpen((prev) => !prev)}
                   >
                     <Menu className="h-4 w-4" />
@@ -935,23 +1083,8 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
-                  onClick={onRunAudit}
-                  className="hidden rounded-full border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 md:inline-flex"
-                >
-                  Audit
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLibraryOpen((prev) => !prev)}
-                  className="inline-flex items-center gap-1 rounded-full border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
-                >
-                  <Library className="h-3.5 w-3.5" />
-                  Library
-                </button>
-                <button
-                  type="button"
                   onClick={() => toggleRightRailMode("activity")}
-                  className="inline-flex items-center gap-1 rounded-full border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 xl:hidden"
+                  className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 xl:hidden"
                 >
                   <PanelRight className="h-3.5 w-3.5" />
                   Activity
@@ -960,7 +1093,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                   <button
                     type="button"
                     onClick={() => toggleRightRailMode("docs")}
-                    className="inline-flex items-center gap-1 rounded-full border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 xl:hidden"
+                    className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 xl:hidden"
                   >
                     <FileText className="h-3.5 w-3.5" />
                     Docs
@@ -969,7 +1102,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                 <button
                   type="button"
                   onClick={() => toggleRightRailMode("activity")}
-                  className="hidden items-center gap-1 rounded-full border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 xl:inline-flex"
+                  className="hidden items-center gap-1 rounded-md border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 xl:inline-flex"
                 >
                   <PanelRight className="h-3.5 w-3.5" />
                   {rightRailCollapsed ? "Activity" : resolvedRightRailMode === "activity" ? "Hide activity" : "Activity"}
@@ -978,26 +1111,11 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                   <button
                     type="button"
                     onClick={() => toggleRightRailMode("docs")}
-                    className="hidden items-center gap-1 rounded-full border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 xl:inline-flex"
+                    className="hidden items-center gap-1 rounded-md border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 xl:inline-flex"
                   >
                     <FileText className="h-3.5 w-3.5" />
                     {rightRailCollapsed ? "Docs" : resolvedRightRailMode === "docs" ? "Hide docs" : "Docs"}
                   </button>
-                ) : null}
-                {queuedMessages.length > 0 ? (
-                  <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs text-zinc-600">
-                    Queue {queuedMessages.length}
-                  </span>
-                ) : null}
-                {branchNeedsDecision ? (
-                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs text-amber-700">
-                    Needs approval
-                  </span>
-                ) : null}
-                {preferences.askQuestionsFirst ? (
-                  <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs text-zinc-600">
-                    Question first
-                  </span>
                 ) : null}
               </div>
             </header>
@@ -1006,7 +1124,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
               className={`grid min-h-0 flex-1 grid-cols-1 overflow-hidden ${
                 rightRailCollapsed
                   ? "xl:grid-cols-1"
-                  : "xl:grid-cols-[minmax(0,1fr)_26rem] 2xl:grid-cols-[minmax(0,1fr)_30rem]"
+                  : "xl:grid-cols-[minmax(0,1fr)_27rem] 2xl:grid-cols-[minmax(0,1fr)_31rem]"
               }`}
             >
               <div className="flex min-h-0 flex-col border-zinc-200 xl:border-r">
@@ -1016,29 +1134,38 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                   onOpenEvidence={onOpenEvidence}
                   onResolveDecision={(decisionId, option) => runAsync(resolveDecision(decisionId, option))}
                   onRunAction={onRunMessageAction}
+                  onLoadDocumentMarkdown={loadRuntimeDocumentMarkdown}
+                  onQuoteArtifact={onQuoteArtifactInChat}
+                  onAskEditArtifact={onAskEditFromArtifact}
                   onStarterAction={(action) => {
                     if (action === "audit") {
-                      injectComposerText("/audit", "replace");
+                      injectComposerText(
+                        "Run a full workspace intelligence audit now and summarize the highest-impact opportunities.",
+                        "replace"
+                      );
                       return;
                     }
                     if (action === "sources") {
-                      injectComposerText("/show_sources", "replace");
+                      injectComposerText("Show sources and evidence links for the latest assistant response.", "replace");
                       return;
                     }
                     if (action === "deliverable") {
-                      injectComposerText("/generate_pdf", "replace");
+                      injectComposerText("Generate a deep business strategy PDF from current workspace evidence.", "replace");
                       return;
                     }
-                    injectComposerText('/competitors.discover_v3 {"mode":"standard","maxCandidates":140,"maxEnrich":10}', "replace");
+                    injectComposerText(
+                      "Run the V3 competitor finder in standard mode and summarize direct plus adjacent competitors.",
+                      "replace"
+                    );
                   }}
                   showInlineReasoning={false}
                   isStreaming={isStreaming}
                   streamingInsight={streamingInsight}
-                  contentWidthClassName="max-w-none"
-                />
+                    contentWidthClassName="max-w-none"
+                  />
 
                 {!activeBranchId ? (
-                  <div className="mx-5 mb-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 sm:mx-8 xl:mx-10">
+                  <div className="mx-4 mb-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 sm:mx-6 xl:mx-8">
                     Open/select a branch to attach files.
                   </div>
                 ) : null}
@@ -1075,7 +1202,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
               </div>
 
               {!rightRailCollapsed ? (
-                <div className="hidden min-h-0 border-l border-zinc-200 bg-[#f8fafc] xl:flex xl:flex-col">
+                <div className="hidden min-h-0 border-l border-zinc-200 bg-white xl:flex xl:flex-col">
                   <div className="min-h-0 flex-1 overflow-hidden">
                     {resolvedRightRailMode === "activity" ? (
                       <LiveActivityPanel
@@ -1095,6 +1222,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                         selectedDocumentId={resolvedSelectedRuntimeDocumentId}
                         onSelectDocument={setSelectedRuntimeDocumentId}
                         onQuoteInChat={onQuoteDocumentInChat}
+                        onAskAiEdit={onAskAiEditFromDocumentReader}
                         onRefreshDocuments={refreshRuntimeDocuments}
                         onRefreshRuntime={refreshNow}
                       />
@@ -1110,7 +1238,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
           <button
             type="button"
             onClick={() => openRightRailMode(resolvedRightRailMode)}
-            className="absolute right-3 top-1/2 z-20 hidden -translate-y-1/2 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-700 shadow-sm hover:bg-zinc-100 xl:inline-flex"
+            className="absolute right-3 top-1/2 z-20 hidden -translate-y-1/2 rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-700 shadow-sm hover:bg-zinc-100 xl:inline-flex"
           >
             <PanelRight className="mr-1 h-3.5 w-3.5" />
             Open {resolvedRightRailMode}
@@ -1128,7 +1256,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
 
         {activityOpen ? (
           <div className="absolute inset-0 z-40 flex justify-end bg-black/35 xl:hidden">
-            <div className="flex h-full w-11/12 max-w-lg flex-col border-l border-zinc-200 bg-[#f8fafc] shadow-2xl">
+            <div className="flex h-full w-11/12 max-w-lg flex-col border-l border-zinc-200 bg-white shadow-2xl">
               <div className="flex items-center justify-between border-b border-zinc-200 px-3 py-2">
                 <div className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-[0.08em] text-zinc-500">
                   {resolvedRightRailMode === "activity" ? (
@@ -1146,7 +1274,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                 <button
                   type="button"
                   onClick={() => setActivityOpen(false)}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-700"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-200 bg-white text-zinc-700"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -1170,6 +1298,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                     selectedDocumentId={resolvedSelectedRuntimeDocumentId}
                     onSelectDocument={setSelectedRuntimeDocumentId}
                     onQuoteInChat={onQuoteDocumentInChat}
+                    onAskAiEdit={onAskAiEditFromDocumentReader}
                     onRefreshDocuments={refreshRuntimeDocuments}
                     onRefreshRuntime={refreshNow}
                   />

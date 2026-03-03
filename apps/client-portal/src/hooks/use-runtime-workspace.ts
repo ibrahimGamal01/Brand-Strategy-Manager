@@ -615,6 +615,52 @@ function normalizeMessageBlocks(value: unknown): ChatMessageBlock[] {
     ];
   }
 
+  if (type === "document_artifact") {
+    const title = String(block.title || "").trim();
+    const formatRaw = String(block.format || "").trim().toUpperCase();
+    const format = formatRaw === "DOCX" || formatRaw === "MD" ? formatRaw : "PDF";
+    const storagePath = String(block.storagePath || "").trim();
+    const documentId = String(block.documentId || block.docId || "").trim();
+    const family = String(block.family || block.docFamily || "").trim().toUpperCase();
+    const versionNumber = Number(block.versionNumber || block.version || block.docVersionNumber);
+    const previewModeDefaultRaw = String(block.previewModeDefault || "").trim().toLowerCase();
+    const previewModeDefault: "pdf" | "markdown" | undefined =
+      previewModeDefaultRaw === "markdown" || previewModeDefaultRaw === "pdf"
+        ? (previewModeDefaultRaw as "pdf" | "markdown")
+        : undefined;
+    if (!title || (!storagePath && !documentId)) return [];
+    const coverageScore = Number(block.coverageScore);
+    const partialReasons = Array.isArray(block.partialReasons)
+      ? block.partialReasons.map((entry) => String(entry || "").trim()).filter(Boolean).slice(0, 8)
+      : [];
+    return [
+      {
+        type: "document_artifact",
+        title,
+        format,
+        ...(storagePath ? { storagePath } : {}),
+        ...(typeof block.docType === "string" && block.docType.trim() ? { docType: block.docType.trim() } : {}),
+        ...(typeof block.downloadHref === "string" && block.downloadHref.trim()
+          ? { downloadHref: block.downloadHref.trim() }
+          : {}),
+        ...(typeof block.previewHref === "string" && block.previewHref.trim()
+          ? { previewHref: block.previewHref.trim() }
+          : {}),
+        ...(documentId ? { documentId } : {}),
+        ...(family ? { family } : {}),
+        ...(Number.isFinite(versionNumber) ? { versionNumber: Math.max(1, Math.floor(versionNumber)) } : {}),
+        ...(previewModeDefault ? { previewModeDefault } : {}),
+        ...(typeof block.versionId === "string" && block.versionId.trim()
+          ? { versionId: block.versionId.trim() }
+          : {}),
+        ...(Number.isFinite(coverageScore) ? { coverageScore } : {}),
+        ...(typeof block.partial === "boolean" ? { partial: block.partial } : {}),
+        ...(partialReasons.length ? { partialReasons } : {}),
+        ...(parseActions().length ? { actions: parseActions() } : {}),
+      },
+    ];
+  }
+
   return [
     {
       type,
@@ -652,6 +698,108 @@ function normalizeMessageInputOptions(value: unknown): ChatInputOptions | undefi
   };
 }
 
+function normalizeDocumentStorageHref(value: unknown): string {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^https?:\/\//i.test(raw)) return raw;
+  if (raw.startsWith("/storage/")) return raw;
+  if (raw.startsWith("storage/")) return `/${raw}`;
+  if (raw.startsWith("./storage/")) return `/${raw.slice(2)}`;
+  return raw;
+}
+
+function extractStoragePathFromContent(content: string): string {
+  const lineMatch = content.match(/(?:^|\n)\s*(?:storage path|download)\s*:\s*([^\n]+)/i);
+  if (lineMatch?.[1]) {
+    return normalizeDocumentStorageHref(lineMatch[1]);
+  }
+  const urlMatch = content.match(/https?:\/\/[^\s)]+\/storage\/[^\s)]+/i);
+  if (urlMatch?.[0]) {
+    return normalizeDocumentStorageHref(urlMatch[0]);
+  }
+  const relativeMatch = content.match(/\bstorage\/documents\/[^\s)]+/i);
+  if (relativeMatch?.[0]) {
+    return normalizeDocumentStorageHref(relativeMatch[0]);
+  }
+  return "";
+}
+
+function inferArtifactTitle(content: string): string {
+  const titleLine = content.match(/(?:^|\n)\s*-\s*Title\s*:\s*([^\n]+)/i) || content.match(/(?:^|\n)\s*Title\s*:\s*([^\n]+)/i);
+  if (titleLine?.[1]) {
+    return titleLine[1].trim().replace(/^["']|["']$/g, "");
+  }
+  return "Generated document";
+}
+
+function ensureDocumentArtifactBlock(blocks: ChatMessageBlock[], content: string): ChatMessageBlock[] {
+  if (blocks.some((block) => block.type === "document_artifact")) return blocks;
+
+  const actionBlocks = blocks.filter(
+    (block): block is Extract<ChatMessageBlock, { type: "action_buttons" }> => block.type === "action_buttons"
+  );
+
+  let storagePath = "";
+  let documentId = "";
+  let docType = "";
+  const artifactActions: Array<{ label: string; action: string; payload?: Record<string, unknown> }> = [];
+  if (actionBlocks.length) {
+    for (const block of actionBlocks) {
+      for (const action of block.actions) {
+        const actionKey = String(action.action || "").trim().toLowerCase();
+        const payload = isRecord(action.payload) ? action.payload : {};
+        if (
+          actionKey === "document.open" ||
+          actionKey === "document.download" ||
+          actionKey === "document.read" ||
+          actionKey === "document.export"
+        ) {
+          artifactActions.push({
+            label: String(action.label || "").trim() || actionKey.replace(/^document\./, "").replace(/[._-]+/g, " "),
+            action: action.action,
+            ...(Object.keys(payload).length ? { payload } : {}),
+          });
+        }
+        if (!documentId) {
+          documentId = String(payload.documentId || payload.docId || "").trim();
+        }
+        if (!docType) {
+          docType = String(payload.docType || payload.documentType || "").trim().toUpperCase();
+        }
+        if (actionKey === "document.download" || actionKey === "document.open") {
+          const href = normalizeDocumentStorageHref(
+            payload.downloadHref || payload.storageHref || payload.href || payload.storagePath
+          );
+          if (href) {
+            storagePath = href;
+            break;
+          }
+        }
+      }
+      if (storagePath) break;
+    }
+  }
+
+  if (!storagePath) {
+    storagePath = extractStoragePathFromContent(content);
+  }
+  if (!storagePath && !documentId && !docType && artifactActions.length === 0) return blocks;
+
+  const artifactBlock: ChatMessageBlock = {
+    type: "document_artifact",
+    title: inferArtifactTitle(content),
+    format: "PDF",
+    ...(storagePath ? { storagePath } : {}),
+    ...(storagePath ? { previewHref: storagePath, downloadHref: storagePath } : {}),
+    ...(documentId ? { documentId } : {}),
+    previewModeDefault: "pdf",
+    ...(docType ? { docType } : {}),
+    ...(artifactActions.length ? { actions: artifactActions.slice(0, 4) } : {}),
+  };
+
+  return [artifactBlock, ...blocks];
+}
+
 function mapMessages(messages: Array<Record<string, unknown>>): ChatMessage[] {
   return messages
     .filter(
@@ -663,7 +811,8 @@ function mapMessages(messages: Array<Record<string, unknown>>): ChatMessage[] {
       const reasoningRaw = isRecord(message.reasoningJson) ? message.reasoningJson : null;
       const modelRaw = reasoningRaw && isRecord(reasoningRaw.model) ? reasoningRaw.model : null;
       const qualityRaw = reasoningRaw && isRecord(reasoningRaw.quality) ? reasoningRaw.quality : null;
-      const blocks = normalizeMessageBlocks(message.blocksJson);
+      const parsedBlocks = normalizeMessageBlocks(message.blocksJson);
+      const blocks = ensureDocumentArtifactBlock(parsedBlocks, String(message.content || ""));
       const inputOptions = normalizeMessageInputOptions(message.inputOptionsJson);
       const attachmentIds = normalizeIdList(message.attachmentIdsJson);
       const documentIds = normalizeIdList(message.documentIdsJson);

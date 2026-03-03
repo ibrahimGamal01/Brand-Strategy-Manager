@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, Download, ExternalLink, FileText, Quote, Sparkles, X } from "lucide-react";
 import { ChatMessage, ChatMessageBlock } from "@/types/chat";
+import { ChatMarkdown } from "./chat-markdown";
 
 function TypingDots() {
   return (
@@ -26,6 +27,51 @@ function formatMessageContentForDisplay(content: string): string {
     .replace(/@library\[([^\]|]+)\|([^\]]+)\]/g, (_match, _id, title: string) => `[Library source: ${title}]`);
 }
 
+function formatDocTypeLabel(value?: string): string {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "Document";
+  return normalized
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function normalizeArtifactHref(value: string): string {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "";
+  if (/^https?:\/\//i.test(normalized)) return normalized;
+  if (normalized.startsWith("/storage/")) return normalized;
+  if (normalized.startsWith("storage/")) return `/${normalized}`;
+  if (normalized.startsWith("./storage/")) return `/${normalized.slice(2)}`;
+  return normalized;
+}
+
+type ArtifactPreviewInput = {
+  title: string;
+  href: string;
+  documentId?: string;
+  docType?: string;
+  family?: string;
+  versionNumber?: number;
+  previewModeDefault?: "pdf" | "markdown";
+};
+
+type ArtifactQuoteInput = {
+  title: string;
+  quotedText: string;
+  documentId?: string;
+  family?: string;
+  versionNumber?: number;
+};
+
+function compactQuote(value: string, maxChars = 1400): string {
+  const normalized = String(value || "").replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
+}
+
 function ReasoningPanel({ message }: { message: ChatMessage }) {
   const [open, setOpen] = useState(false);
 
@@ -34,7 +80,7 @@ function ReasoningPanel({ message }: { message: ChatMessage }) {
   }
 
   return (
-    <div className="mt-3 rounded-2xl border border-zinc-200 bg-zinc-50/90 p-3">
+    <div className="mt-3 rounded-md border border-zinc-200 bg-zinc-50/90 p-2.5">
       <button
         type="button"
         className="flex w-full items-center justify-between text-sm font-semibold text-zinc-700"
@@ -107,14 +153,207 @@ function ReasoningPanel({ message }: { message: ChatMessage }) {
   );
 }
 
+function ArtifactPreviewDialog({
+  preview,
+  markdown,
+  markdownLoading,
+  markdownError,
+  onClose,
+  onQuote,
+  onAskEdit,
+  onOpenInDocs,
+}: {
+  preview: ArtifactPreviewInput;
+  markdown: string;
+  markdownLoading: boolean;
+  markdownError: string | null;
+  onClose: () => void;
+  onQuote?: (input: ArtifactQuoteInput) => void;
+  onAskEdit?: (input: ArtifactQuoteInput) => void;
+  onOpenInDocs?: (documentId: string) => void;
+}) {
+  const [activeView, setActiveView] = useState<"pdf" | "markdown">(
+    preview.previewModeDefault === "markdown" || !preview.href ? "markdown" : "pdf"
+  );
+  const [selectedQuote, setSelectedQuote] = useState("");
+  const markdownRef = useRef<HTMLDivElement | null>(null);
+  const hasPdf = Boolean(preview.href);
+
+  useEffect(() => {
+    let frame = 0;
+    const updateSelection = () => {
+      if (activeView !== "markdown") {
+        setSelectedQuote("");
+        return;
+      }
+      if (!markdownRef.current || typeof window === "undefined") return;
+      const selection = window.getSelection();
+      if (!selection || selection.rangeCount < 1 || selection.isCollapsed) {
+        setSelectedQuote("");
+        return;
+      }
+      const anchorNode = selection.anchorNode;
+      const focusNode = selection.focusNode;
+      if (!anchorNode || !focusNode) {
+        setSelectedQuote("");
+        return;
+      }
+      if (!markdownRef.current.contains(anchorNode) || !markdownRef.current.contains(focusNode)) {
+        setSelectedQuote("");
+        return;
+      }
+      setSelectedQuote(compactQuote(selection.toString()));
+    };
+    const handleSelectionChange = () => {
+      if (frame) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(updateSelection);
+    };
+    document.addEventListener("selectionchange", handleSelectionChange);
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      document.removeEventListener("selectionchange", handleSelectionChange);
+    };
+  }, [activeView]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3">
+      <div className="flex h-[90vh] w-full max-w-6xl flex-col overflow-hidden border border-zinc-200 bg-white">
+        <div className="flex items-center justify-between border-b border-zinc-200 px-3 py-2">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-zinc-900">{preview.title}</p>
+            <p className="text-xs text-zinc-500">Document preview</p>
+          </div>
+          <div className="flex items-center gap-1.5">
+            {hasPdf ? (
+              <button
+                type="button"
+                onClick={() => setActiveView("pdf")}
+                className={`rounded-md border px-2 py-1 text-xs ${
+                  activeView === "pdf"
+                    ? "border-zinc-900 bg-zinc-900 text-white"
+                    : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-100"
+                }`}
+              >
+                PDF
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => setActiveView("markdown")}
+              className={`rounded-md border px-2 py-1 text-xs ${
+                activeView === "markdown"
+                  ? "border-zinc-900 bg-zinc-900 text-white"
+                  : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-100"
+              }`}
+            >
+              Markdown
+            </button>
+            {preview.documentId && onOpenInDocs ? (
+              <button
+                type="button"
+                onClick={() => onOpenInDocs(preview.documentId as string)}
+                className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+              >
+                <FileText className="h-3.5 w-3.5" />
+                Open in Docs
+              </button>
+            ) : null}
+            {preview.href ? (
+              <a
+                href={preview.href}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                Open
+              </a>
+            ) : null}
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-200 text-zinc-600 hover:bg-zinc-100"
+              aria-label="Close preview"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+        {activeView === "pdf" && hasPdf ? (
+          <iframe src={preview.href} title={preview.title} className="h-full w-full border-0 bg-zinc-100" />
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="flex items-center justify-between border-b border-zinc-200 px-3 py-2">
+              <p className="text-xs text-zinc-500">
+                {preview.family || formatDocTypeLabel(preview.docType)} {typeof preview.versionNumber === "number" ? `• v${preview.versionNumber}` : ""}
+              </p>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={!selectedQuote}
+                  onClick={() =>
+                    selectedQuote &&
+                    onQuote?.({
+                      documentId: preview.documentId,
+                      title: preview.title,
+                      family: preview.family,
+                      versionNumber: preview.versionNumber,
+                      quotedText: selectedQuote,
+                    })
+                  }
+                  className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Quote className="h-3.5 w-3.5" />
+                  Quote in chat
+                </button>
+                <button
+                  type="button"
+                  disabled={!selectedQuote}
+                  onClick={() =>
+                    selectedQuote &&
+                    onAskEdit?.({
+                      documentId: preview.documentId,
+                      title: preview.title,
+                      family: preview.family,
+                      versionNumber: preview.versionNumber,
+                      quotedText: selectedQuote,
+                    })
+                  }
+                  className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Ask AI to edit
+                </button>
+              </div>
+            </div>
+            <div ref={markdownRef} className="bat-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-3">
+              {markdownLoading ? (
+                <p className="text-sm text-zinc-500">Loading document markdown...</p>
+              ) : markdownError ? (
+                <p className="text-sm text-red-700">{markdownError}</p>
+              ) : markdown.trim() ? (
+                <ChatMarkdown content={markdown} compact />
+              ) : (
+                <p className="text-sm text-zinc-500">No markdown content available for this document.</p>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function MessageBlocks({
   message,
   onResolveDecision,
   onRunAction,
+  onOpenPreview,
 }: {
   message: ChatMessage;
   onResolveDecision?: (decisionId: string, option: string) => void;
   onRunAction?: (actionLabel: string, actionKey: string, payload?: Record<string, unknown>) => void;
+  onOpenPreview?: (input: ArtifactPreviewInput) => void;
 }) {
   if (!message.blocks?.length || message.role !== "assistant") return null;
 
@@ -140,15 +379,19 @@ function MessageBlocks({
     block: ChatMessageBlock
   ): block is Extract<ChatMessageBlock, { type: "document_export_result" }> =>
     block.type === "document_export_result";
+  const isDocumentArtifactBlock = (
+    block: ChatMessageBlock
+  ): block is Extract<ChatMessageBlock, { type: "document_artifact" }> =>
+    block.type === "document_artifact";
 
   return (
-    <div className="mt-4 space-y-2.5">
+    <div className="mt-3 space-y-2">
       {message.blocks.map((block, index) => {
         if (isDecisionBlock(block)) {
           return (
             <div
               key={`${message.id}-decision-${index}`}
-              className="rounded-2xl border border-amber-200/80 bg-amber-50/80 p-3"
+              className="rounded-md border border-amber-200/80 bg-amber-50/80 p-2.5"
             >
               <p className="text-xs font-semibold uppercase tracking-[0.08em] text-amber-700">Approval needed</p>
               <div className="mt-2 space-y-2">
@@ -161,7 +404,7 @@ function MessageBlocks({
                           key={`${decision.id}-${option.value}`}
                           type="button"
                           onClick={() => onResolveDecision?.(decision.id, option.value)}
-                          className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs text-amber-800 hover:bg-amber-100"
+                          className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs text-amber-800 hover:bg-amber-100"
                         >
                           {option.label || option.value}
                         </button>
@@ -178,7 +421,7 @@ function MessageBlocks({
           return (
             <div
               key={`${message.id}-actions-${index}`}
-              className="rounded-2xl border border-zinc-200 bg-zinc-50/80 p-3"
+              className="rounded-md border border-zinc-200 bg-zinc-50/80 p-2.5"
             >
               <p className="text-xs font-semibold uppercase tracking-[0.08em] text-zinc-500">Quick actions</p>
               <div className="mt-2 flex flex-wrap gap-2">
@@ -187,7 +430,7 @@ function MessageBlocks({
                     key={`${message.id}-${action.action}-${action.label}`}
                     type="button"
                     onClick={() => onRunAction?.(action.label, action.action, action.payload)}
-                    className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+                    className="rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
                   >
                     {action.label}
                   </button>
@@ -204,7 +447,7 @@ function MessageBlocks({
                             key={`${decision.id}-${option.value}`}
                             type="button"
                             onClick={() => onResolveDecision?.(decision.id, option.value)}
-                            className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+                            className="rounded-md border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
                           >
                             {option.label || option.value}
                           </button>
@@ -223,7 +466,7 @@ function MessageBlocks({
           return (
             <div
               key={`${message.id}-doc-ready-${index}`}
-              className={`rounded-2xl border p-3 ${
+              className={`rounded-md border p-2.5 ${
                 review ? "border-amber-200 bg-amber-50/70" : "border-emerald-200 bg-emerald-50/70"
               }`}
             >
@@ -276,7 +519,7 @@ function MessageBlocks({
                       key={`${message.id}-${action.action}-${action.label}`}
                       type="button"
                       onClick={() => onRunAction?.(action.label, action.action, action.payload)}
-                      className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+                      className="rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
                     >
                       {action.label}
                     </button>
@@ -289,7 +532,7 @@ function MessageBlocks({
 
         if (isDocumentEditAppliedBlock(block)) {
           return (
-            <div key={`${message.id}-doc-applied-${index}`} className="rounded-2xl border border-zinc-200 bg-zinc-50/80 p-3">
+            <div key={`${message.id}-doc-applied-${index}`} className="rounded-md border border-zinc-200 bg-zinc-50/80 p-2.5">
               <p className="text-xs font-semibold uppercase tracking-[0.08em] text-zinc-500">Document edit applied</p>
               <p className="mt-1 text-sm text-zinc-800">
                 Version {block.versionNumber} created and saved.
@@ -302,7 +545,7 @@ function MessageBlocks({
                       key={`${message.id}-${action.action}-${action.label}`}
                       type="button"
                       onClick={() => onRunAction?.(action.label, action.action, action.payload)}
-                      className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+                      className="rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
                     >
                       {action.label}
                     </button>
@@ -319,7 +562,7 @@ function MessageBlocks({
             ? `Anchor matched${typeof anchor.matchCount === "number" && anchor.matchCount > 1 ? ` (${anchor.matchCount})` : ""}`
             : "Anchor not found";
           return (
-            <div key={`${message.id}-doc-proposal-${index}`} className="rounded-2xl border border-sky-200 bg-sky-50/70 p-3">
+            <div key={`${message.id}-doc-proposal-${index}`} className="rounded-md border border-sky-200 bg-sky-50/70 p-2.5">
               <p className="text-xs font-semibold uppercase tracking-[0.08em] text-sky-700">Document edit proposal</p>
               <p className="mt-1 text-sm text-zinc-800">
                 Prepared changes for the selected document on version {block.baseVersionNumber}.
@@ -358,7 +601,7 @@ function MessageBlocks({
                       key={`${message.id}-${action.action}-${action.label}`}
                       type="button"
                       onClick={() => onRunAction?.(action.label, action.action, action.payload)}
-                      className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+                      className="rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
                     >
                       {action.label}
                     </button>
@@ -371,7 +614,7 @@ function MessageBlocks({
 
         if (isDocumentExportResultBlock(block)) {
           return (
-            <div key={`${message.id}-doc-export-${index}`} className="rounded-2xl border border-zinc-200 bg-zinc-50/80 p-3">
+            <div key={`${message.id}-doc-export-${index}`} className="rounded-md border border-zinc-200 bg-zinc-50/80 p-2.5">
               <p className="text-xs font-semibold uppercase tracking-[0.08em] text-zinc-500">Document export</p>
               <p className="mt-1 text-sm text-zinc-800">
                 {block.format} export is ready.
@@ -400,6 +643,102 @@ function MessageBlocks({
           );
         }
 
+        if (isDocumentArtifactBlock(block)) {
+          const previewHref = normalizeArtifactHref(String(block.previewHref || block.downloadHref || block.storagePath || "").trim());
+          const downloadHref = normalizeArtifactHref(String(block.downloadHref || block.storagePath || "").trim());
+          return (
+            <div key={`${message.id}-doc-artifact-${index}`} className="rounded-md border border-zinc-200 bg-zinc-50 p-2.5">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-[0.08em] text-zinc-500">Generated document</p>
+                  <p className="mt-1 text-sm font-semibold text-zinc-900">{block.title}</p>
+                </div>
+                <FileText className="h-4 w-4 text-zinc-500" />
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-600">
+                <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
+                  {formatDocTypeLabel(block.family || block.docType)}
+                </span>
+                <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">{block.format}</span>
+                {typeof block.versionNumber === "number" ? (
+                  <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">Version {block.versionNumber}</span>
+                ) : null}
+                {typeof block.coverageScore === "number" ? (
+                  <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
+                    Coverage {Math.round(block.coverageScore)}/100
+                  </span>
+                ) : null}
+                {block.partial ? (
+                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-800">Partial</span>
+                ) : null}
+              </div>
+              {block.partialReasons?.length ? (
+                <ul className="mt-2 space-y-1 text-xs text-amber-800">
+                  {block.partialReasons.slice(0, 3).map((reason) => (
+                    <li key={`${message.id}-${reason}`}>• {reason}</li>
+                  ))}
+                </ul>
+              ) : null}
+              <div className="mt-2 flex flex-wrap gap-2">
+                {previewHref || block.documentId ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onOpenPreview?.({
+                        title: block.title,
+                        href: previewHref,
+                        ...(block.documentId ? { documentId: block.documentId } : {}),
+                        ...(block.docType ? { docType: block.docType } : {}),
+                        ...(block.family ? { family: block.family } : {}),
+                        ...(typeof block.versionNumber === "number" ? { versionNumber: block.versionNumber } : {}),
+                        ...(block.previewModeDefault ? { previewModeDefault: block.previewModeDefault } : {}),
+                      })
+                    }
+                    className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    Preview
+                  </button>
+                ) : null}
+                {downloadHref ? (
+                  <a
+                    href={downloadHref}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    Download
+                  </a>
+                ) : null}
+                {block.documentId ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onRunAction?.("Open in docs", "document.read", {
+                        documentId: block.documentId,
+                      })
+                    }
+                    className="rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+                  >
+                    Open in docs
+                  </button>
+                ) : null}
+                {block.actions?.map((action) => (
+                  <button
+                    key={`${message.id}-${action.action}-${action.label}`}
+                    type="button"
+                    onClick={() => onRunAction?.(action.label, action.action, action.payload)}
+                    className="rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        }
+
         return null;
       })}
     </div>
@@ -411,6 +750,9 @@ export function ChatThread({
   onForkFromMessage,
   onResolveDecision,
   onRunAction,
+  onLoadDocumentMarkdown,
+  onQuoteArtifact,
+  onAskEditArtifact,
   onStarterAction,
   onInspectAssistantMessage,
   onOpenEvidence,
@@ -424,6 +766,9 @@ export function ChatThread({
   onForkFromMessage?: (messageId: string) => void;
   onResolveDecision?: (decisionId: string, option: string) => void;
   onRunAction?: (actionLabel: string, actionKey: string, payload?: Record<string, unknown>) => void;
+  onLoadDocumentMarkdown?: (documentId: string) => Promise<string>;
+  onQuoteArtifact?: (input: ArtifactQuoteInput) => void;
+  onAskEditArtifact?: (input: ArtifactQuoteInput) => void;
   onStarterAction?: (action: "audit" | "sources" | "deliverable" | "competitor_v3") => void;
   onInspectAssistantMessage?: (messageId: string) => void;
   onOpenEvidence?: (messageId: string) => void;
@@ -435,6 +780,10 @@ export function ChatThread({
 }) {
   const scrollRef = useRef<HTMLElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
+  const [artifactPreview, setArtifactPreview] = useState<ArtifactPreviewInput | null>(null);
+  const [artifactMarkdownByDocId, setArtifactMarkdownByDocId] = useState<Record<string, string>>({});
+  const [artifactMarkdownLoading, setArtifactMarkdownLoading] = useState(false);
+  const [artifactMarkdownError, setArtifactMarkdownError] = useState<string | null>(null);
   const visibleMessages = useMemo(() => messages.filter((message) => message.role !== "system"), [messages]);
 
   useEffect(() => {
@@ -447,19 +796,49 @@ export function ChatThread({
     }
   }, [visibleMessages.length, isStreaming, streamingInsight]);
 
+  useEffect(() => {
+    const documentId = artifactPreview?.documentId;
+    if (!documentId || !onLoadDocumentMarkdown) return;
+    if (artifactMarkdownByDocId[documentId]) {
+      return;
+    }
+    let cancelled = false;
+    const loadMarkdown = async () => {
+      setArtifactMarkdownLoading(true);
+      setArtifactMarkdownError(null);
+      try {
+        const markdown = await onLoadDocumentMarkdown(documentId);
+        if (cancelled) return;
+        setArtifactMarkdownByDocId((previous) => ({
+          ...previous,
+          [documentId]: String(markdown || ""),
+        }));
+      } catch (error) {
+        if (cancelled) return;
+        setArtifactMarkdownError(String((error as Error)?.message || "Failed to load markdown preview."));
+      } finally {
+        if (!cancelled) setArtifactMarkdownLoading(false);
+      }
+    };
+    void loadMarkdown();
+    return () => {
+      cancelled = true;
+    };
+  }, [artifactMarkdownByDocId, artifactPreview?.documentId, onLoadDocumentMarkdown]);
+
   if (!visibleMessages.length) {
     return (
-      <section className="flex min-h-0 flex-1 items-start justify-center bg-[linear-gradient(180deg,#f7f7f8_0%,#f2f4f7_100%)] p-5 pt-10 text-center sm:p-10 sm:pt-14">
+      <section className="flex min-h-0 flex-1 items-center justify-center bg-white p-3 text-center sm:p-4">
         <div className="mx-auto w-full max-w-4xl">
-          <p className="text-4xl font-semibold tracking-tight text-zinc-900 sm:text-5xl">How can I help with this workspace?</p>
-          <p className="mt-3 text-base text-zinc-500 sm:text-lg">
+          <p className="text-2xl font-semibold tracking-tight text-zinc-900 sm:text-3xl">How can I help with this workspace?</p>
+          <p className="mt-1.5 text-sm text-zinc-500 sm:text-base">
             Ask for analysis, implementation, debugging, or evidence review and I will run the right tools and respond here.
           </p>
-          <div className="mt-8 grid gap-3 text-left sm:grid-cols-3">
+          <div className="mt-4 grid gap-2 text-left sm:grid-cols-3">
             <button
               type="button"
               onClick={() => onStarterAction?.("audit")}
-              className="rounded-2xl border border-zinc-200 bg-white/92 p-4 text-left shadow-md transition hover:-translate-y-0.5 hover:shadow-lg"
+              className="rounded-md border border-zinc-200 bg-white p-3 text-left transition hover:bg-zinc-50"
             >
               <p className="text-xs font-semibold uppercase tracking-[0.1em] text-zinc-500">Audit</p>
               <p className="mt-2 text-sm font-medium text-zinc-900">Run a full workspace audit</p>
@@ -468,7 +847,7 @@ export function ChatThread({
             <button
               type="button"
               onClick={() => onStarterAction?.("sources")}
-              className="rounded-2xl border border-zinc-200 bg-white/90 p-4 text-left shadow-md transition hover:-translate-y-0.5 hover:shadow-lg"
+              className="rounded-md border border-zinc-200 bg-white p-3 text-left transition hover:bg-zinc-50"
             >
               <p className="text-xs font-semibold uppercase tracking-[0.1em] text-zinc-500">Evidence</p>
               <p className="mt-2 text-sm font-medium text-zinc-900">Ask with source constraints</p>
@@ -477,7 +856,7 @@ export function ChatThread({
             <button
               type="button"
               onClick={() => onStarterAction?.("deliverable")}
-              className="rounded-2xl border border-zinc-200 bg-white/90 p-4 text-left shadow-md transition hover:-translate-y-0.5 hover:shadow-lg"
+              className="rounded-md border border-zinc-200 bg-white p-3 text-left transition hover:bg-zinc-50"
             >
               <p className="text-xs font-semibold uppercase tracking-[0.1em] text-zinc-500">Deliverable</p>
               <p className="mt-2 text-sm font-medium text-zinc-900">Generate client-ready output</p>
@@ -486,7 +865,7 @@ export function ChatThread({
             <button
               type="button"
               onClick={() => onStarterAction?.("competitor_v3")}
-              className="rounded-2xl border border-zinc-200 bg-white/90 p-4 text-left shadow-md transition hover:-translate-y-0.5 hover:shadow-lg sm:col-span-3"
+              className="rounded-md border border-zinc-200 bg-white p-3 text-left transition hover:bg-zinc-50 sm:col-span-3"
             >
               <p className="text-xs font-semibold uppercase tracking-[0.1em] text-zinc-500">Competitor Finder V3</p>
               <p className="mt-2 text-sm font-medium text-zinc-900">Run wide competitor + adjacent discovery</p>
@@ -501,8 +880,8 @@ export function ChatThread({
   }
 
   return (
-    <section ref={scrollRef} className="bat-scrollbar min-h-0 flex-1 overflow-y-auto bg-[linear-gradient(180deg,#f7f7f8_0%,#f2f4f7_100%)]">
-      <div className={`mx-auto w-full ${contentWidthClassName} px-5 pb-24 pt-8 sm:px-8 xl:px-10`}>
+      <section ref={scrollRef} className="bat-scrollbar min-h-0 flex-1 overflow-y-auto bg-white">
+      <div className={`mx-auto w-full ${contentWidthClassName} px-3 pb-6 pt-3 sm:px-4 xl:px-6`}>
         {visibleMessages.map((message) => {
           const isUser = message.role === "user";
           const qualityNotes = message.reasoning?.quality?.notes || [];
@@ -510,21 +889,19 @@ export function ChatThread({
             message.reasoning?.quality?.intent === "competitor_brief" &&
             qualityNotes.some((note) => /rewritten to enforce competitor brief completeness/i.test(note));
           return (
-            <article key={message.id} className="group mb-6">
+            <article key={message.id} className="group mb-3">
               <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
                 <div
                   className={
                     isUser
-                      ? "max-w-[96%] rounded-3xl bg-[#2f2f32] px-4 py-3 text-white shadow-lg sm:max-w-[88%] 2xl:max-w-[82%]"
-                      : "max-w-[98%] rounded-3xl border border-zinc-200 bg-white px-4 py-3 text-zinc-900 shadow-md sm:max-w-[94%] 2xl:max-w-[90%]"
+                      ? "max-w-[93%] rounded-2xl bg-[#2f2f32] px-3 py-2 text-white sm:max-w-[84%] 2xl:max-w-[78%]"
+                      : "max-w-[98%] px-0 py-0 text-zinc-900 sm:max-w-[94%] 2xl:max-w-[90%]"
                   }
                 >
-                  {!isUser ? (
-                    <p className="mb-2 text-xs font-medium uppercase tracking-[0.08em] text-zinc-400">Assistant</p>
-                  ) : null}
-                  <p className={`whitespace-pre-wrap break-words text-base leading-7 ${isUser ? "text-white" : "text-zinc-800"}`}>
-                    {formatMessageContentForDisplay(message.content)}
-                  </p>
+                  <ChatMarkdown
+                    content={formatMessageContentForDisplay(message.content)}
+                    className={isUser ? "[&_*]:!text-white [&_a]:!text-white/95 [&_code]:!bg-zinc-700 [&_blockquote]:!border-zinc-400" : ""}
+                  />
                   {!isUser && message.reasoning?.model?.used ? (
                     <p className="mt-2 text-xs text-zinc-500">
                       Model: {message.reasoning.model.used}
@@ -536,7 +913,7 @@ export function ChatThread({
                   {!isUser && qualityRewriteApplied ? (
                     <p className="mt-1 text-xs text-amber-700">Quality pass: competitor brief was expanded for completeness.</p>
                   ) : null}
-                  <p className={`mt-2 text-xs ${isUser ? "text-zinc-300" : "text-zinc-400"}`}>{formatMessageTime(message.createdAt)}</p>
+                  <p className={`mt-1 text-xs ${isUser ? "text-zinc-300" : "text-zinc-400"}`}>{formatMessageTime(message.createdAt)}</p>
                   {message.attachmentIds?.length || message.documentIds?.length ? (
                     <div className="mt-1 flex flex-wrap gap-1.5">
                       {message.documentIds?.length ? (
@@ -563,12 +940,12 @@ export function ChatThread({
               </div>
 
               {!isUser ? (
-                <div className="mt-2 flex flex-wrap items-center gap-2 opacity-100 transition md:opacity-0 md:group-hover:opacity-100">
+                <div className="mt-1 flex flex-wrap items-center gap-1.5 opacity-100 transition md:opacity-0 md:group-hover:opacity-100">
                   {onInspectAssistantMessage ? (
                     <button
                       type="button"
                       onClick={() => onInspectAssistantMessage(message.id)}
-                      className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
+                      className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
                     >
                       {selectedAssistantMessageId === message.id ? "Thoughts open" : "Open thoughts"}
                     </button>
@@ -577,7 +954,7 @@ export function ChatThread({
                     <button
                       type="button"
                       onClick={() => onForkFromMessage(message.id)}
-                      className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
+                      className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
                     >
                       Fork from here
                     </button>
@@ -586,7 +963,7 @@ export function ChatThread({
                     <button
                       type="button"
                       onClick={() => onOpenEvidence(message.id)}
-                      className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
+                      className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
                     >
                       Sources
                     </button>
@@ -594,19 +971,26 @@ export function ChatThread({
                 </div>
               ) : null}
 
-              <MessageBlocks message={message} onResolveDecision={onResolveDecision} onRunAction={onRunAction} />
+              <MessageBlocks
+                message={message}
+                onResolveDecision={onResolveDecision}
+                onRunAction={onRunAction}
+                onOpenPreview={(input) => {
+                  setArtifactMarkdownError(null);
+                  setArtifactPreview(input);
+                }}
+              />
               {showInlineReasoning && message.role === "assistant" ? <ReasoningPanel message={message} /> : null}
             </article>
           );
         })}
 
         {isStreaming ? (
-            <article className="mb-8">
+            <article className="mb-4">
               <div className="mb-2 flex items-center gap-2">
-              <p className="text-xs font-medium uppercase tracking-[0.08em] text-zinc-400">Assistant</p>
               <TypingDots />
             </div>
-            <div className="rounded-2xl border border-zinc-200 bg-white px-4 py-3 shadow-md">
+            <div className="bg-white px-0 py-0">
               <p className="text-base leading-7 text-zinc-700">
                 {streamingInsight || "Thinking and running tools..."}
               </p>
@@ -615,6 +999,23 @@ export function ChatThread({
         ) : null}
         <div ref={endRef} />
       </div>
+      {artifactPreview ? (
+        <ArtifactPreviewDialog
+          key={`${artifactPreview.documentId || artifactPreview.href || artifactPreview.title}`}
+          preview={artifactPreview}
+          markdown={artifactPreview.documentId ? String(artifactMarkdownByDocId[artifactPreview.documentId] || "") : ""}
+          markdownLoading={artifactMarkdownLoading}
+          markdownError={artifactMarkdownError}
+          onClose={() => {
+            setArtifactPreview(null);
+            setArtifactMarkdownLoading(false);
+            setArtifactMarkdownError(null);
+          }}
+          onOpenInDocs={(documentId) => onRunAction?.("Open in docs", "document.read", { documentId })}
+          onQuote={onQuoteArtifact}
+          onAskEdit={onAskEditArtifact}
+        />
+      ) : null}
     </section>
   );
 }

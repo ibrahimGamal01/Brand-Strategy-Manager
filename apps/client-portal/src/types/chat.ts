@@ -115,6 +115,24 @@ export type ChatMessageBlock =
       downloadHref?: string;
     }
   | {
+      type: "document_artifact";
+      title: string;
+      docType?: string;
+      family?: string;
+      format: "PDF" | "DOCX" | "MD";
+      storagePath?: string;
+      downloadHref?: string;
+      previewHref?: string;
+      documentId?: string;
+      versionId?: string;
+      versionNumber?: number;
+      previewModeDefault?: "pdf" | "markdown";
+      coverageScore?: number;
+      partial?: boolean;
+      partialReasons?: string[];
+      actions?: ChatMessageAction[];
+    }
+  | {
       type: Exclude<
         string,
         | "decision_requests"
@@ -124,6 +142,7 @@ export type ChatMessageBlock =
         | "document_edit_proposal"
         | "document_edit_applied"
         | "document_export_result"
+        | "document_artifact"
       >;
       [key: string]: unknown;
     };

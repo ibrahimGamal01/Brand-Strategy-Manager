@@ -60,6 +60,14 @@ jobs:
           R1_WORKSPACE_ID: ${{ secrets.R1_WORKSPACE_ID }}
           R1_TEST_SCAN_URL: ${{ vars.R1_TEST_SCAN_URL }}
 
+      - name: Online ChatGPT parity smoke
+        run: npm run test:online-chatgpt-parity-smoke --workspace=apps/backend
+        env:
+          CHATGPT_PARITY_BASE_URL: ${{ secrets.PORTAL_E2E_BASE_URL }}
+          R1_ADMIN_EMAIL: ${{ secrets.R1_ADMIN_EMAIL }}
+          R1_ADMIN_PASSWORD: ${{ secrets.R1_ADMIN_PASSWORD }}
+          R1_WORKSPACE_ID: ${{ secrets.R1_WORKSPACE_ID }}
+
       - name: Rollout readiness preflight
         run: npm run check:portal-rollout --workspace=apps/backend | tee portal-rollout-readiness.json
         env:

@@ -31,6 +31,7 @@
         "test:runtime-reliability-r1": "tsx src/scripts/test-runtime-reliability-r1.ts",
         "test:runtime-no-summarizer": "tsx src/scripts/test-runtime-no-summarizer.ts",
         "test:r1-online-smoke": "tsx src/scripts/test-r1-online-smoke.ts",
+        "test:online-chatgpt-parity-smoke": "tsx src/scripts/test-online-chatgpt-parity-smoke.ts",
         "report:r1-cutover": "tsx src/scripts/report-r1-cutover.ts",
         "test-document-generation-quality": "tsx src/scripts/test-document-generation-quality.ts",
         "test:deliverable-engine-regression": "tsx src/scripts/test-deliverable-engine-regression.ts",
