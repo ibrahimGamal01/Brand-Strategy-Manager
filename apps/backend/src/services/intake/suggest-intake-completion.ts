@@ -60,6 +60,15 @@ const INTAKE_LIST_KEYS = new Set<IntakeKey>([
 
 export type IntakeKey = (typeof INTAKE_KEYS)[number];
 export type IntakeSuggestionStep = 'brand' | 'channels' | 'offer' | 'audience' | 'voice';
+export type IntakeSuggestScope = 'step' | 'global';
+export type IntakeSuggestOverwritePolicy = 'missing_only' | 'missing_or_low_signal';
+
+export interface IntakeSuggestFieldMetaItem {
+  source?: 'user' | 'ai' | 'prefill';
+  lastUpdatedAt?: string;
+}
+
+type IntakeSuggestFieldMetaMap = Record<string, IntakeSuggestFieldMetaItem>;
 
 const STEP_KEY_MAP: Record<IntakeSuggestionStep, readonly IntakeKey[]> = {
   brand: ['name', 'website', 'websites', 'oneSentenceDescription', 'niche', 'businessType'],
@@ -105,6 +114,20 @@ export interface SuggestedHandleValidationItem {
 export interface SuggestIntakeCompletionResult {
   suggested: Record<string, unknown>;
   filledByUser: string[];
+  fieldQuality?: Record<
+    string,
+    {
+      confidence: number;
+      reason: string;
+      sourceRefs: string[];
+      lowSignalBlocked: boolean;
+    }
+  >;
+  coverage?: {
+    inferableFields: string[];
+    suggestedFields: string[];
+    blockedLowSignalFields: string[];
+  };
   /** Suggested social handles (from discovery or TikTok-from-Instagram) for user to confirm. */
   suggestedHandles?: Record<string, string>;
   /** Validation for each suggested handle so UI can show "Likely your account" or "Please confirm." */
@@ -191,6 +214,65 @@ function filterMissingKeysForStep(
   if (!step) return missingKeys;
   const allowed = new Set<string>(STEP_KEY_MAP[step]);
   return missingKeys.filter((key) => allowed.has(key));
+}
+
+function resolveInferableKeys(scope: IntakeSuggestScope, step?: IntakeSuggestionStep): IntakeKey[] {
+  if (scope === 'step') {
+    return filterMissingKeysForStep([...INTAKE_KEYS], step);
+  }
+  return [...INTAKE_KEYS];
+}
+
+function resolveFieldMeta(
+  fieldMeta: unknown
+): IntakeSuggestFieldMetaMap {
+  if (!fieldMeta || typeof fieldMeta !== 'object' || Array.isArray(fieldMeta)) return {};
+  return fieldMeta as IntakeSuggestFieldMetaMap;
+}
+
+function isUserLockedField(fieldMeta: IntakeSuggestFieldMetaMap, key: IntakeKey): boolean {
+  const meta = fieldMeta[key];
+  return String(meta?.source || '').toLowerCase() === 'user';
+}
+
+const LOW_SIGNAL_ALLOWED_OVERWRITE_KEYS = new Set<IntakeKey>([
+  'oneSentenceDescription',
+  'mainOffer',
+  'primaryGoal',
+  'niche',
+  'idealAudience',
+  'targetAudience',
+  'operateWhere',
+  'wantClientsWhere',
+  'brandTone',
+  'constraints',
+  'engineGoal',
+]);
+
+function isLowSignalFieldValueForKey(key: IntakeKey, value: unknown): boolean {
+  if (!isFilled(value)) return false;
+  if (INTAKE_LIST_KEYS.has(key)) {
+    const list = sanitizeListSuggestion(value, 20);
+    if (!list.length) return false;
+    return list.every((item) => isLowSignalAutofillText(item));
+  }
+  if (!LOW_SIGNAL_ALLOWED_OVERWRITE_KEYS.has(key)) return false;
+  return isLowSignalAutofillText(value);
+}
+
+function resolveTargetKeys(
+  partialPayload: Record<string, unknown>,
+  inferableKeys: IntakeKey[],
+  fieldMeta: IntakeSuggestFieldMetaMap,
+  overwritePolicy: IntakeSuggestOverwritePolicy
+): IntakeKey[] {
+  return inferableKeys.filter((key) => {
+    const value = partialPayload[key];
+    if (!isFilled(value)) return true;
+    if (overwritePolicy !== 'missing_or_low_signal') return false;
+    if (isUserLockedField(fieldMeta, key)) return false;
+    return isLowSignalFieldValueForKey(key, value);
+  });
 }
 
 function sanitizeSentence(value: string): string {
@@ -483,6 +565,76 @@ function parseUserSocialReferenceCandidates(payload: Record<string, unknown>): S
     });
   }
   return candidates;
+}
+
+function parseUserHandleSeedCandidates(payload: Record<string, unknown>): SuggestedHandleCandidate[] {
+  const out: SuggestedHandleCandidate[] = [];
+  const pushCandidate = (
+    platform: SuggestedHandleCandidate['platform'],
+    rawHandle: unknown,
+    source: string
+  ) => {
+    const parserPlatform = platform === 'twitter' ? 'x' : platform;
+    const handle = normalizeHandleFromUrlOrHandle(rawHandle, parserPlatform);
+    if (!handle) return;
+    out.push({
+      platform,
+      handle,
+      profileUrl: profileUrlFromHandle(platform, handle),
+      confidence: 0.97,
+      reason: 'Detected directly from your provided handle input.',
+      source,
+      isLikelyClient: true,
+    });
+  };
+
+  const handles = partialRecord(payload.handles);
+  for (const [platformRaw, handle] of Object.entries(handles)) {
+    const platform =
+      platformRaw === 'x'
+        ? 'twitter'
+        : platformRaw;
+    if (
+      platform !== 'instagram' &&
+      platform !== 'tiktok' &&
+      platform !== 'youtube' &&
+      platform !== 'twitter' &&
+      platform !== 'linkedin'
+    ) {
+      continue;
+    }
+    pushCandidate(platform, handle, 'user_provided_handle');
+  }
+
+  const handlesV2 = partialRecord(payload.handlesV2);
+  for (const [platformRaw, rawBucket] of Object.entries(handlesV2)) {
+    const platform =
+      platformRaw === 'x'
+        ? 'twitter'
+        : platformRaw;
+    if (
+      platform !== 'instagram' &&
+      platform !== 'tiktok' &&
+      platform !== 'youtube' &&
+      platform !== 'twitter' &&
+      platform !== 'linkedin'
+    ) {
+      continue;
+    }
+    const bucket = partialRecord(rawBucket);
+    pushCandidate(platform, bucket.primary, 'user_provided_handle_v2');
+    const handleList = Array.isArray(bucket.handles) ? bucket.handles : [];
+    for (const entry of handleList) {
+      pushCandidate(platform, entry, 'user_provided_handle_v2');
+    }
+  }
+
+  return mergeHandleCandidates(out, 20);
+}
+
+function partialRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
 }
 
 function mergeHandleCandidates(
@@ -900,13 +1052,22 @@ function normalizeSuggestedShape(
 
 export async function suggestIntakeCompletion(
   partialPayload: Record<string, unknown>,
-  options?: { step?: IntakeSuggestionStep }
+  options?: {
+    step?: IntakeSuggestionStep;
+    scope?: IntakeSuggestScope;
+    overwritePolicy?: IntakeSuggestOverwritePolicy;
+    fieldMeta?: IntakeSuggestFieldMetaMap;
+  }
 ): Promise<SuggestIntakeCompletionResult> {
   const hasOpenAi = Boolean(
     String(process.env.OPENAI_API_KEY || '').trim() || String(process.env.OPENAI_API_KEY_FALLBACK || '').trim()
   );
   const warnings = new Set<string>();
   const suggestionStep = options?.step || parseSuggestionStep(partialPayload.step);
+  const scope: IntakeSuggestScope = options?.scope === 'step' ? 'step' : 'global';
+  const overwritePolicy: IntakeSuggestOverwritePolicy =
+    options?.overwritePolicy === 'missing_only' ? 'missing_only' : 'missing_or_low_signal';
+  const fieldMeta = resolveFieldMeta(options?.fieldMeta ?? partialPayload.fieldMeta);
 
   const filledByUser: string[] = [];
   const contextParts: string[] = [];
@@ -940,8 +1101,8 @@ export async function suggestIntakeCompletion(
   const website = String(websiteFromList || partialPayload.website || '').trim();
   const name = String(partialPayload.name || '').trim();
 
-  let missingKeys = INTAKE_KEYS.filter((k) => !filledByUser.includes(k));
-  missingKeys = filterMissingKeysForStep(missingKeys, suggestionStep);
+  const inferableKeys = resolveInferableKeys(scope, suggestionStep);
+  let missingKeys = resolveTargetKeys(partialPayload, inferableKeys, fieldMeta, overwritePolicy);
 
   const fallbackSuggested = buildFallbackSuggestions(partialPayload, missingKeys, website);
   let suggested: Record<string, unknown> = {
@@ -972,6 +1133,8 @@ Rules:
 ${stepRules}`;
 
     const userPrompt = `Step: ${stepLabel}
+Scope: ${scope}
+OverwritePolicy: ${overwritePolicy}
 Context:
 ${contextStr}
 
@@ -1067,12 +1230,22 @@ Return a single JSON object with only these keys.`;
   const suggestedHandleValidation: SuggestIntakeCompletionResult['suggestedHandleValidation'] = {};
   const shouldSuggestHandles = !suggestionStep || suggestionStep === 'channels';
   const handleCandidates: SuggestedHandleCandidate[] = shouldSuggestHandles
-    ? parseUserSocialReferenceCandidates(partialPayload)
+    ? mergeHandleCandidates([
+        ...parseUserSocialReferenceCandidates(partialPayload),
+        ...parseUserHandleSeedCandidates(partialPayload),
+      ], 30)
     : [];
   const hasUserProvidedSocialCandidate = handleCandidates.some(
     (candidate) => candidate.source === 'user_provided_social_url'
   );
-  const discoveredCandidateMinConfidence = hasUserProvidedSocialCandidate ? 0.7 : 0.55;
+  const hasExplicitLinkedinReference = handleCandidates.some(
+    (candidate) => candidate.source === 'user_provided_social_url' && candidate.platform === 'linkedin'
+  );
+  const discoveredCandidateMinConfidence = hasExplicitLinkedinReference
+    ? 0.82
+    : hasUserProvidedSocialCandidate
+      ? 0.7
+      : 0.55;
   const allowDiscoveryWithProvidedSocialRefs =
     String(process.env.SUGGEST_SOCIAL_DISCOVERY_WITH_USER_REFS || '')
       .trim()
@@ -1209,13 +1382,22 @@ Return a single JSON object with only these keys.`;
     }
 
     const isUserProvided = candidate.source === 'user_provided_social_url';
+    const suppressedByLinkedinPriority =
+      hasExplicitLinkedinReference &&
+      candidate.platform !== 'linkedin' &&
+      !isUserProvided &&
+      Number(candidate.confidence || 0) < 0.9;
     const discoveredAutoApplyAllowed =
       AUTO_APPLY_DISCOVERED_HANDLES &&
       candidate.isLikelyClient &&
       Number(candidate.confidence || 0) >= Math.max(AUTO_APPLY_HANDLE_THRESHOLD, DISCOVERED_HANDLE_AUTO_APPLY_MIN_CONFIDENCE);
-    if (isUserProvided || discoveredAutoApplyAllowed) {
+    if (!suppressedByLinkedinPriority && (isUserProvided || discoveredAutoApplyAllowed)) {
       suggestedHandles[candidate.platform] = candidate.handle;
     }
+  }
+
+  if (hasExplicitLinkedinReference) {
+    warnings.add('LINKEDIN_PRIORITY_ACTIVE');
   }
 
   const hasUserPrimaryHandle = hasPrimaryHandle(handles);
@@ -1245,9 +1427,42 @@ Return a single JSON object with only these keys.`;
     }
   }
 
+  const suggestedFieldNames = Object.keys(suggested);
+  const blockedLowSignalFields = missingKeys.filter((key) => !suggestedFieldNames.includes(key));
+  const fieldQuality: Record<
+    string,
+    {
+      confidence: number;
+      reason: string;
+      sourceRefs: string[];
+      lowSignalBlocked: boolean;
+    }
+  > = {};
+  for (const field of inferableKeys) {
+    const inSuggested = suggestedFieldNames.includes(field);
+    fieldQuality[field] = {
+      confidence: inSuggested ? 0.8 : 0.25,
+      reason: inSuggested
+        ? 'Suggested from website/DDG evidence with policy-aware merge.'
+        : isUserLockedField(fieldMeta, field)
+          ? 'Skipped because field is user-authored and locked.'
+          : blockedLowSignalFields.includes(field)
+            ? 'Skipped due to low-signal or insufficient evidence quality.'
+            : 'No reliable evidence was available for this field.',
+      sourceRefs: [],
+      lowSignalBlocked: blockedLowSignalFields.includes(field),
+    };
+  }
+
   return {
     suggested,
     filledByUser,
+    fieldQuality,
+    coverage: {
+      inferableFields: inferableKeys,
+      suggestedFields: suggestedFieldNames,
+      blockedLowSignalFields,
+    },
     ...(Object.keys(suggestedHandles).length > 0 ? { suggestedHandles } : {}),
     ...(Object.keys(suggestedHandleValidation).length > 0 ? { suggestedHandleValidation } : {}),
     ...(uniqueCandidates.length > 0 ? { suggestedHandleCandidates: uniqueCandidates } : {}),

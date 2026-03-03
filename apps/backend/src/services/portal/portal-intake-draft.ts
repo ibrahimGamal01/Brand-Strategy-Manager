@@ -3,8 +3,14 @@ import { prisma } from '../../lib/prisma';
 import { buildPlatformHandles, parseStringList } from '../intake/brain-intake-utils';
 import { getPortalWorkspaceIntakeStatus } from './portal-intake';
 import { parseSocialReferenceList, resolveIntakeWebsites } from './portal-intake-websites';
+import { syncPortalIntakeContinuousEnrichment } from './portal-signup-enrichment';
 
 type IntakePlatform = 'instagram' | 'tiktok' | 'youtube' | 'twitter' | 'linkedin';
+type IntakeHandlesV2Item = {
+  primary: string;
+  handles: string[];
+};
+type IntakeHandlesV2 = Record<IntakePlatform, IntakeHandlesV2Item>;
 
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -26,6 +32,97 @@ function normalizeHandle(value: unknown): string {
     .trim()
     .replace(/^@+/, '')
     .toLowerCase();
+}
+
+function normalizeHandleList(value: unknown, maxItems = 5): string[] {
+  const source = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(/[\n,;|]+/)
+      : [];
+  return Array.from(
+    new Set(
+      source
+        .map((entry) => normalizeHandle(entry))
+        .filter(Boolean),
+    ),
+  ).slice(0, maxItems);
+}
+
+function ensurePrimaryBucket(bucket: IntakeHandlesV2Item): IntakeHandlesV2Item {
+  const handles = normalizeHandleList(bucket.handles, 5);
+  const primary = normalizeHandle(bucket.primary);
+  return {
+    primary: handles.includes(primary) ? primary : handles[0] || '',
+    handles,
+  };
+}
+
+function buildHandlesV2FromPayload(payload: Record<string, unknown>): IntakeHandlesV2 {
+  const handlesV2: IntakeHandlesV2 = {
+    instagram: { primary: '', handles: [] },
+    tiktok: { primary: '', handles: [] },
+    youtube: { primary: '', handles: [] },
+    twitter: { primary: '', handles: [] },
+    linkedin: { primary: '', handles: [] },
+  };
+
+  const payloadHandlesV2 = asRecord(payload.handlesV2);
+  for (const [platformRaw, rawBucket] of Object.entries(payloadHandlesV2)) {
+    const normalizedPlatform = toAccountPlatform(platformRaw);
+    const platform = normalizedPlatform === 'x' ? 'twitter' : normalizedPlatform;
+    if (!Object.prototype.hasOwnProperty.call(handlesV2, platform)) continue;
+    const bucket = asRecord(rawBucket);
+    handlesV2[platform as IntakePlatform] = ensurePrimaryBucket({
+      primary: normalizeHandle(bucket.primary),
+      handles: normalizeHandleList(bucket.handles, 5),
+    });
+  }
+
+  const legacyHandles = buildPlatformHandles(payload);
+  for (const [platformRaw, handleRaw] of Object.entries(legacyHandles)) {
+    const normalizedPlatform = toAccountPlatform(platformRaw);
+    const platform = normalizedPlatform === 'x' ? 'twitter' : normalizedPlatform;
+    if (!Object.prototype.hasOwnProperty.call(handlesV2, platform)) continue;
+    const handle = normalizeHandle(handleRaw);
+    if (!handle) continue;
+    const bucket = handlesV2[platform as IntakePlatform];
+    if (!bucket.handles.includes(handle)) {
+      bucket.handles.push(handle);
+    }
+    if (!bucket.primary) {
+      bucket.primary = handle;
+    }
+    handlesV2[platform as IntakePlatform] = ensurePrimaryBucket(bucket);
+  }
+
+  return handlesV2;
+}
+
+function toLegacyPrimaryHandles(handlesV2: IntakeHandlesV2): Partial<Record<IntakePlatform, string>> {
+  return {
+    instagram: handlesV2.instagram.primary || '',
+    tiktok: handlesV2.tiktok.primary || '',
+    youtube: handlesV2.youtube.primary || '',
+    linkedin: handlesV2.linkedin.primary || '',
+    twitter: handlesV2.twitter.primary || '',
+  };
+}
+
+function flattenHandlesV2(handlesV2: IntakeHandlesV2): Array<{ platform: string; handle: string }> {
+  const rows: Array<{ platform: string; handle: string }> = [];
+  for (const [platform, bucket] of Object.entries(handlesV2) as Array<[IntakePlatform, IntakeHandlesV2Item]>) {
+    const ordered = bucket.primary
+      ? [bucket.primary, ...bucket.handles.filter((handle) => handle !== bucket.primary)]
+      : bucket.handles;
+    for (const handle of ordered.slice(0, 5)) {
+      rows.push({
+        platform: platform === 'twitter' ? 'x' : platform,
+        handle,
+      });
+    }
+  }
+  return rows;
 }
 
 function toAccountPlatform(value: string): string {
@@ -97,26 +194,15 @@ export async function savePortalWorkspaceIntakeDraft(
       payload.handles && typeof payload.handles === 'object'
         ? payload.handles
         : prefill.handles,
+    handlesV2:
+      payload.handlesV2 && typeof payload.handlesV2 === 'object'
+        ? payload.handlesV2
+        : prefill.handlesV2,
   };
 
-  const platformHandlesRaw = buildPlatformHandles(nextPayload);
-  const platformHandles: Partial<Record<IntakePlatform, string>> = {};
-  for (const [platformRaw, handleRaw] of Object.entries(platformHandlesRaw)) {
-    const normalizedPlatform = toAccountPlatform(platformRaw);
-    const normalizedHandle = normalizeHandle(handleRaw);
-    if (!normalizedHandle) continue;
-
-    if (normalizedPlatform === 'instagram') platformHandles.instagram = normalizedHandle;
-    if (normalizedPlatform === 'tiktok') platformHandles.tiktok = normalizedHandle;
-    if (normalizedPlatform === 'youtube') platformHandles.youtube = normalizedHandle;
-    if (normalizedPlatform === 'linkedin') platformHandles.linkedin = normalizedHandle;
-    if (normalizedPlatform === 'x') platformHandles.twitter = normalizedHandle;
-  }
-
-  const channels = Object.entries(platformHandles).map(([platform, handle]) => ({
-    platform: platform === 'twitter' ? 'x' : platform,
-    handle,
-  }));
+  const handlesV2 = buildHandlesV2FromPayload(nextPayload);
+  const platformHandles = toLegacyPrimaryHandles(handlesV2);
+  const channels = flattenHandlesV2(handlesV2);
   const primaryChannel = channels[0];
 
   const servicesList = parseList(nextPayload.servicesList, 20);
@@ -178,6 +264,13 @@ export async function savePortalWorkspaceIntakeDraft(
     autonomyLevel: stringify(nextPayload.autonomyLevel) || 'assist',
     budgetSensitivity: stringify(nextPayload.budgetSensitivity),
     handles: Object.keys(platformHandles).length ? platformHandles : undefined,
+    handlesV2,
+    primaryHandlesByPlatform: Object.fromEntries(
+      (Object.keys(handlesV2) as IntakePlatform[]).map((platform) => [
+        platform === 'twitter' ? 'x' : platform,
+        handlesV2[platform].primary,
+      ]),
+    ),
     channels: channels.length ? channels : undefined,
     platform: primaryChannel?.platform,
     handle: primaryChannel?.handle,
@@ -190,6 +283,27 @@ export async function savePortalWorkspaceIntakeDraft(
       inputData: toJson(nextInputData),
     },
   });
+
+  const triggerEnrichmentRaw = payload.triggerEnrichment;
+  const triggerEnrichment =
+    triggerEnrichmentRaw === undefined
+      ? true
+      : String(triggerEnrichmentRaw).trim().toLowerCase() !== 'false';
+  if (triggerEnrichment) {
+    void syncPortalIntakeContinuousEnrichment({
+      workspaceId,
+      website: primaryWebsite || '',
+      websites,
+      socialReferences,
+      handlesV2,
+      trigger: 'intake_draft',
+    }).catch((error) => {
+      console.warn(
+        `[PortalIntakeDraft] Continuous enrichment scheduling failed for ${workspaceId}:`,
+        (error as Error)?.message || String(error),
+      );
+    });
+  }
 
   return { ok: true, workspaceId };
 }

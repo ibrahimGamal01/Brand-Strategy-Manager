@@ -46,6 +46,8 @@ export async function signupPortal(input: {
   companyName?: string;
   website: string;
   websites?: string[];
+  socialReferences?: string[];
+  handlesV2?: Record<string, { primary?: string; handles?: string[] }>;
 }) {
   const response = await fetch("/api/portal/auth/signup", {
     method: "POST",

@@ -19,6 +19,7 @@ const CRAWL_SETTINGS_BY_MODE: Record<PortalIntakeScanMode, CrawlSettings> = {
 };
 
 const activeScans = new Set<string>();
+const scanQueueByWorkspace = new Map<string, Promise<void>>();
 
 const SOCIAL_HOST_MARKERS = [
   'instagram.com',
@@ -502,24 +503,38 @@ export async function queuePortalIntakeWebsiteScan(
     crawlSettings,
   });
 
-  void scanPortalIntakeWebsites(workspaceId, normalizedWebsites, {
-    ...options,
-    mode,
-    initiatedBy,
-    scanRunId: scanRun.id,
-  }).catch(async (error) => {
-    const message = (error as Error)?.message || String(error);
-    try {
-      await updatePortalIntakeScanRun(scanRun.id, {
-        status: 'FAILED',
-        failures: 1,
-        error: message,
-        endedAt: new Date(),
+  const previousTask = scanQueueByWorkspace.get(workspaceId) || Promise.resolve();
+  const nextTask = previousTask
+    .catch(() => undefined)
+    .then(async () => {
+      await scanPortalIntakeWebsites(workspaceId, normalizedWebsites, {
+        ...options,
+        mode,
+        initiatedBy,
+        scanRunId: scanRun.id,
+        skipIfRunning: false,
       });
-    } catch {
-      // Best effort; run-level failure logging handled by caller/event stream.
-    }
-  });
+    })
+    .catch(async (error) => {
+      const message = (error as Error)?.message || String(error);
+      try {
+        await updatePortalIntakeScanRun(scanRun.id, {
+          status: 'FAILED',
+          failures: 1,
+          error: message,
+          endedAt: new Date(),
+        });
+      } catch {
+        // Best effort; run-level failure logging handled by caller/event stream.
+      }
+    })
+    .finally(() => {
+      if (scanQueueByWorkspace.get(workspaceId) === nextTask) {
+        scanQueueByWorkspace.delete(workspaceId);
+      }
+    });
+
+  scanQueueByWorkspace.set(workspaceId, nextTask);
 
   return {
     scanRunId: scanRun.id,

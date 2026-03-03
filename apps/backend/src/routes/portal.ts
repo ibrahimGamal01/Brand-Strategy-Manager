@@ -54,7 +54,10 @@ import {
   getPortalIntakeScanRun,
   listPortalIntakeScanRunsWithEventCounts,
 } from '../services/portal/portal-intake-events-repository';
-import { startPortalSignupEnrichment } from '../services/portal/portal-signup-enrichment';
+import {
+  startPortalSignupEnrichment,
+  syncPortalIntakeContinuousEnrichment,
+} from '../services/portal/portal-signup-enrichment';
 
 const router = Router();
 const authRateLimitStore = new Map<string, { count: number; resetAt: number }>();
@@ -122,6 +125,22 @@ function getRequestIp(req: Request): string | null {
 
 function safeString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function parseStringArray(value: unknown, maxItems = 12): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean)
+      .slice(0, maxItems);
+  }
+  const text = safeString(value);
+  if (!text) return [];
+  return text
+    .split(/[\n,;|]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .slice(0, maxItems);
 }
 
 function parseIntakeScanMode(value: unknown): PortalIntakeScanMode {
@@ -212,9 +231,22 @@ router.post('/auth/signup', async (req, res) => {
     const password = safeString(req.body?.password);
     const fullName = safeString(req.body?.fullName);
     const companyName = safeString(req.body?.companyName);
-    const websiteClassified = classifyIntakeUrlInputs([req.body?.website, req.body?.websites], 5, 8);
+    const websiteClassified = classifyIntakeUrlInputs(
+      [req.body?.website, req.body?.websites, req.body?.socialReferences],
+      5,
+      12
+    );
     const websites = websiteClassified.crawlWebsites;
-    const socialReferences = websiteClassified.socialReferences;
+    const socialReferences = Array.from(
+      new Set([
+        ...websiteClassified.socialReferences,
+        ...parseStringArray(req.body?.socialReferences, 12),
+      ])
+    ).slice(0, 12);
+    const handlesV2 =
+      req.body?.handlesV2 && typeof req.body.handlesV2 === 'object' && !Array.isArray(req.body.handlesV2)
+        ? (req.body.handlesV2 as Record<string, unknown>)
+        : undefined;
 
     if (!isValidEmail(email)) {
       return res.status(400).json({ error: 'INVALID_EMAIL' });
@@ -256,6 +288,7 @@ router.post('/auth/signup', async (req, res) => {
             website: websites[0] || '',
             websites,
             socialReferences,
+            ...(handlesV2 ? { handlesV2 } : {}),
             source: 'portal_signup',
           },
         },
@@ -286,6 +319,8 @@ router.post('/auth/signup', async (req, res) => {
       brandName: companyName || email.split('@')[0] || 'Brand',
       website: websites[0],
       websites,
+      socialReferences,
+      ...(handlesV2 ? { handlesV2 } : {}),
     }).catch((error) => {
       console.warn(
         `[PortalSignupEnrichment] Failed to start for workspace=${created.workspaceId}:`,
@@ -717,6 +752,53 @@ router.post('/workspaces/:workspaceId/intake/draft', requirePortalAuth, requireW
     return res.status(status).json({ ok: false, error: message || 'Failed to save workspace intake draft' });
   }
 });
+
+router.post(
+  '/workspaces/:workspaceId/intake/enrichment/sync',
+  requirePortalAuth,
+  requireWorkspaceMembership,
+  async (req, res) => {
+    try {
+      const workspaceId = safeString(req.params.workspaceId);
+      if (!workspaceId) {
+        return res.status(400).json({ error: 'workspaceId is required' });
+      }
+      const payload =
+        req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+          ? (req.body as Record<string, unknown>)
+          : {};
+      const result = await syncPortalIntakeContinuousEnrichment({
+        workspaceId,
+        website: safeString(payload.website),
+        websites: parseStringArray(payload.websites, 5),
+        socialReferences: parseStringArray(payload.socialReferences, 12),
+        handlesV2:
+          payload.handlesV2 && typeof payload.handlesV2 === 'object'
+            ? (payload.handlesV2 as Record<string, unknown>)
+            : undefined,
+        handles:
+          payload.handles && typeof payload.handles === 'object'
+            ? (payload.handles as Record<string, unknown>)
+            : undefined,
+        brandName: safeString(payload.name),
+        trigger: safeString(payload.trigger) || 'manual_sync',
+        force: parseBoolean(payload.force, false),
+      });
+
+      return res.json({
+        ok: true,
+        ...result,
+      });
+    } catch (error: any) {
+      const message = String(error?.message || '');
+      const status = message.toLowerCase().includes('not found') ? 404 : 500;
+      return res.status(status).json({
+        ok: false,
+        error: message || 'Failed to sync intake enrichment',
+      });
+    }
+  }
+);
 
 router.post(
   '/workspaces/:workspaceId/intake/websites/scan',

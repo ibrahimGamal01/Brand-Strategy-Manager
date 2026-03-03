@@ -119,7 +119,24 @@ export function IntakeWizardV2({
 
   const step = STEPS[stepIndex];
   const filledCount = useMemo(() => getFilledHandlesCount(state.handles), [state.handles]);
-  const normalizedChannels = useMemo(() => buildChannelsFromHandles(state.handles), [state.handles]);
+  const normalizedChannels = useMemo(() => {
+    const rows: Array<{ platform: PlatformId; handle: string }> = [];
+    (["instagram", "tiktok", "youtube", "linkedin", "twitter"] as PlatformId[]).forEach((platform) => {
+      const bucket = state.handlesV2?.[platform];
+      if (bucket?.handles?.length) {
+        const ordered = bucket.primary
+          ? [bucket.primary, ...bucket.handles.filter((entry) => entry !== bucket.primary)]
+          : bucket.handles;
+        ordered.slice(0, 5).forEach((handle) => rows.push({ platform, handle }));
+      } else {
+        const legacy = buildChannelsFromHandles({ ...state.handles, [platform]: state.handles[platform] }).find(
+          (entry) => entry.platform === platform
+        );
+        if (legacy) rows.push(legacy);
+      }
+    });
+    return rows;
+  }, [state.handles, state.handlesV2]);
 
   const hasName = state.name.trim().length > 0;
   const hasChannel = normalizedChannels.length > 0;
@@ -153,11 +170,31 @@ export function IntakeWizardV2({
   }
 
   function updateHandle(platform: PlatformId, value: string) {
+    const normalized = String(value || "").trim();
     const next = {
       ...state,
       handles: {
         ...state.handles,
+        [platform]: normalized,
+      },
+      primaryChannel: state.primaryChannel || platform,
+    };
+    onChange(next);
+    if (confirmationRequired) {
+      onChannelsConfirmedChange(false);
+    }
+  }
+
+  function updateHandleV2(platform: PlatformId, value: { primary: string; handles: string[] }) {
+    const next = {
+      ...state,
+      handlesV2: {
+        ...state.handlesV2,
         [platform]: value,
+      },
+      handles: {
+        ...state.handles,
+        [platform]: value.primary || "",
       },
       primaryChannel: state.primaryChannel || platform,
     };
@@ -381,7 +418,9 @@ export function IntakeWizardV2({
           <QuestionCard title="Add channels" description="Paste URL, @handle, or handle. BAT will normalize it.">
             <SocialHandlesFields
               handles={state.handles}
+              handlesV2={state.handlesV2}
               onChange={updateHandle}
+              onChangeV2={updateHandleV2}
               suggestedPlatforms={suggestedHandlePlatforms}
               suggestedHandleValidation={suggestedHandleValidation}
             />

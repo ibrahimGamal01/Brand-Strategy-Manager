@@ -4,6 +4,54 @@ export type CompetitorLinkPlatform = PlatformId | "website" | "unknown";
 
 export type CompetitorLinkKind = "competitor" | "inspiration";
 
+export type IntakeFieldSource = "user" | "ai" | "prefill";
+
+export type IntakeFieldMeta = {
+  source: IntakeFieldSource;
+  lastUpdatedAt: string;
+};
+
+export type IntakeTrackableField =
+  | "name"
+  | "website"
+  | "websites"
+  | "socialReferences"
+  | "oneSentenceDescription"
+  | "niche"
+  | "businessType"
+  | "operateWhere"
+  | "wantClientsWhere"
+  | "idealAudience"
+  | "targetAudience"
+  | "geoScope"
+  | "servicesList"
+  | "mainOffer"
+  | "primaryGoal"
+  | "secondaryGoals"
+  | "futureGoal"
+  | "engineGoal"
+  | "topProblems"
+  | "resultsIn90Days"
+  | "questionsBeforeBuying"
+  | "brandVoiceWords"
+  | "brandTone"
+  | "topicsToAvoid"
+  | "constraints"
+  | "excludedCategories"
+  | "language"
+  | "planningHorizon"
+  | "autonomyLevel"
+  | "budgetSensitivity"
+  | "competitorInspirationLinks"
+  | "primaryChannel"
+  | "handles.instagram"
+  | "handles.tiktok"
+  | "handles.youtube"
+  | "handles.linkedin"
+  | "handles.twitter";
+
+export type IntakeFieldMetaMap = Partial<Record<IntakeTrackableField, IntakeFieldMeta>>;
+
 export interface CompetitorLinkItem {
   id: string;
   raw: string;
@@ -51,6 +99,13 @@ export interface IntakeStateV2 {
   competitorLinks: CompetitorLinkItem[];
   primaryChannel: PlatformId | "";
   handles: Record<PlatformId, string>;
+  handlesV2: Record<
+    PlatformId,
+    {
+      primary: string;
+      handles: string[];
+    }
+  >;
 }
 
 export const INITIAL_INTAKE_STATE_V2: IntakeStateV2 = {
@@ -94,6 +149,13 @@ export const INITIAL_INTAKE_STATE_V2: IntakeStateV2 = {
     youtube: "",
     linkedin: "",
     twitter: "",
+  },
+  handlesV2: {
+    instagram: { primary: "", handles: [] },
+    tiktok: { primary: "", handles: [] },
+    youtube: { primary: "", handles: [] },
+    linkedin: { primary: "", handles: [] },
+    twitter: { primary: "", handles: [] },
   },
 };
 

@@ -1,22 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Activity, AlertTriangle, CheckCircle2, Globe, Loader2 } from "lucide-react";
+import { CheckCircle2 } from "lucide-react";
 import {
-  createWorkspaceIntakeEventsSource,
-  fetchWorkspaceIntakeScanRun,
+  RuntimeApiError,
   saveWorkspaceIntakeDraft,
-  scanWorkspaceIntakeWebsites,
   submitWorkspaceIntake,
   suggestWorkspaceIntakeCompletion,
   WorkspaceIntakeFormData,
-  WorkspaceIntakeLiveEvent,
-  WorkspaceIntakeScanMode,
 } from "@/lib/runtime-api";
 import {
-  buildChannelsFromHandles,
   extractHandleFromUrlOrRaw,
-  getFilledHandlesList,
   SuggestedHandleValidationItem,
 } from "./social-handles-fields";
 import { IntakeWizardV2 } from "./v2/intake-wizard-v2";
@@ -29,7 +23,12 @@ import {
   toSubmitPayloadV2,
   toSuggestPayloadV2,
 } from "./v2/intake-mappers";
-import { IntakeStateV2, IntakeWizardStepId } from "./v2/intake-types";
+import {
+  IntakeFieldMetaMap,
+  IntakeStateV2,
+  IntakeTrackableField,
+  IntakeWizardStepId,
+} from "./v2/intake-types";
 
 type WorkspaceIntakeFlowProps = {
   workspaceId: string;
@@ -46,9 +45,7 @@ type SuggestedHandleValidationState = {
 };
 
 type IntakePhase = "wizard" | "starting";
-type ScanStatus = "idle" | "running" | "done" | "error";
 
-const MAX_FEED_EVENTS = 80;
 const SUGGEST_RETRY_ATTEMPTS = 2;
 const CONFIRMATION_REASON_NOTICE: Record<string, string> = {
   MISSING_PRIMARY_CHANNEL: "No trusted primary channel found yet. Add a website or verified handle to improve suggestions.",
@@ -62,34 +59,35 @@ function hasWebsiteInput(state: IntakeStateV2): boolean {
   return classified.crawlWebsites.length > 0;
 }
 
-function formatRelativeTime(iso: string): string {
-  const time = new Date(iso).getTime();
-  if (!Number.isFinite(time)) return "";
-  const diffSeconds = Math.max(0, Math.floor((Date.now() - time) / 1000));
-  if (diffSeconds < 5) return "now";
-  if (diffSeconds < 60) return `${diffSeconds}s ago`;
-  const diffMinutes = Math.floor(diffSeconds / 60);
-  if (diffMinutes < 60) return `${diffMinutes}m ago`;
-  const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  const diffDays = Math.floor(diffHours / 24);
-  return `${diffDays}d ago`;
-}
-
-function eventTone(type: string): "info" | "warn" | "error" | "success" {
-  const key = String(type || "").toUpperCase();
-  if (key.includes("FAILED")) return "error";
-  if (key.includes("WARNING")) return "warn";
-  if (key.includes("DONE") || key.includes("SAVED") || key.includes("COMPLETED")) return "success";
-  return "info";
-}
-
 function toUniqueWebsiteList(state: IntakeStateV2): string[] {
   return classifyStateWebsiteInputs(state).crawlWebsites.slice(0, 5);
 }
 
 function toSocialReferenceList(state: IntakeStateV2): string[] {
   return classifyStateWebsiteInputs(state).socialReferences.slice(0, 12);
+}
+
+function toHandleRows(state: IntakeStateV2): Array<{ platform: string; handle: string }> {
+  const rows: Array<{ platform: string; handle: string }> = [];
+  const platforms = ["instagram", "tiktok", "youtube", "linkedin", "twitter"] as const;
+  for (const platform of platforms) {
+    const bucket = state.handlesV2?.[platform];
+    if (bucket?.handles?.length) {
+      const ordered = bucket.primary
+        ? [bucket.primary, ...bucket.handles.filter((entry) => entry !== bucket.primary)]
+        : bucket.handles;
+      ordered.slice(0, 5).forEach((handle) => {
+        if (!String(handle || "").trim()) return;
+        rows.push({ platform: platform === "twitter" ? "x" : platform, handle: String(handle || "").trim() });
+      });
+      continue;
+    }
+    const handle = extractHandleFromUrlOrRaw(platform, state.handles[platform] || "");
+    if (handle) {
+      rows.push({ platform: platform === "twitter" ? "x" : platform, handle });
+    }
+  }
+  return rows;
 }
 
 function candidateKey(candidate: Pick<SuggestedHandleCandidate, "platform" | "handle">): string {
@@ -157,45 +155,157 @@ function deriveFallbackHandleCandidates(
   return results;
 }
 
+const TRACKED_FIELD_KEYS: IntakeTrackableField[] = [
+  "name",
+  "website",
+  "websites",
+  "socialReferences",
+  "oneSentenceDescription",
+  "niche",
+  "businessType",
+  "operateWhere",
+  "wantClientsWhere",
+  "idealAudience",
+  "targetAudience",
+  "geoScope",
+  "servicesList",
+  "mainOffer",
+  "primaryGoal",
+  "secondaryGoals",
+  "futureGoal",
+  "engineGoal",
+  "topProblems",
+  "resultsIn90Days",
+  "questionsBeforeBuying",
+  "brandVoiceWords",
+  "brandTone",
+  "topicsToAvoid",
+  "constraints",
+  "excludedCategories",
+  "language",
+  "planningHorizon",
+  "autonomyLevel",
+  "budgetSensitivity",
+  "competitorInspirationLinks",
+  "primaryChannel",
+  "handles.instagram",
+  "handles.tiktok",
+  "handles.youtube",
+  "handles.linkedin",
+  "handles.twitter",
+];
+
+function isFieldValueFilled(value: unknown): boolean {
+  if (value == null) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.some((item) => isFieldValueFilled(item));
+  if (typeof value === "object") return Object.keys(value as Record<string, unknown>).length > 0;
+  return true;
+}
+
+function readTrackableFieldValue(state: IntakeStateV2, field: IntakeTrackableField): unknown {
+  if (field.startsWith("handles.")) {
+    const platform = field.slice("handles.".length) as keyof IntakeStateV2["handles"];
+    return state.handles[platform];
+  }
+  return state[field as keyof IntakeStateV2];
+}
+
+function buildInitialFieldMetaFromState(state: IntakeStateV2): IntakeFieldMetaMap {
+  const createdAt = new Date().toISOString();
+  const fieldMeta: IntakeFieldMetaMap = {};
+  for (const field of TRACKED_FIELD_KEYS) {
+    if (!isFieldValueFilled(readTrackableFieldValue(state, field))) continue;
+    fieldMeta[field] = {
+      source: "prefill",
+      lastUpdatedAt: createdAt,
+    };
+  }
+  return fieldMeta;
+}
+
+function mergeFieldMeta(
+  previous: IntakeFieldMetaMap,
+  updates: Partial<Record<IntakeTrackableField, "user" | "ai" | "prefill">>
+): IntakeFieldMetaMap {
+  const now = new Date().toISOString();
+  const next: IntakeFieldMetaMap = { ...previous };
+  for (const [field, source] of Object.entries(updates)) {
+    if (!source) continue;
+    next[field as IntakeTrackableField] = {
+      source,
+      lastUpdatedAt: now,
+    };
+  }
+  return next;
+}
+
+function normalizeCoverageFields(fields: unknown): string[] {
+  if (!Array.isArray(fields)) return [];
+  return fields.map((field) => String(field || "").trim()).filter(Boolean);
+}
+
 export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }: WorkspaceIntakeFlowProps) {
   const [phase, setPhase] = useState<IntakePhase>("wizard");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [state, setState] = useState<IntakeStateV2>(fromPrefillToV2(initialPrefill));
+  const [fieldMeta, setFieldMeta] = useState<IntakeFieldMetaMap>(() =>
+    buildInitialFieldMetaFromState(fromPrefillToV2(initialPrefill))
+  );
   const [suggestedFields, setSuggestedFields] = useState<Set<string>>(new Set());
   const [suggestedHandlePlatforms, setSuggestedHandlePlatforms] = useState<Set<string>>(new Set());
   const [suggestedHandleValidation, setSuggestedHandleValidation] = useState<SuggestedHandleValidationState>();
   const [suggestedHandleCandidates, setSuggestedHandleCandidates] = useState<SuggestedHandleCandidate[]>([]);
+  const [lastCoverage, setLastCoverage] = useState<{
+    inferableFields: string[];
+    suggestedFields: string[];
+    blockedLowSignalFields: string[];
+  }>({
+    inferableFields: [],
+    suggestedFields: [],
+    blockedLowSignalFields: [],
+  });
   const [rejectedHandleCandidates, setRejectedHandleCandidates] = useState<Set<string>>(new Set());
   const [ignoredHandleCandidates, setIgnoredHandleCandidates] = useState<Set<string>>(new Set());
   const [confirmationRequired, setConfirmationRequired] = useState(false);
   const [confirmationReasons, setConfirmationReasons] = useState<string[]>([]);
   const [channelsConfirmed, setChannelsConfirmed] = useState(false);
-  const [scanMode, setScanMode] = useState<WorkspaceIntakeScanMode>("quick");
-  const [scanStatus, setScanStatus] = useState<ScanStatus>("idle");
-  const [activeScanRunId, setActiveScanRunId] = useState<string | null>(null);
-  const [liveFeedUnavailable, setLiveFeedUnavailable] = useState(false);
-  const [liveEvents, setLiveEvents] = useState<WorkspaceIntakeLiveEvent[]>([]);
+  const [hasPreScanEvidence, setHasPreScanEvidence] = useState(false);
 
-  const lastEventIdRef = useRef(0);
+  const backgroundSyncTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    setState(fromPrefillToV2(initialPrefill));
+    const next = fromPrefillToV2(initialPrefill);
+    setState(next);
+    setFieldMeta(buildInitialFieldMetaFromState(next));
     setSuggestedHandleCandidates([]);
     setRejectedHandleCandidates(new Set());
     setIgnoredHandleCandidates(new Set());
+    setLastCoverage({
+      inferableFields: [],
+      suggestedFields: [],
+      blockedLowSignalFields: [],
+    });
+    setHasPreScanEvidence(Boolean(next.website || next.websites.length || next.socialReferences.length));
   }, [initialPrefill]);
 
   useEffect(() => {
     setSuggestedHandleCandidates((previous) =>
       previous.filter((candidate) => {
-        const current = extractHandleFromUrlOrRaw(candidate.platform, state.handles[candidate.platform] || "");
-        if (!current) return true;
-        return current !== String(candidate.handle || "").trim().toLowerCase();
+        const bucket = state.handlesV2?.[candidate.platform];
+        const currentList = Array.isArray(bucket?.handles) ? bucket.handles : [];
+        const normalized = String(candidate.handle || "").trim().toLowerCase();
+        if (currentList.some((entry) => String(entry || "").trim().toLowerCase() === normalized)) {
+          return false;
+        }
+        const currentPrimary = extractHandleFromUrlOrRaw(candidate.platform, state.handles[candidate.platform] || "");
+        if (!currentPrimary) return true;
+        return currentPrimary !== normalized;
       })
     );
-  }, [state.handles]);
+  }, [state.handles, state.handlesV2]);
 
   useEffect(() => {
     if (phase !== "starting") return;
@@ -212,88 +322,35 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
 
   useEffect(() => {
     if (phase !== "wizard") return;
-
-    const source = createWorkspaceIntakeEventsSource(workspaceId, lastEventIdRef.current || undefined, {
-      ...(activeScanRunId ? { scanRunId: activeScanRunId } : {}),
-    });
-    let receivedAnyEvent = false;
-    setLiveFeedUnavailable(false);
-
-    const handleEvent = (event: MessageEvent<string>) => {
-      try {
-        const parsed = JSON.parse(String(event.data || "{}")) as WorkspaceIntakeLiveEvent;
-        if (!parsed || typeof parsed.id !== "number") return;
-        if (activeScanRunId && parsed.scanRunId && parsed.scanRunId !== activeScanRunId) return;
-        receivedAnyEvent = true;
-
-        lastEventIdRef.current = Math.max(lastEventIdRef.current, parsed.id);
-        setLiveEvents((previous) => {
-          if (previous.some((item) => item.id === parsed.id)) return previous;
-          const next = [...previous, parsed];
-          return next.slice(Math.max(0, next.length - MAX_FEED_EVENTS));
+    if (backgroundSyncTimerRef.current) {
+      window.clearTimeout(backgroundSyncTimerRef.current);
+    }
+    backgroundSyncTimerRef.current = window.setTimeout(() => {
+      const payload = toSuggestPayloadV2(state);
+      void saveWorkspaceIntakeDraft(workspaceId, {
+        ...payload,
+        triggerEnrichment: true,
+      })
+        .then(() => {
+          setHasPreScanEvidence(true);
+        })
+        .catch((backgroundError: unknown) => {
+          const message = String((backgroundError as Error)?.message || "");
+          if (message) {
+            console.warn("[Intake] Background enrichment sync warning:", message);
+          }
         });
-
-        const type = String(parsed.type || "").toUpperCase();
-        if (type === "SCAN_STARTED" || type === "SCAN_TARGET_STARTED") {
-          setScanStatus("running");
-        } else if (type === "SCAN_DONE") {
-          setScanStatus("done");
-        } else if (type === "SCAN_FAILED") {
-          setScanStatus("error");
-        }
-      } catch {
-        // ignore malformed events
-      }
-    };
-
-    source.addEventListener("intake_event", handleEvent as EventListener);
-    source.onerror = () => {
-      if (!receivedAnyEvent) {
-        setLiveFeedUnavailable(true);
-        source.close();
-      }
-    };
+    }, 3200);
 
     return () => {
-      source.close();
-    };
-  }, [workspaceId, phase, activeScanRunId]);
-
-  useEffect(() => {
-    if (phase !== "wizard") return;
-    if (scanStatus !== "running") return;
-    if (!activeScanRunId) return;
-
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const result = await fetchWorkspaceIntakeScanRun(workspaceId, activeScanRunId);
-        if (cancelled || !result?.scanRun) return;
-        const status = String(result.scanRun.status || "").trim().toUpperCase();
-        if (status === "COMPLETED") {
-          setScanStatus("done");
-        } else if (status === "FAILED" || status === "CANCELLED") {
-          setScanStatus("error");
-        } else {
-          setScanStatus("running");
-        }
-      } catch {
-        // Best-effort polling for resumability.
+      if (backgroundSyncTimerRef.current) {
+        window.clearTimeout(backgroundSyncTimerRef.current);
+        backgroundSyncTimerRef.current = null;
       }
     };
+  }, [workspaceId, state, phase]);
 
-    void poll();
-    const timer = setInterval(() => {
-      void poll();
-    }, 3500);
-
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [activeScanRunId, phase, scanStatus, workspaceId]);
-
-  const filledHandles = useMemo(() => buildChannelsFromHandles(state.handles), [state.handles]);
+  const filledHandles = useMemo(() => toHandleRows(state), [state]);
   const hasWebsite = useMemo(() => hasWebsiteInput(state), [state]);
 
   const captureStats = useMemo(() => {
@@ -313,15 +370,20 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
     };
   }, [hasWebsite, state]);
 
-  const feedEvents = useMemo(() => [...liveEvents].reverse().slice(0, 14), [liveEvents]);
-  const hasPreScanEvidence = useMemo(
-    () =>
-      liveEvents.some((event) => {
-        const type = String(event.type || "").toUpperCase();
-        return type.startsWith("ENRICHMENT_") || type.startsWith("DDG_");
-      }),
-    [liveEvents]
-  );
+  function handleWizardStateChange(next: IntakeStateV2) {
+    const updates: Partial<Record<IntakeTrackableField, "user" | "ai" | "prefill">> = {};
+    for (const field of TRACKED_FIELD_KEYS) {
+      const before = JSON.stringify(readTrackableFieldValue(state, field));
+      const after = JSON.stringify(readTrackableFieldValue(next, field));
+      if (before !== after) {
+        updates[field] = "user";
+      }
+    }
+    setState(next);
+    if (Object.keys(updates).length > 0) {
+      setFieldMeta((previous) => mergeFieldMeta(previous, updates));
+    }
+  }
 
   async function handleAutoFillStep(step: IntakeWizardStepId) {
     setLoading(true);
@@ -337,7 +399,10 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
           suggestion = await suggestWorkspaceIntakeCompletion(workspaceId, {
             ...suggestionPayload,
             step,
+            scope: "global",
+            overwritePolicy: "missing_or_low_signal",
             socialReferences: toSocialReferenceList(state),
+            fieldMeta,
           });
           lastSuggestError = null;
           break;
@@ -360,9 +425,14 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
       let updatedHandleCount = 0;
 
       if (suggestion?.success && suggestion.suggested) {
-        const suggestedResult = applySuggestedToState(next, suggestion.suggested, step);
+        const suggestedResult = applySuggestedToState(next, suggestion.suggested, step, {
+          scope: "global",
+          overwritePolicy: "missing_or_low_signal",
+          fieldMeta,
+        });
         next = suggestedResult.next;
         updatedFieldCount = suggestedResult.suggestedKeys.size;
+        setFieldMeta(suggestedResult.nextFieldMeta);
         setSuggestedFields((previous) => new Set([...Array.from(previous), ...Array.from(suggestedResult.suggestedKeys)]));
       }
 
@@ -411,12 +481,17 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
           ? suggestion.suggestedHandleValidation
           : undefined
       );
+      setLastCoverage({
+        inferableFields: normalizeCoverageFields(suggestion?.coverage?.inferableFields),
+        suggestedFields: normalizeCoverageFields(suggestion?.coverage?.suggestedFields),
+        blockedLowSignalFields: normalizeCoverageFields(suggestion?.coverage?.blockedLowSignalFields),
+      });
       setConfirmationRequired(needsConfirmation);
       setConfirmationReasons(reasonCodes);
       setChannelsConfirmed(!needsConfirmation);
 
       if (updatedFieldCount > 0 || updatedHandleCount > 0) {
-        setNotice("Step suggestions applied.");
+        setNotice("Global smart autofill applied.");
       } else if (
         reasonCodes.includes("AI_UNAVAILABLE") ||
         reasonCodes.includes("AI_NOT_CONFIGURED") ||
@@ -435,7 +510,8 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
         setNotice("No strong suggestions found for this step yet.");
       }
     } catch (suggestError: unknown) {
-      const rawMessage = String((suggestError as Error)?.message || "Suggestion failed");
+      const typedError = suggestError as RuntimeApiError;
+      const rawMessage = String(typedError?.message || "Suggestion failed");
       if (/failed to fetch/i.test(rawMessage)) {
         setError("Autofill could not reach the backend suggestion service. Please retry in a few seconds.");
       } else {
@@ -453,7 +529,10 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
 
     try {
       const payload = toSuggestPayloadV2(state);
-      const result = await saveWorkspaceIntakeDraft(workspaceId, payload);
+      const result = await saveWorkspaceIntakeDraft(workspaceId, {
+        ...payload,
+        triggerEnrichment: true,
+      });
       if (!result?.ok) {
         throw new Error("Failed to save draft");
       }
@@ -462,45 +541,6 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
       setError(String((draftError as Error)?.message || "Failed to save draft"));
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function handleScanWebsites() {
-    setError("");
-    setNotice("");
-    const websites = toUniqueWebsiteList(state);
-    if (!websites.length) {
-      setError("Add at least one website in Brand basics before starting a scan.");
-      return;
-    }
-
-    setScanStatus("running");
-
-    try {
-      const result = await scanWorkspaceIntakeWebsites(workspaceId, {
-        website: websites[0],
-        websites,
-        mode: scanMode,
-        socialReferences: toSocialReferenceList(state),
-        includeSocialProfileCrawl: state.includeSocialProfileCrawl,
-      });
-      if (!result?.ok) {
-        throw new Error("Failed to start website scan");
-      }
-      setActiveScanRunId(result.scanRunId);
-      setNotice(`Website scan started (${scanMode}). BAT is enriching your workspace now.`);
-    } catch (scanError: unknown) {
-      const message = String((scanError as Error)?.message || "Failed to start website scan");
-      if (message.includes("404")) {
-        setScanStatus("idle");
-        setLiveFeedUnavailable(true);
-        setNotice(
-          "Live website scan is not available on the current backend deployment yet. Sites will still be scanned automatically after intake submission."
-        );
-        return;
-      }
-      setScanStatus("error");
-      setError(message);
     }
   }
 
@@ -541,15 +581,38 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
 
   function handleAcceptHandleCandidate(candidate: SuggestedHandleCandidate) {
     const key = candidateKey(candidate);
+    const handleMetaKey = `handles.${candidate.platform}` as IntakeTrackableField;
     setState((previous) => {
       const nextHandles = { ...previous.handles };
-      nextHandles[candidate.platform] = String(candidate.handle || "").trim();
+      const normalizedHandle = String(candidate.handle || "").trim();
+      nextHandles[candidate.platform] = normalizedHandle;
+      const nextHandlesV2 = {
+        ...previous.handlesV2,
+        [candidate.platform]: {
+          primary: normalizedHandle,
+          handles: Array.from(
+            new Set([
+              normalizedHandle,
+              ...((previous.handlesV2?.[candidate.platform]?.handles || []).map((entry) =>
+                String(entry || "").trim()
+              )),
+            ])
+          ).slice(0, 5),
+        },
+      };
       return {
         ...previous,
         handles: nextHandles,
+        handlesV2: nextHandlesV2,
         primaryChannel: previous.primaryChannel || candidate.platform,
       };
     });
+    setFieldMeta((previous) =>
+      mergeFieldMeta(previous, {
+        [handleMetaKey]: "user",
+        primaryChannel: "user",
+      })
+    );
     setSuggestedHandlePlatforms((previous) => new Set([...Array.from(previous), candidate.platform]));
     setSuggestedHandleCandidates((previous) =>
       previous.filter((item) => candidateKey(item) !== key)
@@ -610,7 +673,7 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
 
               <IntakeWizardV2
                 state={state}
-                onChange={setState}
+                onChange={handleWizardStateChange}
                 onAutoFillStep={handleAutoFillStep}
                 onSaveDraft={handleSaveDraft}
                 onSubmit={handleStartWorkflow}
@@ -642,7 +705,7 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
               <h2 className="text-lg font-semibold">Starting smart workflow</h2>
               <p className="text-sm" style={{ color: "var(--bat-text-muted)" }}>
                 Discovery is running for{" "}
-                {getFilledHandlesList(state.handles).join(", ") ||
+                {filledHandles.map((item) => `@${item.handle}`).join(", ") ||
                   toUniqueWebsiteList(state).join(", ") ||
                   "your channels and website"}.
                 Opening your chat workspace...
@@ -698,130 +761,6 @@ export function WorkspaceIntakeFlow({ workspaceId, initialPrefill, onCompleted }
                     {state.competitorLinks.length} link{state.competitorLinks.length === 1 ? "" : "s"}
                   </span>
                 </p>
-              </div>
-            </section>
-
-            <section className="bat-surface space-y-3 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.12em]" style={{ color: "var(--bat-text-muted)" }}>
-                    Live Enrichment
-                  </p>
-                  <h3 className="text-sm font-semibold">Website intelligence feed</h3>
-                </div>
-                <span
-                  className="bat-chip"
-                  style={{
-                    color:
-                      scanStatus === "error"
-                        ? "#9f2317"
-                        : scanStatus === "running"
-                          ? "var(--bat-accent)"
-                          : scanStatus === "done"
-                            ? "var(--bat-success)"
-                            : "var(--bat-text-muted)",
-                  }}
-                >
-                  {scanStatus === "running"
-                    ? "Running"
-                    : scanStatus === "done"
-                      ? "Done"
-                      : scanStatus === "error"
-                        ? "Needs attention"
-                        : "Idle"}
-                </span>
-              </div>
-
-              <div className="grid gap-2">
-                <label className="text-xs" style={{ color: "var(--bat-text-muted)" }}>
-                  Scan depth
-                </label>
-                <select
-                  value={scanMode}
-                  onChange={(event) => setScanMode(event.target.value as WorkspaceIntakeScanMode)}
-                  className="rounded-xl border px-3 py-2 text-sm"
-                  style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)", color: "var(--bat-text)" }}
-                >
-                  <option value="quick">Quick (homepage + short crawl)</option>
-                  <option value="standard">Standard (broader crawl)</option>
-                  <option value="deep">Deep (full website pass)</option>
-                </select>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handleScanWebsites();
-                  }}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm"
-                  style={{ borderColor: "var(--bat-border)" }}
-                  disabled={scanStatus === "running"}
-                >
-                  {scanStatus === "running" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Globe className="h-4 w-4" />}
-                  {scanStatus === "running" ? "Scanning websites..." : "Scan websites now"}
-                </button>
-                <label className="inline-flex items-start gap-2 text-xs" style={{ color: "var(--bat-text-muted)" }}>
-                  <input
-                    type="checkbox"
-                    checked={state.includeSocialProfileCrawl}
-                    onChange={(event) =>
-                      setState((previous) => ({
-                        ...previous,
-                        includeSocialProfileCrawl: event.target.checked,
-                      }))
-                    }
-                    className="mt-0.5"
-                  />
-                  Include social profile URLs from references in this scan.
-                </label>
-              </div>
-
-              <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
-                {feedEvents.length === 0 ? (
-                  <p className="text-xs" style={{ color: "var(--bat-text-muted)" }}>
-                    {liveFeedUnavailable
-                      ? "Live feed endpoint is unavailable on this backend deployment. Deploy the latest backend build to enable real-time enrichment events."
-                      : "No live events yet. Start a website scan to see BAT extracting data in real time."}
-                  </p>
-                ) : (
-                  feedEvents.map((event) => {
-                    const tone = eventTone(event.type);
-                    return (
-                      <article
-                        key={event.id}
-                        className="rounded-lg border px-2.5 py-2 text-xs"
-                        style={{
-                          borderColor:
-                            tone === "error"
-                              ? "#f4b8b4"
-                              : tone === "warn"
-                                ? "color-mix(in srgb, var(--bat-warning) 45%, var(--bat-border))"
-                                : "var(--bat-border)",
-                          background:
-                            tone === "error"
-                              ? "#fff5f4"
-                              : tone === "warn"
-                                ? "color-mix(in srgb, var(--bat-warning) 10%, white)"
-                                : "var(--bat-surface-muted)",
-                        }}
-                        data-animate="fade-up"
-                      >
-                        <div className="mb-1 flex items-center justify-between gap-2">
-                          <span className="inline-flex items-center gap-1 font-medium">
-                            {tone === "error" ? (
-                              <AlertTriangle className="h-3.5 w-3.5" />
-                            ) : tone === "success" ? (
-                              <CheckCircle2 className="h-3.5 w-3.5" />
-                            ) : (
-                              <Activity className="h-3.5 w-3.5" />
-                            )}
-                            {String(event.type || "").replaceAll("_", " ")}
-                          </span>
-                          <span style={{ color: "var(--bat-text-muted)" }}>{formatRelativeTime(event.createdAt)}</span>
-                        </div>
-                        <p>{event.message}</p>
-                      </article>
-                    );
-                  })
-                )}
               </div>
             </section>
           </aside>

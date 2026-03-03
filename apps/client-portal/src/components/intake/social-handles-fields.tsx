@@ -1,4 +1,5 @@
 import { PLATFORMS, PlatformId } from "./platforms";
+import { useState } from "react";
 
 export interface SuggestedHandleValidationItem {
   handle: string;
@@ -9,7 +10,9 @@ export interface SuggestedHandleValidationItem {
 
 interface SocialHandlesFieldsProps {
   handles: Record<PlatformId, string>;
+  handlesV2?: Record<PlatformId, { primary: string; handles: string[] }>;
   onChange: (platform: PlatformId, value: string) => void;
+  onChangeV2?: (platform: PlatformId, value: { primary: string; handles: string[] }) => void;
   suggestedPlatforms?: Set<string>;
   suggestedHandleValidation?: {
     instagram?: SuggestedHandleValidationItem;
@@ -103,11 +106,79 @@ function getSuggestionTone(validation?: SuggestedHandleValidationItem): "suggest
 
 export function SocialHandlesFields({
   handles,
+  handlesV2,
   onChange,
+  onChangeV2,
   suggestedPlatforms,
   suggestedHandleValidation,
 }: SocialHandlesFieldsProps) {
   const filledCount = getFilledHandlesCount(handles);
+  const [drafts, setDrafts] = useState<Record<PlatformId, string>>({
+    instagram: "",
+    tiktok: "",
+    youtube: "",
+    linkedin: "",
+    twitter: "",
+  });
+
+  function resolveBucket(platform: PlatformId): { primary: string; handles: string[] } {
+    const fromState = handlesV2?.[platform];
+    const normalizedPrimary = extractHandleFromUrlOrRaw(platform, fromState?.primary || handles[platform] || "");
+    const normalizedHandles = Array.from(
+      new Set(
+        (Array.isArray(fromState?.handles) ? fromState?.handles : [])
+          .map((entry) => extractHandleFromUrlOrRaw(platform, entry))
+          .filter(Boolean)
+      )
+    ).slice(0, 5);
+    if (normalizedPrimary && !normalizedHandles.includes(normalizedPrimary)) {
+      normalizedHandles.unshift(normalizedPrimary);
+    }
+    return {
+      primary: normalizedHandles.includes(normalizedPrimary) ? normalizedPrimary : normalizedHandles[0] || "",
+      handles: normalizedHandles,
+    };
+  }
+
+  function emitBucket(platform: PlatformId, bucket: { primary: string; handles: string[] }) {
+    const normalizedHandles = Array.from(
+      new Set(bucket.handles.map((entry) => extractHandleFromUrlOrRaw(platform, entry)).filter(Boolean))
+    ).slice(0, 5);
+    const normalizedPrimary = extractHandleFromUrlOrRaw(platform, bucket.primary || "");
+    const nextBucket = {
+      primary: normalizedHandles.includes(normalizedPrimary) ? normalizedPrimary : normalizedHandles[0] || "",
+      handles: normalizedHandles,
+    };
+    onChangeV2?.(platform, nextBucket);
+    onChange(platform, nextBucket.primary || "");
+  }
+
+  function addHandle(platform: PlatformId) {
+    const draft = drafts[platform] || "";
+    const normalized = extractHandleFromUrlOrRaw(platform, draft);
+    if (!normalized) return;
+    const bucket = resolveBucket(platform);
+    if (bucket.handles.includes(normalized)) {
+      emitBucket(platform, { ...bucket, primary: bucket.primary || normalized });
+      setDrafts((previous) => ({ ...previous, [platform]: "" }));
+      return;
+    }
+    const nextHandles = [normalized, ...bucket.handles].slice(0, 5);
+    emitBucket(platform, { primary: bucket.primary || normalized, handles: nextHandles });
+    setDrafts((previous) => ({ ...previous, [platform]: "" }));
+  }
+
+  function removeHandle(platform: PlatformId, handle: string) {
+    const bucket = resolveBucket(platform);
+    const nextHandles = bucket.handles.filter((entry) => entry !== handle);
+    const nextPrimary = bucket.primary === handle ? nextHandles[0] || "" : bucket.primary;
+    emitBucket(platform, { primary: nextPrimary, handles: nextHandles });
+  }
+
+  function setPrimary(platform: PlatformId, handle: string) {
+    const bucket = resolveBucket(platform);
+    emitBucket(platform, { primary: handle, handles: bucket.handles });
+  }
 
   return (
     <section className="space-y-3">
@@ -121,8 +192,8 @@ export function SocialHandlesFields({
       <div className="grid gap-3">
         {PLATFORMS.map((platform) => {
           const Icon = platform.icon;
-          const value = String(handles[platform.id] || "");
-          const hasValue = normalizeHandle(value).length > 0;
+          const bucket = resolveBucket(platform.id);
+          const hasValue = bucket.handles.length > 0;
           const isSuggested = suggestedPlatforms?.has(platform.id);
           const validation =
             suggestedHandleValidation?.[platform.id as keyof NonNullable<typeof suggestedHandleValidation>];
@@ -152,19 +223,71 @@ export function SocialHandlesFields({
                 >
                   <Icon className="h-4 w-4" />
                 </span>
-                <input
-                  type="text"
-                  value={value}
-                  onChange={(event) => onChange(platform.id, event.target.value)}
-                  className="w-full rounded-xl border py-2.5 pl-10 pr-3 text-sm"
-                  style={{
-                    borderColor: "var(--bat-border)",
-                    background: "var(--bat-surface)",
-                    color: "var(--bat-text)",
-                  }}
-                  placeholder={`@${platform.placeholder}`}
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={drafts[platform.id] || ""}
+                    onChange={(event) =>
+                      setDrafts((previous) => ({ ...previous, [platform.id]: event.target.value }))
+                    }
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        addHandle(platform.id);
+                      }
+                    }}
+                    className="w-full rounded-xl border py-2.5 pl-10 pr-3 text-sm"
+                    style={{
+                      borderColor: "var(--bat-border)",
+                      background: "var(--bat-surface)",
+                      color: "var(--bat-text)",
+                    }}
+                    placeholder={`Add ${platform.name} handle or URL`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => addHandle(platform.id)}
+                    className="rounded-xl border px-3 py-2 text-xs"
+                    style={{ borderColor: "var(--bat-border)" }}
+                  >
+                    Add
+                  </button>
+                </div>
               </label>
+              {bucket.handles.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {bucket.handles.map((handle) => (
+                    <div
+                      key={`${platform.id}:${handle}`}
+                      className="inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs"
+                      style={{
+                        borderColor:
+                          bucket.primary === handle ? "var(--bat-accent)" : "var(--bat-border)",
+                        background:
+                          bucket.primary === handle ? "var(--bat-accent-soft)" : "var(--bat-surface)",
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setPrimary(platform.id, handle)}
+                        className="font-medium"
+                        title="Set as primary"
+                      >
+                        @{handle}
+                      </button>
+                      {bucket.primary === handle ? <span className="text-[10px]">Primary</span> : null}
+                      <button
+                        type="button"
+                        onClick={() => removeHandle(platform.id, handle)}
+                        className="text-[11px]"
+                        aria-label={`Remove ${handle}`}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
               {validation?.reason ? (
                 <p className="mt-1 text-xs" style={{ color: "var(--bat-text-muted)" }}>
                   {getConfidenceLabel(validation)}: {validation.reason}
@@ -176,7 +299,7 @@ export function SocialHandlesFields({
       </div>
 
       <p className="text-xs" style={{ color: "var(--bat-text-muted)" }}>
-        Add handles to expand social discovery. BAT can still start from website evidence when no handles are available.
+        Add up to 5 handles per platform. BAT can still start from website evidence when no handles are available.
       </p>
     </section>
   );

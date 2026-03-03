@@ -21,6 +21,11 @@ import {
 type IntakePlatform = 'instagram' | 'tiktok' | 'youtube' | 'twitter' | 'linkedin';
 
 type IntakeHandles = Record<IntakePlatform, string>;
+type IntakeHandlesV2Item = {
+  primary: string;
+  handles: string[];
+};
+type IntakeHandlesV2 = Record<IntakePlatform, IntakeHandlesV2Item>;
 
 export type PortalWorkspaceIntakePrefill = {
   name: string;
@@ -55,6 +60,7 @@ export type PortalWorkspaceIntakePrefill = {
   budgetSensitivity: string;
   competitorInspirationLinks: string;
   handles: IntakeHandles;
+  handlesV2: IntakeHandlesV2;
 };
 
 export type PortalWorkspaceIntakeStatus = {
@@ -106,6 +112,13 @@ const EMPTY_HANDLES: IntakeHandles = {
   youtube: '',
   twitter: '',
   linkedin: '',
+};
+const EMPTY_HANDLES_V2: IntakeHandlesV2 = {
+  instagram: { primary: '', handles: [] },
+  tiktok: { primary: '', handles: [] },
+  youtube: { primary: '', handles: [] },
+  twitter: { primary: '', handles: [] },
+  linkedin: { primary: '', handles: [] },
 };
 
 function logIntakeSuggestEvent(input: {
@@ -170,6 +183,21 @@ function normalizeHandle(value: unknown): string {
     .trim()
     .replace(/^@+/, '')
     .toLowerCase();
+}
+
+function normalizeHandleList(value: unknown, maxItems = 5): string[] {
+  const values = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(/[\n,;|]+/)
+      : [];
+  return Array.from(
+    new Set(
+      values
+        .map((entry) => normalizeHandle(entry))
+        .filter(Boolean),
+    ),
+  ).slice(0, maxItems);
 }
 
 function toAccountPlatform(value: string): string {
@@ -278,6 +306,62 @@ function shouldRunLiveDdgSuggest(): boolean {
   return !['0', 'false', 'no', 'off'].includes(value);
 }
 
+function collectHandleSeedsFromPayload(payload: Record<string, unknown>): string[] {
+  const out = new Set<string>();
+  const pushValue = (raw: unknown) => {
+    const normalized = String(raw || '')
+      .trim()
+      .replace(/^@+/, '')
+      .toLowerCase();
+    if (!normalized) return;
+    if (normalized.length < 2 || normalized.length > 80) return;
+    if (/[^a-z0-9._-]/i.test(normalized)) return;
+    out.add(normalized);
+  };
+
+  const handles = asRecord(payload.handles);
+  for (const value of Object.values(handles)) {
+    pushValue(value);
+  }
+
+  const handlesV2 = asRecord(payload.handlesV2);
+  for (const bucketRaw of Object.values(handlesV2)) {
+    const bucket = asRecord(bucketRaw);
+    pushValue(bucket.primary);
+    const list = Array.isArray(bucket.handles) ? bucket.handles : [];
+    for (const value of list) {
+      pushValue(value);
+    }
+  }
+
+  const socialReferences = parseSocialReferenceList([payload.socialReferences], 12);
+  for (const ref of socialReferences) {
+    const lowered = ref.toLowerCase();
+    const patterns: RegExp[] = [];
+    if (lowered.includes('linkedin.com/')) {
+      patterns.push(/linkedin\.com\/(?:in|company)\/([a-z0-9-]{2,100})/i);
+    }
+    if (lowered.includes('instagram.com/')) {
+      patterns.push(/instagram\.com\/([a-z0-9._]{2,40})/i);
+    }
+    if (lowered.includes('tiktok.com/')) {
+      patterns.push(/tiktok\.com\/@?([a-z0-9._]{2,40})/i);
+    }
+    if (lowered.includes('youtube.com/')) {
+      patterns.push(/youtube\.com\/(?:@|c\/|user\/|channel\/)?([a-z0-9._-]{2,80})/i);
+    }
+    if (lowered.includes('x.com/') || lowered.includes('twitter.com/')) {
+      patterns.push(/(?:x|twitter)\.com\/([a-z0-9_]{1,40})/i);
+    }
+    for (const pattern of patterns) {
+      const match = ref.match(pattern)?.[1];
+      if (match) pushValue(match);
+    }
+  }
+
+  return Array.from(out).slice(0, 12);
+}
+
 function buildLiveDdgSuggestQueries(payload: Record<string, unknown>): string[] {
   const name = String(payload.name || '').trim();
   const websites = parseWebsiteList([payload.website, payload.websites], 3);
@@ -296,6 +380,13 @@ function buildLiveDdgSuggestQueries(payload: Record<string, unknown>): string[] 
     })
     .filter(Boolean)
     .slice(0, 3);
+  const handleSeeds = collectHandleSeedsFromPayload(payload);
+  const handleQueries = handleSeeds.flatMap((seed) => [
+    `"${seed}" "linkedin"`,
+    `"${seed}" "instagram"`,
+    `"${seed}" "tiktok"`,
+    `site:linkedin.com "${seed}"`,
+  ]);
   const queries = [
     [name, domain].filter(Boolean).join(' ').trim(),
     domain ? `site:${domain}` : '',
@@ -305,10 +396,11 @@ function buildLiveDdgSuggestQueries(payload: Record<string, unknown>): string[] 
     [name, 'services pricing'].filter(Boolean).join(' ').trim(),
     [domain, 'about services'].filter(Boolean).join(' ').trim(),
     socialHints.length > 0 ? `${name || domain} ${socialHints.join(' ')}` : '',
+    ...handleQueries,
   ]
     .map((query) => query.trim())
     .filter(Boolean);
-  return Array.from(new Set(queries)).slice(0, 8);
+  return Array.from(new Set(queries)).slice(0, 16);
 }
 
 async function buildWebsiteEvidenceSummary(
@@ -480,17 +572,57 @@ function stripUndefinedFromJson(value: unknown): unknown {
   return out;
 }
 
-function collectHandles(job: WorkspaceWithClient): IntakeHandles {
-  const handles: IntakeHandles = { ...EMPTY_HANDLES };
+function ensurePrimaryForHandlesV2Item(item: IntakeHandlesV2Item): IntakeHandlesV2Item {
+  const normalizedHandles = normalizeHandleList(item.handles, 5);
+  const primary = normalizeHandle(item.primary);
+  const resolvedPrimary =
+    normalizedHandles.includes(primary) ? primary : normalizedHandles[0] || '';
+  return {
+    primary: resolvedPrimary,
+    handles: normalizedHandles,
+  };
+}
+
+function collectHandlesV2(job: WorkspaceWithClient): IntakeHandlesV2 {
+  const handles: IntakeHandlesV2 = {
+    instagram: { ...EMPTY_HANDLES_V2.instagram, handles: [] },
+    tiktok: { ...EMPTY_HANDLES_V2.tiktok, handles: [] },
+    youtube: { ...EMPTY_HANDLES_V2.youtube, handles: [] },
+    twitter: { ...EMPTY_HANDLES_V2.twitter, handles: [] },
+    linkedin: { ...EMPTY_HANDLES_V2.linkedin, handles: [] },
+  };
   const input = asRecord(job.inputData);
   const inputHandles = asRecord(input.handles);
+  const inputHandlesV2 = asRecord(input.handlesV2);
+  const primaryHandlesByPlatform = asRecord(input.primaryHandlesByPlatform);
+
+  for (const [platformRaw, rawBucket] of Object.entries(inputHandlesV2)) {
+    const platform = fromAccountPlatform(platformRaw);
+    if (!platform) continue;
+    const bucket = asRecord(rawBucket);
+    const list = normalizeHandleList(bucket.handles, 5);
+    for (const handle of list) {
+      if (!handles[platform].handles.includes(handle)) {
+        handles[platform].handles.push(handle);
+      }
+    }
+    const primary = normalizeHandle(bucket.primary || primaryHandlesByPlatform[platform]);
+    if (primary && handles[platform].handles.includes(primary)) {
+      handles[platform].primary = primary;
+    }
+  }
 
   for (const [platformRaw, handleRaw] of Object.entries(inputHandles)) {
     const platform = fromAccountPlatform(platformRaw);
     if (!platform) continue;
     const handle = normalizeHandle(handleRaw);
     if (!handle) continue;
-    handles[platform] = handle;
+    if (!handles[platform].handles.includes(handle)) {
+      handles[platform].handles.push(handle);
+    }
+    if (!handles[platform].primary) {
+      handles[platform].primary = handle;
+    }
   }
 
   const channels = Array.isArray(input.channels) ? input.channels : [];
@@ -500,7 +632,12 @@ function collectHandles(job: WorkspaceWithClient): IntakeHandles {
     if (!platform) continue;
     const handle = normalizeHandle(rowRecord.handle);
     if (!handle) continue;
-    handles[platform] = handle;
+    if (!handles[platform].handles.includes(handle)) {
+      handles[platform].handles.push(handle);
+    }
+    if (!handles[platform].primary) {
+      handles[platform].primary = handle;
+    }
   }
 
   for (const account of job.client.clientAccounts) {
@@ -508,15 +645,43 @@ function collectHandles(job: WorkspaceWithClient): IntakeHandles {
     if (!platform) continue;
     const handle = normalizeHandle(account.handle);
     if (!handle) continue;
-    handles[platform] = handle;
+    if (!handles[platform].handles.includes(handle)) {
+      handles[platform].handles.push(handle);
+    }
+    if (!handles[platform].primary) {
+      handles[platform].primary = handle;
+    }
   }
+
+  (Object.keys(handles) as IntakePlatform[]).forEach((platform) => {
+    const primary = normalizeHandle(primaryHandlesByPlatform[platform]);
+    if (primary && handles[platform].handles.includes(primary)) {
+      handles[platform].primary = primary;
+    }
+    handles[platform] = ensurePrimaryForHandlesV2Item(handles[platform]);
+  });
 
   return handles;
 }
 
+function collectHandles(job: WorkspaceWithClient): IntakeHandles {
+  const handlesV2 = collectHandlesV2(job);
+  return {
+    instagram: handlesV2.instagram.primary || '',
+    tiktok: handlesV2.tiktok.primary || '',
+    youtube: handlesV2.youtube.primary || '',
+    twitter: handlesV2.twitter.primary || '',
+    linkedin: handlesV2.linkedin.primary || '',
+  };
+}
+
 function hasRequiredIntakeData(prefill: PortalWorkspaceIntakePrefill): boolean {
   const hasName = stringify(prefill.name).length > 0;
-  const hasChannel = Object.values(prefill.handles).some((handle) => normalizeHandle(handle).length > 0);
+  const hasChannel =
+    Object.values(prefill.handles).some((handle) => normalizeHandle(handle).length > 0) ||
+    Object.values(prefill.handlesV2 || {}).some((bucket) =>
+      Array.isArray(bucket?.handles) ? bucket.handles.some((entry) => normalizeHandle(entry).length > 0) : false,
+    );
   const hasWebsite =
     stringify(prefill.website).length > 0 || parseWebsiteList(prefill.websites, 1).length > 0;
   return hasName && (hasChannel || hasWebsite);
@@ -561,6 +726,8 @@ function buildPrefill(job: WorkspaceWithClient): PortalWorkspaceIntakePrefill {
   const websiteFromInput = stringify(input.website);
   const websiteFromInputIsSocial = parseSocialReferenceList([websiteFromInput], 1).length > 0;
   const primaryWebsite = websites[0] || (websiteFromInputIsSocial ? '' : websiteFromInput);
+  const handlesV2 = collectHandlesV2(job);
+  const handles = collectHandles(job);
 
   return {
     name: stringify(input.brandName) || job.client.name || '',
@@ -595,7 +762,77 @@ function buildPrefill(job: WorkspaceWithClient): PortalWorkspaceIntakePrefill {
     autonomyLevel: stringify(input.autonomyLevel || constraints.autonomyLevel) === 'auto' ? 'auto' : 'assist',
     budgetSensitivity: stringify(input.budgetSensitivity || constraints.budgetSensitivity),
     competitorInspirationLinks: joinLines(input.competitorInspirationLinks),
-    handles: collectHandles(job),
+    handles,
+    handlesV2,
+  };
+}
+
+function buildHandlesV2FromPayload(payload: Record<string, unknown>): IntakeHandlesV2 {
+  const handlesV2: IntakeHandlesV2 = {
+    instagram: { ...EMPTY_HANDLES_V2.instagram, handles: [] },
+    tiktok: { ...EMPTY_HANDLES_V2.tiktok, handles: [] },
+    youtube: { ...EMPTY_HANDLES_V2.youtube, handles: [] },
+    twitter: { ...EMPTY_HANDLES_V2.twitter, handles: [] },
+    linkedin: { ...EMPTY_HANDLES_V2.linkedin, handles: [] },
+  };
+
+  const payloadHandlesV2 = asRecord(payload.handlesV2);
+  for (const [platformRaw, rawBucket] of Object.entries(payloadHandlesV2)) {
+    const platform = fromAccountPlatform(platformRaw);
+    if (!platform) continue;
+    const bucket = asRecord(rawBucket);
+    const handles = normalizeHandleList(bucket.handles, 5);
+    const primary = normalizeHandle(bucket.primary);
+    handlesV2[platform] = ensurePrimaryForHandlesV2Item({
+      primary,
+      handles,
+    });
+  }
+
+  const payloadHandles = asRecord(payload.handles);
+  for (const [platformRaw, handleRaw] of Object.entries(payloadHandles)) {
+    const platform = fromAccountPlatform(platformRaw);
+    if (!platform) continue;
+    const handle = normalizeHandle(handleRaw);
+    if (!handle) continue;
+    if (!handlesV2[platform].handles.includes(handle)) {
+      handlesV2[platform].handles.push(handle);
+    }
+    if (!handlesV2[platform].primary) {
+      handlesV2[platform].primary = handle;
+    }
+  }
+
+  (Object.keys(handlesV2) as IntakePlatform[]).forEach((platform) => {
+    handlesV2[platform] = ensurePrimaryForHandlesV2Item(handlesV2[platform]);
+  });
+
+  return handlesV2;
+}
+
+function flattenHandlesV2(handlesV2: IntakeHandlesV2): Array<{ platform: string; handle: string }> {
+  const out: Array<{ platform: string; handle: string }> = [];
+  for (const [platform, bucket] of Object.entries(handlesV2) as Array<[IntakePlatform, IntakeHandlesV2Item]>) {
+    const ordered = bucket.primary
+      ? [bucket.primary, ...bucket.handles.filter((handle) => handle !== bucket.primary)]
+      : bucket.handles;
+    for (const handle of ordered.slice(0, 5)) {
+      out.push({
+        platform: platform === 'twitter' ? 'x' : platform,
+        handle,
+      });
+    }
+  }
+  return out;
+}
+
+function toLegacyHandles(handlesV2: IntakeHandlesV2): IntakeHandles {
+  return {
+    instagram: handlesV2.instagram.primary || '',
+    tiktok: handlesV2.tiktok.primary || '',
+    youtube: handlesV2.youtube.primary || '',
+    twitter: handlesV2.twitter.primary || '',
+    linkedin: handlesV2.linkedin.primary || '',
   };
 }
 
@@ -688,6 +925,10 @@ export async function suggestPortalWorkspaceIntakeCompletion(
       partialPayload.handles && typeof partialPayload.handles === 'object'
         ? partialPayload.handles
         : prefill.handles,
+    handlesV2:
+      partialPayload.handlesV2 && typeof partialPayload.handlesV2 === 'object'
+        ? partialPayload.handlesV2
+        : prefill.handlesV2,
   };
 
   const websiteEvidence = await buildWebsiteEvidenceSummary(workspaceId, payload).catch((error) => {
@@ -731,7 +972,15 @@ export async function suggestPortalWorkspaceIntakeCompletion(
   };
 
   try {
-    const result = await suggestIntakeCompletion(payloadWithEvidence, { step: suggestionStep });
+    const scopeRaw = stringify(partialPayload.scope).toLowerCase();
+    const overwritePolicyRaw = stringify(partialPayload.overwritePolicy).toLowerCase();
+    const fieldMeta = asRecord(partialPayload.fieldMeta);
+    const result = await suggestIntakeCompletion(payloadWithEvidence, {
+      step: suggestionStep,
+      scope: scopeRaw === 'step' ? 'step' : 'global',
+      overwritePolicy: overwritePolicyRaw === 'missing_only' ? 'missing_only' : 'missing_or_low_signal',
+      fieldMeta: fieldMeta as any,
+    });
     const warnings = Array.isArray((result as { warnings?: string[] }).warnings)
       ? ((result as { warnings?: string[] }).warnings as string[])
       : [];
@@ -813,6 +1062,10 @@ export async function submitPortalWorkspaceIntake(
       payload.handles && typeof payload.handles === 'object'
         ? payload.handles
         : existingPrefill.handles,
+    handlesV2:
+      payload.handlesV2 && typeof payload.handlesV2 === 'object'
+        ? payload.handlesV2
+        : existingPrefill.handlesV2,
   };
 
   const mergedName = stringify(nextPayload.name) || workspace.client.name;
@@ -820,19 +1073,14 @@ export async function submitPortalWorkspaceIntake(
     throw new Error('name is required');
   }
 
-  const platformHandlesRaw = buildPlatformHandles(nextPayload);
-  const platformHandles: Record<string, string> = {};
-  for (const [platformRaw, handleRaw] of Object.entries(platformHandlesRaw)) {
-    const normalizedPlatform = toAccountPlatform(platformRaw);
-    const normalizedHandle = normalizeHandle(handleRaw);
-    if (!normalizedPlatform || !normalizedHandle) continue;
-    platformHandles[normalizedPlatform] = normalizedHandle;
-  }
+  const handlesV2 = buildHandlesV2FromPayload(nextPayload);
+  const platformHandles = toLegacyHandles(handlesV2);
+  const channels = flattenHandlesV2(handlesV2);
 
   const { websites, primaryWebsite, socialReferences } = resolveIntakeWebsites(nextPayload);
   const website = primaryWebsite || stringify(nextPayload.website) || stringify(nextPayload.websiteDomain);
   const hasWebsite = websites.length > 0 || website.length > 0;
-  if (!Object.keys(platformHandles).length && !hasWebsite) {
+  if (!channels.length && !hasWebsite) {
     throw new Error('Provide at least one social handle/channel or a website');
   }
 
@@ -840,10 +1088,6 @@ export async function submitPortalWorkspaceIntake(
   const mergedConstraints = buildConstraintObject(nextPayload, existingConstraints);
 
   const secondaryGoals = parseStringList(nextPayload.secondaryGoals);
-  const channels = Object.entries(platformHandles).map(([platform, handle]) => ({
-    platform,
-    handle,
-  }));
   const oneSentenceDescription =
     stringify(nextPayload.oneSentenceDescription) ||
     stringify(nextPayload.description) ||
@@ -868,7 +1112,21 @@ export async function submitPortalWorkspaceIntake(
     },
   });
 
-  for (const [platform, handle] of Object.entries(platformHandles)) {
+  const submittedByPlatform = new Map<string, Set<string>>();
+  for (const row of channels) {
+    const platform = String(row.platform || '').trim().toLowerCase();
+    const handle = normalizeHandle(row.handle);
+    if (!platform || !handle) continue;
+    if (!submittedByPlatform.has(platform)) {
+      submittedByPlatform.set(platform, new Set<string>());
+    }
+    submittedByPlatform.get(platform)!.add(handle);
+  }
+
+  for (const row of channels) {
+    const platform = String(row.platform || '').trim().toLowerCase();
+    const handle = normalizeHandle(row.handle);
+    if (!platform || !handle) continue;
     await prisma.clientAccount.upsert({
       where: {
         clientId_platform_handle: {
@@ -879,14 +1137,49 @@ export async function submitPortalWorkspaceIntake(
       },
       update: {
         profileUrl: getProfileUrl(platform, handle),
+        isActive: true,
+        archivedAt: null,
+        archivedBy: null,
       },
       create: {
         clientId: workspace.client.id,
         platform,
         handle,
         profileUrl: getProfileUrl(platform, handle),
+        isActive: true,
       },
     });
+  }
+
+  if (submittedByPlatform.size > 0) {
+    const activeAccounts = await prisma.clientAccount.findMany({
+      where: {
+        clientId: workspace.client.id,
+        platform: {
+          in: Array.from(submittedByPlatform.keys()),
+        },
+        isActive: true,
+      },
+      select: {
+        id: true,
+        platform: true,
+        handle: true,
+      },
+    });
+    for (const account of activeAccounts) {
+      const keepSet = submittedByPlatform.get(String(account.platform || '').toLowerCase());
+      if (!keepSet) continue;
+      const normalized = normalizeHandle(account.handle);
+      if (keepSet.has(normalized)) continue;
+      await prisma.clientAccount.update({
+        where: { id: account.id },
+        data: {
+          isActive: false,
+          archivedAt: new Date(),
+          archivedBy: 'portal_intake',
+        },
+      });
+    }
   }
 
   const brainProfile = await prisma.brainProfile.upsert({
@@ -918,8 +1211,17 @@ export async function submitPortalWorkspaceIntake(
 
   await syncBrainGoals(brainProfile.id, primaryGoal || null, secondaryGoals);
 
-  const primaryPlatform = channels[0]?.platform || undefined;
-  const primaryHandle = channels[0]?.handle || undefined;
+  const preferredPrimaryChannel = fromAccountPlatform(stringify(nextPayload.primaryChannel));
+  const preferredPrimaryPlatform = preferredPrimaryChannel
+    ? preferredPrimaryChannel === 'twitter'
+      ? 'x'
+      : preferredPrimaryChannel
+    : '';
+  const preferredPrimaryHandle = preferredPrimaryChannel
+    ? handlesV2[preferredPrimaryChannel].primary
+    : '';
+  const primaryPlatform = preferredPrimaryHandle ? preferredPrimaryPlatform : channels[0]?.platform || undefined;
+  const primaryHandle = preferredPrimaryHandle || channels[0]?.handle || undefined;
   const surfaces =
     channels.length > 0
       ? channels.map((row) => row.platform)
@@ -965,6 +1267,13 @@ export async function submitPortalWorkspaceIntake(
     topicsToAvoid: topicsToAvoid.length ? topicsToAvoid : undefined,
     excludedCategories: excludedCategories.length ? excludedCategories : undefined,
     handles: platformHandles,
+    handlesV2,
+    primaryHandlesByPlatform: Object.fromEntries(
+      (Object.keys(handlesV2) as IntakePlatform[]).map((platform) => [
+        platform === 'twitter' ? 'x' : platform,
+        handlesV2[platform].primary,
+      ]),
+    ),
     channels,
     platform: primaryPlatform,
     handle: primaryHandle,

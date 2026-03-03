@@ -183,6 +183,13 @@ export type WorkspaceIntakeFormData = {
     twitter: string;
     linkedin: string;
   };
+  handlesV2?: {
+    instagram?: { primary?: string; handles?: string[] };
+    tiktok?: { primary?: string; handles?: string[] };
+    youtube?: { primary?: string; handles?: string[] };
+    twitter?: { primary?: string; handles?: string[] };
+    linkedin?: { primary?: string; handles?: string[] };
+  };
 };
 
 export type WorkspaceIntakeStatus = {
@@ -211,6 +218,20 @@ export type IntakeSuggestedHandleValidationItem = {
 export type WorkspaceIntakeSuggestion = {
   success: boolean;
   suggested?: Record<string, unknown>;
+  fieldQuality?: Record<
+    string,
+    {
+      confidence: number;
+      reason: string;
+      sourceRefs: string[];
+      lowSignalBlocked: boolean;
+    }
+  >;
+  coverage?: {
+    inferableFields: string[];
+    suggestedFields: string[];
+    blockedLowSignalFields: string[];
+  };
   suggestedHandles?: Record<string, string>;
   suggestedHandleValidation?: {
     instagram?: IntakeSuggestedHandleValidationItem;
@@ -272,7 +293,10 @@ export async function suggestWorkspaceIntakeCompletion(
   workspaceId: string,
   payload: Record<string, unknown> & {
     step?: "brand" | "channels" | "offer" | "audience" | "voice";
+    scope?: "step" | "global";
+    overwritePolicy?: "missing_only" | "missing_or_low_signal";
     socialReferences?: string[];
+    fieldMeta?: Record<string, { source: "user" | "ai" | "prefill"; lastUpdatedAt?: string }>;
   }
 ) {
   const response = await fetch(`/api/portal/workspaces/${workspaceId}/intake/suggest`, {
@@ -305,7 +329,7 @@ export async function submitWorkspaceIntake(
 
 export async function saveWorkspaceIntakeDraft(
   workspaceId: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown> & { triggerEnrichment?: boolean }
 ) {
   const response = await fetch(`/api/portal/workspaces/${workspaceId}/intake/draft`, {
     method: "POST",
@@ -370,6 +394,20 @@ export async function fetchWorkspaceIntakeScanRun(workspaceId: string, scanRunId
       endedAt?: string | null;
       createdAt: string;
       updatedAt: string;
+    };
+    proof?: {
+      crawlSettings?: { maxPages?: number; maxDepth?: number; mode?: string };
+      pagesDiscovered: number;
+      pagesPersisted: number;
+      snapshotsSaved: number;
+      uniquePaths: number;
+      sampleUrls: string[];
+      extraction: {
+        extractionRuns: number;
+        sampleSnapshotUrls: string[];
+      };
+      warnings: number;
+      failures: number;
     };
   }>(response);
 }

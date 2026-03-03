@@ -11,6 +11,7 @@ export default function SignupPage() {
   const [companyName, setCompanyName] = useState("");
   const [website, setWebsite] = useState("");
   const [additionalWebsites, setAdditionalWebsites] = useState("");
+  const [socialReferences, setSocialReferences] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -52,6 +53,11 @@ export default function SignupPage() {
           .map((entry) => entry.trim())
           .filter(Boolean)
           .slice(0, 5),
+        socialReferences: socialReferences
+          .split(/[\n,]+/)
+          .map((entry) => entry.trim())
+          .filter(Boolean)
+          .slice(0, 12),
       });
 
       if (payload.emailDelivery?.provider === "console") {
@@ -162,6 +168,16 @@ export default function SignupPage() {
               placeholder="One per line, e.g. https://subdomain.yourcompany.com"
               value={additionalWebsites}
               onChange={(event) => setAdditionalWebsites(event.target.value)}
+            />
+          </label>
+          <label className="block text-sm">
+            Social profile references (optional)
+            <textarea
+              className="mt-1 w-full rounded-xl border px-3 py-2"
+              style={{ borderColor: "var(--bat-border)", minHeight: 76 }}
+              placeholder="LinkedIn / Instagram / TikTok / YouTube / X URLs (one per line)"
+              value={socialReferences}
+              onChange={(event) => setSocialReferences(event.target.value)}
             />
           </label>
           <label className="block text-sm">
