@@ -540,6 +540,21 @@ function candidateKey(candidate: Pick<SuggestedHandleCandidate, 'platform' | 'ha
   return `${candidate.platform}:${normalizeHandle(candidate.handle)}`;
 }
 
+function resolveCandidateProfileUrl(
+  platform: SuggestedHandleCandidate['platform'],
+  rawHandle: unknown,
+  normalizedHandle: string
+): string {
+  const rawUrl = normalizeHttpUrl(rawHandle);
+  if (platform === 'linkedin') {
+    if (rawUrl.includes('linkedin.com/in/') || rawUrl.includes('linkedin.com/company/')) {
+      return rawUrl;
+    }
+    return '';
+  }
+  return rawUrl || profileUrlFromHandle(platform, normalizedHandle);
+}
+
 function parseUserSocialReferenceCandidates(payload: Record<string, unknown>): SuggestedHandleCandidate[] {
   const rawValues = parseStringCandidates(payload.socialReferences);
   const candidates: SuggestedHandleCandidate[] = [];
@@ -591,7 +606,7 @@ function parseUserHandleSeedCandidates(payload: Record<string, unknown>): Sugges
     out.push({
       platform,
       handle,
-      profileUrl: profileUrlFromHandle(platform, handle),
+      profileUrl: resolveCandidateProfileUrl(platform, rawHandle, handle),
       confidence: 0.97,
       reason: 'Detected directly from your provided handle input.',
       source,
