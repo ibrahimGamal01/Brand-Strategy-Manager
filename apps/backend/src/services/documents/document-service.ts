@@ -917,14 +917,15 @@ async function buildPayload(
     const state = String(row.selectionState || '').trim().toUpperCase();
     return state === 'TOP_PICK' || state === 'APPROVED';
   });
-  const filteredCompetitorsRaw =
-    competitorsRaw.filter((row) => {
-      const state = String(row.selectionState || '').trim().toUpperCase();
-      return state === 'TOP_PICK' || state === 'APPROVED' || state === 'SHORTLISTED';
-    }) || [];
+  const shortlistCompetitorsRaw = competitorsRaw.filter((row) => {
+    const state = String(row.selectionState || '').trim().toUpperCase();
+    return state === 'SHORTLISTED';
+  });
   const documentCompetitorsRaw =
-    filteredCompetitorsRaw.length > 0
-      ? filteredCompetitorsRaw
+    strongCompetitorRows.length > 0
+      ? strongCompetitorRows
+      : shortlistCompetitorsRaw.length > 0
+        ? shortlistCompetitorsRaw
       : competitorsRaw
           .slice()
           .sort((a, b) => Number(b.relevanceScore || 0) - Number(a.relevanceScore || 0))
