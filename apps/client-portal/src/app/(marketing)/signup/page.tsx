@@ -145,18 +145,22 @@ export default function SignupPage() {
   }
 
   return (
-    <section className="bat-shell py-10 sm:py-14">
-      <div className="mx-auto w-full max-w-4xl">
-        <div className="bat-surface p-6 sm:p-8">
-          <h1 className="text-3xl font-semibold">Create your BAT workspace</h1>
-          <p className="mt-2 text-sm" style={{ color: "var(--bat-text-muted)" }}>
-            Start free, verify your email, and continue setup in chat.
-          </p>
-          <p className="mt-3 rounded-xl border px-3 py-2 text-sm" style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)", color: "var(--bat-text-muted)" }}>
-            BAT starts background research after signup. Details appear in Library.
-          </p>
+    <section className="bat-shell py-4 sm:py-6">
+      <div className="mx-auto w-full max-w-5xl">
+        <div className="bat-surface p-4 sm:p-5">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h1 className="text-2xl font-semibold">Create your BAT workspace</h1>
+              <p className="mt-1 text-xs" style={{ color: "var(--bat-text-muted)" }}>
+                Verify email, then continue setup in chat.
+              </p>
+            </div>
+            <p className="rounded-full border px-3 py-1 text-xs" style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)", color: "var(--bat-text-muted)" }}>
+              Background research starts automatically
+            </p>
+          </div>
 
-          <div className="mt-4 min-h-10 space-y-2" aria-live="polite">
+          <div className="min-h-8 space-y-2" aria-live="polite">
             {error ? (
               <p className="rounded-xl border px-3 py-2 text-sm" style={{ borderColor: "#f4b8b4", background: "#fff5f4", color: "#9f2317" }}>
                 {error}
@@ -169,8 +173,8 @@ export default function SignupPage() {
             ) : null}
           </div>
 
-          <form className="mt-4 space-y-6" onSubmit={onSubmit}>
-            <div className="grid gap-4 sm:grid-cols-2">
+          <form className="mt-3 space-y-4" onSubmit={onSubmit}>
+            <div className="grid gap-3 sm:grid-cols-2">
               <label className="block text-sm">
                 Full name
                 <input
@@ -200,13 +204,13 @@ export default function SignupPage() {
                   required
                   autoComplete="email"
                 />
-                <span className="mt-1 block min-h-5 text-xs" style={{ color: "#9f2317" }}>
+                <span className="mt-1 block min-h-4 text-xs" style={{ color: "#9f2317" }}>
                   {fieldErrors.email || ""}
                 </span>
               </label>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-2">
               <label className="block text-sm">
                 Company name
                 <input
@@ -237,35 +241,37 @@ export default function SignupPage() {
                   required
                   autoComplete="url"
                 />
-                <span className="mt-1 block min-h-5 text-xs" style={{ color: "#9f2317" }}>
+                <span className="mt-1 block min-h-4 text-xs" style={{ color: "#9f2317" }}>
                   {fieldErrors.website || ""}
                 </span>
               </label>
             </div>
 
-            <label className="block text-sm">
-              Additional websites (optional)
-              <textarea
-                className="mt-1 w-full rounded-xl border px-3 py-2"
-                style={{ borderColor: "var(--bat-border)", minHeight: 96 }}
-                placeholder="One per line, e.g. https://subdomain.yourcompany.com"
-                value={additionalWebsites}
-                onChange={(event) => setAdditionalWebsites(event.target.value)}
-              />
-            </label>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block text-sm">
+                Additional websites (optional)
+                <textarea
+                  className="mt-1 w-full rounded-xl border px-3 py-2"
+                  style={{ borderColor: "var(--bat-border)", minHeight: 78 }}
+                  placeholder="One per line"
+                  value={additionalWebsites}
+                  onChange={(event) => setAdditionalWebsites(event.target.value)}
+                />
+              </label>
 
-            <label className="block text-sm">
-              Social profile references (optional)
-              <textarea
-                className="mt-1 w-full rounded-xl border px-3 py-2"
-                style={{ borderColor: "var(--bat-border)", minHeight: 96 }}
-                placeholder="LinkedIn / Instagram / TikTok / YouTube / X URLs (one per line)"
-                value={socialReferences}
-                onChange={(event) => setSocialReferences(event.target.value)}
-              />
-            </label>
+              <label className="block text-sm">
+                Social profile references (optional)
+                <textarea
+                  className="mt-1 w-full rounded-xl border px-3 py-2"
+                  style={{ borderColor: "var(--bat-border)", minHeight: 78 }}
+                  placeholder="LinkedIn / Instagram / TikTok / YouTube / X"
+                  value={socialReferences}
+                  onChange={(event) => setSocialReferences(event.target.value)}
+                />
+              </label>
+            </div>
 
-            <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
+            <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
               <label className="block text-sm">
                 Password
                 <input
@@ -285,7 +291,7 @@ export default function SignupPage() {
                   autoComplete="new-password"
                   minLength={8}
                 />
-                <span className="mt-1 block min-h-5 text-xs" style={{ color: "#9f2317" }}>
+                <span className="mt-1 block min-h-4 text-xs" style={{ color: "#9f2317" }}>
                   {fieldErrors.password || "Use at least 8 characters."}
                 </span>
               </label>
@@ -301,7 +307,7 @@ export default function SignupPage() {
             </div>
           </form>
 
-          <p className="mt-5 text-sm" style={{ color: "var(--bat-text-muted)" }}>
+          <p className="mt-3 text-sm" style={{ color: "var(--bat-text-muted)" }}>
             Already onboarded? <Link href="/login">Log in</Link>
           </p>
         </div>
