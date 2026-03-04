@@ -49,6 +49,7 @@
         "test:discovery-query-guardrails": "tsx src/scripts/test-discovery-v3-query-lane-guardrails.ts",
         "test:intake-competitor-links": "tsx src/scripts/test-intake-competitor-links-suggest.ts",
         "test:competitor-pipeline-fixes": "tsx src/scripts/test-competitor-pipeline-fixes.ts",
+        "test:instagram-graphql-retry-guard": "tsx src/scripts/test-instagram-graphql-retry-guard.ts",
         "export:chat-training": "tsx -r dotenv/config src/scripts/export-chat-training-samples.ts",
         "test:camoufox": "tsx src/scripts/test-camoufox-integration.ts",
         "delete-evolving-ai": "tsx -r dotenv/config scripts/delete-evolving-ai-data.ts",

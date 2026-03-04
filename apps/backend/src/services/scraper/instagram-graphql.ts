@@ -30,6 +30,16 @@ const DOC_IDS = {
 
 const INSTAGRAM_APP_ID = '124024574287414';
 const INSTAGRAM_BASE_URL = 'https://www.instagram.com';
+const GRAPHQL_MAX_AUTH_RETRIES = Math.max(0, Number(process.env.INSTAGRAM_GRAPHQL_MAX_AUTH_RETRIES || 3));
+const GRAPHQL_RETRY_BASE_DELAY_MS = Math.max(250, Number(process.env.INSTAGRAM_GRAPHQL_RETRY_BASE_DELAY_MS || 750));
+const GRAPHQL_RETRY_MAX_DELAY_MS = Math.max(
+  GRAPHQL_RETRY_BASE_DELAY_MS,
+  Number(process.env.INSTAGRAM_GRAPHQL_RETRY_MAX_DELAY_MS || 5000)
+);
+const GRAPHQL_REQUIRE_LOGIN_COOLDOWN_MS = Math.max(
+  30_000,
+  Number(process.env.INSTAGRAM_GRAPHQL_REQUIRE_LOGIN_COOLDOWN_MS || 180_000)
+);
 
 // Rotate multiple session cookies to spread rate limits
 function loadSessionPool(): string[] {
@@ -80,6 +90,7 @@ export class InstagramGraphQLScraper {
   private sessionCookie: string | null = null;
   private sessionPool: string[] = [];
   private poolIndex = 0;
+  private authCooldownUntil = 0;
 
   constructor(options: InstagramGraphQLOptions = {}) {
     this.sessionPool = loadSessionPool();
@@ -123,14 +134,39 @@ export class InstagramGraphQLScraper {
   }
 
   private rotateSession(): string | null {
-    if (this.sessionPool.length === 0) return this.sessionCookie;
-    this.sessionCookie = this.pickSession();
-    if (this.sessionCookie) {
+    if (this.sessionPool.length === 0) return null;
+    const previousSession = this.sessionCookie;
+    for (let tries = 0; tries < this.sessionPool.length; tries++) {
+      const nextSession = this.pickSession();
+      if (!nextSession || nextSession === previousSession) {
+        continue;
+      }
+      this.sessionCookie = nextSession;
       this.client.defaults.headers.common['Cookie'] = this.sessionCookie;
       const csrf = extractCsrf(this.sessionCookie);
       if (csrf) this.client.defaults.headers.common['X-CSRFToken'] = csrf;
+      return this.sessionCookie;
     }
-    return this.sessionCookie;
+    return null;
+  }
+
+  private isLoginGatePayload(payload: any): boolean {
+    const message = String(payload?.message || '').toLowerCase();
+    return Boolean(
+      payload?.require_login === true ||
+        message.includes('please wait a few minutes') ||
+        message.includes('login required')
+    );
+  }
+
+  private getRetryDelayMs(attempt: number): number {
+    const exponential = Math.min(GRAPHQL_RETRY_BASE_DELAY_MS * Math.pow(2, Math.max(0, attempt - 1)), GRAPHQL_RETRY_MAX_DELAY_MS);
+    const jitter = Math.floor(Math.random() * 200);
+    return exponential + jitter;
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**
@@ -149,46 +185,89 @@ export class InstagramGraphQLScraper {
    * Execute a GraphQL query
    */
   private async graphqlQuery(docId: string, variables: Record<string, any>): Promise<any> {
-    try {
-      const params = new URLSearchParams({
-        doc_id: docId,
-        variables: JSON.stringify(variables),
-      });
-
-      // Use the axios client which already has headers and cookies configured
-      const response = await this.client.get(`/graphql/query?${params.toString()}`);
-
-      const data = response.data;
-      
-      if (data?.status === 'fail') {
-        throw new Error(`Instagram API error: ${data.message || 'Unknown error'}`);
-      }
-
-      if (data?.errors && data.errors.length > 0) {
-        const errorMsg = data.errors.map((e: any) => e.message).join(', ');
-        throw new Error(`GraphQL execution error: ${errorMsg}`);
-      }
-
-      return data;
-    } catch (error: any) {
-      if (axios.isAxiosError(error)) {
-        console.error(`[GraphQL] Request failed with status: ${error.response?.status} ${error.response?.statusText}`);
-        if (error.response?.data) {
-           console.error(`[GraphQL] Response body: ${JSON.stringify(error.response.data).substring(0, 500)}`);
-        }
-
-        // Rotate session on auth/rate errors and retry once
-        if (error.response?.status === 401 || error.response?.status === 429) {
-          const newSession = this.rotateSession();
-          if (newSession) {
-            console.warn('[GraphQL] Rotating session cookie and retrying...');
-            return this.graphqlQuery(docId, variables);
-          }
-          throw new Error('Session expired or invalid. Please provide a fresh session cookie.');
-        }
-      }
-      throw error;
+    const cooldownRemainingMs = this.authCooldownUntil - Date.now();
+    if (cooldownRemainingMs > 0) {
+      const waitSeconds = Math.ceil(cooldownRemainingMs / 1000);
+      throw new Error(`Instagram GraphQL temporarily blocked by login/rate gate. Retry in ${waitSeconds}s.`);
     }
+
+    let attempt = 0;
+    const attemptedSessions = new Set<string>();
+
+    while (attempt <= GRAPHQL_MAX_AUTH_RETRIES) {
+      if (this.sessionCookie) {
+        attemptedSessions.add(this.sessionCookie);
+      }
+
+      try {
+        const params = new URLSearchParams({
+          doc_id: docId,
+          variables: JSON.stringify(variables),
+        });
+
+        const response = await this.client.get(`/graphql/query?${params.toString()}`);
+        const data = response.data;
+
+        if (data?.status === 'fail') {
+          throw new Error(`Instagram API error: ${data.message || 'Unknown error'}`);
+        }
+
+        if (data?.errors && data.errors.length > 0) {
+          const errorMsg = data.errors.map((e: any) => e.message).join(', ');
+          throw new Error(`GraphQL execution error: ${errorMsg}`);
+        }
+
+        return data;
+      } catch (error: any) {
+        if (!axios.isAxiosError(error)) {
+          throw error;
+        }
+
+        const status = error.response?.status;
+        const responseBody = error.response?.data;
+        console.error(`[GraphQL] Request failed with status: ${status} ${error.response?.statusText}`);
+        if (responseBody) {
+          console.error(`[GraphQL] Response body: ${JSON.stringify(responseBody).substring(0, 500)}`);
+        }
+
+        const retryableStatus = status === 401 || status === 429;
+        if (!retryableStatus) {
+          throw error;
+        }
+
+        const hasLoginGateSignal = this.isLoginGatePayload(responseBody);
+        if (hasLoginGateSignal) {
+          this.authCooldownUntil = Date.now() + GRAPHQL_REQUIRE_LOGIN_COOLDOWN_MS;
+        }
+
+        if (attempt >= GRAPHQL_MAX_AUTH_RETRIES) {
+          const waitSeconds = Math.max(0, Math.ceil((this.authCooldownUntil - Date.now()) / 1000));
+          if (hasLoginGateSignal && waitSeconds > 0) {
+            throw new Error(`Instagram GraphQL temporarily blocked by login/rate gate. Retry in ${waitSeconds}s.`);
+          }
+          throw new Error(`Instagram GraphQL request failed after ${attempt + 1} attempts (status ${status || 'unknown'}).`);
+        }
+
+        const previousSession = this.sessionCookie;
+        const newSession = this.rotateSession();
+        const sessionChanged = Boolean(newSession && newSession !== previousSession && !attemptedSessions.has(newSession));
+
+        if (!sessionChanged) {
+          const waitSeconds = Math.max(0, Math.ceil((this.authCooldownUntil - Date.now()) / 1000));
+          if (hasLoginGateSignal && waitSeconds > 0) {
+            throw new Error(`Instagram GraphQL temporarily blocked by login/rate gate. Retry in ${waitSeconds}s.`);
+          }
+          throw new Error('Instagram GraphQL session expired or invalid. Please provide fresh session cookies.');
+        }
+
+        attempt += 1;
+        const delayMs = this.getRetryDelayMs(attempt);
+        console.warn(`[GraphQL] Rotating session cookie and retrying (${attempt}/${GRAPHQL_MAX_AUTH_RETRIES}) after ${delayMs}ms...`);
+        await this.sleep(delayMs);
+      }
+    }
+
+    throw new Error('Instagram GraphQL request failed unexpectedly.');
   }
 
   /**
