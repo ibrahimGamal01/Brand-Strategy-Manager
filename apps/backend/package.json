@@ -46,6 +46,7 @@
         "test:client-right-rail-regression": "tsx src/scripts/test-client-right-rail-regression.ts",
         "test:competitor-scoring": "tsx src/scripts/test-competitor-scorer-utils.ts",
         "test:competitor-quality-v3": "tsx src/scripts/test-competitor-quality-v3.ts",
+        "test:discovery-query-guardrails": "tsx src/scripts/test-discovery-v3-query-lane-guardrails.ts",
         "test:intake-competitor-links": "tsx src/scripts/test-intake-competitor-links-suggest.ts",
         "test:competitor-pipeline-fixes": "tsx src/scripts/test-competitor-pipeline-fixes.ts",
         "export:chat-training": "tsx -r dotenv/config src/scripts/export-chat-training-samples.ts",

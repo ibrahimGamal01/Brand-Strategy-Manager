@@ -730,6 +730,59 @@ function extractCompetitorQueryTarget(message: string): string {
   return '';
 }
 
+function sanitizeSearchQueryText(message: string): string {
+  const compact = String(message || '')
+    .replace(/use pinned library evidence:[^\n]+/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!compact) return '';
+
+  const stripped = compact
+    .replace(
+      /^(please\s+)?(?:can you\s+)?(?:run|do|execute|start|continue|perform)?\s*(?:a\s+)?(?:full\s+)?(?:web\s+)?search(?:\s+the\s+web)?\s*(?:for|on|about)?\s*/i,
+      ''
+    )
+    .replace(/^(please\s+)?(?:look up|find online|search online|research)\s*/i, '')
+    .trim();
+
+  return stripped || compact;
+}
+
+function extractExplicitSearchQuery(
+  message: string,
+  input: { competitorIntent?: boolean; defaultQuery?: string } = {}
+): string {
+  const compact = sanitizeSearchQueryText(message);
+  const competitorIntent = Boolean(input.competitorIntent);
+  const hasOrchestrationSyntax =
+    /\b(run|continue|execute|use tools|scenario|next actions|workspace|intelligence audit|evidence loop)\b/i.test(compact) ||
+    compact.includes('\n') ||
+    compact.split(/[,.]/).length > 4;
+  const hasLongAudienceSentence =
+    /\/| who want| looking for| technology-framed approach|consistency and structure/i.test(compact) ||
+    compact.length > 140;
+
+  if (competitorIntent) {
+    const target = extractCompetitorQueryTarget(compact);
+    if (target) {
+      return compactDigestText(`${target} competitors alternatives`, 100) || 'direct competitors alternatives';
+    }
+  }
+
+  if (hasOrchestrationSyntax || hasLongAudienceSentence) {
+    return input.defaultQuery || (competitorIntent ? 'direct competitors alternatives' : 'brand strategy research');
+  }
+
+  const normalized = compact
+    .replace(/[“”"'`]/g, ' ')
+    .replace(/[|/]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const finalQuery = compactDigestText(normalized, 100);
+  if (finalQuery.length >= 12) return finalQuery;
+  return input.defaultQuery || (competitorIntent ? 'direct competitors alternatives' : 'brand strategy research');
+}
+
 function normalizeScore(value: unknown): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return 0;
@@ -1559,8 +1612,15 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
             ? 'competitor_audit'
             : wantsPlaybook
               ? 'playbook'
-              : 'business_strategy',
+            : 'business_strategy',
   };
+  const sanitizedSearchQuery = extractExplicitSearchQuery(originalMessage, {
+    competitorIntent: hasCompetitorSignals || hasCompetitorDiscoveryIntent || hasV3DiscoveryIntent,
+  });
+  const sanitizedResearchQuery = extractExplicitSearchQuery(messageWithMentions, {
+    competitorIntent: hasCompetitorSignals || hasCompetitorDiscoveryIntent || hasV3DiscoveryIntent,
+    defaultQuery: sanitizedSearchQuery,
+  });
   const hasDocumentSignals = /\b(document|doc|proposal|draft|uploaded file|attachment)\b/.test(normalized);
   const hasDocumentEditIntent = /\b(edit|rewrite|refine|improve|change|update|replace)\b/.test(normalized);
   const hasDocumentReadIntent =
@@ -1605,10 +1665,10 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
     pushIfMissing('intel.list', { section: 'competitors', limit: 12 });
   }
   if (isCompetitorBriefIntent) {
-    const competitorQueryTarget = extractCompetitorQueryTarget(originalMessage);
-    const competitorSearchQuery = competitorQueryTarget
-      ? `${competitorQueryTarget} competitors alternatives`
-      : 'direct competitors alternatives';
+    const competitorSearchQuery = extractExplicitSearchQuery(originalMessage, {
+      competitorIntent: true,
+      defaultQuery: 'direct competitors alternatives',
+    });
     pushIfMissing('intel.list', { section: 'competitors', limit: 12 });
     pushIfMissing('intel.list', { section: 'competitor_accounts', limit: 20 });
     pushIfMissing('search.web', {
@@ -1654,7 +1714,7 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   }
   if (hasDeepInvestigationIntent || hasResearchSignal) {
     pushIfMissing('research.gather', {
-      query: messageWithMentions,
+      query: sanitizedResearchQuery,
       depth: hasDeepInvestigationIntent ? 'deep' : 'standard',
       includeScrapling: true,
       includeAccountContext: true,
@@ -1693,7 +1753,7 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
     pushIfMissing('intel.list', { section: 'community_insights', limit: 10 });
   }
   if (hasExplicitWebSearchIntent) {
-    pushIfMissing('search.web', { query: originalMessage, count: 10, provider: 'auto' });
+    pushIfMissing('search.web', { query: sanitizedSearchQuery, count: 10, provider: 'auto' });
   }
   if (/news|press|mention/.test(normalized)) {
     pushIfMissing('evidence.news', { limit: 8 });
@@ -2084,9 +2144,10 @@ export async function generatePlannerPlan(input: PlannerInput): Promise<RuntimeP
               {
                 tool: 'search.web',
                 args: {
-                  query: `${
-                    extractCompetitorQueryTarget(input.userMessage) || compactDigestText(input.userMessage, 80)
-                  } competitors alternatives`,
+                  query: extractExplicitSearchQuery(input.userMessage, {
+                    competitorIntent: true,
+                    defaultQuery: 'direct competitors alternatives',
+                  }),
                   count: 10,
                   provider: 'auto',
                 },

@@ -4,6 +4,14 @@ import type {
   LaneQuery,
   MarketFingerprint,
 } from './types';
+import {
+  isAcceptableQuery,
+  isBadQueryToken,
+  resolveQuerySanitizerMode,
+  sanitizeAudienceHints,
+  sanitizeKeywordList,
+  type QuerySanitizerMode,
+} from './query-quality';
 
 const DEFAULT_LANES: CompetitorDiscoveryLane[] = [
   'category',
@@ -60,26 +68,92 @@ function seedTerms(fingerprint: MarketFingerprint): string[] {
   return uniqueStrings(terms, 20);
 }
 
-export function buildLaneQueries(
+type LaneQueryBuildOutput = {
+  queries: LaneQuery[];
+  diagnostics: {
+    sanitizerMode: QuerySanitizerMode;
+    droppedKeywordCount: number;
+    droppedQueryCount: number;
+    finalQueryCount: number;
+  };
+};
+
+function sanitizeSeedTerms(rawSeeds: string[], mode: QuerySanitizerMode): string[] {
+  const sanitized: string[] = [];
+  for (const seedRaw of rawSeeds) {
+    const normalized = String(seedRaw || '')
+      .replace(/^https?:\/\//i, '')
+      .replace(/^www\./i, '')
+      .replace(/\/.*$/g, '')
+      .replace(/[_-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+    if (!normalized) continue;
+    const words = normalized
+      .split(/\s+/)
+      .map((word) => word.trim())
+      .filter(Boolean)
+      .filter((word) => !isBadQueryToken(word));
+    if (!words.length) continue;
+    const phrase = words.join(' ').trim();
+    if (phrase.length < 3 || phrase.length > 52) continue;
+    if (mode === 'strict' && words.length > 4) continue;
+    if (words.length > 6) continue;
+    sanitized.push(phrase);
+  }
+  return uniqueStrings(sanitized, 10);
+}
+
+function buildLaneQueriesInternal(
   fingerprint: MarketFingerprint,
   input: DiscoverCompetitorsV3Input
-): LaneQuery[] {
+): LaneQueryBuildOutput {
+  const sanitizerMode = resolveQuerySanitizerMode(process.env.COMPETITOR_QUERY_SANITIZER_MODE);
   const locales = Array.isArray(input.locales) && input.locales.length
     ? input.locales.map((locale) => String(locale || '').trim()).filter(Boolean)
     : ['en-US'];
   const lanes = laneEnabledSet(input);
 
-  const primaryKeywords = uniqueStrings([
-    ...fingerprint.categoryKeywords.slice(0, 5),
+  const rawPrimaryKeywords = uniqueStrings([
+    ...fingerprint.categoryKeywords.slice(0, 6),
+    ...fingerprint.offerTypes.slice(0, 3),
     fingerprint.niche,
-  ], 6);
-  const audienceKeywords = uniqueStrings(fingerprint.audienceKeywords.slice(0, 4), 4);
-  const seeds = seedTerms(fingerprint).slice(0, 10);
+  ], 10);
+  const rawAudienceKeywords = uniqueStrings(fingerprint.audienceKeywords.slice(0, 6), 6);
+  const rawSeedTerms = seedTerms(fingerprint).slice(0, 10);
+  const nicheTokens = uniqueStrings([fingerprint.niche, ...fingerprint.offerTypes], 12);
+  const primaryKeywords = sanitizeKeywordList({
+    rawKeywords: rawPrimaryKeywords,
+    brandTokens: [fingerprint.brandName],
+    nicheTokens,
+    mode: sanitizerMode,
+    maxItems: 6,
+  });
+  if (!primaryKeywords.length) {
+    const primaryFallback = sanitizeKeywordList({
+      rawKeywords: [fingerprint.niche],
+      brandTokens: [fingerprint.brandName],
+      nicheTokens,
+      mode: sanitizerMode,
+      maxItems: 1,
+    });
+    primaryKeywords.push(...(primaryFallback.length ? primaryFallback : [fingerprint.niche]));
+  }
+  const audienceKeywords = sanitizeAudienceHints(rawAudienceKeywords);
+  const seeds = sanitizeSeedTerms(rawSeedTerms, sanitizerMode);
+  const nicheAnchor = sanitizeKeywordList({
+    rawKeywords: [fingerprint.niche, ...fingerprint.offerTypes],
+    brandTokens: [fingerprint.brandName],
+    nicheTokens,
+    mode: sanitizerMode,
+    maxItems: 2,
+  })[0] || 'market';
 
   const entries: LaneQuery[] = [];
   const addLane = (lane: CompetitorDiscoveryLane, queries: string[]) => {
     if (!lanes.has(lane)) return;
-    const deduped = uniqueStrings(queries, 16);
+    const deduped = uniqueStrings(queries, 18);
     for (const locale of locales) {
       for (const query of deduped) {
         entries.push({ lane, query, locale });
@@ -89,19 +163,28 @@ export function buildLaneQueries(
 
   addLane(
     'category',
-    primaryKeywords.flatMap((keyword) => [
-      `best ${keyword} companies`,
-      `top ${keyword} brands`,
-      `${keyword} for ${audienceKeywords[0] || 'clients'}`,
-    ])
+    primaryKeywords.flatMap((keyword) => {
+      const audienceHint = audienceKeywords[0] || '';
+      const categoryQueries = [
+        `${keyword} alternatives ${nicheAnchor}`,
+      ];
+      if (audienceHint) {
+        categoryQueries.push(`${keyword} ${audienceHint} competitors`);
+      }
+      if (!isBadQueryToken(keyword)) {
+        categoryQueries.push(`best ${keyword} companies`);
+        categoryQueries.push(`top ${keyword} brands`);
+      }
+      return categoryQueries;
+    })
   );
 
   addLane(
     'alternatives',
     seeds.flatMap((seed) => [
       `${seed} competitors`,
+      `${seed} direct competitors`,
       `${seed} alternatives`,
-      `${seed} vs`,
       `brands similar to ${seed}`,
     ])
   );
@@ -110,9 +193,9 @@ export function buildLaneQueries(
     'directories',
     primaryKeywords.flatMap((keyword) => [
       `${keyword} alternatives list`,
-      `best ${keyword} tools`,
       `${keyword} directory`,
       `top ${keyword} platforms`,
+      `${keyword} comparison list`,
     ])
   );
 
@@ -145,7 +228,7 @@ export function buildLaneQueries(
     ])
   );
 
-  return uniqueStrings(entries.map((entry) => `${entry.lane}|${entry.locale}|${entry.query}`), 220).map((raw) => {
+  const deduped = uniqueStrings(entries.map((entry) => `${entry.lane}|${entry.locale}|${entry.query}`), 220).map((raw) => {
     const [lane, locale, ...queryParts] = raw.split('|');
     return {
       lane: lane as CompetitorDiscoveryLane,
@@ -153,4 +236,42 @@ export function buildLaneQueries(
       query: queryParts.join('|'),
     };
   });
+
+  const accepted: LaneQuery[] = [];
+  let droppedQueryCount = 0;
+  for (const entry of deduped) {
+    if (!isAcceptableQuery(entry.query, { mode: sanitizerMode, minLength: 16, maxLength: 100 })) {
+      droppedQueryCount += 1;
+      continue;
+    }
+    accepted.push(entry);
+  }
+
+  const rawKeywordTotal = uniqueStrings([...rawPrimaryKeywords, ...rawAudienceKeywords, ...rawSeedTerms], 50).length;
+  const sanitizedKeywordTotal = uniqueStrings([...primaryKeywords, ...audienceKeywords, ...seeds], 50).length;
+  const droppedKeywordCount = Math.max(0, rawKeywordTotal - sanitizedKeywordTotal);
+
+  return {
+    queries: accepted,
+    diagnostics: {
+      sanitizerMode,
+      droppedKeywordCount,
+      droppedQueryCount,
+      finalQueryCount: accepted.length,
+    },
+  };
+}
+
+export function buildLaneQueries(
+  fingerprint: MarketFingerprint,
+  input: DiscoverCompetitorsV3Input
+): LaneQuery[] {
+  return buildLaneQueriesInternal(fingerprint, input).queries;
+}
+
+export function buildLaneQueriesWithDiagnostics(
+  fingerprint: MarketFingerprint,
+  input: DiscoverCompetitorsV3Input
+): LaneQueryBuildOutput {
+  return buildLaneQueriesInternal(fingerprint, input);
 }

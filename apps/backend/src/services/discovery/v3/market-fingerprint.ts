@@ -1,5 +1,10 @@
 import { prisma } from '../../../lib/prisma';
 import type { DiscoverCompetitorsV3Seed, MarketFingerprint } from './types';
+import {
+  resolveQuerySanitizerMode,
+  sanitizeAudienceHints,
+  sanitizeKeywordList,
+} from './query-quality';
 
 const STOPWORDS = new Set([
   'about',
@@ -100,6 +105,28 @@ function parseArrayish(value: unknown): string[] {
   return [];
 }
 
+function normalizeHostname(value: unknown): string {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try {
+    const candidate = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    const parsed = new URL(candidate);
+    return String(parsed.hostname || '').trim().toLowerCase().replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
+function domainRootToken(hostname: string): string {
+  const parts = String(hostname || '')
+    .toLowerCase()
+    .split('.')
+    .filter(Boolean);
+  if (!parts.length) return '';
+  const root = parts[0] || '';
+  return root.replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
 function extractSeedCompetitors(inputData: Record<string, unknown>): DiscoverCompetitorsV3Seed[] {
   const seeds: DiscoverCompetitorsV3Seed[] = [];
   const rawLinks = parseArrayish(inputData.competitorInspirationLinks);
@@ -159,9 +186,26 @@ export async function buildMarketFingerprint(
   ]);
 
   const inputData = asRecord(job?.inputData);
+  const sanitizerMode = resolveQuerySanitizerMode(process.env.COMPETITOR_QUERY_SANITIZER_MODE);
   const brandName =
     String(inputData.name || job?.client?.name || 'Brand').trim() || 'Brand';
   const niche = String(inputData.niche || inputData.businessType || inputData.industry || 'business').trim() || 'business';
+  const brandTokens = uniqueStrings([
+    ...tokenize(brandName),
+    ...tokenize(String(job?.client?.name || '')),
+    ...parseArrayish(inputData.websites)
+      .map((entry) => normalizeHostname(entry))
+      .map((host) => domainRootToken(host))
+      .filter(Boolean),
+    domainRootToken(normalizeHostname(inputData.website)),
+  ], 16);
+  const nicheTokens = uniqueStrings([
+    niche,
+    ...parseArrayish(inputData.businessType),
+    ...parseArrayish(inputData.servicesList),
+    ...parseArrayish(inputData.mainOffer),
+    ...parseArrayish(inputData.offerTypes),
+  ], 20);
 
   const textCorpus = [
     toText(inputData.oneSentenceDescription),
@@ -174,23 +218,45 @@ export async function buildMarketFingerprint(
     ...snapshots.map((row) => String(row.cleanText || '')),
   ].filter(Boolean);
 
-  const categoryKeywords = uniqueStrings([
+  const rawCategoryKeywords = uniqueStrings([
     ...topKeywords(textCorpus, 16),
     ...parseArrayish(inputData.servicesList),
     ...parseArrayish(inputData.offerTypes),
   ], 18);
+  const categoryKeywords = sanitizeKeywordList({
+    rawKeywords: rawCategoryKeywords,
+    brandTokens,
+    nicheTokens,
+    mode: sanitizerMode,
+    maxItems: 18,
+  });
 
-  const problemKeywords = uniqueStrings([
+  const rawProblemKeywords = uniqueStrings([
     ...parseArrayish(inputData.topProblems),
     ...topKeywords(parseArrayish(inputData.topProblems), 10),
     ...topKeywords(textCorpus.slice(0, 12), 10),
   ], 14);
+  const problemKeywords = sanitizeKeywordList({
+    rawKeywords: rawProblemKeywords,
+    brandTokens,
+    nicheTokens,
+    mode: sanitizerMode,
+    maxItems: 14,
+  });
 
   const audienceKeywords = uniqueStrings([
-    ...parseArrayish(inputData.idealAudience),
-    ...parseArrayish(inputData.targetAudience),
-    ...parseArrayish(inputData.wantClientsWhere),
-    ...topKeywords([toText(inputData.idealAudience), toText(inputData.targetAudience)], 10),
+    ...sanitizeAudienceHints([
+      ...parseArrayish(inputData.idealAudience),
+      ...parseArrayish(inputData.targetAudience),
+      ...parseArrayish(inputData.wantClientsWhere),
+    ]),
+    ...sanitizeKeywordList({
+      rawKeywords: topKeywords([toText(inputData.idealAudience), toText(inputData.targetAudience)], 10),
+      brandTokens,
+      nicheTokens,
+      mode: sanitizerMode,
+      maxItems: 8,
+    }),
   ], 14);
 
   const geoMarkets = uniqueStrings([
@@ -247,7 +313,19 @@ export async function buildMarketFingerprint(
   return {
     brandName,
     niche,
-    categoryKeywords: categoryKeywords.length ? categoryKeywords : [niche, `${niche} brand`],
+    categoryKeywords:
+      categoryKeywords.length
+        ? categoryKeywords
+        : (() => {
+            const fallback = sanitizeKeywordList({
+              rawKeywords: [niche, `${niche} industry`, ...nicheTokens],
+              brandTokens,
+              nicheTokens,
+              mode: sanitizerMode,
+              maxItems: 3,
+            });
+            return fallback.length ? fallback : [niche];
+          })(),
     problemKeywords,
     audienceKeywords,
     geoMarkets,
