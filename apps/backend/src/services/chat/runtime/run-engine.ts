@@ -1018,6 +1018,69 @@ function withLibraryMentionHints(message: string): string {
   return `${message}\n${hints}`;
 }
 
+function extractCompetitorQueryTarget(message: string): string {
+  const raw = String(message || '').replace(/\s+/g, ' ').trim();
+  if (!raw) return '';
+  const forMatch = raw.match(/\bfor\s+([^.!?\n]{2,100})/i);
+  if (forMatch?.[1]) return forMatch[1].trim();
+  const ofMatch = raw.match(/\bof\s+([^.!?\n]{2,100})/i);
+  if (ofMatch?.[1]) return ofMatch[1].trim();
+  return '';
+}
+
+function sanitizeSearchQueryText(message: string): string {
+  const compact = String(message || '')
+    .replace(/use pinned library evidence:[^\n]+/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!compact) return '';
+
+  const stripped = compact
+    .replace(
+      /^(please\s+)?(?:can you\s+)?(?:run|do|execute|start|continue|perform)?\s*(?:a\s+)?(?:full\s+)?(?:web\s+)?search(?:\s+the\s+web)?\s*(?:for|on|about)?\s*/i,
+      ''
+    )
+    .replace(/^(please\s+)?(?:look up|find online|search online|research)\s*/i, '')
+    .trim();
+
+  return stripped || compact;
+}
+
+function extractExplicitSearchQuery(
+  message: string,
+  input: { competitorIntent?: boolean; defaultQuery?: string } = {}
+): string {
+  const compact = sanitizeSearchQueryText(message);
+  const competitorIntent = Boolean(input.competitorIntent);
+  const hasOrchestrationSyntax =
+    /\b(run|continue|execute|use tools|scenario|next actions|workspace|intelligence audit|evidence loop)\b/i.test(compact) ||
+    compact.includes('\n') ||
+    compact.split(/[,.]/).length > 4;
+  const hasLongAudienceSentence =
+    /\/| who want| looking for| technology-framed approach|consistency and structure/i.test(compact) ||
+    compact.length > 140;
+
+  if (competitorIntent) {
+    const target = extractCompetitorQueryTarget(compact);
+    if (target) {
+      return compactPromptString(`${target} competitors alternatives`, 100) || 'direct competitors alternatives';
+    }
+  }
+
+  if (hasOrchestrationSyntax || hasLongAudienceSentence) {
+    return input.defaultQuery || (competitorIntent ? 'direct competitors alternatives' : 'brand strategy research');
+  }
+
+  const normalized = compact
+    .replace(/[“”"'`]/g, ' ')
+    .replace(/[|/]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const finalQuery = compactPromptString(normalized, 100);
+  if (finalQuery.length >= 12) return finalQuery;
+  return input.defaultQuery || (competitorIntent ? 'direct competitors alternatives' : 'brand strategy research');
+}
+
 function parseSlashCommand(message: string): { command: string; argsText: string; argsJson: Record<string, unknown> | null } | null {
   const raw = String(message || '').trim();
   const match = raw.match(/^\/([a-z0-9_./-]+)(?:\s+([\s\S]+))?$/i);
@@ -2936,6 +2999,13 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
     ...(hasContinueDeepeningIntent ? { continueDeepening: true } : {}),
     ...(resumeDocumentIdFromText ? { resumeDocumentId: resumeDocumentIdFromText } : {}),
   };
+  const sanitizedSearchQuery = extractExplicitSearchQuery(originalMessage, {
+    competitorIntent: hasCompetitorSignals || hasCompetitorDiscoveryIntent || hasV3DiscoveryIntent,
+  });
+  const sanitizedResearchQuery = extractExplicitSearchQuery(messageWithMentions, {
+    competitorIntent: hasCompetitorSignals || hasCompetitorDiscoveryIntent || hasV3DiscoveryIntent,
+    defaultQuery: sanitizedSearchQuery,
+  });
 
   if (slashCommand) {
     if (slashCommand.command === 'show_sources') {
@@ -3013,7 +3083,7 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
 
   if (hasDeepInvestigationIntent || hasResearchSignal) {
     pushIfMissing('research.gather', {
-      query: messageWithMentions,
+      query: sanitizedResearchQuery,
       depth: hasDeepInvestigationIntent ? 'deep' : 'standard',
       includeScrapling: true,
       includeAccountContext: true,
@@ -3054,7 +3124,7 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   }
 
   if (hasExplicitWebSearchIntent) {
-    pushIfMissing('search.web', { query: originalMessage, count: 10, provider: 'auto' });
+    pushIfMissing('search.web', { query: sanitizedSearchQuery, count: 10, provider: 'auto' });
   }
 
   if (/news|press|mention/.test(normalized)) {

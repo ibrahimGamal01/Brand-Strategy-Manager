@@ -65,9 +65,29 @@ function testPlannerHeuristics() {
   );
 
   const explicitSearchCalls = inferToolCallsFromMessage('Search the web for best biophoton energy programs.');
+  const explicitSearchCall = explicitSearchCalls.find((entry) => entry.tool === 'search.web');
   assert.ok(
-    explicitSearchCalls.some((entry) => entry.tool === 'search.web'),
+    explicitSearchCall,
     'Expected explicit web search phrasing to trigger search.web.'
+  );
+  assert.ok(
+    !String((explicitSearchCall?.args as Record<string, unknown>)?.query || '').toLowerCase().startsWith('search the web for'),
+    'Expected explicit web search query to strip instruction wrappers.'
+  );
+
+  const adjacentCompetitorSearchPrompt =
+    'Search the web for based on the top picks from competitors run a competitors research for ones that are adjacent';
+  const adjacentCompetitorSearchCalls = inferToolCallsFromMessage(adjacentCompetitorSearchPrompt);
+  const adjacentSearchCall = adjacentCompetitorSearchCalls.find((entry) => entry.tool === 'search.web');
+  assert.ok(adjacentSearchCall, 'Expected adjacent competitor web-search prompt to trigger search.web.');
+  const adjacentQuery = String((adjacentSearchCall?.args as Record<string, unknown>)?.query || '').toLowerCase();
+  assert.ok(
+    adjacentQuery.length > 0 && adjacentQuery !== adjacentCompetitorSearchPrompt.toLowerCase(),
+    'Expected adjacent competitor query to be sanitized instead of raw prompt text.'
+  );
+  assert.ok(
+    !adjacentQuery.includes('run a competitors research'),
+    'Expected adjacent competitor query to remove orchestration instruction fragments.'
   );
 
   const crawlRunReferenceCalls = inferToolCallsFromMessage('Use evidence from: Crawl run crawl-e8');
