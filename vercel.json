@@ -2,6 +2,6 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
   "installCommand": "if [ -f apps/frontend/package.json ] && [ -f apps/client-portal/package.json ]; then npm install --workspace=apps/frontend --include-workspace-root; else npm install; fi",
-  "buildCommand": "if [ -f apps/frontend/package.json ] && [ -f apps/client-portal/package.json ]; then npm run build --workspace=apps/frontend && rm -rf .next && cp -R apps/frontend/.next .next; else npm run build; fi",
+  "buildCommand": "if [ -f apps/frontend/package.json ] && [ -f apps/client-portal/package.json ]; then npm run build --workspace=apps/frontend && rm -rf .next && ln -s apps/frontend/.next .next; else npm run build; fi",
   "outputDirectory": ".next"
 }
