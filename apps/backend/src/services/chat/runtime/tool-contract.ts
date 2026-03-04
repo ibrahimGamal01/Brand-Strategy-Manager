@@ -20,7 +20,7 @@ const TOOL_TIMEOUT_OVERRIDES_MS: Record<string, number> = {
   'web.fetch': 45_000,
   'search.web': 25_000,
   'research.gather': 75_000,
-  'competitors.discover_v3': 65_000,
+  'competitors.discover_v3': 90_000,
   'evidence.news': 40_000,
   'evidence.posts': 35_000,
   'document.generate': 120_000,

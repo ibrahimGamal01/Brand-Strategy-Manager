@@ -44,6 +44,9 @@ jobs:
         run: |
           npm run check:runtime-config --workspace=apps/backend
           npm run test:chat-runtime-engine --workspace=apps/backend
+          npm run test:discovery-v3-query-guardrails --workspace=apps/backend
+          npm run test:intake-competitor-links --workspace=apps/backend
+          npm run test:competitor-discovery-reliability --workspace=apps/backend
           npm run test:runtime-reliability-r1 --workspace=apps/backend
           npm run test-document-generation-quality --workspace=apps/backend
           npm run test:deliverable-engine-regression --workspace=apps/backend

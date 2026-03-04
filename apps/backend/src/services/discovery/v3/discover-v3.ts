@@ -42,9 +42,9 @@ const MODE_BUDGETS: Record<
   CompetitorDiscoveryV3Mode,
   { queryLimit: number; perQueryCount: number; maxCandidates: number; maxEnrich: number }
 > = {
-  wide: { queryLimit: 28, perQueryCount: 8, maxCandidates: 80, maxEnrich: 4 },
-  standard: { queryLimit: 48, perQueryCount: 12, maxCandidates: 140, maxEnrich: 10 },
-  deep: { queryLimit: 72, perQueryCount: 14, maxCandidates: 220, maxEnrich: 20 },
+  wide: { queryLimit: 12, perQueryCount: 6, maxCandidates: 80, maxEnrich: 4 },
+  standard: { queryLimit: 20, perQueryCount: 8, maxCandidates: 140, maxEnrich: 10 },
+  deep: { queryLimit: 30, perQueryCount: 10, maxCandidates: 220, maxEnrich: 20 },
 };
 
 const PERSON_HINT_RE = /\b(coach|founder|creator|influencer|speaker|author|mentor|personal brand)\b/i;
@@ -91,6 +91,12 @@ function normalizeMode(value: unknown): CompetitorDiscoveryV3Mode {
   if (normalized === 'deep') return 'deep';
   if (normalized === 'wide') return 'wide';
   return 'standard';
+}
+
+function envInteger(name: string, fallback: number, min: number, max: number): number {
+  const parsed = Number(process.env[name]);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(parsed)));
 }
 
 function hostOf(value: string): string | null {
@@ -911,6 +917,106 @@ async function executeLaneQuery(query: LaneQuery, count: number): Promise<Compet
   }));
 }
 
+type LaneQueryExecutionInput = {
+  laneQueries: LaneQuery[];
+  perQueryCount: number;
+  queryConcurrency: number;
+  searchBudgetMs: number;
+  laneStats: Map<string, { queries: number; hits: number }>;
+  warnings: string[];
+  executeQuery?: (query: LaneQuery, count: number) => Promise<CompetitorDiscoveryV3SearchHit[]>;
+};
+
+type LaneQueryExecutionOutput = {
+  allHits: CompetitorDiscoveryV3SearchHit[];
+  executedQueries: LaneQuery[];
+  budgetReached: boolean;
+  elapsedMs: number;
+};
+
+async function executeLaneQueriesWithBudget(input: LaneQueryExecutionInput): Promise<LaneQueryExecutionOutput> {
+  const executeQuery = input.executeQuery || executeLaneQuery;
+  const allHits: CompetitorDiscoveryV3SearchHit[] = [];
+  const executedQueries: LaneQuery[] = [];
+  const startedAt = Date.now();
+  let nextIndex = 0;
+  let budgetReached = false;
+
+  const budgetExceeded = () => Date.now() - startedAt >= input.searchBudgetMs;
+
+  const worker = async (): Promise<void> => {
+    while (true) {
+      if (budgetReached) return;
+      if (budgetExceeded()) {
+        budgetReached = true;
+        return;
+      }
+      const index = nextIndex;
+      if (index >= input.laneQueries.length) return;
+      nextIndex += 1;
+
+      const laneQuery = input.laneQueries[index];
+      executedQueries.push(laneQuery);
+
+      const state = input.laneStats.get(laneQuery.lane) || { queries: 0, hits: 0 };
+      state.queries += 1;
+      input.laneStats.set(laneQuery.lane, state);
+
+      try {
+        const hits = await executeQuery(laneQuery, input.perQueryCount);
+        state.hits += hits.length;
+        input.laneStats.set(laneQuery.lane, state);
+        allHits.push(...hits);
+      } catch (error: any) {
+        input.warnings.push(`Query failed (${laneQuery.lane}): ${laneQuery.query} — ${String(error?.message || error)}`);
+      }
+    }
+  };
+
+  const workerCount = Math.max(1, Math.min(input.queryConcurrency, input.laneQueries.length || 1));
+  await Promise.all(Array.from({ length: workerCount }, async () => worker()));
+
+  if (budgetReached && executedQueries.length < input.laneQueries.length) {
+    input.warnings.push('TIME_BUDGET_REACHED');
+  }
+
+  return {
+    allHits,
+    executedQueries,
+    budgetReached,
+    elapsedMs: Date.now() - startedAt,
+  };
+}
+
+export async function runLaneQueriesWithBudgetForTest(input: {
+  laneQueries: LaneQuery[];
+  perQueryCount: number;
+  queryConcurrency: number;
+  searchBudgetMs: number;
+  executeQuery: (query: LaneQuery, count: number) => Promise<CompetitorDiscoveryV3SearchHit[]>;
+}): Promise<{ executedQueries: number; budgetReached: boolean; elapsedMs: number; warnings: string[] }> {
+  const laneStats = new Map<string, { queries: number; hits: number }>();
+  for (const lane of input.laneQueries.map((entry) => entry.lane)) {
+    if (!laneStats.has(lane)) laneStats.set(lane, { queries: 0, hits: 0 });
+  }
+  const warnings: string[] = [];
+  const result = await executeLaneQueriesWithBudget({
+    laneQueries: input.laneQueries,
+    perQueryCount: input.perQueryCount,
+    queryConcurrency: input.queryConcurrency,
+    searchBudgetMs: input.searchBudgetMs,
+    laneStats,
+    warnings,
+    executeQuery: input.executeQuery,
+  });
+  return {
+    executedQueries: result.executedQueries.length,
+    budgetReached: result.budgetReached,
+    elapsedMs: result.elapsedMs,
+    warnings,
+  };
+}
+
 export async function discoverCompetitorsV3(
   researchJobId: string,
   rawInput: DiscoverCompetitorsV3Input
@@ -948,6 +1054,8 @@ export async function discoverCompetitorsV3(
 }> {
   const mode = normalizeMode(rawInput.mode);
   const budget = MODE_BUDGETS[mode];
+  const queryConcurrency = envInteger('COMPETITOR_DISCOVERY_QUERY_CONCURRENCY', 3, 1, 6);
+  const searchBudgetMs = envInteger('COMPETITOR_DISCOVERY_SEARCH_BUDGET_MS', 55_000, 10_000, 180_000);
   const maxCandidates = Number.isFinite(Number(rawInput.maxCandidates))
     ? Math.max(20, Math.min(300, Math.floor(Number(rawInput.maxCandidates))))
     : budget.maxCandidates;
@@ -970,6 +1078,8 @@ export async function discoverCompetitorsV3(
         includePeople: rawInput.includePeople !== false,
         maxCandidates,
         maxEnrich,
+        queryConcurrency,
+        searchBudgetMs,
       }),
       phase: 'wide_search',
     },
@@ -992,28 +1102,28 @@ export async function discoverCompetitorsV3(
       if (!laneStats.has(lane)) laneStats.set(lane, { queries: 0, hits: 0 });
     }
 
-    const allHits: CompetitorDiscoveryV3SearchHit[] = [];
-    for (const laneQuery of laneQueries) {
-      const state = laneStats.get(laneQuery.lane) || { queries: 0, hits: 0 };
-      state.queries += 1;
-      laneStats.set(laneQuery.lane, state);
-      try {
-        const hits = await executeLaneQuery(laneQuery, budget.perQueryCount);
-        state.hits += hits.length;
-        laneStats.set(laneQuery.lane, state);
-        allHits.push(...hits);
-      } catch (error: any) {
-        warnings.push(`Query failed (${laneQuery.lane}): ${laneQuery.query} — ${String(error?.message || error)}`);
-      }
-    }
+    const queryExecution = await executeLaneQueriesWithBudget({
+      laneQueries,
+      perQueryCount: budget.perQueryCount,
+      queryConcurrency,
+      searchBudgetMs,
+      laneStats,
+      warnings,
+    });
+    const allHits = queryExecution.allHits;
+    const executedLaneQueries = queryExecution.executedQueries;
 
     await prisma.competitorOrchestrationRun.update({
       where: { id: run.id },
       data: {
         phase: 'candidate_ranking',
         diagnostics: asJson({
-          queriesExecuted: laneQueries.length,
+          queriesPlanned: laneQueries.length,
+          queriesExecuted: executedLaneQueries.length,
           rawHits: allHits.length,
+          searchBudgetMs,
+          searchElapsedMs: queryExecution.elapsedMs,
+          budgetReached: queryExecution.budgetReached,
           queryQuality: {
             droppedKeywords: laneQueryBuild.diagnostics.droppedKeywordCount,
             droppedQueries: laneQueryBuild.diagnostics.droppedQueryCount,
@@ -1043,7 +1153,7 @@ export async function discoverCompetitorsV3(
 
     const platformSet = uniqueStrings(rankedCandidates.map((candidate) => candidate.platform), 12);
     const summary = {
-      queriesExecuted: laneQueries.length,
+      queriesExecuted: executedLaneQueries.length,
       searchResults: allHits.length,
       candidatesRanked: rankedCandidates.length,
       candidatesPersisted: persistence.persisted,
@@ -1070,9 +1180,13 @@ export async function discoverCompetitorsV3(
           queryQuality: {
             droppedKeywords: laneQueryBuild.diagnostics.droppedKeywordCount,
             droppedQueries: laneQueryBuild.diagnostics.droppedQueryCount,
-            executedQueries: laneQueries.slice(0, 20).map((entry) => entry.query),
+            executedQueries: executedLaneQueries.slice(0, 20).map((entry) => entry.query),
             sanitizerMode: laneQueryBuild.diagnostics.sanitizerMode,
           },
+          searchBudgetMs,
+          searchElapsedMs: queryExecution.elapsedMs,
+          budgetReached: queryExecution.budgetReached,
+          queryConcurrency,
         }),
       },
     });
