@@ -38,6 +38,8 @@ export function SlackAdvancedSettings() {
     purgeChannel,
   } = useSlackIntegrationData();
 
+  const blockedByPreflight = Boolean(preflight && !preflight.configured);
+
   return (
     <section className="space-y-5">
       <div className="rounded-3xl border p-5 md:p-6" style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}>
@@ -50,11 +52,17 @@ export function SlackAdvancedSettings() {
           <button
             type="button"
             onClick={() => void connectSlack()}
-            disabled={connecting}
+            disabled={connecting || blockedByPreflight}
             className="rounded-full px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-70"
             style={{ background: "var(--bat-accent)", color: "white" }}
           >
-            {connecting ? "Redirecting..." : installations.length ? "Reconnect Slack" : "Connect Slack"}
+            {connecting
+              ? "Redirecting..."
+              : blockedByPreflight
+                ? "Set env vars first"
+                : installations.length
+                  ? "Reconnect Slack"
+                  : "Connect Slack"}
           </button>
           <button
             type="button"
@@ -273,4 +281,3 @@ export function SlackAdvancedSettings() {
     </section>
   );
 }
-
