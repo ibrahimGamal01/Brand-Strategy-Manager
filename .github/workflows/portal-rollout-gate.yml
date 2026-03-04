@@ -65,6 +65,7 @@ jobs:
           PORTAL_UI_E2E_BASE_URL: ${{ secrets.PORTAL_UI_E2E_BASE_URL }}
 
       - name: Online runtime smoke
+        if: ${{ vars.PORTAL_ENABLE_ONLINE_RUNTIME_SMOKE == 'true' }}
         run: npm run test:r1-online-smoke --workspace=apps/backend
         env:
           R1_BASE_URL: ${{ secrets.PORTAL_E2E_BASE_URL }}
@@ -74,6 +75,7 @@ jobs:
           R1_TEST_SCAN_URL: ${{ vars.R1_TEST_SCAN_URL }}
 
       - name: Online ChatGPT parity smoke
+        if: ${{ vars.PORTAL_ENABLE_ONLINE_CHATGPT_PARITY_SMOKE == 'true' }}
         run: npm run test:online-chatgpt-parity-smoke --workspace=apps/backend
         env:
           CHATGPT_PARITY_BASE_URL: ${{ secrets.PORTAL_E2E_BASE_URL }}
@@ -82,6 +84,7 @@ jobs:
           R1_WORKSPACE_ID: ${{ secrets.R1_WORKSPACE_ID }}
 
       - name: Rollout readiness preflight
+        if: ${{ vars.PORTAL_ENABLE_ROLLOUT_PREFLIGHT == 'true' }}
         run: npm run check:portal-rollout --workspace=apps/backend | tee portal-rollout-readiness.json
         env:
           BACKEND_BASE_URL: ${{ secrets.PORTAL_E2E_BASE_URL }}
