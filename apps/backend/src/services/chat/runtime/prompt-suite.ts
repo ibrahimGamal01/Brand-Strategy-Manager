@@ -2019,6 +2019,7 @@ export async function generatePlannerPlan(input: PlannerInput): Promise<RuntimeP
     ...(input.policy.sourceScope.webSearch ? [] : ['search.web', 'research.gather', 'competitors.discover_v3', 'evidence.news']),
     ...(input.policy.sourceScope.liveWebsiteCrawl ? [] : ['web.crawl', 'web.fetch']),
     ...(input.policy.sourceScope.socialIntel ? [] : ['evidence.posts', 'evidence.videos', 'orchestration.run']),
+    ...(input.policy.sourceScope.slackIntel ? [] : ['slack.search_messages', 'slack.get_thread']),
   ];
 
   const systemPrompt = [

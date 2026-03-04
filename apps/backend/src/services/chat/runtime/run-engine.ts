@@ -174,6 +174,7 @@ const DEFAULT_POLICY: RunPolicy = {
     webSearch: true,
     liveWebsiteCrawl: true,
     socialIntel: true,
+    slackIntel: true,
   },
   pauseAfterPlanning: false,
 };
@@ -364,6 +365,7 @@ function normalizeSourceScope(raw?: Partial<RuntimeSourceScope> | null): Runtime
     webSearch: scope.webSearch !== false,
     liveWebsiteCrawl: scope.liveWebsiteCrawl !== false,
     socialIntel: scope.socialIntel !== false,
+    slackIntel: scope.slackIntel !== false,
   };
 }
 
@@ -376,6 +378,7 @@ function normalizeInputSourceScope(raw?: unknown): Partial<RuntimeSourceScope> |
   if (typeof raw.webSearch === 'boolean') normalized.webSearch = raw.webSearch;
   if (typeof raw.liveWebsiteCrawl === 'boolean') normalized.liveWebsiteCrawl = raw.liveWebsiteCrawl;
   if (typeof raw.socialIntel === 'boolean') normalized.socialIntel = raw.socialIntel;
+  if (typeof raw.slackIntel === 'boolean') normalized.slackIntel = raw.slackIntel;
   return Object.keys(normalized).length ? normalized : undefined;
 }
 
@@ -2631,7 +2634,7 @@ function buildDocumentBudgetPartialMessage(input: {
 
 type SourceScopeBlockedTool = {
   tool: string;
-  lane: 'web_search' | 'live_website_crawl' | 'social_intel';
+  lane: 'web_search' | 'live_website_crawl' | 'social_intel' | 'slack_intel';
   reason: string;
   fallbackTool?: RuntimeToolCall;
 };
@@ -2756,6 +2759,19 @@ function enforceToolSourceScope(input: {
         });
         continue;
       }
+    }
+
+    if (!sourceScope.slackIntel && (tool === 'slack.search_messages' || tool === 'slack.get_thread')) {
+      block({
+        tool,
+        lane: 'slack_intel',
+        reason: 'Slack intelligence is disabled by input source scope.',
+        fallbackTool: {
+          tool: 'intel.list',
+          args: { section: 'community_insights', limit: 12 },
+        },
+      });
+      continue;
     }
 
     pushAllowed(call);

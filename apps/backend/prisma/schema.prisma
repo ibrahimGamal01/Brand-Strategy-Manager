@@ -122,6 +122,11 @@ model ResearchJob {
   workspaceEvidenceRefs       WorkspaceEvidenceRef[]
   workspaceEvidenceLinks      WorkspaceEvidenceLink[]
   connectorRuns               ConnectorRun[]
+  slackChannelLinks           SlackChannelLink[]
+  slackMessages               SlackMessage[]
+  attentionItems              AttentionItem[]
+  notifications               Notification[]
+  integrationJobs             IntegrationJob[]
   knowledgeLedgerVersions     KnowledgeLedgerVersion[]
   workLedgerVersions          WorkLedgerVersion[]
   documentSpecVersions        DocumentSpecVersion[]
@@ -141,6 +146,79 @@ enum PortalEmailTokenType {
   PASSWORD_RESET
 }
 
+enum SlackConversationType {
+  CHANNEL
+  GROUP
+  IM
+  MPIM
+}
+
+enum SlackInstallationStatus {
+  ACTIVE
+  REVOKED
+}
+
+enum SlackBackfillState {
+  PENDING
+  RUNNING
+  DONE
+  FAILED
+}
+
+enum AttentionItemType {
+  NEEDS_REPLY
+  FEEDBACK_REQUEST
+  DEADLINE
+}
+
+enum AttentionItemStatus {
+  OPEN
+  SNOOZED
+  DONE
+  DISMISSED
+}
+
+enum NotificationKind {
+  SLACK_ATTENTION
+  SLACK_DRAFT_READY
+  BAT_WAITING_INPUT
+  DEADLINE_REMINDER
+}
+
+enum NotificationSeverity {
+  INFO
+  WARN
+  URGENT
+}
+
+enum NotificationDeliveryDestination {
+  SLACK_DM
+  SLACK_CHANNEL
+  IN_APP
+}
+
+enum NotificationDeliveryStatus {
+  SENT
+  FAILED
+}
+
+enum IntegrationJobType {
+  SLACK_SYNC_CHANNELS
+  SLACK_BACKFILL_CHANNEL
+  SLACK_BACKFILL_THREAD
+  SLACK_TRIAGE_MESSAGE
+  ATTENTION_REMINDER_SCAN
+  BAT_WAITING_INPUT_SCAN
+}
+
+enum IntegrationJobStatus {
+  QUEUED
+  RUNNING
+  DONE
+  FAILED
+  RETRY
+}
+
 model PortalUser {
   id              String                     @id @default(uuid())
   email           String                     @unique
@@ -154,6 +232,12 @@ model PortalUser {
   memberships     PortalWorkspaceMembership[]
   sessions        PortalSession[]
   emailTokens     PortalEmailToken[]
+  notifications   Notification[]
+  slackUserLinks  SlackUserLink[]
+  slackChannelOwners SlackChannelOwner[]
+  assignedAttentionItems AttentionItem[]
+  createdSlackChannelLinks SlackChannelLink[]
+  installedSlackInstallations SlackInstallation[]
 
   @@map("portal_users")
 }
@@ -249,6 +333,274 @@ model PortalIntakeScanEvent {
   @@index([workspaceId, id])
   @@index([scanRunId, id])
   @@map("portal_intake_scan_events")
+}
+
+model SlackInstallation {
+  id                      String                  @id @default(uuid())
+  slackTeamId             String                  @map("slack_team_id")
+  enterpriseId            String?                 @map("enterprise_id")
+  teamName                String?                 @map("team_name")
+  botUserId               String                  @map("bot_user_id")
+  botTokenEnc             String                  @map("bot_token_enc")
+  botScopes               String[]                @default([]) @map("bot_scopes")
+  installedBySlackUserId  String                  @map("installed_by_slack_user_id")
+  installedByPortalUserId String?                 @map("installed_by_portal_user_id")
+  defaultNotifyChannelId  String?                 @map("default_notify_channel_id")
+  settingsJson            Json?                   @map("settings_json")
+  status                  SlackInstallationStatus @default(ACTIVE)
+  installedAt             DateTime                @default(now()) @map("installed_at")
+  updatedAt               DateTime                @updatedAt @map("updated_at")
+
+  installedByPortalUser PortalUser? @relation(fields: [installedByPortalUserId], references: [id], onDelete: SetNull)
+  channels              SlackChannel[]
+  userLinks             SlackUserLink[]
+  eventReceipts         SlackEventReceipt[]
+  channelLinks          SlackChannelLink[]
+  messages              SlackMessage[]
+  attentionItems        AttentionItem[]
+  deliveries            NotificationDelivery[]
+  jobs                  IntegrationJob[]
+
+  @@unique([slackTeamId], map: "slack_installations_team_key")
+  @@index([status, updatedAt(sort: Desc)], map: "slack_installations_status_updated_idx")
+  @@map("slack_installations")
+}
+
+model SlackUserLink {
+  id           String   @id @default(uuid())
+  slackTeamId  String   @map("slack_team_id")
+  slackUserId  String   @map("slack_user_id")
+  portalUserId String?  @map("portal_user_id")
+  email        String?
+  displayName  String?  @map("display_name")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  installation SlackInstallation @relation(fields: [slackTeamId], references: [slackTeamId], onDelete: Cascade)
+  portalUser   PortalUser?       @relation(fields: [portalUserId], references: [id], onDelete: SetNull)
+
+  @@unique([slackTeamId, slackUserId], map: "slack_user_links_team_user_key")
+  @@index([portalUserId], map: "slack_user_links_portal_user_idx")
+  @@map("slack_user_links")
+}
+
+model SlackChannel {
+  id               String                @id @default(uuid())
+  slackTeamId      String                @map("slack_team_id")
+  slackChannelId   String                @map("slack_channel_id")
+  name             String
+  isPrivate        Boolean               @default(false) @map("is_private")
+  isArchived       Boolean               @default(false) @map("is_archived")
+  isMember         Boolean               @default(false) @map("is_member")
+  conversationType SlackConversationType @default(CHANNEL) @map("conversation_type")
+  lastSeenAt       DateTime?             @map("last_seen_at")
+  createdAt        DateTime              @default(now()) @map("created_at")
+  updatedAt        DateTime              @updatedAt @map("updated_at")
+
+  installation SlackInstallation    @relation(fields: [slackTeamId], references: [slackTeamId], onDelete: Cascade)
+  links        SlackChannelLink[]
+  owners       SlackChannelOwner[]
+  messages     SlackMessage[]
+  attention    AttentionItem[]
+  deliveries   NotificationDelivery[]
+
+  @@unique([slackTeamId, slackChannelId], map: "slack_channels_team_channel_key")
+  @@index([slackTeamId, updatedAt(sort: Desc)], map: "slack_channels_team_updated_idx")
+  @@index([slackTeamId, isMember, isArchived], map: "slack_channels_team_member_archived_idx")
+  @@map("slack_channels")
+}
+
+model SlackChannelLink {
+  id                    String           @id @default(uuid())
+  slackTeamId           String           @map("slack_team_id")
+  slackChannelId        String           @map("slack_channel_id")
+  researchJobId         String           @map("research_job_id")
+  enabled               Boolean          @default(true)
+  backfillState         SlackBackfillState @default(PENDING) @map("backfill_state")
+  backfillCursor        String?          @map("backfill_cursor")
+  backfillError         String?          @map("backfill_error")
+  lastBackfillAt        DateTime?        @map("last_backfill_at")
+  createdByPortalUserId String?          @map("created_by_portal_user_id")
+  createdAt             DateTime         @default(now()) @map("created_at")
+  updatedAt             DateTime         @updatedAt @map("updated_at")
+
+  installation      SlackInstallation @relation(fields: [slackTeamId], references: [slackTeamId], onDelete: Cascade)
+  channel           SlackChannel      @relation(fields: [slackTeamId, slackChannelId], references: [slackTeamId, slackChannelId], onDelete: Cascade)
+  researchJob       ResearchJob       @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  createdByPortalUser PortalUser?     @relation(fields: [createdByPortalUserId], references: [id], onDelete: SetNull)
+
+  @@unique([slackTeamId, slackChannelId], map: "slack_channel_links_team_channel_key")
+  @@index([researchJobId, enabled], map: "slack_channel_links_workspace_enabled_idx")
+  @@index([backfillState, updatedAt(sort: Desc)], map: "slack_channel_links_backfill_state_updated_idx")
+  @@map("slack_channel_links")
+}
+
+model SlackChannelOwner {
+  id            String   @id @default(uuid())
+  slackTeamId   String   @map("slack_team_id")
+  slackChannelId String  @map("slack_channel_id")
+  slackUserId   String   @map("slack_user_id")
+  portalUserId  String?  @map("portal_user_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  channel    SlackChannel @relation(fields: [slackTeamId, slackChannelId], references: [slackTeamId, slackChannelId], onDelete: Cascade)
+  portalUser PortalUser?  @relation(fields: [portalUserId], references: [id], onDelete: SetNull)
+
+  @@unique([slackTeamId, slackChannelId, slackUserId], map: "slack_channel_owners_team_channel_user_key")
+  @@index([portalUserId], map: "slack_channel_owners_portal_user_idx")
+  @@map("slack_channel_owners")
+}
+
+model SlackMessage {
+  id              String   @id @default(uuid())
+  slackTeamId     String   @map("slack_team_id")
+  slackChannelId  String   @map("slack_channel_id")
+  slackTs         String   @map("slack_ts")
+  threadTs        String?  @map("thread_ts")
+  researchJobId   String?  @map("research_job_id")
+  slackUserId     String?  @map("slack_user_id")
+  text            String
+  rawJson         Json?    @map("raw_json")
+  permalink       String?
+  messageCreatedAt DateTime @map("message_created_at")
+  editedAt        DateTime? @map("edited_at")
+  deletedAt       DateTime? @map("deleted_at")
+  ingestedAt      DateTime  @default(now()) @map("ingested_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  installation SlackInstallation @relation(fields: [slackTeamId], references: [slackTeamId], onDelete: Cascade)
+  channel      SlackChannel      @relation(fields: [slackTeamId, slackChannelId], references: [slackTeamId, slackChannelId], onDelete: Cascade)
+  researchJob  ResearchJob?      @relation(fields: [researchJobId], references: [id], onDelete: SetNull)
+  attention    AttentionItem[]
+
+  @@unique([slackTeamId, slackChannelId, slackTs], map: "slack_messages_team_channel_ts_key")
+  @@index([researchJobId, messageCreatedAt(sort: Desc)], map: "slack_messages_workspace_created_idx")
+  @@index([slackTeamId, slackChannelId, threadTs], map: "slack_messages_team_channel_thread_idx")
+  @@map("slack_messages")
+}
+
+model SlackEventReceipt {
+  id         String   @id @default(uuid())
+  slackTeamId String  @map("slack_team_id")
+  eventId    String   @map("event_id")
+  eventType  String   @map("event_type")
+  payloadJson Json?   @map("payload_json")
+  receivedAt DateTime @default(now()) @map("received_at")
+
+  installation SlackInstallation @relation(fields: [slackTeamId], references: [slackTeamId], onDelete: Cascade)
+
+  @@unique([slackTeamId, eventId], map: "slack_event_receipts_team_event_key")
+  @@index([slackTeamId, receivedAt(sort: Desc)], map: "slack_event_receipts_team_received_idx")
+  @@map("slack_event_receipts")
+}
+
+model AttentionItem {
+  id                   String            @id @default(uuid())
+  researchJobId        String            @map("research_job_id")
+  slackTeamId          String            @map("slack_team_id")
+  slackChannelId       String            @map("slack_channel_id")
+  slackMessageId       String?           @map("slack_message_id")
+  slackMessageTs       String?           @map("slack_message_ts")
+  threadTs             String?           @map("thread_ts")
+  type                 AttentionItemType
+  summary              String
+  dueAt                DateTime?         @map("due_at")
+  status               AttentionItemStatus @default(OPEN)
+  draftReply           String?           @map("draft_reply")
+  assignedSlackUserId  String?           @map("assigned_slack_user_id")
+  assignedPortalUserId String?           @map("assigned_portal_user_id")
+  lastNotifiedAt       DateTime?         @map("last_notified_at")
+  metadataJson         Json?             @map("metadata_json")
+  createdAt            DateTime          @default(now()) @map("created_at")
+  updatedAt            DateTime          @updatedAt @map("updated_at")
+
+  researchJob        ResearchJob       @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  installation       SlackInstallation @relation(fields: [slackTeamId], references: [slackTeamId], onDelete: Cascade)
+  channel            SlackChannel      @relation(fields: [slackTeamId, slackChannelId], references: [slackTeamId, slackChannelId], onDelete: Cascade)
+  slackMessage       SlackMessage?     @relation(fields: [slackMessageId], references: [id], onDelete: SetNull)
+  assignedPortalUser PortalUser?       @relation(fields: [assignedPortalUserId], references: [id], onDelete: SetNull)
+  notifications      Notification[]
+
+  @@index([researchJobId, status, dueAt], map: "attention_items_workspace_status_due_idx")
+  @@index([slackTeamId, slackChannelId, status], map: "attention_items_team_channel_status_idx")
+  @@index([assignedPortalUserId, status], map: "attention_items_assigned_portal_status_idx")
+  @@map("attention_items")
+}
+
+model Notification {
+  id              String               @id @default(uuid())
+  portalUserId    String               @map("portal_user_id")
+  researchJobId   String?              @map("research_job_id")
+  attentionItemId String?              @map("attention_item_id")
+  kind            NotificationKind
+  severity        NotificationSeverity @default(INFO)
+  title           String
+  body            String
+  metadataJson    Json?                @map("metadata_json")
+  readAt          DateTime?            @map("read_at")
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
+
+  portalUser    PortalUser     @relation(fields: [portalUserId], references: [id], onDelete: Cascade)
+  researchJob   ResearchJob?   @relation(fields: [researchJobId], references: [id], onDelete: SetNull)
+  attentionItem AttentionItem? @relation(fields: [attentionItemId], references: [id], onDelete: SetNull)
+  deliveries    NotificationDelivery[]
+
+  @@index([portalUserId, readAt, createdAt(sort: Desc)], map: "notifications_portal_user_read_created_idx")
+  @@index([researchJobId, createdAt(sort: Desc)], map: "notifications_workspace_created_idx")
+  @@index([attentionItemId], map: "notifications_attention_item_idx")
+  @@map("notifications")
+}
+
+model NotificationDelivery {
+  id             String                        @id @default(uuid())
+  notificationId String                        @map("notification_id")
+  slackTeamId    String?                       @map("slack_team_id")
+  slackChannelId String?                       @map("slack_channel_id")
+  slackUserId    String?                       @map("slack_user_id")
+  destination    NotificationDeliveryDestination
+  slackMessageTs String?                       @map("slack_message_ts")
+  status         NotificationDeliveryStatus    @default(SENT)
+  error          String?
+  sentAt         DateTime?                     @map("sent_at")
+  createdAt      DateTime                      @default(now()) @map("created_at")
+  updatedAt      DateTime                      @updatedAt @map("updated_at")
+
+  notification Notification     @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  installation SlackInstallation? @relation(fields: [slackTeamId], references: [slackTeamId], onDelete: SetNull)
+  channel      SlackChannel?      @relation(fields: [slackTeamId, slackChannelId], references: [slackTeamId, slackChannelId], onDelete: SetNull)
+
+  @@index([notificationId, createdAt(sort: Desc)], map: "notification_deliveries_notification_created_idx")
+  @@index([destination, status, createdAt(sort: Desc)], map: "notification_deliveries_destination_status_created_idx")
+  @@map("notification_deliveries")
+}
+
+model IntegrationJob {
+  id           String               @id @default(uuid())
+  type         IntegrationJobType
+  status       IntegrationJobStatus @default(QUEUED)
+  researchJobId String?             @map("research_job_id")
+  slackTeamId  String?              @map("slack_team_id")
+  payloadJson  Json?                @map("payload_json")
+  runAt        DateTime             @default(now()) @map("run_at")
+  lockedAt     DateTime?            @map("locked_at")
+  lockedBy     String?              @map("locked_by")
+  attempts     Int                  @default(0)
+  maxAttempts  Int                  @default(8) @map("max_attempts")
+  lastError    String?              @map("last_error")
+  completedAt  DateTime?            @map("completed_at")
+  createdAt    DateTime             @default(now()) @map("created_at")
+  updatedAt    DateTime             @updatedAt @map("updated_at")
+
+  researchJob   ResearchJob?       @relation(fields: [researchJobId], references: [id], onDelete: SetNull)
+  installation  SlackInstallation? @relation(fields: [slackTeamId], references: [slackTeamId], onDelete: SetNull)
+
+  @@index([status, runAt], map: "integration_jobs_status_run_at_idx")
+  @@index([type, status, runAt], map: "integration_jobs_type_status_run_at_idx")
+  @@index([researchJobId, status, runAt], map: "integration_jobs_workspace_status_run_at_idx")
+  @@map("integration_jobs")
 }
 
 model ResearchJobEvent {

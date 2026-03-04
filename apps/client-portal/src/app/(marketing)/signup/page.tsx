@@ -4,6 +4,7 @@ import Link from "next/link";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getPortalMe, signupPortal } from "@/lib/auth-api";
+import { Badge, Button, Input } from "@/components/ui";
 
 type SignupFieldKey = "email" | "password" | "website";
 
@@ -41,6 +42,8 @@ function firstInvalidFieldKey(errors: Partial<Record<SignupFieldKey, string>>): 
   const order: SignupFieldKey[] = ["email", "password", "website"];
   return order.find((field) => Boolean(errors[field])) || null;
 }
+
+const baseFieldClass = "mt-1";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -137,49 +140,35 @@ export default function SignupPage() {
   if (checking) {
     return (
       <section className="bat-shell grid min-h-[70vh] place-items-center py-12">
-        <div className="bat-surface w-full max-w-md p-7 text-sm" style={{ color: "var(--bat-text-muted)" }}>
-          Checking session...
-        </div>
+        <div className="bat-panel w-full max-w-md p-7 text-sm bat-text-muted">Checking session...</div>
       </section>
     );
   }
 
   return (
-    <section className="bat-shell py-4 sm:py-6">
+    <section className="bat-shell py-6">
       <div className="mx-auto w-full max-w-5xl">
-        <div className="bat-surface p-4 sm:p-5">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="bat-panel p-5 sm:p-6">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <div>
-              <h1 className="text-2xl font-semibold">Create your BAT workspace</h1>
-              <p className="mt-1 text-xs" style={{ color: "var(--bat-text-muted)" }}>
-                Verify email, then continue setup in chat.
-              </p>
+              <Badge>Create workspace</Badge>
+              <h1 className="bat-heading-md mt-3">Create your BAT workspace</h1>
+              <p className="mt-1 text-xs bat-text-muted">Verify email, then continue setup in chat.</p>
             </div>
-            <p className="rounded-full border px-3 py-1 text-xs" style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)", color: "var(--bat-text-muted)" }}>
-              Background research starts automatically
-            </p>
+            <p className="bat-chip">Background research starts automatically</p>
           </div>
 
           <div className="min-h-8 space-y-2" aria-live="polite">
-            {error ? (
-              <p className="rounded-xl border px-3 py-2 text-sm" style={{ borderColor: "#f4b8b4", background: "#fff5f4", color: "#9f2317" }}>
-                {error}
-              </p>
-            ) : null}
-            {emailNotice ? (
-              <p className="rounded-xl border px-3 py-2 text-sm" style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}>
-                {emailNotice}
-              </p>
-            ) : null}
+            {error ? <p className="bat-panel-muted bat-status-danger rounded-xl px-3 py-2 text-sm">{error}</p> : null}
+            {emailNotice ? <p className="bat-panel-muted rounded-xl px-3 py-2 text-sm">{emailNotice}</p> : null}
           </div>
 
           <form className="mt-3 space-y-4" onSubmit={onSubmit}>
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="block text-sm">
                 Full name
-                <input
-                  className="mt-1 w-full rounded-xl border px-3 py-2"
-                  style={{ borderColor: "var(--bat-border)" }}
+                <Input
+                  className={baseFieldClass}
                   type="text"
                   value={fullName}
                   onChange={(event) => setFullName(event.target.value)}
@@ -188,13 +177,12 @@ export default function SignupPage() {
               </label>
               <label className="block text-sm">
                 Work email
-                <input
+                <Input
                   ref={(node) => {
                     inputRefs.current.email = node;
                   }}
                   aria-invalid={Boolean(fieldErrors.email)}
-                  className="mt-1 w-full rounded-xl border px-3 py-2"
-                  style={{ borderColor: fieldErrors.email ? "#f4b8b4" : "var(--bat-border)" }}
+                  className={baseFieldClass}
                   type="email"
                   value={email}
                   onChange={(event) => {
@@ -204,18 +192,15 @@ export default function SignupPage() {
                   required
                   autoComplete="email"
                 />
-                <span className="mt-1 block min-h-4 text-xs" style={{ color: "#9f2317" }}>
-                  {fieldErrors.email || ""}
-                </span>
+                <span className="mt-1 block min-h-4 text-xs text-[color:var(--bat-danger)]">{fieldErrors.email || ""}</span>
               </label>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="block text-sm">
                 Company name
-                <input
-                  className="mt-1 w-full rounded-xl border px-3 py-2"
-                  style={{ borderColor: "var(--bat-border)" }}
+                <Input
+                  className={baseFieldClass}
                   type="text"
                   value={companyName}
                   onChange={(event) => setCompanyName(event.target.value)}
@@ -224,13 +209,12 @@ export default function SignupPage() {
               </label>
               <label className="block text-sm">
                 Website
-                <input
+                <Input
                   ref={(node) => {
                     inputRefs.current.website = node;
                   }}
                   aria-invalid={Boolean(fieldErrors.website)}
-                  className="mt-1 w-full rounded-xl border px-3 py-2"
-                  style={{ borderColor: fieldErrors.website ? "#f4b8b4" : "var(--bat-border)" }}
+                  className={baseFieldClass}
                   type="url"
                   placeholder="https://yourcompany.com"
                   value={website}
@@ -241,9 +225,7 @@ export default function SignupPage() {
                   required
                   autoComplete="url"
                 />
-                <span className="mt-1 block min-h-4 text-xs" style={{ color: "#9f2317" }}>
-                  {fieldErrors.website || ""}
-                </span>
+                <span className="mt-1 block min-h-4 text-xs text-[color:var(--bat-danger)]">{fieldErrors.website || ""}</span>
               </label>
             </div>
 
@@ -251,8 +233,7 @@ export default function SignupPage() {
               <label className="block text-sm">
                 Additional websites (optional)
                 <textarea
-                  className="mt-1 w-full rounded-xl border px-3 py-2"
-                  style={{ borderColor: "var(--bat-border)", minHeight: 78 }}
+                  className="bat-textarea mt-1"
                   placeholder="One per line"
                   value={additionalWebsites}
                   onChange={(event) => setAdditionalWebsites(event.target.value)}
@@ -262,8 +243,7 @@ export default function SignupPage() {
               <label className="block text-sm">
                 Social profile references (optional)
                 <textarea
-                  className="mt-1 w-full rounded-xl border px-3 py-2"
-                  style={{ borderColor: "var(--bat-border)", minHeight: 78 }}
+                  className="bat-textarea mt-1"
                   placeholder="LinkedIn / Instagram / TikTok / YouTube / X"
                   value={socialReferences}
                   onChange={(event) => setSocialReferences(event.target.value)}
@@ -274,13 +254,12 @@ export default function SignupPage() {
             <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
               <label className="block text-sm">
                 Password
-                <input
+                <Input
                   ref={(node) => {
                     inputRefs.current.password = node;
                   }}
                   aria-invalid={Boolean(fieldErrors.password)}
-                  className="mt-1 w-full rounded-xl border px-3 py-2"
-                  style={{ borderColor: fieldErrors.password ? "#f4b8b4" : "var(--bat-border)" }}
+                  className={baseFieldClass}
                   type="password"
                   value={password}
                   onChange={(event) => {
@@ -291,24 +270,19 @@ export default function SignupPage() {
                   autoComplete="new-password"
                   minLength={8}
                 />
-                <span className="mt-1 block min-h-4 text-xs" style={{ color: "#9f2317" }}>
+                <span className="mt-1 block min-h-4 text-xs text-[color:var(--bat-danger)]">
                   {fieldErrors.password || "Use at least 8 characters."}
                 </span>
               </label>
 
-              <button
-                type="submit"
-                disabled={loading}
-                className="h-11 rounded-full px-6 text-sm font-semibold disabled:opacity-70"
-                style={{ background: "var(--bat-accent)", color: "white" }}
-              >
+              <Button type="submit" disabled={loading} className="h-11 px-6">
                 {loading ? "Creating workspace..." : "Create workspace"}
-              </button>
+              </Button>
             </div>
           </form>
 
-          <p className="mt-3 text-sm" style={{ color: "var(--bat-text-muted)" }}>
-            Already onboarded? <Link href="/login">Log in</Link>
+          <p className="mt-3 text-sm bat-text-muted">
+            Already onboarded? <Link href="/login" className="font-semibold text-[color:var(--bat-text)]">Log in</Link>
           </p>
         </div>
       </div>

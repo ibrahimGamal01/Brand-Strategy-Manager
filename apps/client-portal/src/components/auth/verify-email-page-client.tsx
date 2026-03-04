@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { verifyPortalEmail } from "@/lib/auth-api";
+import { Badge, Button } from "@/components/ui";
 
 export function VerifyEmailPageClient() {
   const searchParams = useSearchParams();
@@ -40,27 +41,17 @@ export function VerifyEmailPageClient() {
 
   return (
     <section className="bat-shell grid min-h-[70vh] place-items-center py-12">
-      <div className="bat-surface w-full max-w-md p-7">
-        <h1 className="text-2xl font-semibold">Verify your email</h1>
-        <p className="mt-3 text-sm" style={{ color: state === "error" ? "#9f2317" : "var(--bat-text-muted)" }}>
+      <div className="bat-panel w-full max-w-md p-7">
+        <Badge className="mb-4">Verification</Badge>
+        <h1 className="bat-heading-md">Verify your email</h1>
+        <p className={state === "error" ? "bat-panel-muted bat-status-danger mt-3 rounded-xl px-3 py-2 text-sm" : "mt-3 text-sm bat-text-muted"}>
           {message}
         </p>
         <div className="mt-5 flex gap-2">
           {state === "ok" ? (
-            <button
-              type="button"
-              className="rounded-full px-4 py-2 text-sm font-semibold"
-              style={{ background: "var(--bat-accent)", color: "white" }}
-              onClick={() => router.push("/login?verified=1")}
-            >
-              Go to login
-            </button>
+            <Button onClick={() => router.push("/login?verified=1")}>Go to login</Button>
           ) : null}
-          <Link
-            href="/login"
-            className="rounded-full border px-4 py-2 text-sm"
-            style={{ borderColor: "var(--bat-border)" }}
-          >
+          <Link href="/login" className="bat-button bat-button-secondary">
             Back to login
           </Link>
         </div>

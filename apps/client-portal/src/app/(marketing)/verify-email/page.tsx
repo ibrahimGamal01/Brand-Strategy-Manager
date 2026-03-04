@@ -6,7 +6,7 @@ export default function VerifyEmailPage() {
     <Suspense
       fallback={
         <section className="bat-shell grid min-h-[70vh] place-items-center py-12">
-          <div className="bat-surface w-full max-w-md p-7 text-sm" style={{ color: "var(--bat-text-muted)" }}>
+          <div className="bat-panel w-full max-w-md p-7 text-sm bat-text-muted">
             Loading verification...
           </div>
         </section>

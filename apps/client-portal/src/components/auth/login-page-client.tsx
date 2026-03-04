@@ -4,6 +4,7 @@ import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getPortalMe, loginPortal, resendPortalVerification } from "@/lib/auth-api";
+import { Badge, Button, Input } from "@/components/ui";
 
 export function LoginPageClient() {
   const router = useRouter();
@@ -94,41 +95,27 @@ export function LoginPageClient() {
   if (checking) {
     return (
       <section className="bat-shell grid min-h-[70vh] place-items-center py-12">
-        <div className="bat-surface w-full max-w-md p-7 text-sm" style={{ color: "var(--bat-text-muted)" }}>
-          Checking session...
-        </div>
+        <div className="bat-panel w-full max-w-md p-7 text-sm bat-text-muted">Checking session...</div>
       </section>
     );
   }
 
   return (
     <section className="bat-shell grid min-h-[70vh] place-items-center py-12">
-      <div className="bat-surface w-full max-w-md p-7">
-        <h1 className="text-2xl font-semibold">Log in to BAT</h1>
-        <p className="mt-2 text-sm" style={{ color: "var(--bat-text-muted)" }}>
-          Continue to your workspaces and live activity stream.
-        </p>
-        {verified ? (
-          <p className="mt-3 rounded-xl border px-3 py-2 text-sm" style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}>
-            Your email is verified. You can log in now.
-          </p>
-        ) : null}
-        {error ? (
-          <p className="mt-3 rounded-xl border px-3 py-2 text-sm" style={{ borderColor: "#f4b8b4", background: "#fff5f4", color: "#9f2317" }}>
-            {error}
-          </p>
-        ) : null}
-        {notice ? (
-          <p className="mt-3 rounded-xl border px-3 py-2 text-sm" style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}>
-            {notice}
-          </p>
-        ) : null}
+      <div className="bat-panel w-full max-w-md p-7">
+        <Badge className="mb-4">Sign in</Badge>
+        <h1 className="bat-heading-md">Log in to BAT</h1>
+        <p className="mt-2 text-sm bat-text-muted">Continue to your workspaces and live activity stream.</p>
+
+        {verified ? <p className="bat-panel-muted mt-3 rounded-xl px-3 py-2 text-sm">Your email is verified.</p> : null}
+        {error ? <p className="bat-panel-muted bat-status-danger mt-3 rounded-xl px-3 py-2 text-sm">{error}</p> : null}
+        {notice ? <p className="bat-panel-muted mt-3 rounded-xl px-3 py-2 text-sm">{notice}</p> : null}
+
         <form className="mt-6 space-y-3" onSubmit={onSubmit}>
           <label className="block text-sm">
             Email
-            <input
-              className="mt-1 w-full rounded-xl border px-3 py-2"
-              style={{ borderColor: "var(--bat-border)" }}
+            <Input
+              className="mt-1"
               type="email"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
@@ -138,9 +125,8 @@ export function LoginPageClient() {
           </label>
           <label className="block text-sm">
             Password
-            <input
-              className="mt-1 w-full rounded-xl border px-3 py-2"
-              style={{ borderColor: "var(--bat-border)" }}
+            <Input
+              className="mt-1"
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
@@ -148,35 +134,25 @@ export function LoginPageClient() {
               autoComplete="current-password"
             />
           </label>
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-full px-4 py-2 text-sm font-semibold disabled:opacity-70"
-            style={{ background: "var(--bat-accent)", color: "white" }}
-          >
+          <Button type="submit" disabled={loading} className="w-full">
             {loading ? "Logging in..." : "Log in"}
-          </button>
+          </Button>
         </form>
+
         <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
           <Link
             href={`/verify-email-code${email.trim() ? `?email=${encodeURIComponent(email.trim())}` : ""}`}
-            className="rounded-full border px-4 py-2"
-            style={{ borderColor: "var(--bat-border)" }}
+            className="bat-button bat-button-secondary"
           >
             Verify email code
           </Link>
-          <button
-            type="button"
-            className="rounded-full border px-4 py-2"
-            style={{ borderColor: "var(--bat-border)" }}
-            disabled={resending}
-            onClick={handleResend}
-          >
+          <Button variant="secondary" disabled={resending} onClick={handleResend}>
             {resending ? "Sending..." : "Resend code"}
-          </button>
+          </Button>
         </div>
-        <p className="mt-4 text-sm" style={{ color: "var(--bat-text-muted)" }}>
-          No account? <Link href="/signup">Create one</Link>
+
+        <p className="mt-4 text-sm bat-text-muted">
+          No account? <Link href="/signup" className="font-semibold text-[color:var(--bat-text)]">Create one</Link>
         </p>
       </div>
     </section>

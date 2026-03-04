@@ -30,6 +30,7 @@ function runDiversityAssertions() {
       webSearch: true,
       liveWebsiteCrawl: true,
       socialIntel: true,
+      slackIntel: true,
     },
   });
 
@@ -57,6 +58,7 @@ function runDiversityAssertions() {
       webSearch: true,
       liveWebsiteCrawl: true,
       socialIntel: true,
+      slackIntel: true,
     },
   });
 

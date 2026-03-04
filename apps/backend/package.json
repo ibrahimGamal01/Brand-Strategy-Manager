@@ -18,6 +18,9 @@
         "lint": "eslint src/",
         "check:portal-rollout": "tsx src/scripts/check-portal-rollout-readiness.ts",
         "check:runtime-config": "tsx src/scripts/check-runtime-config.ts",
+        "check:slack-integration": "tsx src/scripts/check-slack-integration-readiness.ts",
+        "slack:manifest": "tsx src/scripts/export-slack-manifest.ts",
+        "slack:manifest:push": "tsx src/scripts/push-slack-manifest.ts",
         "cleanup:library-trust:dry-run": "tsx src/scripts/library-trust-cleanup-dry-run.ts",
         "test:chat-components": "tsx src/scripts/test-chat-component-policy.ts",
         "test:chat-tool-hints": "tsx src/scripts/test-chat-tool-hints.ts",
@@ -43,6 +46,7 @@
         "test:client-right-rail-regression": "tsx src/scripts/test-client-right-rail-regression.ts",
         "test:competitor-scoring": "tsx src/scripts/test-competitor-scorer-utils.ts",
         "test:competitor-quality-v3": "tsx src/scripts/test-competitor-quality-v3.ts",
+        "test:intake-competitor-links": "tsx src/scripts/test-intake-competitor-links-suggest.ts",
         "test:competitor-pipeline-fixes": "tsx src/scripts/test-competitor-pipeline-fixes.ts",
         "export:chat-training": "tsx -r dotenv/config src/scripts/export-chat-training-samples.ts",
         "test:camoufox": "tsx src/scripts/test-camoufox-integration.ts",
@@ -56,6 +60,7 @@
         "test:workflow-integrity": "tsx -r dotenv/config scripts/test-client-workflow-integrity.ts"
     },
     "dependencies": {
+        "@slack/bolt": "^3.19.0",
         "@aws-sdk/client-s3": "^3.995.0",
         "@aws-sdk/lib-storage": "^3.995.0",
         "@prisma/client": "^6.0.0",

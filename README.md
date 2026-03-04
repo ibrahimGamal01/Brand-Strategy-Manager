@@ -128,6 +128,22 @@ python3 apps/backend/scripts/instagram_scraper.py ummahpreneur 10
 | `/api/clients` | GET, POST | Manage clients |
 | `/api/research-jobs` | GET, POST | Manage research jobs |
 
+## Slack Integration Quickstart
+
+Use the production-oriented guide:
+
+- `docs/integrations/slack-quickstart.md`
+- `docs/deployment/slack-production-cutover.md`
+
+Readiness check:
+
+```bash
+npm run check:slack-integration --workspace=apps/backend
+npm run slack:manifest --workspace=apps/backend > /tmp/bat-slack-manifest.yaml
+# Optional: push/update app manifest via Slack API token
+SLACK_ADMIN_USER_TOKEN=xoxp-... npm run slack:manifest:push --workspace=apps/backend
+```
+
 ## Database Schema
 
 See `apps/backend/prisma/schema.prisma` for the complete schema.

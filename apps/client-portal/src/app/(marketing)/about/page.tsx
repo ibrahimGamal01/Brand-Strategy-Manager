@@ -1,25 +1,32 @@
+const blocks = [
+  {
+    title: "Why BAT exists",
+    text: "Marketing teams juggle disconnected tools, unclear ownership, and low confidence in recommendations. BAT centralizes execution in one conversation.",
+  },
+  {
+    title: "How BAT works",
+    text: "Start from chat, watch activity updates, open evidence, and approve changes before they apply. BAT can run with you or autonomously with guardrails.",
+  },
+];
+
 export default function AboutPage() {
   return (
-    <section className="bat-shell py-14 md:py-20">
-      <p className="bat-chip">About BAT</p>
-      <h1 className="mt-4 text-4xl md:text-5xl" style={{ fontFamily: "var(--font-display)" }}>
-        A client-ready agency operating layer
-      </h1>
-      <div className="mt-6 grid gap-4 md:grid-cols-2">
-        <article className="bat-surface p-6">
-          <h2 className="text-lg font-semibold">Why BAT exists</h2>
-          <p className="mt-2 text-sm" style={{ color: "var(--bat-text-muted)" }}>
-            Marketing teams juggle disconnected tools, unclear ownership, and low confidence in recommendations. BAT
-            centralizes execution in one conversation where data, decisions, and deliverables stay connected.
-          </p>
-        </article>
-        <article className="bat-surface p-6">
-          <h2 className="text-lg font-semibold">How BAT works</h2>
-          <p className="mt-2 text-sm" style={{ color: "var(--bat-text-muted)" }}>
-            Start from chat, watch activity updates live, open evidence from the library, and approve changes before
-            they apply. BAT can run manually with you or autonomously with guardrails.
-          </p>
-        </article>
+    <section className="bat-shell py-10 md:py-16">
+      <div className="bat-panel space-y-4 p-7 md:p-9">
+        <p className="bat-chip">About BAT</p>
+        <h1 className="bat-heading-lg">A client-ready agency operating layer</h1>
+        <p className="max-w-3xl text-sm bat-text-muted md:text-base">
+          BAT is designed for teams that need transparent strategy execution with context, not disconnected outputs.
+        </p>
+      </div>
+
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
+        {blocks.map((block) => (
+          <article key={block.title} className="bat-panel p-6">
+            <h2 className="bat-heading-sm">{block.title}</h2>
+            <p className="mt-2 text-sm bat-text-muted">{block.text}</p>
+          </article>
+        ))}
       </div>
     </section>
   );

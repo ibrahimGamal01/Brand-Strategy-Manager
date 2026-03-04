@@ -252,6 +252,7 @@ function testPolicyNormalization() {
         webSearch: true,
         liveWebsiteCrawl: true,
         socialIntel: true,
+        slackIntel: true,
       },
     },
     {
@@ -280,6 +281,7 @@ async function testSourceScopeBlockingInToolContract() {
       webSearch: false,
       liveWebsiteCrawl: true,
       socialIntel: true,
+      slackIntel: true,
     },
   });
   const webSearchBlocked = await executeToolWithContract({
@@ -314,6 +316,7 @@ async function testSourceScopeBlockingInToolContract() {
       webSearch: true,
       liveWebsiteCrawl: true,
       socialIntel: false,
+      slackIntel: true,
     },
   });
   const socialBlocked = await executeToolWithContract({

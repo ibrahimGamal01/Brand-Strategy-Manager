@@ -1,6 +1,12 @@
 import {
   LibraryItem,
+  RuntimeNotification,
   RuntimeBranch,
+  SlackChannelSummary,
+  SlackInstallationSettings,
+  SlackInstallationSummary,
+  SlackPreflightReport,
+  SlackUserSummary,
   RuntimeThread,
   RuntimeWorkspace,
 } from "@/types/chat";
@@ -57,6 +63,234 @@ export async function fetchWorkspaces(): Promise<RuntimeWorkspace[]> {
   if (Array.isArray(payload?.workspaces)) return payload.workspaces;
   if (Array.isArray(payload?.jobs)) return payload.jobs;
   return [];
+}
+
+export async function fetchPortalNotifications(options?: {
+  workspaceId?: string;
+  unreadOnly?: boolean;
+  limit?: number;
+}) {
+  const params = new URLSearchParams();
+  if (options?.workspaceId) params.set("workspaceId", options.workspaceId);
+  if (typeof options?.unreadOnly === "boolean") {
+    params.set("unreadOnly", String(options.unreadOnly));
+  }
+  if (typeof options?.limit === "number" && Number.isFinite(options.limit)) {
+    params.set("limit", String(Math.max(1, Math.min(200, Math.floor(options.limit)))));
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`/api/portal/notifications${suffix}`, {
+    method: "GET",
+    cache: "no-store",
+    credentials: "include",
+  });
+  return parseJson<{ ok: boolean; notifications: RuntimeNotification[] }>(response);
+}
+
+export async function markPortalNotificationRead(notificationId: string) {
+  const response = await fetch(`/api/portal/notifications/${notificationId}/read`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+  });
+  return parseJson<{ ok: boolean; updated: number }>(response);
+}
+
+export async function markAllPortalNotificationsRead(workspaceId?: string) {
+  const response = await fetch(`/api/portal/notifications/read-all`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(workspaceId ? { workspaceId } : {}),
+  });
+  return parseJson<{ ok: boolean; updated: number }>(response);
+}
+
+export async function fetchSlackInstallUrl() {
+  const response = await fetch(`/api/portal/slack/install-url`, {
+    method: "GET",
+    cache: "no-store",
+    credentials: "include",
+  });
+  return parseJson<{ ok: boolean; installUrl: string }>(response);
+}
+
+export async function fetchSlackStatus() {
+  const response = await fetch(`/api/portal/slack/status`, {
+    method: "GET",
+    cache: "no-store",
+    credentials: "include",
+  });
+  return parseJson<{ ok: boolean; installations: SlackInstallationSummary[] }>(response);
+}
+
+export async function fetchSlackPreflight() {
+  const response = await fetch(`/api/portal/slack/preflight`, {
+    method: "GET",
+    cache: "no-store",
+    credentials: "include",
+  });
+  return parseJson<{ ok: boolean } & SlackPreflightReport>(response);
+}
+
+export async function fetchSlackManifest() {
+  const response = await fetch(`/api/portal/slack/manifest`, {
+    method: "GET",
+    cache: "no-store",
+    credentials: "include",
+  });
+  return parseJson<{
+    ok: boolean;
+    yaml: string;
+    manifest: Record<string, unknown>;
+    backendOrigin: string;
+    requestUrls: {
+      events: string;
+      commands: string;
+      interactive: string;
+      oauthRedirect: string;
+    };
+    scopes: string[];
+    warnings: string[];
+  }>(response);
+}
+
+export async function fetchSlackUsers(options?: { slackTeamId?: string; sync?: boolean }) {
+  const params = new URLSearchParams();
+  if (options?.slackTeamId) params.set("slackTeamId", options.slackTeamId);
+  if (options?.sync) params.set("sync", "true");
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`/api/portal/slack/users${suffix}`, {
+    method: "GET",
+    cache: "no-store",
+    credentials: "include",
+  });
+  return parseJson<{
+    ok: boolean;
+    slackTeamId: string | null;
+    synced: Record<string, unknown> | null;
+    users: SlackUserSummary[];
+  }>(response);
+}
+
+export async function fetchSlackChannels(slackTeamId?: string) {
+  const params = new URLSearchParams();
+  if (slackTeamId) params.set("slackTeamId", slackTeamId);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`/api/portal/slack/channels${suffix}`, {
+    method: "GET",
+    cache: "no-store",
+    credentials: "include",
+  });
+  return parseJson<{
+    ok: boolean;
+    slackTeamId: string | null;
+    channels: SlackChannelSummary[];
+    workspaces: Array<{ id: string; name: string }>;
+  }>(response);
+}
+
+export async function linkSlackChannel(input: {
+  slackTeamId: string;
+  channelId: string;
+  workspaceId: string;
+  enabled?: boolean;
+}) {
+  const response = await fetch(`/api/portal/slack/channels/${input.channelId}/link`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({
+      slackTeamId: input.slackTeamId,
+      workspaceId: input.workspaceId,
+      enabled: input.enabled !== false,
+    }),
+  });
+  return parseJson<{ ok: boolean }>(response);
+}
+
+export async function updateSlackChannelOwners(input: {
+  slackTeamId: string;
+  channelId: string;
+  owners: Array<{ slackUserId: string; portalUserId?: string }>;
+}) {
+  const response = await fetch(`/api/portal/slack/channels/${input.channelId}/owners`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({
+      slackTeamId: input.slackTeamId,
+      owners: input.owners,
+    }),
+  });
+  return parseJson<{ ok: boolean; ownersCount: number }>(response);
+}
+
+export async function queueSlackChannelBackfill(input: { slackTeamId: string; channelId: string }) {
+  const response = await fetch(`/api/portal/slack/channels/${input.channelId}/backfill`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ slackTeamId: input.slackTeamId }),
+  });
+  return parseJson<{ ok: boolean }>(response);
+}
+
+export async function updateSlackSettings(input: {
+  slackTeamId: string;
+  defaultNotifyChannelId?: string | null;
+  settings?: Partial<SlackInstallationSettings>;
+}) {
+  const response = await fetch(`/api/portal/slack/settings`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(input),
+  });
+  return parseJson<{
+    ok: boolean;
+    installation: {
+      slackTeamId: string;
+      teamName?: string | null;
+      defaultNotifyChannelId?: string | null;
+      settings: SlackInstallationSettings;
+    };
+  }>(response);
+}
+
+export async function purgeSlackChannelData(input: { slackTeamId: string; slackChannelId: string }) {
+  const response = await fetch(`/api/portal/slack/purge/channel`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(input),
+  });
+  return parseJson<{
+    ok: boolean;
+    purged: {
+      deliveries: number;
+      attentionItems: number;
+      messages: number;
+    };
+  }>(response);
+}
+
+export async function purgeSlackWorkspaceData(workspaceId: string) {
+  const response = await fetch(`/api/portal/slack/purge/workspace`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ workspaceId }),
+  });
+  return parseJson<{
+    ok: boolean;
+    purged: {
+      deliveries: number;
+      notifications: number;
+      attentionItems: number;
+      messages: number;
+    };
+  }>(response);
 }
 
 export async function fetchWorkspaceLibrary(
@@ -751,6 +985,7 @@ export type RuntimeInputSourceScopeDto = {
   webSearch: boolean;
   liveWebsiteCrawl: boolean;
   socialIntel: boolean;
+  slackIntel: boolean;
 };
 
 export type RuntimeInputOptionsDto = {

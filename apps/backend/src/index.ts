@@ -27,9 +27,13 @@ import documentsRouter from './routes/research-jobs-documents';
 import webIntelligenceRouter from './routes/research-jobs-web-intelligence';
 import chatRuntimeRouter from './routes/research-jobs-chat-runtime';
 import portalRouter from './routes/portal';
+import slackRouter from './routes/slack';
 import { STORAGE_ROOT } from './services/storage/storage-root';
 import { attachChatWebSocketServer } from './services/chat/chat-ws';
 import { attachRuntimeWebSocketServer } from './services/chat/runtime/runtime-ws';
+import { getSlackBootstrapStatus, getSlackReceiverRouter } from './services/slack/slack-app';
+import { getIntegrationSchedulerStatus, startIntegrationScheduler } from './services/integrations/integration-scheduler';
+import { queueDepthSnapshot } from './services/integrations/integration-job-queue';
 
 const envLoad = loadBackendEnv();
 console.log('[DEBUG] DATABASE_URL loaded:', process.env.DATABASE_URL?.replace(/:[^:@]*@/, ':***@'));
@@ -58,14 +62,26 @@ function resolvePortalDdgEnabled(): boolean {
 }
 
 app.use(cors());
+
+const slackReceiverRouter = getSlackReceiverRouter();
+if (slackReceiverRouter) {
+  app.use(slackReceiverRouter);
+}
+app.use('/api/slack', slackRouter);
 app.use(express.json());
 
 // Serve static files from storage directory
 app.use('/storage', express.static(STORAGE_ROOT));
 
 // Health check (always available, even if schema is not ready)
-app.get('/api/health', (req, res) => {
-  res.json({ 
+app.get('/api/health', async (req, res) => {
+  const slackBootstrap = getSlackBootstrapStatus();
+  const schedulerStatus = getIntegrationSchedulerStatus();
+  const queueDepth = await queueDepthSnapshot().catch((error: any) => ({
+    error: String(error?.message || error || 'UNAVAILABLE'),
+  }));
+
+  res.json({
     status: schemaReport?.schemaReady ? 'ok' : 'degraded',
     timestamp: new Date().toISOString(),
     database: 'connected',
@@ -90,6 +106,11 @@ app.get('/api/health', (req, res) => {
     portalEnrichment: {
       signupScanMode: resolvePortalSignupScanMode(),
       ddgEnabled: resolvePortalDdgEnabled(),
+    },
+    integrations: {
+      slack: slackBootstrap,
+      scheduler: schedulerStatus,
+      queueDepth,
     },
   });
 });
@@ -174,6 +195,10 @@ async function startServer(): Promise<void> {
     const { startOrchestrationScheduler } = require('./services/orchestration/orchestration-scheduler');
     startOrchestrationScheduler();
     console.log('🔄 Continuous orchestration scheduler started (15-minute intervals)');
+
+    // Start Slack/attention integration scheduler.
+    startIntegrationScheduler();
+    console.log('🔔 Integration scheduler started');
   });
 }
 

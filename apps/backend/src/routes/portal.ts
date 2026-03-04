@@ -51,6 +51,11 @@ import {
   resolvePortalWorkspaceLibraryRefs,
 } from '../services/portal/portal-library';
 import {
+  listPortalUserNotifications,
+  markAllNotificationsRead,
+  markNotificationRead,
+} from '../services/notifications/notification-service';
+import {
   getPortalIntakeScanRun,
   listPortalIntakeScanRunsWithEventCounts,
 } from '../services/portal/portal-intake-events-repository';
@@ -58,6 +63,22 @@ import {
   startPortalSignupEnrichment,
   syncPortalIntakeContinuousEnrichment,
 } from '../services/portal/portal-signup-enrichment';
+import { buildSlackInstallUrl, createSlackInstallState } from '../services/slack/slack-oauth';
+import {
+  findPortalUserBySlackUser,
+  listActiveSlackInstallations,
+  parseSlackInstallationSettings,
+  patchSlackInstallationSettings,
+} from '../services/slack/slack-installation-repo';
+import {
+  linkSlackChannelToWorkspace,
+  listSlackChannelsForTeam,
+  setSlackChannelOwners,
+} from '../services/slack/slack-channel-service';
+import { listSlackUsersForTeam, syncSlackUsersFromApi } from '../services/slack/slack-user-service';
+import { enqueueIntegrationJob } from '../services/integrations/integration-job-queue';
+import { getSlackBootstrapStatus } from '../services/slack/slack-app';
+import { buildSlackManifestBundle } from '../services/slack/slack-manifest';
 
 const router = Router();
 const authRateLimitStore = new Map<string, { count: number; resetAt: number }>();
@@ -188,6 +209,65 @@ function parseLibraryVersion(value: unknown): 'v1' | 'v2' | undefined {
   if (raw === '1' || raw === 'v1') return 'v1';
   if (raw === '2' || raw === 'v2') return 'v2';
   return undefined;
+}
+
+async function canAccessWorkspace(portalUserId: string, workspaceId: string, isAdmin: boolean): Promise<boolean> {
+  if (isAdmin) return true;
+  const membership = await prisma.portalWorkspaceMembership.findFirst({
+    where: {
+      userId: portalUserId,
+      researchJobId: workspaceId,
+    },
+    select: { id: true },
+  });
+  return Boolean(membership?.id);
+}
+
+async function listAccessibleSlackTeamIds(portalUserId: string, isAdmin: boolean): Promise<string[]> {
+  const installations = await listActiveSlackInstallations();
+  if (isAdmin) {
+    return Array.from(new Set(installations.map((installation) => installation.slackTeamId)));
+  }
+
+  const ownedInstallations = installations
+    .filter((installation) => installation.installedByPortalUserId === portalUserId)
+    .map((installation) => installation.slackTeamId);
+
+  const linkedWorkspaceTeams = await prisma.slackChannelLink.findMany({
+    where: {
+      researchJob: {
+        portalMemberships: {
+          some: {
+            userId: portalUserId,
+          },
+        },
+      },
+    },
+    select: { slackTeamId: true },
+    distinct: ['slackTeamId'],
+  });
+
+  return Array.from(new Set([...ownedInstallations, ...linkedWorkspaceTeams.map((row) => row.slackTeamId)]));
+}
+
+function buildSlackPreflightReport() {
+  const required: string[] = [
+    'BACKEND_PUBLIC_ORIGIN',
+    'SLACK_CLIENT_ID',
+    'SLACK_CLIENT_SECRET',
+    'SLACK_SIGNING_SECRET',
+    'SLACK_TOKEN_ENCRYPTION_KEY',
+  ];
+  const missingEnv = required.filter((name) => !safeString(process.env[name]));
+  const origin = safeString(process.env.BACKEND_PUBLIC_ORIGIN);
+  const callbackUrl = origin ? `${origin.replace(/\/+$/, '')}/api/slack/oauth/callback` : null;
+  return {
+    configured: missingEnv.length === 0,
+    required,
+    missingEnv,
+    callbackUrl,
+    bootstrap: getSlackBootstrapStatus(),
+  };
 }
 
 function serializePortalIntakeEventSse(event: PortalIntakeEvent): string {
@@ -604,6 +684,748 @@ router.post('/auth/resend-verification', async (req, res) => {
     });
   } catch (error: any) {
     return res.status(500).json({ error: 'RESEND_FAILED', details: error?.message || String(error) });
+  }
+});
+
+router.get('/notifications', requirePortalAuth, async (req, res) => {
+  try {
+    const authedReq = req as AuthedPortalRequest;
+    const portalUserId = String(authedReq.portalSession?.user?.id || '').trim();
+    if (!portalUserId) {
+      return res.status(401).json({ error: 'AUTH_REQUIRED' });
+    }
+
+    const workspaceId = safeString(Array.isArray(req.query.workspaceId) ? req.query.workspaceId[0] : req.query.workspaceId);
+    const unreadOnly = parseBoolean(Array.isArray(req.query.unreadOnly) ? req.query.unreadOnly[0] : req.query.unreadOnly, false);
+    const limit = Number.parseInt(
+      String(Array.isArray(req.query.limit) ? req.query.limit[0] : req.query.limit || ''),
+      10
+    );
+
+    if (workspaceId && !(await canAccessWorkspace(portalUserId, workspaceId, Boolean(authedReq.portalSession?.user?.isAdmin)))) {
+      return res.status(403).json({ error: 'FORBIDDEN' });
+    }
+
+    const notifications = await listPortalUserNotifications({
+      portalUserId,
+      ...(workspaceId ? { workspaceId } : {}),
+      unreadOnly,
+      ...(Number.isFinite(limit) ? { limit } : {}),
+    });
+    return res.json({ ok: true, notifications });
+  } catch (error: any) {
+    return res.status(500).json({
+      ok: false,
+      error: 'NOTIFICATIONS_LIST_FAILED',
+      details: String(error?.message || error),
+    });
+  }
+});
+
+router.post('/notifications/:id/read', requirePortalAuth, async (req, res) => {
+  try {
+    const authedReq = req as AuthedPortalRequest;
+    const portalUserId = String(authedReq.portalSession?.user?.id || '').trim();
+    if (!portalUserId) {
+      return res.status(401).json({ error: 'AUTH_REQUIRED' });
+    }
+    const notificationId = safeString(req.params.id);
+    if (!notificationId) return res.status(400).json({ error: 'notificationId is required' });
+    const result = await markNotificationRead({ portalUserId, notificationId });
+    return res.json({ ok: true, updated: result.count });
+  } catch (error: any) {
+    return res.status(500).json({
+      ok: false,
+      error: 'NOTIFICATION_READ_FAILED',
+      details: String(error?.message || error),
+    });
+  }
+});
+
+router.post('/notifications/read-all', requirePortalAuth, async (req, res) => {
+  try {
+    const authedReq = req as AuthedPortalRequest;
+    const portalUserId = String(authedReq.portalSession?.user?.id || '').trim();
+    if (!portalUserId) {
+      return res.status(401).json({ error: 'AUTH_REQUIRED' });
+    }
+    const workspaceId = safeString(req.body?.workspaceId);
+    if (workspaceId && !(await canAccessWorkspace(portalUserId, workspaceId, Boolean(authedReq.portalSession?.user?.isAdmin)))) {
+      return res.status(403).json({ error: 'FORBIDDEN' });
+    }
+    const result = await markAllNotificationsRead({ portalUserId, ...(workspaceId ? { workspaceId } : {}) });
+    return res.json({ ok: true, updated: result.count });
+  } catch (error: any) {
+    return res.status(500).json({
+      ok: false,
+      error: 'NOTIFICATION_READ_ALL_FAILED',
+      details: String(error?.message || error),
+    });
+  }
+});
+
+router.get('/slack/install-url', requirePortalAuth, async (req, res) => {
+  try {
+    const authedReq = req as AuthedPortalRequest;
+    const portalUserId = String(authedReq.portalSession?.user?.id || '').trim();
+    if (!portalUserId) {
+      return res.status(401).json({ error: 'AUTH_REQUIRED' });
+    }
+    const state = createSlackInstallState(portalUserId);
+    const installUrl = buildSlackInstallUrl(state);
+    return res.json({ ok: true, installUrl });
+  } catch (error: any) {
+    return res.status(500).json({
+      ok: false,
+      error: 'SLACK_INSTALL_URL_FAILED',
+      details: String(error?.message || error),
+    });
+  }
+});
+
+router.get('/slack/preflight', requirePortalAuth, async (req, res) => {
+  try {
+    const authedReq = req as AuthedPortalRequest;
+    const portalUserId = String(authedReq.portalSession?.user?.id || '').trim();
+    const isAdmin = Boolean(authedReq.portalSession?.user?.isAdmin);
+    if (!portalUserId) {
+      return res.status(401).json({ error: 'AUTH_REQUIRED' });
+    }
+
+    const report = buildSlackPreflightReport();
+    const teamIds = await listAccessibleSlackTeamIds(portalUserId, isAdmin);
+    return res.json({
+      ok: true,
+      ...report,
+      teamIds,
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      ok: false,
+      error: 'SLACK_PREFLIGHT_FAILED',
+      details: String(error?.message || error),
+    });
+  }
+});
+
+router.get('/slack/manifest', requirePortalAuth, async (req, res) => {
+  try {
+    const authedReq = req as AuthedPortalRequest;
+    const portalUserId = String(authedReq.portalSession?.user?.id || '').trim();
+    if (!portalUserId) {
+      return res.status(401).json({ error: 'AUTH_REQUIRED' });
+    }
+
+    const bundle = buildSlackManifestBundle();
+    return res.json({
+      ok: true,
+      ...bundle,
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      ok: false,
+      error: 'SLACK_MANIFEST_BUILD_FAILED',
+      details: String(error?.message || error),
+    });
+  }
+});
+
+router.get('/slack/status', requirePortalAuth, async (req, res) => {
+  try {
+    const authedReq = req as AuthedPortalRequest;
+    const portalUserId = String(authedReq.portalSession?.user?.id || '').trim();
+    const isAdmin = Boolean(authedReq.portalSession?.user?.isAdmin);
+    if (!portalUserId) {
+      return res.status(401).json({ error: 'AUTH_REQUIRED' });
+    }
+
+    const installations = await listActiveSlackInstallations();
+    const accessibleTeamIds = new Set(await listAccessibleSlackTeamIds(portalUserId, isAdmin));
+    const visibleInstallations = isAdmin
+      ? installations
+      : installations.filter((installation) => accessibleTeamIds.has(installation.slackTeamId));
+
+    return res.json({
+      ok: true,
+      installations: visibleInstallations.map((installation) => ({
+        id: installation.id,
+        slackTeamId: installation.slackTeamId,
+        teamName: installation.teamName,
+        enterpriseId: installation.enterpriseId,
+        botUserId: installation.botUserId,
+        defaultNotifyChannelId: installation.defaultNotifyChannelId,
+        status: installation.status,
+        settings: parseSlackInstallationSettings(installation.settingsJson),
+        installedAt: installation.installedAt,
+        updatedAt: installation.updatedAt,
+      })),
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      ok: false,
+      error: 'SLACK_STATUS_FAILED',
+      details: String(error?.message || error),
+    });
+  }
+});
+
+router.get('/slack/users', requirePortalAuth, async (req, res) => {
+  try {
+    const authedReq = req as AuthedPortalRequest;
+    const portalUserId = String(authedReq.portalSession?.user?.id || '').trim();
+    const isAdmin = Boolean(authedReq.portalSession?.user?.isAdmin);
+    if (!portalUserId) {
+      return res.status(401).json({ error: 'AUTH_REQUIRED' });
+    }
+
+    const teamIds = await listAccessibleSlackTeamIds(portalUserId, isAdmin);
+    const teamSet = new Set(teamIds);
+    const requestedTeamId = safeString(Array.isArray(req.query.slackTeamId) ? req.query.slackTeamId[0] : req.query.slackTeamId);
+    if (requestedTeamId && !teamSet.has(requestedTeamId)) {
+      return res.status(403).json({ error: 'FORBIDDEN' });
+    }
+    const slackTeamId = requestedTeamId || teamIds[0] || '';
+    if (!slackTeamId) {
+      return res.json({ ok: true, slackTeamId: null, users: [], synced: null });
+    }
+
+    let synced: Record<string, unknown> | null = null;
+    const shouldSync = parseBoolean(Array.isArray(req.query.sync) ? req.query.sync[0] : req.query.sync, false);
+    if (shouldSync) {
+      synced = await syncSlackUsersFromApi({ slackTeamId });
+    }
+
+    const users = await listSlackUsersForTeam(slackTeamId);
+    return res.json({
+      ok: true,
+      slackTeamId,
+      synced,
+      users,
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      ok: false,
+      error: 'SLACK_USERS_FETCH_FAILED',
+      details: String(error?.message || error),
+    });
+  }
+});
+
+router.get('/slack/channels', requirePortalAuth, async (req, res) => {
+  try {
+    const authedReq = req as AuthedPortalRequest;
+    const portalUserId = String(authedReq.portalSession?.user?.id || '').trim();
+    const isAdmin = Boolean(authedReq.portalSession?.user?.isAdmin);
+    if (!portalUserId) {
+      return res.status(401).json({ error: 'AUTH_REQUIRED' });
+    }
+
+    const accessibleTeamIds = await listAccessibleSlackTeamIds(portalUserId, isAdmin);
+    const accessibleTeamSet = new Set(accessibleTeamIds);
+    const requestedTeamId = safeString(Array.isArray(req.query.slackTeamId) ? req.query.slackTeamId[0] : req.query.slackTeamId);
+    if (requestedTeamId && !accessibleTeamSet.has(requestedTeamId)) {
+      return res.status(403).json({ error: 'FORBIDDEN' });
+    }
+    const slackTeamId = requestedTeamId || accessibleTeamIds[0] || '';
+    if (!slackTeamId) {
+      return res.json({ ok: true, slackTeamId: null, channels: [], workspaces: [] });
+    }
+
+    const channels = await listSlackChannelsForTeam(slackTeamId);
+    let workspaceRows: Array<{ id: string; name: string }> = [];
+    if (isAdmin) {
+      const workspaces = await prisma.researchJob.findMany({
+        select: {
+          id: true,
+          client: { select: { name: true } },
+        },
+        orderBy: { startedAt: 'desc' },
+        take: 200,
+      });
+      workspaceRows = workspaces.map((workspace) => ({
+        id: workspace.id,
+        name: workspace.client?.name || workspace.id,
+      }));
+    } else {
+      const memberships = await prisma.portalWorkspaceMembership.findMany({
+        where: {
+          userId: portalUserId,
+        },
+        include: {
+          researchJob: {
+            select: {
+              id: true,
+              client: { select: { name: true } },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      workspaceRows = memberships.map((membership) => ({
+        id: membership.researchJobId,
+        name: membership.researchJob.client?.name || membership.researchJobId,
+      }));
+    }
+
+    return res.json({
+      ok: true,
+      slackTeamId,
+      channels,
+      workspaces: workspaceRows,
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      ok: false,
+      error: 'SLACK_CHANNELS_FETCH_FAILED',
+      details: String(error?.message || error),
+    });
+  }
+});
+
+router.post('/slack/channels/:channelId/link', requirePortalAuth, async (req, res) => {
+  try {
+    const authedReq = req as AuthedPortalRequest;
+    const portalUserId = String(authedReq.portalSession?.user?.id || '').trim();
+    const isAdmin = Boolean(authedReq.portalSession?.user?.isAdmin);
+    if (!portalUserId) {
+      return res.status(401).json({ error: 'AUTH_REQUIRED' });
+    }
+    const slackChannelId = safeString(req.params.channelId);
+    const slackTeamId = safeString(req.body?.slackTeamId);
+    const workspaceId = safeString(req.body?.workspaceId);
+    const enabled = parseBoolean(req.body?.enabled, true);
+    if (!slackTeamId || !slackChannelId || !workspaceId) {
+      return res.status(400).json({ error: 'slackTeamId, channelId and workspaceId are required' });
+    }
+
+    const installation = await prisma.slackInstallation.findUnique({
+      where: { slackTeamId },
+      select: { status: true },
+    });
+    if (!installation || installation.status !== 'ACTIVE') {
+      return res.status(404).json({ error: 'SLACK_INSTALLATION_NOT_FOUND' });
+    }
+
+    if (!(await canAccessWorkspace(portalUserId, workspaceId, isAdmin))) {
+      return res.status(403).json({ error: 'FORBIDDEN' });
+    }
+
+    const link = await linkSlackChannelToWorkspace({
+      slackTeamId,
+      slackChannelId,
+      researchJobId: workspaceId,
+      createdByPortalUserId: portalUserId,
+      enabled,
+    });
+
+    await enqueueIntegrationJob({
+      type: 'SLACK_BACKFILL_CHANNEL',
+      slackTeamId,
+      researchJobId: workspaceId,
+      payload: {
+        slackTeamId,
+        slackChannelId,
+      },
+    });
+
+    return res.json({ ok: true, link });
+  } catch (error: any) {
+    const message = String(error?.message || '');
+    const status = message.toLowerCase().includes('not found') ? 404 : 500;
+    return res.status(status).json({
+      ok: false,
+      error: 'SLACK_CHANNEL_LINK_FAILED',
+      details: message || 'Failed to link Slack channel to workspace',
+    });
+  }
+});
+
+router.post('/slack/channels/:channelId/owners', requirePortalAuth, async (req, res) => {
+  try {
+    const authedReq = req as AuthedPortalRequest;
+    const portalUserId = String(authedReq.portalSession?.user?.id || '').trim();
+    const isAdmin = Boolean(authedReq.portalSession?.user?.isAdmin);
+    if (!portalUserId) {
+      return res.status(401).json({ error: 'AUTH_REQUIRED' });
+    }
+    const slackChannelId = safeString(req.params.channelId);
+    const slackTeamId = safeString(req.body?.slackTeamId);
+    if (!slackTeamId || !slackChannelId) {
+      return res.status(400).json({ error: 'slackTeamId and channelId are required' });
+    }
+    const installation = await prisma.slackInstallation.findUnique({
+      where: { slackTeamId },
+      select: { status: true },
+    });
+    if (!installation || installation.status !== 'ACTIVE') {
+      return res.status(404).json({ error: 'SLACK_INSTALLATION_NOT_FOUND' });
+    }
+
+    const link = await prisma.slackChannelLink.findUnique({
+      where: {
+        slackTeamId_slackChannelId: {
+          slackTeamId,
+          slackChannelId,
+        },
+      },
+      select: { researchJobId: true },
+    });
+    if (!link?.researchJobId) {
+      return res.status(404).json({ error: 'SLACK_CHANNEL_NOT_LINKED' });
+    }
+    if (!(await canAccessWorkspace(portalUserId, link.researchJobId, isAdmin))) {
+      return res.status(403).json({ error: 'FORBIDDEN' });
+    }
+
+    const ownersRaw = Array.isArray(req.body?.owners) ? req.body.owners : [];
+    const requestedOwners = ownersRaw
+      .map((entry: unknown) => {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+        const record = entry as Record<string, unknown>;
+        const slackUserId = safeString(record.slackUserId);
+        const ownerPortalUserId = safeString(record.portalUserId);
+        if (!slackUserId) return null;
+        return {
+          slackUserId,
+          ...(ownerPortalUserId ? { portalUserId: ownerPortalUserId } : {}),
+        };
+      })
+      .filter(
+        (entry: { slackUserId: string; portalUserId?: string } | null): entry is { slackUserId: string; portalUserId?: string } =>
+          Boolean(entry)
+      )
+      .slice(0, 30);
+
+    if (ownersRaw.length > 0 && requestedOwners.length === 0) {
+      return res.status(400).json({ error: 'Each owner must include at least slackUserId.' });
+    }
+
+    const unresolvedSlackUserIds: string[] = [];
+    const resolvedOwners: Array<{ slackUserId: string; portalUserId: string }> = [];
+    const seenSlackUserIds = new Set<string>();
+
+    for (const owner of requestedOwners) {
+      if (seenSlackUserIds.has(owner.slackUserId)) continue;
+      seenSlackUserIds.add(owner.slackUserId);
+
+      let resolvedPortalUserId = owner.portalUserId ? safeString(owner.portalUserId) : '';
+      if (!resolvedPortalUserId) {
+        resolvedPortalUserId = (await findPortalUserBySlackUser({
+          slackTeamId,
+          slackUserId: owner.slackUserId,
+        })) || '';
+      }
+
+      if (!resolvedPortalUserId) {
+        const linkBySlackUser = await prisma.slackUserLink.findUnique({
+          where: {
+            slackTeamId_slackUserId: {
+              slackTeamId,
+              slackUserId: owner.slackUserId,
+            },
+          },
+          select: { portalUserId: true, email: true },
+        });
+        if (linkBySlackUser?.portalUserId) {
+          resolvedPortalUserId = linkBySlackUser.portalUserId;
+        } else if (safeString(linkBySlackUser?.email)) {
+          const memberByEmail = await prisma.portalWorkspaceMembership.findFirst({
+            where: {
+              researchJobId: link.researchJobId,
+              user: {
+                email: {
+                  equals: safeString(linkBySlackUser?.email),
+                  mode: 'insensitive',
+                },
+              },
+            },
+            select: { userId: true },
+          });
+          resolvedPortalUserId = memberByEmail?.userId || '';
+        }
+      }
+
+      if (!resolvedPortalUserId) {
+        unresolvedSlackUserIds.push(owner.slackUserId);
+        continue;
+      }
+
+      resolvedOwners.push({
+        slackUserId: owner.slackUserId,
+        portalUserId: resolvedPortalUserId,
+      });
+    }
+
+    if (unresolvedSlackUserIds.length > 0) {
+      return res.status(400).json({
+        error: 'Some Slack owners could not be mapped to workspace portal users.',
+        unresolvedSlackUserIds,
+        hint: 'Sync Slack users first, then ensure matched portal users are members of this workspace.',
+      });
+    }
+
+    if (!isAdmin) {
+      for (const owner of resolvedOwners) {
+        const valid = await canAccessWorkspace(owner.portalUserId, link.researchJobId, false);
+        if (!valid) {
+          return res.status(400).json({
+            error: `Owner portal user ${owner.portalUserId} is not a member of workspace ${link.researchJobId}.`,
+          });
+        }
+      }
+    }
+
+    await setSlackChannelOwners({
+      slackTeamId,
+      slackChannelId,
+      owners: resolvedOwners,
+    });
+    return res.json({ ok: true, ownersCount: resolvedOwners.length });
+  } catch (error: any) {
+    return res.status(500).json({
+      ok: false,
+      error: 'SLACK_CHANNEL_OWNERS_FAILED',
+      details: String(error?.message || error),
+    });
+  }
+});
+
+router.post('/slack/channels/:channelId/backfill', requirePortalAuth, async (req, res) => {
+  try {
+    const authedReq = req as AuthedPortalRequest;
+    const portalUserId = String(authedReq.portalSession?.user?.id || '').trim();
+    const isAdmin = Boolean(authedReq.portalSession?.user?.isAdmin);
+    if (!portalUserId) {
+      return res.status(401).json({ error: 'AUTH_REQUIRED' });
+    }
+    const slackChannelId = safeString(req.params.channelId);
+    const slackTeamId = safeString(req.body?.slackTeamId);
+    if (!slackTeamId || !slackChannelId) {
+      return res.status(400).json({ error: 'slackTeamId and channelId are required' });
+    }
+    const installation = await prisma.slackInstallation.findUnique({
+      where: { slackTeamId },
+      select: { status: true },
+    });
+    if (!installation || installation.status !== 'ACTIVE') {
+      return res.status(404).json({ error: 'SLACK_INSTALLATION_NOT_FOUND' });
+    }
+
+    const link = await prisma.slackChannelLink.findUnique({
+      where: {
+        slackTeamId_slackChannelId: {
+          slackTeamId,
+          slackChannelId,
+        },
+      },
+      select: { researchJobId: true },
+    });
+    if (!link?.researchJobId) return res.status(404).json({ error: 'SLACK_CHANNEL_NOT_LINKED' });
+    if (!(await canAccessWorkspace(portalUserId, link.researchJobId, isAdmin))) {
+      return res.status(403).json({ error: 'FORBIDDEN' });
+    }
+
+    await enqueueIntegrationJob({
+      type: 'SLACK_BACKFILL_CHANNEL',
+      slackTeamId,
+      researchJobId: link.researchJobId,
+      payload: { slackTeamId, slackChannelId },
+    });
+    return res.json({ ok: true });
+  } catch (error: any) {
+    return res.status(500).json({
+      ok: false,
+      error: 'SLACK_BACKFILL_QUEUE_FAILED',
+      details: String(error?.message || error),
+    });
+  }
+});
+
+router.post('/slack/settings', requirePortalAuth, async (req, res) => {
+  try {
+    const authedReq = req as AuthedPortalRequest;
+    const portalUserId = String(authedReq.portalSession?.user?.id || '').trim();
+    const isAdmin = Boolean(authedReq.portalSession?.user?.isAdmin);
+    if (!portalUserId) {
+      return res.status(401).json({ error: 'AUTH_REQUIRED' });
+    }
+
+    const slackTeamId = safeString(req.body?.slackTeamId);
+    if (!slackTeamId) {
+      return res.status(400).json({ error: 'slackTeamId is required' });
+    }
+    const installation = await prisma.slackInstallation.findUnique({
+      where: { slackTeamId },
+      select: { installedByPortalUserId: true, status: true },
+    });
+    if (!installation || installation.status !== 'ACTIVE') {
+      return res.status(404).json({ error: 'SLACK_INSTALLATION_NOT_FOUND' });
+    }
+    if (!isAdmin && installation.installedByPortalUserId !== portalUserId) {
+      return res.status(403).json({ error: 'FORBIDDEN' });
+    }
+    const settingsPatch = req.body?.settings && typeof req.body.settings === 'object' && !Array.isArray(req.body.settings)
+      ? req.body.settings
+      : {};
+    const updated = await patchSlackInstallationSettings({
+      slackTeamId,
+      ...(typeof req.body?.defaultNotifyChannelId !== 'undefined'
+        ? { defaultNotifyChannelId: safeString(req.body.defaultNotifyChannelId) || null }
+        : {}),
+      settingsPatch: {
+        ...(typeof settingsPatch.dmIngestionEnabled === 'boolean' ? { dmIngestionEnabled: settingsPatch.dmIngestionEnabled } : {}),
+        ...(typeof settingsPatch.mpimIngestionEnabled === 'boolean' ? { mpimIngestionEnabled: settingsPatch.mpimIngestionEnabled } : {}),
+        ...(typeof settingsPatch.notifyInSlack === 'boolean' ? { notifyInSlack: settingsPatch.notifyInSlack } : {}),
+        ...(typeof settingsPatch.notifyInBat === 'boolean' ? { notifyInBat: settingsPatch.notifyInBat } : {}),
+        ...(typeof settingsPatch.ownerDeliveryMode === 'string'
+          ? { ownerDeliveryMode: settingsPatch.ownerDeliveryMode }
+          : {}),
+      } as any,
+    });
+
+    return res.json({
+      ok: true,
+      installation: {
+        slackTeamId: updated.slackTeamId,
+        teamName: updated.teamName,
+        defaultNotifyChannelId: updated.defaultNotifyChannelId,
+        settings: parseSlackInstallationSettings(updated.settingsJson),
+      },
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      ok: false,
+      error: 'SLACK_SETTINGS_UPDATE_FAILED',
+      details: String(error?.message || error),
+    });
+  }
+});
+
+router.post('/slack/purge/channel', requirePortalAuth, async (req, res) => {
+  try {
+    const authedReq = req as AuthedPortalRequest;
+    const portalUserId = String(authedReq.portalSession?.user?.id || '').trim();
+    const isAdmin = Boolean(authedReq.portalSession?.user?.isAdmin);
+    if (!portalUserId) {
+      return res.status(401).json({ error: 'AUTH_REQUIRED' });
+    }
+
+    const slackTeamId = safeString(req.body?.slackTeamId);
+    const slackChannelId = safeString(req.body?.slackChannelId);
+    if (!slackTeamId || !slackChannelId) {
+      return res.status(400).json({ error: 'slackTeamId and slackChannelId are required' });
+    }
+
+    const link = await prisma.slackChannelLink.findUnique({
+      where: {
+        slackTeamId_slackChannelId: {
+          slackTeamId,
+          slackChannelId,
+        },
+      },
+      select: { researchJobId: true },
+    });
+    if (!isAdmin) {
+      if (!link?.researchJobId) {
+        return res.status(403).json({ error: 'FORBIDDEN' });
+      }
+      const canAccess = await canAccessWorkspace(portalUserId, link.researchJobId, false);
+      if (!canAccess) {
+        return res.status(403).json({ error: 'FORBIDDEN' });
+      }
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const deliveries = await tx.notificationDelivery.deleteMany({
+        where: {
+          slackTeamId,
+          slackChannelId,
+        },
+      });
+      const attention = await tx.attentionItem.deleteMany({
+        where: {
+          slackTeamId,
+          slackChannelId,
+        },
+      });
+      const messages = await tx.slackMessage.deleteMany({
+        where: {
+          slackTeamId,
+          slackChannelId,
+        },
+      });
+      return {
+        deliveries: deliveries.count,
+        attentionItems: attention.count,
+        messages: messages.count,
+      };
+    });
+
+    return res.json({ ok: true, purged: result });
+  } catch (error: any) {
+    return res.status(500).json({
+      ok: false,
+      error: 'SLACK_PURGE_CHANNEL_FAILED',
+      details: String(error?.message || error),
+    });
+  }
+});
+
+router.post('/slack/purge/workspace', requirePortalAuth, async (req, res) => {
+  try {
+    const authedReq = req as AuthedPortalRequest;
+    const portalUserId = String(authedReq.portalSession?.user?.id || '').trim();
+    const isAdmin = Boolean(authedReq.portalSession?.user?.isAdmin);
+    if (!portalUserId) {
+      return res.status(401).json({ error: 'AUTH_REQUIRED' });
+    }
+
+    const workspaceId = safeString(req.body?.workspaceId);
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'workspaceId is required' });
+    }
+    if (!(await canAccessWorkspace(portalUserId, workspaceId, isAdmin))) {
+      return res.status(403).json({ error: 'FORBIDDEN' });
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const deliveries = await tx.notificationDelivery.deleteMany({
+        where: {
+          notification: {
+            researchJobId: workspaceId,
+          },
+        },
+      });
+      const notifications = await tx.notification.deleteMany({
+        where: {
+          researchJobId: workspaceId,
+        },
+      });
+      const attention = await tx.attentionItem.deleteMany({
+        where: {
+          researchJobId: workspaceId,
+        },
+      });
+      const messages = await tx.slackMessage.deleteMany({
+        where: {
+          researchJobId: workspaceId,
+        },
+      });
+      return {
+        deliveries: deliveries.count,
+        notifications: notifications.count,
+        attentionItems: attention.count,
+        messages: messages.count,
+      };
+    });
+
+    return res.json({ ok: true, purged: result });
+  } catch (error: any) {
+    return res.status(500).json({
+      ok: false,
+      error: 'SLACK_PURGE_WORKSPACE_FAILED',
+      details: String(error?.message || error),
+    });
   }
 });
 

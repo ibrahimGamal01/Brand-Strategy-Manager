@@ -4,6 +4,7 @@ import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getPortalMe, resendPortalVerification, verifyPortalEmailCode } from "@/lib/auth-api";
+import { Badge, Button, Input } from "@/components/ui";
 
 export function VerifyEmailCodePageClient() {
   const router = useRouter();
@@ -85,27 +86,19 @@ export function VerifyEmailCodePageClient() {
 
   return (
     <section className="bat-shell grid min-h-[70vh] place-items-center py-12">
-      <div className="bat-surface w-full max-w-md p-7">
-        <h1 className="text-2xl font-semibold">Verify your email code</h1>
-        <p className="mt-2 text-sm" style={{ color: "var(--bat-text-muted)" }}>
-          Enter the code from your inbox to activate login.
-        </p>
-        {error ? (
-          <p className="mt-3 rounded-xl border px-3 py-2 text-sm" style={{ borderColor: "#f4b8b4", background: "#fff5f4", color: "#9f2317" }}>
-            {error}
-          </p>
-        ) : null}
-        {notice ? (
-          <p className="mt-3 rounded-xl border px-3 py-2 text-sm" style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}>
-            {notice}
-          </p>
-        ) : null}
+      <div className="bat-panel w-full max-w-md p-7">
+        <Badge className="mb-4">Verification</Badge>
+        <h1 className="bat-heading-md">Verify your email code</h1>
+        <p className="mt-2 text-sm bat-text-muted">Enter the code from your inbox to activate login.</p>
+
+        {error ? <p className="bat-panel-muted bat-status-danger mt-3 rounded-xl px-3 py-2 text-sm">{error}</p> : null}
+        {notice ? <p className="bat-panel-muted mt-3 rounded-xl px-3 py-2 text-sm">{notice}</p> : null}
+
         <form className="mt-6 space-y-3" onSubmit={onSubmit}>
           <label className="block text-sm">
             Work email
-            <input
-              className="mt-1 w-full rounded-xl border px-3 py-2"
-              style={{ borderColor: "var(--bat-border)" }}
+            <Input
+              className="mt-1"
               type="email"
               autoComplete="email"
               required
@@ -115,9 +108,8 @@ export function VerifyEmailCodePageClient() {
           </label>
           <label className="block text-sm">
             Verification code
-            <input
-              className="mt-1 w-full rounded-xl border px-3 py-2"
-              style={{ borderColor: "var(--bat-border)" }}
+            <Input
+              className="mt-1"
               type="text"
               required
               value={code}
@@ -125,26 +117,16 @@ export function VerifyEmailCodePageClient() {
               placeholder="00000"
             />
           </label>
-          <button
-            type="submit"
-            disabled={!canSubmit}
-            className="w-full rounded-full px-4 py-2 text-sm font-semibold disabled:opacity-60"
-            style={{ background: "var(--bat-accent)", color: "white" }}
-          >
+          <Button type="submit" disabled={!canSubmit} className="w-full">
             {submitting ? "Verifying..." : "Verify code"}
-          </button>
+          </Button>
         </form>
+
         <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
-          <button
-            type="button"
-            className="rounded-full border px-4 py-2"
-            style={{ borderColor: "var(--bat-border)" }}
-            disabled={resending}
-            onClick={onResend}
-          >
+          <Button variant="secondary" disabled={resending} onClick={onResend}>
             {resending ? "Sending..." : "Resend code"}
-          </button>
-          <Link href="/login" className="rounded-full border px-4 py-2" style={{ borderColor: "var(--bat-border)" }}>
+          </Button>
+          <Link href="/login" className="bat-button bat-button-secondary">
             Back to login
           </Link>
         </div>

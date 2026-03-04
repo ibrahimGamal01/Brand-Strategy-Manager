@@ -37,6 +37,7 @@ const RUNTIME_EVIDENCE_LEDGER_ENABLED = String(process.env.RUNTIME_EVIDENCE_LEDG
 const WEB_SEARCH_TOOLS = new Set(['search.web', 'research.gather', 'competitors.discover_v3', 'evidence.news']);
 const LIVE_CRAWL_TOOLS = new Set(['web.crawl', 'web.fetch']);
 const SOCIAL_INTEL_TOOLS = new Set(['evidence.posts', 'evidence.videos', 'orchestration.run']);
+const SLACK_INTEL_TOOLS = new Set(['slack.search_messages', 'slack.get_thread']);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -130,6 +131,13 @@ async function evaluateSourceScopeBlock(input: {
     return {
       blocked: true,
       reason: `Tool ${input.toolName} blocked because social_intel is disabled.`,
+    };
+  }
+
+  if (!sourceScope.slackIntel && SLACK_INTEL_TOOLS.has(input.toolName)) {
+    return {
+      blocked: true,
+      reason: `Tool ${input.toolName} blocked because slack_intel is disabled.`,
     };
   }
 

@@ -5,32 +5,34 @@ const links = [
   { href: "/", label: "Home" },
   { href: "/pricing", label: "Pricing" },
   { href: "/security", label: "Security" },
-  { href: "/about", label: "About" }
+  { href: "/about", label: "About" },
 ];
 
 export function MarketingNav() {
   return (
-    <header className="sticky top-0 z-30 border-b backdrop-blur-sm" style={{ borderColor: "var(--bat-border)", background: "color-mix(in srgb, var(--bat-bg-soft) 85%, transparent)" }}>
-      <div className="bat-shell flex items-center justify-between py-4">
-        <Link href="/">
+    <header className="sticky top-0 z-30 border-b border-[color:var(--bat-border-subtle)] bg-[color:color-mix(in_srgb,var(--bat-bg-soft)_84%,transparent)] backdrop-blur">
+      <div className="bat-shell flex min-h-18 items-center justify-between gap-3 py-3">
+        <Link href="/" className="shrink-0">
           <BrandMark />
         </Link>
-        <nav className="hidden items-center gap-5 text-sm md:flex">
+
+        <nav className="hidden items-center gap-2 md:flex">
           {links.map((link) => (
-            <Link key={link.href} href={link.href} className="transition-opacity hover:opacity-70">
+            <Link
+              key={link.href}
+              href={link.href}
+              className="bat-button bat-button-ghost min-h-9 px-3 py-1.5 text-xs"
+            >
               {link.label}
             </Link>
           ))}
         </nav>
+
         <div className="flex items-center gap-2">
-          <Link href="/login" className="rounded-full px-4 py-2 text-sm" style={{ border: "1px solid var(--bat-border)" }}>
+          <Link href="/login" className="bat-button bat-button-secondary min-h-9 px-4 py-1.5 text-xs">
             Log in
           </Link>
-          <Link
-            href="/signup"
-            className="rounded-full px-4 py-2 text-sm font-semibold"
-            style={{ background: "var(--bat-accent)", color: "white" }}
-          >
+          <Link href="/signup" className="bat-button bat-button-primary min-h-9 px-4 py-1.5 text-xs">
             Start free
           </Link>
         </div>

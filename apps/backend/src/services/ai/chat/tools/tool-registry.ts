@@ -6,6 +6,7 @@ import { evidenceTools } from './tools-evidence';
 import { scraplingTools } from './tools-scrapling';
 import { workspaceOpsTools } from './tools-workspace-ops';
 import { searchTools } from './tools-search';
+import { slackTools } from './tools-slack';
 
 export const TOOL_REGISTRY: ToolDefinition<Record<string, unknown>, Record<string, unknown>>[] = [
   ...intelReadTools,
@@ -15,6 +16,7 @@ export const TOOL_REGISTRY: ToolDefinition<Record<string, unknown>, Record<strin
   ...evidenceTools,
   ...scraplingTools,
   ...searchTools,
+  ...slackTools,
 ];
 
 export function getTool(name: string): ToolDefinition<Record<string, unknown>, Record<string, unknown>> | null {

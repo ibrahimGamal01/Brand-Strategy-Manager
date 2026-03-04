@@ -95,6 +95,7 @@ const DEFAULT_PREFERENCES: SessionPreferences = {
     webSearch: true,
     liveWebsiteCrawl: true,
     socialIntel: true,
+    slackIntel: true,
   },
   transparency: true,
   askQuestionsFirst: false,
@@ -1853,6 +1854,7 @@ function normalizeSourceScope(scope: Partial<ChatInputSourceScope> | undefined):
     webSearch: scope?.webSearch !== false,
     liveWebsiteCrawl: scope?.liveWebsiteCrawl !== false,
     socialIntel: scope?.socialIntel !== false,
+    slackIntel: scope?.slackIntel !== false,
   };
 }
 

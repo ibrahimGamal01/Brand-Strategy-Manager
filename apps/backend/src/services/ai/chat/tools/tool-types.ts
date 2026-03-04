@@ -35,7 +35,9 @@ export type ToolName =
   | 'document.propose_edit'
   | 'document.apply_edit'
   | 'document.export'
-  | 'document.compare_versions';
+  | 'document.compare_versions'
+  | 'slack.search_messages'
+  | 'slack.get_thread';
 
 export type JsonSchema = Record<string, unknown>;
 

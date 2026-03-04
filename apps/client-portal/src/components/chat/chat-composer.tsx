@@ -21,6 +21,7 @@ const sourceScopeOptions: Array<{ key: keyof ChatInputSourceScope; label: string
   { key: "webSearch", label: "Web search" },
   { key: "liveWebsiteCrawl", label: "Live website crawl" },
   { key: "socialIntel", label: "Social intelligence" },
+  { key: "slackIntel", label: "Slack intelligence" },
 ];
 
 interface ChatComposerProps {
@@ -68,6 +69,7 @@ function compactScopeBadges(scope: ChatInputSourceScope): string[] {
   if (scope.webSearch) labels.push("Web");
   if (scope.liveWebsiteCrawl) labels.push("Crawl");
   if (scope.socialIntel) labels.push("Social");
+  if (scope.slackIntel) labels.push("Slack");
   if (scope.uploadedDocs) labels.push("Docs");
   if (scope.libraryPinned) labels.push("Pinned");
   if (scope.workspaceData) labels.push("Workspace");

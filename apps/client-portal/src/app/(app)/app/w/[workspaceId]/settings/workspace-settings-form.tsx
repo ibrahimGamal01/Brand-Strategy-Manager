@@ -49,20 +49,24 @@ export function WorkspaceSettingsForm({ workspaceId }: { workspaceId: string }) 
         webSearch: toBoolean(sourceScope.webSearch, true),
         liveWebsiteCrawl: toBoolean(sourceScope.liveWebsiteCrawl, true),
         socialIntel: toBoolean(sourceScope.socialIntel, true),
+        slackIntel: toBoolean(sourceScope.slackIntel, true),
       };
 
       if (mainChannelFocus === "Web") {
         nextSourceScope.webSearch = true;
         nextSourceScope.liveWebsiteCrawl = true;
         nextSourceScope.socialIntel = false;
+        nextSourceScope.slackIntel = true;
       } else if (mainChannelFocus === "Social") {
         nextSourceScope.webSearch = false;
         nextSourceScope.liveWebsiteCrawl = false;
         nextSourceScope.socialIntel = true;
+        nextSourceScope.slackIntel = true;
       } else {
         nextSourceScope.webSearch = true;
         nextSourceScope.liveWebsiteCrawl = true;
         nextSourceScope.socialIntel = true;
+        nextSourceScope.slackIntel = true;
       }
 
       window.localStorage.setItem(
@@ -152,4 +156,3 @@ export function WorkspaceSettingsForm({ workspaceId }: { workspaceId: string }) 
     </section>
   );
 }
-

@@ -51,6 +51,7 @@ export type RuntimeSourceScope = {
   webSearch: boolean;
   liveWebsiteCrawl: boolean;
   socialIntel: boolean;
+  slackIntel: boolean;
 };
 
 export type RuntimeInputOptions = {
