@@ -16,7 +16,7 @@ import { prisma } from '../../../lib/prisma';
 import { fetchAndPersistWebSnapshot } from '../../scraping/web-intelligence-service';
 import { searchWeb } from '../../search/search-service';
 import { buildMarketFingerprint } from './market-fingerprint';
-import { buildLaneQueriesWithDiagnostics } from './query-lanes';
+import { buildLaneQueries } from './query-lanes';
 import type {
   CompetitorDiscoveryLane,
   CompetitorDiscoveryV3Candidate,
@@ -981,11 +981,10 @@ export async function discoverCompetitorsV3(
   try {
     const seedCompetitors = parseSeedCompetitors(rawInput);
     const fingerprint = await buildMarketFingerprint(researchJobId, seedCompetitors);
-    const laneQueryBuild = buildLaneQueriesWithDiagnostics(fingerprint, {
+    const laneQueries = buildLaneQueries(fingerprint, {
       ...rawInput,
       mode,
-    });
-    const laneQueries = laneQueryBuild.queries.slice(0, budget.queryLimit);
+    }).slice(0, budget.queryLimit);
 
     const laneStats = new Map<string, { queries: number; hits: number }>();
     for (const lane of laneQueries.map((entry) => entry.lane)) {
@@ -1014,11 +1013,6 @@ export async function discoverCompetitorsV3(
         diagnostics: asJson({
           queriesExecuted: laneQueries.length,
           rawHits: allHits.length,
-          queryQuality: {
-            droppedKeywords: laneQueryBuild.diagnostics.droppedKeywordCount,
-            droppedQueries: laneQueryBuild.diagnostics.droppedQueryCount,
-            sanitizerMode: laneQueryBuild.diagnostics.sanitizerMode,
-          },
         }),
       },
     });
@@ -1067,12 +1061,6 @@ export async function discoverCompetitorsV3(
         diagnostics: asJson({
           laneStats: Object.fromEntries(laneStats.entries()),
           warnings: warnings.slice(0, 20),
-          queryQuality: {
-            droppedKeywords: laneQueryBuild.diagnostics.droppedKeywordCount,
-            droppedQueries: laneQueryBuild.diagnostics.droppedQueryCount,
-            executedQueries: laneQueries.slice(0, 20).map((entry) => entry.query),
-            sanitizerMode: laneQueryBuild.diagnostics.sanitizerMode,
-          },
         }),
       },
     });

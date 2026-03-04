@@ -1,11 +1,5 @@
 import { buildLaneQueries } from '../discovery/v3/query-lanes';
 import type { CompetitorDiscoveryLane, MarketFingerprint } from '../discovery/v3/types';
-import {
-  isAcceptableQuery,
-  resolveQuerySanitizerMode,
-  sanitizeAudienceHints,
-  sanitizeKeywordList,
-} from '../discovery/v3/query-quality';
 import { searchWeb } from '../search/search-service';
 import type { SearchRequest, SearchResponse, SearchResultItem } from '../search/search-provider';
 import {
@@ -434,7 +428,6 @@ function buildFingerprint(
   selfHandles: Map<string, Set<string>>;
   existingKeys: Set<string>;
 } {
-  const sanitizerMode = resolveQuerySanitizerMode(process.env.COMPETITOR_QUERY_SANITIZER_MODE);
   const selfDomains = buildSelfDomains(intakePayload);
   const selfHandles = buildSelfHandles(intakePayload);
 
@@ -476,45 +469,21 @@ function buildFingerprint(
     )
   );
 
-  const rawCategoryKeywords = uniqueStrings([
-    ...topKeywords(corpus, 20).filter((token) => !brandTokens.has(token)),
-    ...parseArrayish(intakePayload.servicesList),
-    String(intakePayload.mainOffer || '').trim(),
-    String(intakePayload.businessType || '').trim(),
-  ], 24);
-  const categoryKeywords = sanitizeKeywordList({
-    rawKeywords: rawCategoryKeywords,
-    brandTokens: Array.from(brandTokens),
-    nicheTokens: [niche, ...parseArrayish(intakePayload.servicesList), String(intakePayload.mainOffer || '')],
-    mode: sanitizerMode,
-    maxItems: 18,
-  });
+  const categoryKeywords = uniqueStrings(
+    topKeywords(corpus, 20).filter((token) => !brandTokens.has(token)),
+    18
+  );
 
   const topProblems = parseArrayish(intakePayload.topProblems);
-  const problemKeywords = sanitizeKeywordList({
-    rawKeywords: [...topProblems, ...topKeywords(topProblems, 10)].filter(Boolean),
-    brandTokens: Array.from(brandTokens),
-    nicheTokens: [niche],
-    mode: sanitizerMode,
-    maxItems: 14,
-  });
+  const problemKeywords = uniqueStrings(
+    [...topProblems, ...topKeywords(topProblems, 10)].filter(Boolean),
+    14
+  );
 
   const audienceKeywords = uniqueStrings(
     [
-      ...sanitizeAudienceHints([
-        String(intakePayload.idealAudience || ''),
-        String(intakePayload.targetAudience || ''),
-      ]),
-      ...sanitizeKeywordList({
-        rawKeywords: [
-          ...tokenize(String(intakePayload.idealAudience || '')),
-          ...tokenize(String(intakePayload.targetAudience || '')),
-        ],
-        brandTokens: Array.from(brandTokens),
-        nicheTokens: [niche],
-        mode: sanitizerMode,
-        maxItems: 10,
-      }),
+      ...tokenize(String(intakePayload.idealAudience || '')),
+      ...tokenize(String(intakePayload.targetAudience || '')),
     ],
     14
   );
@@ -567,19 +536,7 @@ function buildFingerprint(
     fingerprint: {
       brandName,
       niche,
-      categoryKeywords:
-        categoryKeywords.length
-          ? categoryKeywords
-          : (() => {
-              const fallbackCategory = sanitizeKeywordList({
-                rawKeywords: [niche, `${niche} industry`],
-                brandTokens: Array.from(brandTokens),
-                nicheTokens: [niche],
-                mode: sanitizerMode,
-                maxItems: 2,
-              });
-              return fallbackCategory.length ? fallbackCategory : [niche];
-            })(),
+      categoryKeywords: categoryKeywords.length ? categoryKeywords : [niche, `${niche} brand`],
       problemKeywords,
       audienceKeywords,
       geoMarkets,
@@ -648,60 +605,6 @@ function pickQueries(
   return out.slice(0, limit);
 }
 
-function buildLegacyNearbyFallbackQueries(
-  fingerprint: MarketFingerprint,
-  existingLinks: string[],
-  mode: 'balanced' | 'strict'
-): LaneQuery[] {
-  const parsed = parseCompetitorInspirationInputs(existingLinks);
-  const seedTerms = uniqueStrings(
-    parsed
-      .map((entry) => {
-        if (entry.inputType === 'website') {
-          return (normalizeWebsiteDomain(entry.domain) || entry.domain).replace(/^www\./i, '');
-        }
-        return normalizeHandle(entry.handle);
-      })
-      .filter(Boolean),
-    8
-  );
-
-  const nicheAnchor = sanitizeKeywordList({
-    rawKeywords: [fingerprint.niche, ...fingerprint.offerTypes, ...fingerprint.categoryKeywords.slice(0, 3)],
-    brandTokens: [fingerprint.brandName],
-    nicheTokens: [fingerprint.niche, ...fingerprint.offerTypes],
-    mode,
-    maxItems: 2,
-  })[0] || fingerprint.niche || 'market';
-
-  const fallbackQueries: LaneQuery[] = [];
-  for (const seed of seedTerms.slice(0, 4)) {
-    fallbackQueries.push({ lane: 'alternatives', query: `${seed} competitors ${nicheAnchor}`, locale: 'en-US' });
-    fallbackQueries.push({ lane: 'alternatives', query: `${seed} alternatives ${nicheAnchor}`, locale: 'en-US' });
-    fallbackQueries.push({ lane: 'social', query: `site:instagram.com "${seed}"`, locale: 'en-US' });
-  }
-
-  if (!fallbackQueries.length) {
-    fallbackQueries.push({ lane: 'alternatives', query: `${nicheAnchor} direct competitors`, locale: 'en-US' });
-    fallbackQueries.push({ lane: 'directories', query: `${nicheAnchor} alternatives list`, locale: 'en-US' });
-    fallbackQueries.push({ lane: 'social', query: `site:instagram.com "${nicheAnchor}"`, locale: 'en-US' });
-  }
-
-  const deduped = uniqueStrings(
-    fallbackQueries.map((entry) => `${entry.lane}|${entry.locale}|${entry.query}`),
-    10
-  ).map((raw) => {
-    const [lane, locale, ...queryParts] = raw.split('|');
-    return {
-      lane: lane as SupportedLane,
-      locale,
-      query: queryParts.join('|'),
-    };
-  });
-
-  return deduped.filter((entry) => isAcceptableQuery(entry.query, { mode, minLength: 16, maxLength: 100 }));
-}
-
 async function mapWithConcurrency<T, R>(
   items: T[],
   concurrency: number,
@@ -735,7 +638,6 @@ export async function suggestCompetitorInspirationLinks(input: {
     : 5;
   const existingLinks = Array.isArray(input.existingLinks) ? input.existingLinks : [];
   const search = input.search || searchWeb;
-  const sanitizerMode = resolveQuerySanitizerMode(process.env.COMPETITOR_QUERY_SANITIZER_MODE);
 
   const warnings: string[] = [];
   const { fingerprint, selfDomains, selfHandles, existingKeys } = buildFingerprint(
@@ -758,33 +660,13 @@ export async function suggestCompetitorInspirationLinks(input: {
     locales: ['en-US'],
     includePeople: true,
   });
-  const selectedQueries = pickQueries(laneQueries, fingerprint, 12).filter((entry) =>
-    isAcceptableQuery(entry.query, { mode: sanitizerMode, minLength: 16, maxLength: 100 })
-  );
-  const fallbackQueries =
-    selectedQueries.length < 6
-      ? buildLegacyNearbyFallbackQueries(fingerprint, existingLinks, sanitizerMode)
-      : [];
-  const candidateQueries = uniqueStrings(
-    [...selectedQueries, ...fallbackQueries].map((entry) => `${entry.lane}|${entry.locale}|${entry.query}`),
-    14
-  ).map((raw) => {
-    const [lane, locale, ...queryParts] = raw.split('|');
-    return {
-      lane: lane as SupportedLane,
-      locale,
-      query: queryParts.join('|'),
-    };
-  });
-  if (fallbackQueries.length) {
-    warnings.push('COMPETITOR_LINK_DISCOVERY_FALLBACK_QUERIES_APPLIED');
-  }
-  if (candidateQueries.length === 0) {
+  const selectedQueries = pickQueries(laneQueries, fingerprint, 12);
+  if (selectedQueries.length === 0) {
     return { links: existingLinks.slice(0, desiredCount), warnings: ['COMPETITOR_LINK_DISCOVERY_NO_QUERIES'] };
   }
 
   const hitsByQuery = await mapWithConcurrency(
-    candidateQueries,
+    selectedQueries,
     3,
     async (entry): Promise<{ entry: LaneQuery; response: SearchResponse | null }> => {
       try {

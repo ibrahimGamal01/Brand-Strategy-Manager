@@ -71,14 +71,6 @@ const stubSearch = async (
 };
 
 async function main(): Promise<void> {
-  const issuedQueries: string[] = [];
-  const capturedSearch = async (
-    input: SearchRequest & { provider?: 'auto' | 'brave' | 'ddg' }
-  ): Promise<SearchResponse> => {
-    issuedQueries.push(String(input.query || ''));
-    return stubSearch(input);
-  };
-
   const intakePayload = {
     name: 'ELUUMIS',
     website: 'https://eluumis.com',
@@ -107,7 +99,7 @@ async function main(): Promise<void> {
     intakePayload,
     existingLinks,
     desiredCount: 5,
-    search: capturedSearch,
+    search: stubSearch,
   });
 
   assert(result.links.length === 5, `Expected 5 links, got ${result.links.length}`);
@@ -128,15 +120,6 @@ async function main(): Promise<void> {
     result.links[1]?.includes('balancehealthhq.com/products/eluumis-sky'),
     'Expected existing link to remain second'
   );
-  assert(issuedQueries.length > 0, 'Expected search queries to be issued.');
-  assert(
-    issuedQueries.every((query) => !/\bbest\s+free\b|\btop\s+pass\b/i.test(query)),
-    'Expected generated queries to avoid generic junk patterns.'
-  );
-  assert(
-    issuedQueries.every((query) => !/who want|looking for|\s\/\s/i.test(query)),
-    'Expected generated queries to avoid long audience-sentence fragments.'
-  );
 
   console.log('intake-competitor-links-suggest tests passed');
 }
@@ -145,3 +128,4 @@ main().catch((error) => {
   console.error(error);
   process.exit(1);
 });
+
