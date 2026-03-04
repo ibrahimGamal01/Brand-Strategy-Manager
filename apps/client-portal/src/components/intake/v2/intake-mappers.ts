@@ -614,7 +614,20 @@ export function applySuggestedToState(
       !isUserLocked &&
       currentFilled &&
       isLowSignalFieldValue(key, currentValue);
-    const shouldApply = !currentFilled || canReplaceLowSignal;
+    let shouldApply = !currentFilled || canReplaceLowSignal;
+    if (
+      !shouldApply &&
+      key === "competitorInspirationLinks" &&
+      step === "voice" &&
+      overwritePolicy === "missing_or_low_signal" &&
+      !isUserLocked
+    ) {
+      const existingList = splitList(currentValue, LIST_FIELD_MAX_ITEMS[key] ?? 5);
+      const incomingList = splitList(rawValue, LIST_FIELD_MAX_ITEMS[key] ?? 5);
+      if (incomingList.length > existingList.length) {
+        shouldApply = true;
+      }
+    }
     if (!shouldApply) continue;
 
     if (LIST_FIELD_KEYS.includes(key)) {
