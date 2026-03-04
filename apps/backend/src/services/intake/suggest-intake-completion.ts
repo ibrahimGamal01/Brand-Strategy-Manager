@@ -12,6 +12,8 @@ import {
   normalizeHandleFromUrlOrHandle,
   normalizeSocialHandlePlatform,
 } from '../handles/platform-handle';
+import { getProfileUrl, normalizeWebsiteDomain, parseCompetitorInspirationInputs } from './brain-intake-utils';
+import { suggestCompetitorInspirationLinks } from './suggest-competitor-inspiration-links';
 
 const INTAKE_KEYS = [
   'name',
@@ -534,6 +536,179 @@ function normalizeHttpUrl(value: unknown): string {
   } catch {
     return '';
   }
+}
+
+function hostnameOf(value: string): string {
+  try {
+    return new URL(value).hostname.replace(/^www\./i, '').toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function normalizeUrlForLink(value: string): string {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try {
+    const parsed = new URL(raw.startsWith('http') ? raw : `https://${raw}`);
+    parsed.protocol = parsed.protocol.toLowerCase();
+    parsed.hostname = parsed.hostname.replace(/^www\./i, '').toLowerCase();
+    parsed.hash = '';
+    for (const key of Array.from(parsed.searchParams.keys())) {
+      const normalized = String(key || '').trim().toLowerCase();
+      if (!normalized) continue;
+      if (normalized.startsWith('utm_')) {
+        parsed.searchParams.delete(key);
+        continue;
+      }
+      if (['gclid', 'fbclid', 'igshid', 'mc_cid', 'mc_eid'].includes(normalized)) {
+        parsed.searchParams.delete(key);
+      }
+    }
+    parsed.pathname = parsed.pathname.replace(/\/+$/g, '') || '/';
+    return parsed.toString();
+  } catch {
+    return raw;
+  }
+}
+
+function buildSelfDomainsFromPayload(payload: Record<string, unknown>): Set<string> {
+  const out = new Set<string>();
+  const website = normalizeHttpUrl(payload.website);
+  const websites = Array.isArray(payload.websites)
+    ? payload.websites
+    : typeof payload.websites === 'string'
+      ? [payload.websites]
+      : [];
+  const all = [website, ...websites.map((entry) => normalizeHttpUrl(entry))].filter(Boolean);
+  for (const url of all) {
+    const host = hostnameOf(url);
+    if (!host) continue;
+    const normalized = normalizeWebsiteDomain(host) || host;
+    if (normalized) out.add(normalized.toLowerCase());
+  }
+  return out;
+}
+
+function buildSelfHandlesFromPayload(payload: Record<string, unknown>): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  const push = (platform: string, handle: string) => {
+    const normalized = normalizeHandle(handle);
+    if (!normalized) return;
+    const key = platform === 'twitter' ? 'x' : platform;
+    if (!out.has(key)) out.set(key, new Set<string>());
+    out.get(key)!.add(normalized);
+  };
+
+  const handles = partialRecord(payload.handles);
+  for (const [platformRaw, handle] of Object.entries(handles)) {
+    const platform = platformRaw === 'twitter' ? 'x' : platformRaw;
+    if (!['instagram', 'tiktok', 'youtube', 'linkedin', 'x', 'facebook'].includes(platform)) continue;
+    const extracted = normalizeHandleFromUrlOrHandle(handle, platform);
+    if (extracted) push(platform, extracted);
+  }
+
+  const handlesV2 = partialRecord(payload.handlesV2);
+  for (const [platformRaw, rawBucket] of Object.entries(handlesV2)) {
+    const platform = platformRaw === 'twitter' ? 'x' : platformRaw;
+    if (!['instagram', 'tiktok', 'youtube', 'linkedin', 'x', 'facebook'].includes(platform)) continue;
+    const bucket = partialRecord(rawBucket);
+    const primary = normalizeHandleFromUrlOrHandle(bucket.primary, platform);
+    if (primary) push(platform, primary);
+    const handleList = Array.isArray(bucket.handles) ? bucket.handles : [];
+    for (const entry of handleList) {
+      const extracted = normalizeHandleFromUrlOrHandle(entry, platform);
+      if (extracted) push(platform, extracted);
+    }
+  }
+
+  const socialRefs = parseStringCandidates(payload.socialReferences);
+  for (const ref of socialRefs) {
+    const platform = normalizeSocialHandlePlatform(ref);
+    if (!platform) continue;
+    if (!['instagram', 'tiktok', 'youtube', 'linkedin', 'x', 'facebook'].includes(platform)) continue;
+    const extracted = normalizeHandleFromUrlOrHandle(ref, platform);
+    if (extracted) push(platform, extracted);
+  }
+
+  const derivedCandidates: string[] = [];
+  const name = String(payload.name || '').trim();
+  if (name) derivedCandidates.push(name);
+  const primaryWebsite = normalizeHttpUrl(payload.website);
+  if (primaryWebsite) {
+    const host = hostnameOf(primaryWebsite);
+    const root = host.split('.')[0] || '';
+    if (root) derivedCandidates.push(root);
+  }
+  const websiteList = Array.isArray(payload.websites)
+    ? payload.websites
+    : typeof payload.websites === 'string'
+      ? [payload.websites]
+      : [];
+  for (const raw of websiteList.slice(0, 2)) {
+    const url = normalizeHttpUrl(raw);
+    if (!url) continue;
+    const host = hostnameOf(url);
+    const root = host.split('.')[0] || '';
+    if (root) derivedCandidates.push(root);
+  }
+
+  const derivedHandles = uniqueList(
+    derivedCandidates
+      .map((value) =>
+        String(value || '')
+          .toLowerCase()
+          .replace(/[^a-z0-9._-]/g, '')
+          .replace(/^[._-]+|[._-]+$/g, '')
+          .trim()
+      )
+      .filter((value) => value.length >= 3 && value.length <= 40),
+    6
+  );
+  for (const derivedHandle of derivedHandles) {
+    for (const platform of ['instagram', 'tiktok', 'youtube', 'linkedin', 'x']) {
+      push(platform, derivedHandle);
+    }
+  }
+
+  return out;
+}
+
+function normalizeCompetitorInspirationLinks(payload: Record<string, unknown>, links: string[]): string[] {
+  const selfDomains = buildSelfDomainsFromPayload(payload);
+  const selfHandles = buildSelfHandlesFromPayload(payload);
+
+  const parsed = parseCompetitorInspirationInputs(links);
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  for (const row of parsed) {
+    if (row.inputType === 'website') {
+      const domain = (normalizeWebsiteDomain(row.domain) || row.domain || '').toLowerCase();
+      if (!domain || selfDomains.has(domain)) continue;
+      const key = `web:${domain}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const url = normalizeUrlForLink(row.sourceUrl) || `https://${domain}/`;
+      out.push(url);
+      continue;
+    }
+
+    const platform = row.inputType === 'x' ? 'x' : row.inputType;
+    const handle = normalizeHandle(row.handle);
+    if (!handle) continue;
+    const selfBucket = selfHandles.get(platform) || new Set<string>();
+    if (selfBucket.has(handle)) continue;
+    const key = `${platform}:${handle}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const canonicalProfile = getProfileUrl(platform, handle);
+    const preferred = normalizeUrlForLink(canonicalProfile || row.sourceUrl);
+    const fallback = normalizeUrlForLink(row.sourceUrl);
+    out.push(preferred || fallback);
+  }
+
+  return out.slice(0, 5);
 }
 
 function candidateKey(candidate: Pick<SuggestedHandleCandidate, 'platform' | 'handle'>): string {
@@ -1130,6 +1305,17 @@ export async function suggestIntakeCompletion(
   const inferableKeys = resolveInferableKeys(scope, suggestionStep);
   let missingKeys = resolveTargetKeys(partialPayload, inferableKeys, fieldMeta, overwritePolicy);
 
+  if (
+    suggestionStep === 'voice' &&
+    !isUserLockedField(fieldMeta, 'competitorInspirationLinks') &&
+    !missingKeys.includes('competitorInspirationLinks')
+  ) {
+    const existingCompetitors = parseLooseList(partialPayload.competitorInspirationLinks, 5);
+    if (existingCompetitors.length > 0 && existingCompetitors.length < 5) {
+      missingKeys = [...missingKeys, 'competitorInspirationLinks'];
+    }
+  }
+
   const fallbackSuggested = buildFallbackSuggestions(partialPayload, missingKeys, website);
   let suggested: Record<string, unknown> = {
     ...fallbackSuggested,
@@ -1146,7 +1332,7 @@ export async function suggestIntakeCompletion(
           : suggestionStep === 'audience'
             ? `Audience step: define a clear target segment, pains, and intent in practical language.`
             : suggestionStep === 'voice'
-              ? `Voice step: propose strong, brand-safe voice and guardrails with realistic constraints.`
+              ? `Voice step: propose strong, brand-safe voice and guardrails with realistic constraints. For competitorInspirationLinks, return an array of 3–5 competitor/inspiration URLs/handles (websites or social). Never include the client's own website(s) or their own social handles. Prefer close/direct competitors; allow some relevant directories/reseller listings when appropriate.`
               : `Global step: keep suggestions practical and conversion-focused.`;
     const systemPrompt = `You are BAT's intake strategist. Generate polished, specific, evidence-grounded suggestions for missing intake fields.
 Rules:
@@ -1249,6 +1435,43 @@ Return a single JSON object with only these keys.`;
       suggested.servicesList = combinedServices;
     } else {
       delete suggested.servicesList;
+    }
+  }
+
+  if (missingKeys.includes('competitorInspirationLinks')) {
+    const combinedLinks = [
+      ...parseLooseList(partialPayload.competitorInspirationLinks, 5),
+      ...parseLooseList(suggested.competitorInspirationLinks, 5),
+    ].filter(Boolean);
+
+    let normalizedLinks = normalizeCompetitorInspirationLinks(partialPayload, combinedLinks);
+
+    if (suggestionStep === 'voice' && normalizedLinks.length < 5) {
+      try {
+        const discovery = await suggestCompetitorInspirationLinks({
+          intakePayload: partialPayload,
+          existingLinks: normalizedLinks,
+          desiredCount: 5,
+        });
+        normalizedLinks = normalizeCompetitorInspirationLinks(partialPayload, discovery.links);
+        for (const warningCode of discovery.warnings) {
+          warnings.add(warningCode);
+        }
+      } catch (error: unknown) {
+        warnings.add('COMPETITOR_LINK_DISCOVERY_FAILED');
+      }
+    }
+
+    if (normalizedLinks.length > 0) {
+      suggested.competitorInspirationLinks = normalizedLinks;
+      if (suggestionStep === 'voice' && normalizedLinks.length < 3) {
+        warnings.add('COMPETITOR_LINK_DISCOVERY_LOW_RESULTS');
+      }
+    } else {
+      delete suggested.competitorInspirationLinks;
+      if (suggestionStep === 'voice') {
+        warnings.add('COMPETITOR_LINK_DISCOVERY_EMPTY');
+      }
     }
   }
 
