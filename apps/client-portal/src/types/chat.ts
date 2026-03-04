@@ -180,6 +180,7 @@ export interface ChatInputSourceScope {
   webSearch: boolean;
   liveWebsiteCrawl: boolean;
   socialIntel: boolean;
+  slackIntel: boolean;
 }
 
 export interface ChatInputOptions {
@@ -345,4 +346,130 @@ export interface RuntimeWorkspace {
     id: string;
     name: string;
   };
+}
+
+export interface RuntimeNotificationDelivery {
+  id: string;
+  destination: "SLACK_DM" | "SLACK_CHANNEL" | "IN_APP";
+  status: "SENT" | "FAILED";
+  slackTeamId?: string | null;
+  slackChannelId?: string | null;
+  slackUserId?: string | null;
+  slackMessageTs?: string | null;
+  error?: string | null;
+  createdAt: string;
+}
+
+export interface RuntimeAttentionItemSummary {
+  id: string;
+  type: "NEEDS_REPLY" | "FEEDBACK_REQUEST" | "DEADLINE";
+  status: "OPEN" | "SNOOZED" | "DONE" | "DISMISSED";
+  summary: string;
+  dueAt?: string | null;
+}
+
+export interface RuntimeNotification {
+  id: string;
+  researchJobId?: string | null;
+  kind: "SLACK_ATTENTION" | "SLACK_DRAFT_READY" | "BAT_WAITING_INPUT" | "DEADLINE_REMINDER";
+  severity: "INFO" | "WARN" | "URGENT";
+  title: string;
+  body: string;
+  metadataJson?: Record<string, unknown> | null;
+  readAt?: string | null;
+  createdAt: string;
+  deliveries: RuntimeNotificationDelivery[];
+  attentionItem?: RuntimeAttentionItemSummary | null;
+}
+
+export interface SlackChannelOwnerSummary {
+  id: string;
+  slackUserId: string;
+  portalUserId?: string | null;
+  portalUser?: {
+    id: string;
+    email: string;
+    fullName?: string | null;
+  } | null;
+}
+
+export interface SlackChannelLinkSummary {
+  id: string;
+  researchJobId: string;
+  enabled: boolean;
+  backfillState: "PENDING" | "RUNNING" | "DONE" | "FAILED";
+  updatedAt: string;
+  researchJob?: {
+    id: string;
+    client?: {
+      name?: string | null;
+    } | null;
+  } | null;
+}
+
+export interface SlackChannelSummary {
+  id: string;
+  slackTeamId: string;
+  slackChannelId: string;
+  name: string;
+  isPrivate: boolean;
+  isArchived: boolean;
+  isMember: boolean;
+  conversationType: "CHANNEL" | "GROUP" | "IM" | "MPIM";
+  updatedAt: string;
+  links: SlackChannelLinkSummary[];
+  owners: SlackChannelOwnerSummary[];
+}
+
+export interface SlackInstallationSettings {
+  dmIngestionEnabled: boolean;
+  mpimIngestionEnabled: boolean;
+  notifyInSlack: boolean;
+  notifyInBat: boolean;
+  ownerDeliveryMode: "dm" | "channel" | "both";
+}
+
+export type SlackSetupStepId = "connect" | "users" | "channels" | "settings";
+
+export type SlackSetupStepState = "locked" | "todo" | "in_progress" | "done";
+
+export type SlackChannelActionState = "needs_link" | "needs_owners" | "needs_backfill" | "ready";
+
+export interface SlackInstallationSummary {
+  id: string;
+  slackTeamId: string;
+  teamName?: string | null;
+  enterpriseId?: string | null;
+  botUserId: string;
+  defaultNotifyChannelId?: string | null;
+  status: "ACTIVE" | "REVOKED";
+  settings: SlackInstallationSettings;
+  installedAt: string;
+  updatedAt: string;
+}
+
+export interface SlackUserSummary {
+  id: string;
+  slackTeamId: string;
+  slackUserId: string;
+  email?: string | null;
+  displayName?: string | null;
+  portalUserId?: string | null;
+  portalUser?: {
+    id: string;
+    email: string;
+    fullName?: string | null;
+  } | null;
+}
+
+export interface SlackPreflightReport {
+  configured: boolean;
+  required: string[];
+  missingEnv: string[];
+  callbackUrl?: string | null;
+  bootstrap: {
+    enabled: boolean;
+    reason?: string | null;
+  };
+  teamIds: string[];
 }
