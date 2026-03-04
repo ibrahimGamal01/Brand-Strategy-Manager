@@ -11,7 +11,7 @@
         "dev:client-portal": "npm run dev --workspace=apps/client-portal",
         "dev:backend": "npm run dev --workspace=apps/backend",
         "build": "if [ \"$VERCEL\" = \"1\" ]; then npm run build:vercel; else npm run build --workspaces; fi",
-        "build:vercel": "npm run build --workspace=apps/frontend",
+        "build:vercel": "npm run build --workspace=apps/frontend && rm -rf .next && cp -R apps/frontend/.next .next",
         "lint": "npm run lint --workspaces",
         "quality:file-lines": "node scripts/quality/check-file-lines.cjs",
         "security:scan-main": "node scripts/security/scan-main-hardening.cjs"
