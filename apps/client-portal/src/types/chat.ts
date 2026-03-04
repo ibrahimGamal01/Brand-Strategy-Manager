@@ -261,6 +261,10 @@ export interface ProcessFeedItem {
   docFamily?: string;
   sectionId?: string;
   sectionTitle?: string;
+  methodFamily?: string;
+  lane?: string;
+  queryVariant?: string;
+  newEvidenceRefs?: number;
   details?: string[];
   actionLabel?: string;
   actionTarget?: {

@@ -207,19 +207,24 @@ async function waitForLoopStageEvents(input: {
       return Number.isFinite(createdAt) && createdAt >= input.createdAfterMs;
     });
     const markers = new Set<string>();
+    let hasMethodFamilyMeta = false;
     for (const row of recent) {
       const payload = isRecord(row.payloadJson) ? row.payloadJson : {};
       const eventV2 = isRecord(payload.eventV2) ? payload.eventV2 : isRecord(row.eventV2) ? row.eventV2 : {};
       const event = String(eventV2.event || '').trim().toLowerCase();
       if (!event) continue;
       markers.add(event);
+      if (event === 'run.stage_searching') {
+        const methodFamily = String(payload.methodFamily || '').trim();
+        if (methodFamily) hasMethodFamilyMeta = true;
+      }
     }
     const expected = ['run.stage_searching', 'run.stage_thinking', 'run.stage_building', 'run.stage_validating'];
-    if (expected.every((event) => markers.has(event))) {
+    if (expected.every((event) => markers.has(event)) && hasMethodFamilyMeta) {
       return;
     }
   }
-  throw new Error('Timed out waiting for progressive loop stage events.');
+  throw new Error('Timed out waiting for progressive loop stage events with methodFamily metadata.');
 }
 
 async function main() {
@@ -285,6 +290,7 @@ async function main() {
     /##\s+What I searched/i.test(assistantContent) &&
       /##\s+What I found/i.test(assistantContent) &&
       /##\s+Synthesis/i.test(assistantContent) &&
+      /##\s+Scenarios and tradeoffs/i.test(assistantContent) &&
       /##\s+Recommendations/i.test(assistantContent) &&
       /##\s+Next loop \/ next actions/i.test(assistantContent),
     'Deep/pro response is missing required section headers.'

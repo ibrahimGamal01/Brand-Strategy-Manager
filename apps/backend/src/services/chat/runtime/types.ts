@@ -96,6 +96,14 @@ export type RuntimePlan = {
     loopMax?: number;
     loopReason?: string;
     coverageDelta?: number;
+    familyHistory?: string[];
+    queryFingerprints?: string[];
+    coverageDeltaHistory?: number[];
+    newEvidenceRefCountHistory?: number[];
+    seenEvidenceRefIds?: string[];
+    explorationStrategies?: string[];
+    queryVariants?: string[];
+    lanePriority?: string[];
     contextSnapshot?: Record<string, unknown>;
   };
 };

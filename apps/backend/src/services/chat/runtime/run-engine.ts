@@ -164,8 +164,8 @@ const DEFAULT_POLICY: RunPolicy = {
   toolConcurrency: 3,
   allowMutationTools: false,
   maxToolMs: envRuntimeNumber('CHAT_TOOL_TIMEOUT_MS', 45_000, 2_000, 300_000),
-  responseMode: 'balanced',
-  targetLength: 'medium',
+  responseMode: 'deep',
+  targetLength: 'long',
   strictValidation: false,
   sourceScope: {
     workspaceData: true,
@@ -302,7 +302,7 @@ const DOCUMENT_RUN_BUDGET_STANDARD_MS = envRuntimeNumber(
 );
 const DOCUMENT_RUN_BUDGET_DEEP_MS = envRuntimeNumber(
   'RUNTIME_DOCUMENT_RUN_BUDGET_DEEP_MS',
-  8 * 60_000,
+  10 * 60_000,
   4 * 60_000,
   20 * 60_000
 );
@@ -1679,6 +1679,459 @@ function sanitizeToolCalls(toolCalls: RuntimeToolCall[], userMessage: string, ma
   }
 
   return sanitized.slice(0, maxToolRuns);
+}
+
+type ToolFamily =
+  | 'web_search'
+  | 'crawl_extract'
+  | 'workspace_intel'
+  | 'social_signals'
+  | 'news_signals'
+  | 'competitor_discovery';
+
+type ToolFamilyDiversityResult = {
+  toolCalls: RuntimeToolCall[];
+  familiesUsed: ToolFamily[];
+  addedFamilies: ToolFamily[];
+};
+
+const TOOL_FAMILY_PRIORITY: ToolFamily[] = [
+  'web_search',
+  'workspace_intel',
+  'competitor_discovery',
+  'social_signals',
+  'news_signals',
+  'crawl_extract',
+];
+const LOOP_STALL_MAX_RETRIES = envRuntimeNumber('RUNTIME_LOOP_STALL_MAX_RETRIES', 2, 1, 5);
+const LOOP_HISTORY_MAX = 24;
+const LOOP_QUERY_FINGERPRINT_MAX = 64;
+const LOOP_SEEN_EVIDENCE_MAX = 240;
+const TOOL_FAMILY_SET = new Set<ToolFamily>(TOOL_FAMILY_PRIORITY);
+
+function normalizeStringHistory(value: unknown, maxItems: number): string[] {
+  if (!Array.isArray(value)) return [];
+  const deduped = new Set<string>();
+  const out: string[] = [];
+  for (const entry of value) {
+    const normalized = String(entry || '').trim();
+    if (!normalized || deduped.has(normalized)) continue;
+    deduped.add(normalized);
+    out.push(normalized);
+    if (out.length >= maxItems) break;
+  }
+  return out;
+}
+
+function normalizeNumberHistory(value: unknown, maxItems: number): number[] {
+  if (!Array.isArray(value)) return [];
+  const out: number[] = [];
+  for (const entry of value) {
+    const parsed = Number(entry);
+    if (!Number.isFinite(parsed)) continue;
+    out.push(parsed);
+    if (out.length >= maxItems) break;
+  }
+  return out;
+}
+
+function normalizeToolFamilyHistory(value: unknown, maxItems: number): ToolFamily[] {
+  if (!Array.isArray(value)) return [];
+  const out: ToolFamily[] = [];
+  const seen = new Set<ToolFamily>();
+  for (const entry of value) {
+    const normalized = String(entry || '').trim().toLowerCase() as ToolFamily;
+    if (!TOOL_FAMILY_SET.has(normalized) || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+    if (out.length >= maxItems) break;
+  }
+  return out;
+}
+
+function appendBoundedNumberHistory(history: number[], next: number, maxItems: number): number[] {
+  const normalized = Number.isFinite(next) ? next : 0;
+  return [...history.slice(-(Math.max(0, maxItems - 1))), normalized];
+}
+
+function appendBoundedStringHistory(history: string[], nextItems: string[], maxItems: number): string[] {
+  if (!nextItems.length) return history.slice(-maxItems);
+  const out = history.slice(-maxItems);
+  for (const item of nextItems) {
+    const normalized = String(item || '').trim();
+    if (!normalized) continue;
+    out.push(normalized);
+  }
+  const deduped = new Set<string>();
+  const compact: string[] = [];
+  for (let index = out.length - 1; index >= 0; index -= 1) {
+    const value = out[index];
+    if (deduped.has(value)) continue;
+    deduped.add(value);
+    compact.push(value);
+    if (compact.length >= maxItems) break;
+  }
+  return compact.reverse();
+}
+
+function appendBoundedFamilyHistory(history: ToolFamily[], nextItems: ToolFamily[], maxItems: number): ToolFamily[] {
+  if (!nextItems.length) return history.slice(-maxItems);
+  const out = history.slice(-maxItems);
+  for (const item of nextItems) {
+    if (!TOOL_FAMILY_SET.has(item)) continue;
+    out.push(item);
+  }
+  return out.slice(-maxItems);
+}
+
+function laneToToolFamily(laneRaw: unknown): ToolFamily | null {
+  const lane = String(laneRaw || '').trim().toLowerCase();
+  if (!lane) return null;
+  if (lane.includes('competitor') || lane.includes('battlecard') || lane.includes('market_map')) return 'competitor_discovery';
+  if (lane.includes('news') || lane.includes('press')) return 'news_signals';
+  if (lane.includes('social') || lane.includes('post') || lane.includes('video')) return 'social_signals';
+  if (lane.includes('crawl') || lane.includes('extract') || lane.includes('snapshot') || lane.includes('web_fetch')) return 'crawl_extract';
+  if (lane.includes('intel') || lane.includes('workspace') || lane.includes('library')) return 'workspace_intel';
+  if (lane.includes('web') || lane.includes('search') || lane.includes('site')) return 'web_search';
+  return null;
+}
+
+function preferredFamiliesFromLanePriority(value: unknown): ToolFamily[] {
+  if (!Array.isArray(value)) return [];
+  const out: ToolFamily[] = [];
+  const seen = new Set<ToolFamily>();
+  for (const lane of value) {
+    const family = laneToToolFamily(lane);
+    if (!family || seen.has(family)) continue;
+    seen.add(family);
+    out.push(family);
+  }
+  return out;
+}
+
+function toolCallFingerprint(call: RuntimeToolCall): string {
+  return `${String(call.tool || '').trim().toLowerCase()}:${stableJson(isRecord(call.args) ? call.args : {})}`;
+}
+
+function buildToolCallFingerprints(toolCalls: RuntimeToolCall[], maxItems: number): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const call of toolCalls) {
+    const key = toolCallFingerprint(call);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+    if (out.length >= maxItems) break;
+  }
+  return out;
+}
+
+function countConsecutiveLowDeltaLoops(coverageDeltaHistory: number[], newEvidenceRefCountHistory: number[]): number {
+  const span = Math.min(coverageDeltaHistory.length, newEvidenceRefCountHistory.length);
+  let count = 0;
+  for (let index = span - 1; index >= 0; index -= 1) {
+    const coverageDelta = Number(coverageDeltaHistory[index] || 0);
+    const novelty = Number(newEvidenceRefCountHistory[index] || 0);
+    if (coverageDelta <= 0 && novelty <= 0) {
+      count += 1;
+      continue;
+    }
+    break;
+  }
+  return count;
+}
+
+function chooseAlternateFamiliesForStall(input: {
+  availableFamilies: ToolFamily[];
+  currentFamilies: ToolFamily[];
+  familyHistory: ToolFamily[];
+  preferredFamilies: ToolFamily[];
+}): ToolFamily[] {
+  if (!input.availableFamilies.length) return [];
+  const currentSet = new Set<ToolFamily>(input.currentFamilies);
+  const recentHistory = input.familyHistory.slice(-10);
+  const usage = new Map<ToolFamily, number>();
+  for (const family of recentHistory) {
+    usage.set(family, (usage.get(family) || 0) + 1);
+  }
+  const preferredRank = new Map<ToolFamily, number>();
+  input.preferredFamilies.forEach((family, index) => preferredRank.set(family, index));
+  const sorted = [...input.availableFamilies].sort((left, right) => {
+    const leftCurrent = currentSet.has(left) ? 1 : 0;
+    const rightCurrent = currentSet.has(right) ? 1 : 0;
+    if (leftCurrent !== rightCurrent) return leftCurrent - rightCurrent;
+    const leftPreferred = preferredRank.has(left) ? preferredRank.get(left)! : Number.MAX_SAFE_INTEGER;
+    const rightPreferred = preferredRank.has(right) ? preferredRank.get(right)! : Number.MAX_SAFE_INTEGER;
+    if (leftPreferred !== rightPreferred) return leftPreferred - rightPreferred;
+    const leftUsage = usage.get(left) || 0;
+    const rightUsage = usage.get(right) || 0;
+    if (leftUsage !== rightUsage) return leftUsage - rightUsage;
+    return TOOL_FAMILY_PRIORITY.indexOf(left) - TOOL_FAMILY_PRIORITY.indexOf(right);
+  });
+  return sorted.slice(0, 2);
+}
+
+function pickQueryVariantForLoop(value: unknown, loopIndex: number): string | null {
+  const variants = normalizeStringHistory(value, 12);
+  if (!variants.length) return null;
+  const index = Math.max(0, (Math.max(1, loopIndex) - 1) % variants.length);
+  return variants[index] || null;
+}
+
+function pickLaneForLoop(value: unknown, loopIndex: number): string | null {
+  const lanes = normalizeStringHistory(value, 12);
+  if (!lanes.length) return null;
+  const index = Math.max(0, (Math.max(1, loopIndex) - 1) % lanes.length);
+  return lanes[index] || null;
+}
+
+function toolFamilyForTool(toolNameRaw: string): ToolFamily | null {
+  const tool = String(toolNameRaw || '').trim().toLowerCase();
+  if (tool === 'search.web' || tool === 'research.gather') return 'web_search';
+  if (tool === 'web.crawl' || tool === 'web.fetch' || tool === 'web.extract' || tool === 'web.crawl.list_snapshots') {
+    return 'crawl_extract';
+  }
+  if (tool === 'intel.list' || tool === 'intel.get') return 'workspace_intel';
+  if (tool === 'evidence.posts' || tool === 'evidence.videos') return 'social_signals';
+  if (tool === 'evidence.news') return 'news_signals';
+  if (tool === 'competitors.discover_v3' || tool === 'orchestration.run' || tool === 'orchestration.status') {
+    return 'competitor_discovery';
+  }
+  return null;
+}
+
+function listToolFamilies(toolCalls: RuntimeToolCall[]): ToolFamily[] {
+  const seen = new Set<ToolFamily>();
+  for (const call of toolCalls) {
+    const family = toolFamilyForTool(call.tool);
+    if (!family) continue;
+    seen.add(family);
+  }
+  return Array.from(seen);
+}
+
+function listAvailableToolFamilies(policy: RunPolicy): ToolFamily[] {
+  const available = new Set<ToolFamily>(['workspace_intel']);
+  if (policy.sourceScope.webSearch) {
+    available.add('web_search');
+    available.add('news_signals');
+    available.add('competitor_discovery');
+  }
+  if (policy.sourceScope.socialIntel) {
+    available.add('social_signals');
+    available.add('competitor_discovery');
+  }
+  if (policy.sourceScope.liveWebsiteCrawl) {
+    available.add('crawl_extract');
+  }
+  return Array.from(available);
+}
+
+function requiredFamilyCount(policy: RunPolicy, availableFamilies: ToolFamily[]): number {
+  if (policy.responseMode === 'pro') return Math.max(1, Math.min(4, availableFamilies.length));
+  if (policy.responseMode === 'deep') return Math.max(1, Math.min(3, availableFamilies.length));
+  return 0;
+}
+
+function buildFamilyCandidateToolCall(input: {
+  family: ToolFamily;
+  userMessage: string;
+  policy: RunPolicy;
+  runtimeContextSnapshot?: Record<string, unknown>;
+}): RuntimeToolCall | null {
+  const query = compactPromptString(input.userMessage, 180) || 'brand strategy research';
+  const websiteCandidates = Array.isArray(input.runtimeContextSnapshot?.websites)
+    ? input.runtimeContextSnapshot?.websites.map((entry) => String(entry || '').trim()).filter(Boolean)
+    : [];
+  const firstWebsite = websiteCandidates[0] || findFirstUrl(input.userMessage) || '';
+
+  if (input.family === 'web_search') {
+    return {
+      tool: input.policy.responseMode === 'pro' ? 'research.gather' : 'search.web',
+      args:
+        input.policy.responseMode === 'pro'
+          ? {
+              query,
+              depth: 'deep',
+              includeScrapling: true,
+              includeAccountContext: true,
+              includeWorkspaceWebsites: true,
+            }
+          : {
+              query,
+              count: 10,
+              provider: 'auto',
+            },
+    };
+  }
+
+  if (input.family === 'crawl_extract') {
+    if (!firstWebsite) return null;
+    return {
+      tool: 'web.crawl',
+      args: {
+        startUrls: [firstWebsite],
+        maxPages: input.policy.responseMode === 'pro' ? 16 : 10,
+        maxDepth: input.policy.responseMode === 'pro' ? 2 : 1,
+        allowExternal: false,
+      },
+    };
+  }
+
+  if (input.family === 'workspace_intel') {
+    return {
+      tool: 'intel.list',
+      args: {
+        section: 'web_snapshots',
+        limit: 20,
+      },
+    };
+  }
+
+  if (input.family === 'social_signals') {
+    return {
+      tool: 'evidence.posts',
+      args: {
+        platform: 'any',
+        sort: 'engagement',
+        limit: 10,
+      },
+    };
+  }
+
+  if (input.family === 'news_signals') {
+    return {
+      tool: 'evidence.news',
+      args: {
+        limit: 10,
+      },
+    };
+  }
+
+  if (input.family === 'competitor_discovery') {
+    if (input.policy.sourceScope.webSearch) {
+      return {
+        tool: 'competitors.discover_v3',
+        args: {
+          mode: input.policy.responseMode === 'pro' ? 'deep' : 'standard',
+          maxCandidates: input.policy.responseMode === 'pro' ? 120 : 80,
+          maxEnrich: input.policy.responseMode === 'pro' ? 10 : 6,
+        },
+      };
+    }
+    if (input.policy.sourceScope.socialIntel) {
+      return {
+        tool: 'orchestration.run',
+        args: {
+          targetCount: 12,
+          mode: 'append',
+          precision: 'balanced',
+        },
+      };
+    }
+    return null;
+  }
+
+  return null;
+}
+
+function enforceToolFamilyDiversity(input: {
+  toolCalls: RuntimeToolCall[];
+  policy: RunPolicy;
+  userMessage: string;
+  maxToolRuns: number;
+  runtimeContextSnapshot?: Record<string, unknown>;
+  preferredFamilies?: ToolFamily[];
+}): ToolFamilyDiversityResult {
+  const availableFamilies = listAvailableToolFamilies(input.policy);
+  const required = requiredFamilyCount(input.policy, availableFamilies);
+  const existingFamilies = listToolFamilies(input.toolCalls);
+
+  if (required <= 0 || existingFamilies.length >= required) {
+    return {
+      toolCalls: input.toolCalls.slice(0, input.maxToolRuns),
+      familiesUsed: existingFamilies,
+      addedFamilies: [],
+    };
+  }
+
+  const preferred = Array.isArray(input.preferredFamilies)
+    ? input.preferredFamilies.filter((family) => availableFamilies.includes(family))
+    : [];
+  const familyOrder = [
+    ...preferred,
+    ...TOOL_FAMILY_PRIORITY.filter((family) => !preferred.includes(family)),
+  ].filter((family) => availableFamilies.includes(family));
+  const missingFamilies = familyOrder.filter((family) => !existingFamilies.includes(family));
+  const existingKeys = new Set(input.toolCalls.map((call) => `${call.tool}:${stableJson(call.args || {})}`));
+  const addedCalls: RuntimeToolCall[] = [];
+  const addedFamilies: ToolFamily[] = [];
+
+  for (const family of missingFamilies) {
+    const candidate = buildFamilyCandidateToolCall({
+      family,
+      userMessage: input.userMessage,
+      policy: input.policy,
+      ...(input.runtimeContextSnapshot ? { runtimeContextSnapshot: input.runtimeContextSnapshot } : {}),
+    });
+    if (!candidate) continue;
+    const key = `${candidate.tool}:${stableJson(candidate.args || {})}`;
+    if (existingKeys.has(key)) continue;
+    existingKeys.add(key);
+    addedCalls.push(candidate);
+    addedFamilies.push(family);
+    if (existingFamilies.length + addedFamilies.length >= required) break;
+  }
+
+  if (!addedCalls.length) {
+    return {
+      toolCalls: input.toolCalls.slice(0, input.maxToolRuns),
+      familiesUsed: existingFamilies,
+      addedFamilies: [],
+    };
+  }
+
+  const merged = [...addedCalls, ...input.toolCalls];
+  const bounded = [...merged];
+  const familyCounts = new Map<ToolFamily, number>();
+  for (const call of bounded) {
+    const family = toolFamilyForTool(call.tool);
+    if (!family) continue;
+    familyCounts.set(family, (familyCounts.get(family) || 0) + 1);
+  }
+
+  while (bounded.length > input.maxToolRuns) {
+    let removalIndex = -1;
+    for (let index = bounded.length - 1; index >= 0; index -= 1) {
+      const toolName = String(bounded[index].tool || '').trim().toLowerCase();
+      if (toolName === 'document.generate') continue;
+      const family = toolFamilyForTool(toolName);
+      if (family && (familyCounts.get(family) || 0) > 1) {
+        removalIndex = index;
+        break;
+      }
+    }
+    if (removalIndex < 0) {
+      for (let index = bounded.length - 1; index >= 0; index -= 1) {
+        const toolName = String(bounded[index].tool || '').trim().toLowerCase();
+        if (toolName === 'document.generate') continue;
+        removalIndex = index;
+        break;
+      }
+    }
+    if (removalIndex < 0) break;
+    const removed = bounded.splice(removalIndex, 1)[0];
+    const family = toolFamilyForTool(removed.tool);
+    if (family) {
+      familyCounts.set(family, Math.max(0, (familyCounts.get(family) || 0) - 1));
+    }
+  }
+
+  return {
+    toolCalls: bounded.slice(0, input.maxToolRuns),
+    familiesUsed: listToolFamilies(bounded),
+    addedFamilies,
+  };
 }
 
 type RuntimeDocumentCoverage = {
@@ -4154,9 +4607,13 @@ export class RuntimeRunEngine {
     };
 
     if (RUNTIME_PROGRESSIVE_LOOPS_ENABLED) {
+      const loopMethodFamily = listToolFamilies(plan.toolCalls).join(', ');
+      const loopQueryVariant = pickQueryVariantForLoop(plan.runtime?.queryVariants, loopState.loopIndex);
+      const loopLane = pickLaneForLoop(plan.runtime?.lanePriority, loopState.loopIndex);
       plan = {
         ...plan,
         runtime: {
+          ...(isRecord(plan.runtime) ? plan.runtime : {}),
           continuationDepth: plan.runtime?.continuationDepth ?? 0,
           loopIndex: loopState.loopIndex,
           loopMax: loopState.loopMax,
@@ -4170,15 +4627,25 @@ export class RuntimeRunEngine {
       await updateAgentRun(run.id, { plan });
       await emitProgressiveLoopEvent({
         event: 'run.loop_started',
-        message: `Loop ${loopState.loopIndex}/${loopState.loopMax} started.`,
+        message: `Loop ${loopState.loopIndex}/${loopState.loopMax} started${loopMethodFamily ? ` (${loopMethodFamily})` : ''}.`,
         phase: 'tools',
         stage: 'loop',
+        extra: {
+          ...(loopMethodFamily ? { methodFamily: loopMethodFamily } : {}),
+          ...(loopLane ? { lane: loopLane } : {}),
+          ...(loopQueryVariant ? { queryVariant: loopQueryVariant } : {}),
+        },
       });
       await emitProgressiveLoopEvent({
         event: 'run.stage_thinking',
         message: `Thinking and restructuring sections (loop ${loopState.loopIndex}/${loopState.loopMax}).`,
         phase: 'planning',
         stage: 'thinking',
+        extra: {
+          ...(loopMethodFamily ? { methodFamily: loopMethodFamily } : {}),
+          ...(loopLane ? { lane: loopLane } : {}),
+          ...(loopQueryVariant ? { queryVariant: loopQueryVariant } : {}),
+        },
       });
     }
 
@@ -4484,6 +4951,94 @@ export class RuntimeRunEngine {
     }
 
     const continuationDepth = plan.runtime?.continuationDepth ?? 0;
+    const runtimeState = (isRecord(plan.runtime) ? plan.runtime : {}) as NonNullable<RuntimePlan['runtime']>;
+    const plannerPreferredFamilies = preferredFamiliesFromLanePriority(runtimeState.lanePriority);
+    const currentLoopFamilies = listToolFamilies(plan.toolCalls);
+    const currentLoopFingerprints = buildToolCallFingerprints(plan.toolCalls, policy.maxToolRuns);
+    const familyHistory = normalizeToolFamilyHistory(runtimeState.familyHistory, LOOP_HISTORY_MAX);
+    const queryFingerprints = normalizeStringHistory(runtimeState.queryFingerprints, LOOP_QUERY_FINGERPRINT_MAX);
+    const coverageDeltaHistory = normalizeNumberHistory(runtimeState.coverageDeltaHistory, LOOP_HISTORY_MAX);
+    const newEvidenceRefCountHistory = normalizeNumberHistory(runtimeState.newEvidenceRefCountHistory, LOOP_HISTORY_MAX);
+    const seenEvidenceRefIds = normalizeStringHistory(runtimeState.seenEvidenceRefIds, LOOP_SEEN_EVIDENCE_MAX);
+    const loopRuntimeEvidenceRefIds = collectRuntimeEvidenceRefIds(toolResults);
+    const seenEvidenceRefSet = new Set<string>(seenEvidenceRefIds);
+    let newEvidenceRefs = 0;
+    for (const refId of loopRuntimeEvidenceRefIds) {
+      if (!refId || seenEvidenceRefSet.has(refId)) continue;
+      seenEvidenceRefSet.add(refId);
+      newEvidenceRefs += 1;
+    }
+    const nextCoverageDeltaHistory = appendBoundedNumberHistory(coverageDeltaHistory, loopState.coverageDelta, LOOP_HISTORY_MAX);
+    const nextNoveltyHistory = appendBoundedNumberHistory(
+      newEvidenceRefCountHistory,
+      newEvidenceRefs,
+      LOOP_HISTORY_MAX
+    );
+    const nextFamilyHistory = appendBoundedFamilyHistory(familyHistory, currentLoopFamilies, LOOP_HISTORY_MAX);
+    const nextQueryFingerprints = appendBoundedStringHistory(
+      queryFingerprints,
+      currentLoopFingerprints,
+      LOOP_QUERY_FINGERPRINT_MAX
+    );
+    const nextSeenEvidenceRefIds = Array.from(seenEvidenceRefSet).slice(-LOOP_SEEN_EVIDENCE_MAX);
+    const consecutiveLowDeltaLoops = countConsecutiveLowDeltaLoops(nextCoverageDeltaHistory, nextNoveltyHistory);
+    const shouldForceAlternateMethod = consecutiveLowDeltaLoops >= 2;
+    const alternateFamilies = shouldForceAlternateMethod
+      ? chooseAlternateFamiliesForStall({
+          availableFamilies: listAvailableToolFamilies(policy),
+          currentFamilies: currentLoopFamilies,
+          familyHistory: nextFamilyHistory,
+          preferredFamilies: plannerPreferredFamilies,
+        })
+      : [];
+    const continuationPreferredFamilies = Array.from(
+      new Set<ToolFamily>([...alternateFamilies, ...plannerPreferredFamilies])
+    );
+    const nextLoopIndexCandidate = Math.max(1, continuationDepth + 2);
+    const continuationQueryVariant = pickQueryVariantForLoop(plan.runtime?.queryVariants, nextLoopIndexCandidate);
+    const continuationLane = pickLaneForLoop(plan.runtime?.lanePriority, nextLoopIndexCandidate);
+    const continuationSeedMessage = continuationQueryVariant
+      ? `${triggerMessage}\n\nQuery variant: ${continuationQueryVariant}`
+      : triggerMessage;
+
+    const shouldPersistLoopRuntimeState =
+      JSON.stringify(familyHistory) !== JSON.stringify(nextFamilyHistory) ||
+      JSON.stringify(queryFingerprints) !== JSON.stringify(nextQueryFingerprints) ||
+      JSON.stringify(coverageDeltaHistory) !== JSON.stringify(nextCoverageDeltaHistory) ||
+      JSON.stringify(newEvidenceRefCountHistory) !== JSON.stringify(nextNoveltyHistory) ||
+      JSON.stringify(seenEvidenceRefIds) !== JSON.stringify(nextSeenEvidenceRefIds);
+    if (shouldPersistLoopRuntimeState) {
+      plan = {
+        ...plan,
+        runtime: {
+          ...(isRecord(plan.runtime) ? plan.runtime : {}),
+          continuationDepth,
+          familyHistory: nextFamilyHistory,
+          queryFingerprints: nextQueryFingerprints,
+          coverageDeltaHistory: nextCoverageDeltaHistory,
+          newEvidenceRefCountHistory: nextNoveltyHistory,
+          seenEvidenceRefIds: nextSeenEvidenceRefIds,
+        },
+      };
+      await updateAgentRun(run.id, { plan });
+    }
+
+    if (shouldForceAlternateMethod) {
+      await emitProgressiveLoopEvent({
+        event: 'run.stage_thinking',
+        message: `Coverage stalled for ${consecutiveLowDeltaLoops} loop(s); rotating methods for the next loop.`,
+        phase: 'planning',
+        stage: 'thinking',
+        extra: {
+          stallLoops: consecutiveLowDeltaLoops,
+          methodFamily: continuationPreferredFamilies.join(', '),
+          newEvidenceRefs,
+          ...(continuationLane ? { lane: continuationLane } : {}),
+          ...(continuationQueryVariant ? { queryVariant: continuationQueryVariant } : {}),
+        },
+      });
+    }
+
     const continuationCallsFromResults = RUNTIME_CONTINUATION_CALLS_V2
       ? collectContinuationToolCalls(toolResults)
       : collectContinuationTools(toolResults).map((tool) => ({ tool, args: {} }));
@@ -4509,7 +5064,7 @@ export class RuntimeRunEngine {
         0,
         policy.maxToolRuns
       ),
-      triggerMessage,
+      continuationSeedMessage,
       policy.maxToolRuns
     );
     const continuationSourceScope = enforceToolSourceScope({
@@ -4518,14 +5073,26 @@ export class RuntimeRunEngine {
       ...(runtimeContextSnapshot ? { runtimeContextSnapshot } : {}),
       maxToolRuns: policy.maxToolRuns,
     });
-    const continuationCalls = continuationSourceScope.toolCalls;
+    const continuationDiversity = enforceToolFamilyDiversity({
+      toolCalls: continuationSourceScope.toolCalls,
+      policy,
+      userMessage: continuationSeedMessage,
+      ...(runtimeContextSnapshot ? { runtimeContextSnapshot } : {}),
+      maxToolRuns: policy.maxToolRuns,
+      ...(continuationPreferredFamilies.length ? { preferredFamilies: continuationPreferredFamilies } : {}),
+    });
+    const continuationCalls = continuationDiversity.toolCalls;
+    const continuationFamiliesUsed = continuationDiversity.familiesUsed.join(', ');
     const suppressAutoContinueForCompetitorBrief = detectWriterIntent(effectiveUserMessage) === 'competitor_brief';
     const hasGeneratedDocumentDraft = toolRuns.some(
       (toolRun) => toolRun.toolName === 'document.generate' && toolRun.status === ToolRunStatus.DONE
     );
     const suppressAutoContinueForDocumentRun = isDocumentFocusedRun({ plan, toolRuns }) && hasGeneratedDocumentDraft;
+    const shouldStopForLowDeltaLoops = consecutiveLowDeltaLoops > LOOP_STALL_MAX_RETRIES;
     const continuationCallsForRun =
-      suppressAutoContinueForCompetitorBrief || suppressAutoContinueForDocumentRun ? [] : continuationCalls;
+      suppressAutoContinueForCompetitorBrief || suppressAutoContinueForDocumentRun || shouldStopForLowDeltaLoops
+        ? []
+        : continuationCalls;
     if (continuationSourceScope.blocked.length > 0) {
       for (const blocked of continuationSourceScope.blocked) {
         await this.emitEvent({
@@ -4548,6 +5115,51 @@ export class RuntimeRunEngine {
           },
         });
       }
+    }
+    if (continuationDiversity.addedFamilies.length > 0) {
+      await emitProgressiveLoopEvent({
+        event: 'run.stage_searching',
+        message: `Expanded methods for next loop: ${continuationDiversity.addedFamilies.join(', ')}.`,
+        phase: 'tools',
+        stage: 'searching',
+        extra: {
+          methodFamily: continuationFamiliesUsed,
+          newEvidenceRefs,
+          ...(continuationLane ? { lane: continuationLane } : {}),
+          ...(continuationQueryVariant ? { queryVariant: continuationQueryVariant } : {}),
+        },
+      });
+    }
+    if (shouldStopForLowDeltaLoops) {
+      runtimeContextSnapshot = {
+        ...(runtimeContextSnapshot || {}),
+        researchLoopStalled: true,
+        researchLoopStalledCount: consecutiveLowDeltaLoops,
+        researchLoopStalledFamilies: continuationFamiliesUsed,
+      };
+      plan = {
+        ...plan,
+        runtime: {
+          ...(isRecord(plan.runtime) ? plan.runtime : {}),
+          continuationDepth,
+          ...(runtimeContextSnapshot ? { contextSnapshot: runtimeContextSnapshot } : {}),
+        },
+      };
+      await updateAgentRun(run.id, { plan });
+      await this.emitEvent({
+        branchId: run.branchId,
+        agentRunId: run.id,
+        type: ProcessEventType.PROCESS_LOG,
+        level: ProcessEventLevel.WARN,
+        message: `Loop quality cap reached after ${consecutiveLowDeltaLoops} low-improvement loop(s); returning best grounded draft now.`,
+        payload: {
+          stage: 'validation',
+          loopIndex: loopState.loopIndex,
+          loopMax: loopState.loopMax,
+          methodFamily: continuationFamiliesUsed,
+          newEvidenceRefs,
+        },
+      });
     }
 
     if (
@@ -4588,16 +5200,22 @@ export class RuntimeRunEngine {
       });
       if (RUNTIME_PROGRESSIVE_LOOPS_ENABLED) {
         const nextLoopIndex = Math.max(1, Number(nextPlan.runtime?.continuationDepth || 0) + 1);
+        const nextMethodFamily = listToolFamilies(nextPlan.toolCalls).join(', ');
+        const nextQueryVariant = pickQueryVariantForLoop(nextPlan.runtime?.queryVariants, nextLoopIndex);
+        const nextLane = pickLaneForLoop(nextPlan.runtime?.lanePriority, nextLoopIndex);
         await this.emitEvent({
           branchId: run.branchId,
           agentRunId: run.id,
           type: ProcessEventType.PROCESS_LOG,
-          message: `Searching sources (loop ${nextLoopIndex}/${loopState.loopMax}).`,
+          message: `Searching sources (loop ${nextLoopIndex}/${loopState.loopMax})${nextMethodFamily ? `: ${nextMethodFamily}` : ''}.`,
           payload: {
             stage: 'searching',
             loopIndex: nextLoopIndex,
             loopMax: loopState.loopMax,
             ...(docFamily ? { docFamily } : {}),
+            ...(nextMethodFamily ? { methodFamily: nextMethodFamily } : {}),
+            ...(nextLane ? { lane: nextLane } : {}),
+            ...(nextQueryVariant ? { queryVariant: nextQueryVariant } : {}),
             eventV2: {
               version: 2,
               event: 'run.stage_searching',
@@ -4622,6 +5240,10 @@ export class RuntimeRunEngine {
       message: `Building response from evidence (loop ${loopState.loopIndex}/${loopState.loopMax}).`,
       phase: 'writing',
       stage: 'building',
+      extra: {
+        methodFamily: currentLoopFamilies.join(', '),
+        newEvidenceRefs,
+      },
     });
     await this.emitEvent({
       branchId: run.branchId,
@@ -4725,6 +5347,10 @@ export class RuntimeRunEngine {
       message: `Validating grounded claims (loop ${loopState.loopIndex}/${loopState.loopMax}).`,
       phase: 'writing',
       stage: 'validation',
+      extra: {
+        methodFamily: currentLoopFamilies.join(', '),
+        newEvidenceRefs,
+      },
     });
 
     const validatorOutput = await withTimeout(
@@ -4796,6 +5422,19 @@ export class RuntimeRunEngine {
       .filter((section) => String(section || '').trim().length > 0)
       .join('\n\n');
     finalResponseContent = sanitizeClientResponse(finalResponseContent);
+    if (runtimeContextSnapshot.researchLoopStalled) {
+      const stalledLoops = Math.max(1, Number(runtimeContextSnapshot.researchLoopStalledCount || 0));
+      const stalledFamilies = String(runtimeContextSnapshot.researchLoopStalledFamilies || '').trim();
+      finalResponseContent = [
+        finalResponseContent,
+        '## Loop cap reached',
+        `I stopped iterative searching after ${stalledLoops} low-improvement loop(s) to avoid repetitive tool churn.`,
+        stalledFamilies ? `Methods attempted: ${stalledFamilies}.` : '',
+        'Use **Continue deepening** to focus only on missing lanes and weak sections.',
+      ]
+        .filter((section) => String(section || '').trim().length > 0)
+        .join('\n\n');
+    }
 
     if (lowTrustPinnedOnly) {
       const pinnedSummary = pinnedLibraryItems
@@ -5427,6 +6066,7 @@ export class RuntimeRunEngine {
         maxToolRuns: policy.maxToolRuns,
       });
       sanitizedToolCalls = sourceScopeEnforcement.toolCalls;
+      const plannedPreferredFamilies = preferredFamiliesFromLanePriority(plan.runtime?.lanePriority);
 
       const hasDocumentGenerateCall = sanitizedToolCalls.some(
         (call) => String(call.tool || '').trim().toLowerCase() === 'document.generate'
@@ -5477,6 +6117,38 @@ export class RuntimeRunEngine {
             stage: 'intent',
             docFamily: routedIntent.docFamily || 'BUSINESS_STRATEGY',
             autopilotInjected: true,
+          },
+        });
+      }
+
+      const initialDiversity = enforceToolFamilyDiversity({
+        toolCalls: sanitizedToolCalls,
+        policy,
+        userMessage: triggerContent,
+        ...(runtimeContextSnapshot ? { runtimeContextSnapshot } : {}),
+        maxToolRuns: policy.maxToolRuns,
+        ...(plannedPreferredFamilies.length ? { preferredFamilies: plannedPreferredFamilies } : {}),
+      });
+      sanitizedToolCalls = initialDiversity.toolCalls;
+      if (initialDiversity.addedFamilies.length > 0) {
+        await this.emitEvent({
+          branchId: fresh.branchId,
+          agentRunId: fresh.id,
+          type: ProcessEventType.PROCESS_LOG,
+          message: `Expanded exploration methods: ${initialDiversity.addedFamilies.join(', ')}.`,
+          payload: {
+            stage: 'searching',
+            methodFamily: initialDiversity.familiesUsed.join(', '),
+            addedFamilies: initialDiversity.addedFamilies,
+            docFamily: routedIntent.docFamily || undefined,
+            eventV2: {
+              version: 2,
+              event: 'run.stage_searching',
+              phase: 'tools',
+              status: 'info',
+              runId: fresh.id,
+              createdAt: new Date().toISOString(),
+            },
           },
         });
       }
@@ -5584,16 +6256,22 @@ export class RuntimeRunEngine {
         const loopIndex = Math.max(1, Number(plan.runtime?.continuationDepth || 0) + 1);
         const loopMax = Math.max(loopIndex, Number(policy.maxAutoContinuations || 0) + 1);
         const docFamily = resolveDocFamilyFromPlan(plan);
+        const methodFamily = listToolFamilies(plan.toolCalls).join(', ');
+        const lane = pickLaneForLoop(plan.runtime?.lanePriority, loopIndex);
+        const queryVariant = pickQueryVariantForLoop(plan.runtime?.queryVariants, loopIndex);
         await this.emitEvent({
           branchId: fresh.branchId,
           agentRunId: fresh.id,
           type: ProcessEventType.PROCESS_LOG,
-          message: `Searching sources (loop ${loopIndex}/${loopMax}).`,
+          message: `Searching sources (loop ${loopIndex}/${loopMax})${methodFamily ? `: ${methodFamily}` : ''}.`,
           payload: {
             stage: 'searching',
             loopIndex,
             loopMax,
             ...(docFamily ? { docFamily } : {}),
+            ...(methodFamily ? { methodFamily } : {}),
+            ...(lane ? { lane } : {}),
+            ...(queryVariant ? { queryVariant } : {}),
             eventV2: {
               version: 2,
               event: 'run.stage_searching',
@@ -5716,3 +6394,16 @@ export class RuntimeRunEngine {
 }
 
 export const runtimeRunEngine = new RuntimeRunEngine();
+
+export const __testOnlyRuntimeLoop = {
+  toolFamilyForTool,
+  listToolFamilies,
+  listAvailableToolFamilies,
+  requiredFamilyCount,
+  enforceToolFamilyDiversity,
+  preferredFamiliesFromLanePriority,
+  countConsecutiveLowDeltaLoops,
+  chooseAlternateFamiliesForStall,
+  pickQueryVariantForLoop,
+  pickLaneForLoop,
+};

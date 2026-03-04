@@ -41,6 +41,7 @@ jobs:
           npm run test:runtime-reliability-r1 --workspace=apps/backend
           npm run test-document-generation-quality --workspace=apps/backend
           npm run test:deliverable-engine-regression --workspace=apps/backend
+          npm run test:deep-pro-iteration-regression --workspace=apps/backend
           npm run test:client-right-rail-regression --workspace=apps/backend
           npm run test:portal-auth-runtime-e2e --workspace=apps/backend
         env:

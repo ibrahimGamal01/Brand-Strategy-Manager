@@ -1047,6 +1047,7 @@ export function applyWriterQualityGate(input: {
       '## What I searched',
       '## What I found',
       '## Synthesis',
+      '## Scenarios and tradeoffs',
       '## Recommendations',
       '## Next loop / next actions',
     ];
@@ -1056,17 +1057,27 @@ export function applyWriterQualityGate(input: {
         : [];
     const recommendationSignals = /\brecommend|priority|next action|do now|should\b/i.test(raw);
     const caveatSignals = /\b(caveat|risk|limitation|confidence|gap|uncertain|partial)\b/i.test(raw);
+    const scenarioSignals = /\bscenario|tradeoff|upside|downside|best case|worst case\b/i.test(raw);
     const bulletLikeLineCount = raw
       .split('\n')
       .filter((line) => /^(\s*[-*]\s+|\s*\d+\.\s+)/.test(String(line || '')))
       .length;
-    const minimumLength = responseMode === 'pro' ? 1200 : isDeepOrPro ? 850 : 80;
+    const minimumLength = responseMode === 'pro' ? 1800 : isDeepOrPro ? 1300 : 120;
+    const evidenceRefCount = input.toolResults.reduce((count, result) => {
+      const directEvidence = Array.isArray(result.evidence) ? result.evidence.length : 0;
+      const runtimeRefs = isRecord(result.raw) && Array.isArray(result.raw.runtimeEvidenceRefIds)
+        ? result.raw.runtimeEvidenceRefIds.length
+        : 0;
+      return count + directEvidence + runtimeRefs;
+    }, 0);
+    const minEvidenceRefs = responseMode === 'pro' ? 12 : isDeepOrPro ? 8 : 2;
     const hasLowSignal =
       genericSignals >= 2 ||
       raw.length < minimumLength ||
       (isDeepOrPro && enforceSections && (missingHeaders.length > 0 || !recommendationSignals)) ||
-      (isDeepOrPro && bulletLikeLineCount < 10) ||
-      (responseMode === 'pro' && !caveatSignals);
+      (isDeepOrPro && (!scenarioSignals || !caveatSignals)) ||
+      (isDeepOrPro && bulletLikeLineCount < (responseMode === 'pro' ? 16 : 12)) ||
+      (isDeepOrPro && evidenceRefCount < minEvidenceRefs);
     if (!hasLowSignal) {
       return {
         response: input.response,
@@ -1133,6 +1144,14 @@ export function applyWriterQualityGate(input: {
           '- Confidence should be treated as provisional when coverage/relevance lanes are below deep thresholds.',
           '- Recommendations below are ranked for execution value and validation speed.',
           '',
+          '## Scenarios and tradeoffs',
+          '### Scenario A: Execute now with current evidence',
+          '- Upside: faster execution and learning velocity this week.',
+          '- Downside: higher risk of messaging drift where evidence density is thin.',
+          '### Scenario B: Run one more evidence loop before scaling',
+          '- Upside: stronger confidence for external-facing claims and positioning.',
+          '- Downside: slower time-to-launch by one iteration cycle.',
+          '',
           '## Recommendations',
           ...recommendationLines.map((line, index) => `${index + 1}. ${line}`),
           '',
@@ -1158,6 +1177,9 @@ export function applyWriterQualityGate(input: {
         passed: false,
         notes: [
           ...(missingHeaders.length ? [`Added required deep/pro sections: ${missingHeaders.join(', ')}.`] : []),
+          ...(evidenceRefCount < minEvidenceRefs
+            ? [`Raised evidence density from ${evidenceRefCount} to required floor ${minEvidenceRefs}.`]
+            : []),
           'Rewritten low-signal response to improve clarity and usefulness.',
         ],
       },
@@ -2089,6 +2111,9 @@ export async function generatePlannerPlan(input: PlannerInput): Promise<RuntimeP
           ? (depthRaw as 'fast' | 'deep')
           : 'deep';
     const tone: 'direct' | 'friendly' = toneRaw === 'friendly' ? 'friendly' : 'direct';
+    const explorationStrategies = normalizeStringArray(parsed.explorationStrategies, 8);
+    const queryVariants = normalizeStringArray(parsed.queryVariants, 10);
+    const lanePriority = normalizeStringArray(parsed.lanePriority, 8);
 
     return {
       goal: String(parsed.goal || fallback.goal),
@@ -2099,6 +2124,9 @@ export async function generatePlannerPlan(input: PlannerInput): Promise<RuntimeP
       responseStyle: { depth, tone },
       runtime: {
         continuationDepth: 0,
+        ...(explorationStrategies.length ? { explorationStrategies } : {}),
+        ...(queryVariants.length ? { queryVariants } : {}),
+        ...(lanePriority.length ? { lanePriority } : {}),
       },
     };
   } catch (error) {
@@ -2294,8 +2322,10 @@ export async function writeClientResponse(input: WriterInput): Promise<WriterOut
     '## What I searched',
     '## What I found',
     '## Synthesis',
+    '## Scenarios and tradeoffs',
     '## Recommendations',
     '## Next loop / next actions',
+    'For deep/pro, include explicit caveats/limitations tied to evidence quality.',
     'Synthesize evidence into clear narrative and recommendations; do not just output sparse bullet points.',
     'Never output internal IDs, run IDs, or raw system identifiers.',
     'Avoid mechanical phrasing like "Loaded X records" unless the user explicitly asked for raw logs.',

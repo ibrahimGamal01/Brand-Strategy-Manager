@@ -18,6 +18,13 @@ function stageLabel(stage?: string) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+function compactText(value: string, max = 96) {
+  const normalized = String(value || "").replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  if (normalized.length <= max) return normalized;
+  return `${normalized.slice(0, Math.max(0, max - 1)).trimEnd()}...`;
+}
+
 function StatusIcon({ status }: { status: ProcessRun["status"] }) {
   if (status === "running") return <Loader2 className="h-4 w-4 animate-spin text-zinc-600" />;
   if (status === "waiting_input") return <PauseCircle className="h-4 w-4 text-amber-600" />;
@@ -161,6 +168,18 @@ export function LiveActivityPanel({
             {item.docFamily || typeof item.coverageScore === "number" ? (
               <p className="mt-1 text-[11px] text-zinc-500">
                 {[item.docFamily ? item.docFamily.replace(/_/g, " ") : "", typeof item.coverageScore === "number" ? `Coverage ${item.coverageScore}/100` : ""]
+                  .filter(Boolean)
+                  .join(" • ")}
+              </p>
+            ) : null}
+            {item.methodFamily || item.lane || item.queryVariant || typeof item.newEvidenceRefs === "number" ? (
+              <p className="mt-1 text-[11px] text-zinc-500">
+                {[
+                  item.methodFamily ? `Methods: ${item.methodFamily}` : "",
+                  item.lane ? `Lane: ${item.lane}` : "",
+                  item.queryVariant ? `Variant: ${compactText(item.queryVariant, 72)}` : "",
+                  typeof item.newEvidenceRefs === "number" ? `New refs ${item.newEvidenceRefs}` : "",
+                ]
                   .filter(Boolean)
                   .join(" • ")}
               </p>

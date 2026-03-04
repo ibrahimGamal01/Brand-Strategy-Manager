@@ -86,7 +86,7 @@ type UseRuntimeWorkspaceResult = {
 };
 
 const DEFAULT_PREFERENCES: SessionPreferences = {
-  responseMode: "balanced",
+  responseMode: "deep",
   tone: "detailed",
   sourceScope: {
     workspaceData: true,
@@ -98,7 +98,7 @@ const DEFAULT_PREFERENCES: SessionPreferences = {
   },
   transparency: true,
   askQuestionsFirst: false,
-  targetLength: "medium",
+  targetLength: "long",
 };
 
 const ACTIVE_POLL_INTERVAL_MS = 1200;
@@ -1239,7 +1239,11 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
           ? `Loop ${loopIndex}/${loopMax} completed.`
           : "Progressive loop completed.";
     } else if (event.event === "run.stage_searching") {
-      message = "Searching sources.";
+      const methodFamilyRaw = event.payload?.methodFamily;
+      const methodFamily = Array.isArray(methodFamilyRaw)
+        ? methodFamilyRaw.map((entry) => String(entry || "").trim()).filter(Boolean).join(", ")
+        : String(methodFamilyRaw || "").trim();
+      message = methodFamily ? `Searching sources: ${methodFamily}.` : "Searching sources.";
     } else if (event.event === "run.stage_thinking") {
       message = "Thinking and restructuring sections.";
     } else if (event.event === "run.stage_building") {
@@ -1304,6 +1308,13 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
     const sectionId = String(event.payload?.sectionId || "").trim();
     const sectionTitle = String(event.payload?.sectionTitle || "").trim();
     const docFamily = String(event.payload?.docFamily || "").trim();
+    const methodFamilyRaw = event.payload?.methodFamily;
+    const methodFamily = Array.isArray(methodFamilyRaw)
+      ? methodFamilyRaw.map((entry) => String(entry || "").trim()).filter(Boolean).join(", ")
+      : String(methodFamilyRaw || "").trim();
+    const lane = String(event.payload?.lane || "").trim();
+    const queryVariant = String(event.payload?.queryVariant || "").trim();
+    const newEvidenceRefs = Number(event.payload?.newEvidenceRefs);
 
     return {
       id: event.id,
@@ -1320,6 +1331,10 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
       ...(docFamily ? { docFamily } : {}),
       ...(sectionId ? { sectionId } : {}),
       ...(sectionTitle ? { sectionTitle } : {}),
+      ...(methodFamily ? { methodFamily } : {}),
+      ...(lane ? { lane } : {}),
+      ...(queryVariant ? { queryVariant } : {}),
+      ...(Number.isFinite(newEvidenceRefs) ? { newEvidenceRefs: Math.max(0, Math.floor(newEvidenceRefs)) } : {}),
       ...(details?.length ? { details } : {}),
       phase: event.phase,
       level: event.level,
@@ -1851,7 +1866,7 @@ function buildInputOptionsFromPreferences(
   preferences: SessionPreferences,
   options?: { steerNote?: string }
 ): ChatInputOptions {
-  const mode = preferences.responseMode || "balanced";
+  const mode = preferences.responseMode || "deep";
   const targetLength = preferences.targetLength || defaultTargetLengthForMode(mode);
   return {
     modeLabel: mode,
@@ -1865,7 +1880,7 @@ function buildInputOptionsFromPreferences(
 }
 
 function buildPolicyFromPreferences(preferences: SessionPreferences): Record<string, unknown> {
-  const mode = preferences.responseMode || "balanced";
+  const mode = preferences.responseMode || "deep";
   const sourceScope = normalizeSourceScope(preferences.sourceScope);
   const targetLength = preferences.targetLength || defaultTargetLengthForMode(mode);
   const modeMaxToolRuns = mode === "fast" ? 4 : mode === "balanced" ? 6 : mode === "deep" ? 10 : 12;
