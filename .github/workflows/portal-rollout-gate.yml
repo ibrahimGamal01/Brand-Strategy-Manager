@@ -53,7 +53,7 @@ jobs:
           PORTAL_E2E_BASE_URL: ${{ secrets.PORTAL_E2E_BASE_URL }}
 
       - name: Online portal auth runtime e2e
-        if: ${{ vars.PORTAL_ENABLE_RUNTIME_E2E == 'true' && secrets.PORTAL_E2E_BASE_URL != '' }}
+        if: ${{ vars.PORTAL_ENABLE_RUNTIME_E2E == 'true' }}
         run: npm run test:portal-auth-runtime-e2e --workspace=apps/backend
         env:
           PORTAL_E2E_BASE_URL: ${{ secrets.PORTAL_E2E_BASE_URL }}
