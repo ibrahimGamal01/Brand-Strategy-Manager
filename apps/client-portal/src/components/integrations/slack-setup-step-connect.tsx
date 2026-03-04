@@ -10,24 +10,39 @@ type SlackSetupStepConnectProps = {
 };
 
 export function SlackSetupStepConnect({ data, state }: SlackSetupStepConnectProps) {
-  const blockedByPreflight = Boolean(data.preflight && !data.preflight.configured);
+  const platformReady = data.preflight ? (data.preflight.platformReady ?? data.preflight.configured) : true;
+  const blockedByPreflight = Boolean(data.preflight && !platformReady);
+  const preflightMessage = platformReady
+    ? "Ready"
+    : data.isAdminView
+      ? `Missing platform config (${data.preflight?.missingEnv?.join(", ") || "unknown"}). Fix these first.`
+      : data.preflight?.publicMessage ||
+        "BAT Slack is being configured by BAT admins. Contact support and retry.";
   return (
     <SlackSetupStepCard
       number={1}
       title="Prepare + connect Slack"
-      detail="Confirm preflight readiness, copy your manifest, and connect your Slack workspace."
+      detail={
+        data.isAdminView
+          ? "Confirm platform readiness, manage BAT Slack app manifest, and connect a workspace."
+          : "BAT manages one global Slack app. Once platform status is ready, connect your workspace in one click."
+      }
       state={state}
     >
       <div className="space-y-3">
         <p className="text-sm" style={{ color: "var(--bat-text-muted)" }}>
-          Preflight:{" "}
-          {data.preflight?.configured
-            ? "Ready"
-            : `Missing env vars (${data.preflight?.missingEnv.join(", ") || "unknown"}). Fix these first.`}
+          Preflight: {preflightMessage}
         </p>
-        <p className="text-xs" style={{ color: "var(--bat-text-muted)" }}>
-          OAuth callback: {data.preflight?.callbackUrl || "BACKEND_PUBLIC_ORIGIN not set"}
-        </p>
+        {data.isAdminView ? (
+          <p className="text-xs" style={{ color: "var(--bat-text-muted)" }}>
+            OAuth callback: {data.preflight?.callbackUrl || "BACKEND_PUBLIC_ORIGIN not set"}
+          </p>
+        ) : null}
+        {!data.isAdminView ? (
+          <p className="text-xs" style={{ color: "var(--bat-text-muted)" }}>
+            You do not need to create a Slack app or manage environment variables for your workspace.
+          </p>
+        ) : null}
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
@@ -39,7 +54,9 @@ export function SlackSetupStepConnect({ data, state }: SlackSetupStepConnectProp
             {data.connecting
               ? "Redirecting..."
               : blockedByPreflight
-                ? "Set env vars first"
+                ? data.isAdminView
+                  ? "Finish platform setup"
+                  : "Platform setup pending"
                 : data.installations.length
                   ? "Reconnect Slack"
                   : "Connect Slack"}
@@ -52,38 +69,44 @@ export function SlackSetupStepConnect({ data, state }: SlackSetupStepConnectProp
           >
             Refresh status
           </button>
-          <button
-            type="button"
-            onClick={() => void data.copyManifest()}
-            className="rounded-full border px-4 py-2 text-sm"
-            style={{ borderColor: "var(--bat-border)" }}
-          >
-            Copy manifest
-          </button>
-          <button
-            type="button"
-            onClick={data.downloadManifest}
-            className="rounded-full border px-4 py-2 text-sm"
-            style={{ borderColor: "var(--bat-border)" }}
-          >
-            Download YAML
-          </button>
-          <a
-            href="https://api.slack.com/apps?new_app=1"
-            target="_blank"
-            rel="noreferrer"
-            className="rounded-full border px-4 py-2 text-sm"
-            style={{ borderColor: "var(--bat-border)" }}
-          >
-            Open Slack App Setup
-          </a>
+          {data.isAdminView ? (
+            <>
+              <button
+                type="button"
+                onClick={() => void data.copyManifest()}
+                className="rounded-full border px-4 py-2 text-sm"
+                style={{ borderColor: "var(--bat-border)" }}
+              >
+                Copy manifest
+              </button>
+              <button
+                type="button"
+                onClick={data.downloadManifest}
+                className="rounded-full border px-4 py-2 text-sm"
+                style={{ borderColor: "var(--bat-border)" }}
+              >
+                Download YAML
+              </button>
+              <a
+                href="https://api.slack.com/apps?new_app=1"
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-full border px-4 py-2 text-sm"
+                style={{ borderColor: "var(--bat-border)" }}
+              >
+                Open Slack App Setup
+              </a>
+            </>
+          ) : null}
         </div>
-        <textarea
-          readOnly
-          value={data.manifestYaml}
-          className="min-h-28 w-full rounded-xl border px-3 py-2 font-mono text-xs"
-          style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}
-        />
+        {data.isAdminView ? (
+          <textarea
+            readOnly
+            value={data.manifestYaml}
+            className="min-h-28 w-full rounded-xl border px-3 py-2 font-mono text-xs"
+            style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface-muted)" }}
+          />
+        ) : null}
       </div>
     </SlackSetupStepCard>
   );

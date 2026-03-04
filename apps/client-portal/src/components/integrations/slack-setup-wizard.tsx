@@ -63,7 +63,7 @@ export function SlackSetupWizard() {
 
       {data.error ? (
         <article className="rounded-2xl border p-4 text-sm" style={{ borderColor: "#f4b8b4", background: "#fff5f4", color: "#9f2317" }}>
-          {data.error} Try refresh, sync users again, or check Slack preflight values.
+          {data.error} Try refresh, sync users again, or check Slack setup status.
         </article>
       ) : null}
 
@@ -86,4 +86,3 @@ export function SlackSetupWizard() {
     </section>
   );
 }
-

@@ -38,6 +38,7 @@ export type SlackIntegrationState = {
   setError: Dispatch<SetStateAction<string>>;
   statusMessage: string;
   setStatusMessage: Dispatch<SetStateAction<string>>;
+  isAdminView: boolean;
   portalUserId: string;
   portalUserEmail: string;
   installations: SlackInstallationSummary[];
@@ -70,6 +71,7 @@ export function useSlackIntegrationState(): SlackIntegrationState {
   const [syncingUsers, setSyncingUsers] = useState(false);
   const [error, setError] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
+  const [isAdminView, setIsAdminView] = useState(false);
   const [portalUserId, setPortalUserId] = useState("");
   const [portalUserEmail, setPortalUserEmail] = useState("");
   const [installations, setInstallations] = useState<SlackInstallationSummary[]>([]);
@@ -132,16 +134,18 @@ export function useSlackIntegrationState(): SlackIntegrationState {
     if (withLoading) setLoading(true);
     setError("");
     try {
-      const [me, statusPayload, preflightPayload, manifestPayload] = await Promise.all([
-        getPortalMe(),
+      const me = await getPortalMe();
+      const adminView = Boolean(me.user.isAdmin);
+      const [statusPayload, preflightPayload, manifestPayload] = await Promise.all([
         fetchSlackStatus(),
         fetchSlackPreflight(),
-        fetchSlackManifest(),
+        adminView ? fetchSlackManifest() : Promise.resolve(null),
       ]);
+      setIsAdminView(adminView);
       setPortalUserId(me.user.id);
       setPortalUserEmail(String(me.user.email || "").trim().toLowerCase());
       setPreflight(preflightPayload);
-      setManifestYaml(String(manifestPayload.yaml || "").trim());
+      setManifestYaml(adminView ? String(manifestPayload?.yaml || "").trim() : "");
       const rows = Array.isArray(statusPayload.installations) ? statusPayload.installations : [];
       setInstallations(rows);
       setSelectedTeamId((current) => {
@@ -150,6 +154,7 @@ export function useSlackIntegrationState(): SlackIntegrationState {
       });
     } catch (nextError: any) {
       setError(String(nextError?.message || "Failed to load Slack installation status."));
+      setIsAdminView(false);
       setPreflight(null);
       setManifestYaml("");
       setInstallations([]);
@@ -274,6 +279,7 @@ export function useSlackIntegrationState(): SlackIntegrationState {
     setError,
     statusMessage,
     setStatusMessage,
+    isAdminView,
     portalUserId,
     portalUserEmail,
     installations,

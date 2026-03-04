@@ -1,102 +1,54 @@
-# BAT Slack Integration v1 – Quickstart (Plug-and-Use)
+# BAT Slack Integration v1 – Customer Quickstart (Global Managed App)
 
-This guide gets Slack connected with minimal manual setup.
+BAT runs one managed Slack app globally. Customers do not create Slack apps or set Slack environment variables.
 
-## 1) Environment
+## 1) Open Guided Setup
 
-Copy `.env.example` and set Slack keys:
+Go to:
 
-- `BACKEND_PUBLIC_ORIGIN`
-- `CLIENT_PORTAL_ORIGIN`
-- `SLACK_CLIENT_ID`
-- `SLACK_CLIENT_SECRET`
-- `SLACK_SIGNING_SECRET`
-- `SLACK_STATE_SECRET`
-- `SLACK_TOKEN_ENCRYPTION_KEY`
+`/app/integrations/slack/setup`
 
-Then validate:
+If platform setup is still in progress, BAT shows a friendly “platform not ready” status and what to do next.
 
-```bash
-npm run check:slack-integration --workspace=apps/backend
-npm run slack:manifest --workspace=apps/backend > /tmp/bat-slack-manifest.yaml
-```
+## 2) Connect Slack
 
-Optional automated push (requires Slack user token with `apps.manifest:write`):
+1. Click **Connect Slack**.
+2. Approve BAT in your Slack workspace.
+3. Return to BAT automatically.
 
-```bash
-SLACK_ADMIN_USER_TOKEN=xoxp-... \
-npm run slack:manifest:push --workspace=apps/backend
-```
+## 3) Complete onboarding flow
 
-## 2) Database + backend boot
+1. **Sync users**.
+2. For each channel:
+   - **Link** to a BAT workspace.
+   - **Assign owners**.
+   - **Run full backfill**.
+3. Save notification and ingestion settings.
 
-Apply schema and start services:
-
-```bash
-cd apps/backend
-npx prisma migrate deploy
-npx prisma generate
-cd ../..
-npm run dev:backend
-npm run dev:client-portal
-```
-
-## 3) Slack app configuration
-
-Use callback URL:
-
-`<BACKEND_PUBLIC_ORIGIN>/api/slack/oauth/callback`
-
-Use bot scopes:
-
-- `channels:read`, `channels:history`
-- `groups:read`, `groups:history`
-- `chat:write`
-- `users:read`, `users:read.email`
-- `commands`
-
-Request URLs:
-
-- Events: `<BACKEND_PUBLIC_ORIGIN>/api/slack/events`
-- Slash commands: `<BACKEND_PUBLIC_ORIGIN>/api/slack/commands` (`/bat`)
-- Interactivity: `<BACKEND_PUBLIC_ORIGIN>/api/slack/interactive`
-
-Tip: the manifest is available in the BAT UI (`/app/integrations/slack`) and API (`GET /api/portal/slack/manifest`).
-
-## 4) Portal setup flow (recommended)
+## 4) Run Go Live checks
 
 Open:
 
-`/app/integrations/slack`
+`/app/integrations/slack/verify`
 
-Then:
+Then validate:
 
-1. Click **Connect Slack**.
-2. Select team and click **Sync Slack Users** once.
-3. For each channel:
-   - pick workspace and click **Link Channel**
-   - add owners (from synced users / Add me) and click **Save Owners**
-   - click **Run Full Backfill**
+1. Invite BAT to one channel in Slack.
+2. Send a feedback/deadline-style message.
+3. Confirm BAT notification center entry appears.
+4. Confirm Slack owner delivery appears.
+5. Approve a draft reply and verify thread posting.
 
-## 5) Runtime usage
+## 5) Safety defaults
 
-- Slack retrieval tools are available only when `sourceScope.slackIntel=true`.
-- In chat composer, keep **Slack intelligence** enabled when Slack context is needed.
-
-## 6) Safety defaults
-
-- Reply mode is approval-only (no autonomous posting).
-- No automatic retention deletion is enabled.
-- Manual purge exists:
+- Messages are retained until manually purged (no auto deletion).
+- Draft replies are approval-only (no autonomous posting).
+- Manual purge endpoints:
   - `POST /api/portal/slack/purge/channel`
   - `POST /api/portal/slack/purge/workspace`
 
-## 7) Health + checks
+## 6) Admin / Ops note
 
-- Health: `GET /api/health` (includes Slack/scheduler/queue status)
-- Portal preflight: `GET /api/portal/slack/preflight`
-- Runtime regression: `npm run test:chat-runtime-engine --workspace=apps/backend`
-
-For production go-live sequence, use:
+Platform admins can use the deployment runbook for one-time global setup:
 
 - `docs/deployment/slack-production-cutover.md`

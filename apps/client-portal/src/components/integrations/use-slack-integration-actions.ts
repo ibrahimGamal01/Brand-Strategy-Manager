@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
+import type { RuntimeApiError } from "@/lib/runtime-api";
 import {
   fetchSlackInstallUrl,
   linkSlackChannel,
@@ -53,9 +54,17 @@ function getChannelGroups(channels: SlackChannelSummary[]): ChannelGroups {
 export function useSlackIntegrationActions(state: SlackIntegrationState): SlackIntegrationActions {
   const connectSlack = useCallback(async () => {
     if (state.connecting) return;
-    if (state.preflight && !state.preflight.configured) {
-      const missing = state.preflight.missingEnv.join(", ") || "required Slack environment variables";
-      state.setError(`Slack setup is not ready yet. Add missing env vars first: ${missing}.`);
+    const platformReady = state.preflight ? (state.preflight.platformReady ?? state.preflight.configured) : true;
+    if (!platformReady) {
+      if (state.isAdminView) {
+        const missing = state.preflight?.missingEnv?.join(", ") || "required Slack environment variables";
+        state.setError(`Slack setup is not ready yet. Complete platform config first: ${missing}.`);
+      } else {
+        state.setError(
+          state.preflight?.publicMessage ||
+            "BAT Slack is being configured. Contact your BAT admin or support and try again."
+        );
+      }
       return;
     }
     state.setConnecting(true);
@@ -65,7 +74,16 @@ export function useSlackIntegrationActions(state: SlackIntegrationState): SlackI
       if (!payload.installUrl) throw new Error("Slack install URL is unavailable.");
       window.location.href = payload.installUrl;
     } catch (nextError: any) {
-      state.setError(String(nextError?.message || "Failed to start Slack OAuth flow."));
+      const runtimeError = nextError as RuntimeApiError;
+      if (runtimeError?.code === "SLACK_PLATFORM_NOT_READY") {
+        state.setError(
+          state.preflight?.publicMessage ||
+            runtimeError.details ||
+            "BAT Slack is being configured. Contact your BAT admin or support and try again."
+        );
+      } else {
+        state.setError(String(nextError?.message || "Failed to start Slack OAuth flow."));
+      }
       state.setConnecting(false);
     }
   }, [state]);

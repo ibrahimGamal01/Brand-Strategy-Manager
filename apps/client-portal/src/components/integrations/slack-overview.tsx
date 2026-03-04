@@ -9,6 +9,7 @@ export function SlackOverview() {
     connecting,
     error,
     statusMessage,
+    isAdminView,
     preflight,
     manifestYaml,
     installations,
@@ -26,7 +27,8 @@ export function SlackOverview() {
     refreshInstallations,
   } = useSlackIntegrationData();
 
-  const blockedByPreflight = Boolean(preflight && !preflight.configured);
+  const platformReady = preflight ? (preflight.platformReady ?? preflight.configured) : true;
+  const blockedByPreflight = Boolean(preflight && !platformReady);
 
   return (
     <section className="space-y-5">
@@ -54,7 +56,9 @@ export function SlackOverview() {
             {connecting
               ? "Redirecting..."
               : blockedByPreflight
-                ? "Set env vars first"
+                ? isAdminView
+                  ? "Finish platform setup"
+                  : "Platform setup pending"
                 : installations.length
                   ? "Reconnect Slack"
                   : "Connect Slack"}
@@ -161,52 +165,59 @@ export function SlackOverview() {
           </p>
         ) : (
           <p className="mt-2 text-sm" style={{ color: "var(--bat-text-muted)" }}>
-            Missing environment variables: {preflight?.missingEnv.join(", ") || "Unknown"}.
+            {isAdminView
+              ? `Missing platform configuration: ${preflight?.missingEnv?.join(", ") || "Unknown"}.`
+              : preflight?.publicMessage ||
+                "BAT Slack is being configured. Contact your BAT admin or support and retry."}
           </p>
         )}
-        <p className="mt-2 text-xs" style={{ color: "var(--bat-text-muted)" }}>
-          OAuth callback: {preflight?.callbackUrl || "BACKEND_PUBLIC_ORIGIN not set"}
-        </p>
+        {isAdminView ? (
+          <p className="mt-2 text-xs" style={{ color: "var(--bat-text-muted)" }}>
+            OAuth callback: {preflight?.callbackUrl || "BACKEND_PUBLIC_ORIGIN not set"}
+          </p>
+        ) : null}
       </article>
 
-      <article className="bat-surface p-5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-sm font-semibold">Slack App Manifest</p>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => void copyManifest()}
-              className="rounded-full border px-3 py-1.5 text-xs"
-              style={{ borderColor: "var(--bat-border)" }}
-            >
-              Copy
-            </button>
-            <button
-              type="button"
-              onClick={downloadManifest}
-              className="rounded-full border px-3 py-1.5 text-xs"
-              style={{ borderColor: "var(--bat-border)" }}
-            >
-              Download YAML
-            </button>
-            <a
-              href="https://api.slack.com/apps?new_app=1"
-              target="_blank"
-              rel="noreferrer"
-              className="rounded-full border px-3 py-1.5 text-xs"
-              style={{ borderColor: "var(--bat-border)" }}
-            >
-              Open Slack App Setup
-            </a>
+      {isAdminView ? (
+        <article className="bat-surface p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-semibold">Slack App Manifest</p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void copyManifest()}
+                className="rounded-full border px-3 py-1.5 text-xs"
+                style={{ borderColor: "var(--bat-border)" }}
+              >
+                Copy
+              </button>
+              <button
+                type="button"
+                onClick={downloadManifest}
+                className="rounded-full border px-3 py-1.5 text-xs"
+                style={{ borderColor: "var(--bat-border)" }}
+              >
+                Download YAML
+              </button>
+              <a
+                href="https://api.slack.com/apps?new_app=1"
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-full border px-3 py-1.5 text-xs"
+                style={{ borderColor: "var(--bat-border)" }}
+              >
+                Open Slack App Setup
+              </a>
+            </div>
           </div>
-        </div>
-        <textarea
-          readOnly
-          value={manifestYaml}
-          className="mt-2 min-h-32 w-full rounded-xl border px-3 py-2 font-mono text-xs"
-          style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}
-        />
-      </article>
+          <textarea
+            readOnly
+            value={manifestYaml}
+            className="mt-2 min-h-32 w-full rounded-xl border px-3 py-2 font-mono text-xs"
+            style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}
+          />
+        </article>
+      ) : null}
 
       {selectedInstallation ? (
         <article className="bat-surface p-5">

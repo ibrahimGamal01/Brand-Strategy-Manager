@@ -464,8 +464,11 @@ export interface SlackUserSummary {
 
 export interface SlackPreflightReport {
   configured: boolean;
-  required: string[];
-  missingEnv: string[];
+  platformReady?: boolean;
+  isAdminView?: boolean;
+  publicMessage?: string;
+  required?: string[];
+  missingEnv?: string[];
   callbackUrl?: string | null;
   bootstrap: {
     enabled: boolean;

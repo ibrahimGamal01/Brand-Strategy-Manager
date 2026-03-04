@@ -1,12 +1,12 @@
 # Slack Production Cutover (BAT v1)
 
-This is the exact go-live order for deploying BAT Slack integration with minimal friction.
+This is the exact go-live order for deploying BAT Slack as one global managed app.
 
 ## 0) Inputs You Need
 
 - Public backend URL (HTTPS), example: `https://api.yourdomain.com`
 - Public portal URL (HTTPS), example: `https://portal.yourdomain.com`
-- Slack workspace admin access
+- BAT platform Slack admin access
 - Production database access (for migrations)
 
 ## 0.5) Preview-First Gate (Required)
@@ -26,7 +26,7 @@ Then run the full guided setup flow in preview:
 
 Proceed to production only after preview checks pass.
 
-## 1) Set Production Environment Variables
+## 1) One-time global platform environment setup (BAT admins)
 
 Set these on backend:
 
@@ -54,6 +54,7 @@ Notes:
 - `SLACK_TOKEN_ENCRYPTION_KEY` protects tokens at rest (AES-256-GCM).
 - Keep `SLACK_STATE_SECRET` and signing secret private.
 - No auto deletion is enabled in v1.
+- This setup is done once for BAT globally, not per customer.
 
 ## 2) Run Backend Readiness Gate
 
@@ -72,20 +73,20 @@ npx prisma generate
 cd ../..
 ```
 
-## 4) Create or Update the Slack App
+## 4) Create or update BAT global Slack app (admin-only)
 
-### Option A (recommended): From BAT UI
-1. Open `https://portal.yourdomain.com/app/integrations/slack`.
+### Option A (recommended): From BAT UI (admin account)
+1. Open `https://portal.yourdomain.com/app/integrations/slack/advanced`.
 2. In **Slack App Manifest**, click **Copy** or **Download YAML**.
 3. Click **Open Slack App Setup**.
-4. In Slack:
+4. In Slack admin dashboard:
    - Click **Create New App**.
    - Choose **From an app manifest**.
    - Select target workspace.
    - Paste BAT manifest.
    - Click **Create**.
 
-### Option B: CLI push
+### Option B: CLI push (admin automation)
 
 Create or update manifest directly via Slack API:
 
@@ -96,7 +97,7 @@ npm run slack:manifest:push --workspace=apps/backend
 
 If `SLACK_APP_ID` is set, script updates existing app; otherwise it creates a new app.
 
-## 5) Slack Dashboard Click Path (in order)
+## 5) Slack dashboard final checks + distribution
 
 After app exists:
 
@@ -126,21 +127,25 @@ After app exists:
 6. **Install App**:
    - Click **Install to Workspace**
    - Approve permissions
+7. **Manage Distribution**:
+   - Start with private distribution link.
+   - Share this link in BAT onboarding and support handoff.
 
-## 6) Connect + Configure in BAT Portal
+## 6) Customer onboarding handoff (repeatable, no env setup)
 
 In `https://portal.yourdomain.com/app/integrations/slack`:
 
-1. Click **Connect Slack** (OAuth).
-2. Choose team.
-3. Click **Sync Slack Users** (once).
-4. For each channel:
+1. Open **Guided Setup**.
+2. Click **Connect Slack** (OAuth).
+3. Choose team.
+4. Click **Sync Slack Users** (once).
+5. For each channel:
    - Choose workspace
    - **Link Channel**
    - Add owners via picker (**Add me** or synced users)
    - **Save Owners**
    - **Run Full Backfill**
-5. Save integration settings:
+6. Save integration settings:
    - notification mode
    - DM/MPIM ingestion toggles
    - default notify channel

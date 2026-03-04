@@ -250,15 +250,21 @@ async function listAccessibleSlackTeamIds(portalUserId: string, isAdmin: boolean
   return Array.from(new Set([...ownedInstallations, ...linkedWorkspaceTeams.map((row) => row.slackTeamId)]));
 }
 
-function buildSlackPreflightReport() {
+function buildSlackPreflightDiagnostics() {
   const required: string[] = [
     'BACKEND_PUBLIC_ORIGIN',
     'SLACK_CLIENT_ID',
     'SLACK_CLIENT_SECRET',
     'SLACK_SIGNING_SECRET',
     'SLACK_TOKEN_ENCRYPTION_KEY',
+    'SLACK_STATE_SECRET_OR_RUNTIME_WS_SIGNING_SECRET',
   ];
-  const missingEnv = required.filter((name) => !safeString(process.env[name]));
+  const missingEnv = required.filter((name) => {
+    if (name === 'SLACK_STATE_SECRET_OR_RUNTIME_WS_SIGNING_SECRET') {
+      return !safeString(process.env.SLACK_STATE_SECRET) && !safeString(process.env.RUNTIME_WS_SIGNING_SECRET);
+    }
+    return !safeString(process.env[name]);
+  });
   const origin = safeString(process.env.BACKEND_PUBLIC_ORIGIN);
   const callbackUrl = origin ? `${origin.replace(/\/+$/, '')}/api/slack/oauth/callback` : null;
   return {
@@ -267,6 +273,43 @@ function buildSlackPreflightReport() {
     missingEnv,
     callbackUrl,
     bootstrap: getSlackBootstrapStatus(),
+  };
+}
+
+function buildSlackPreflightPublicMessage(configured: boolean): string {
+  if (configured) {
+    return 'BAT Slack platform is ready. You can connect your workspace now.';
+  }
+  return 'BAT Slack is being configured by BAT admins. Please contact your BAT admin or support and try again shortly.';
+}
+
+function buildSlackPreflightResponse(input: {
+  isAdmin: boolean;
+  teamIds: string[];
+}) {
+  const diagnostics = buildSlackPreflightDiagnostics();
+  const common = {
+    configured: diagnostics.configured,
+    platformReady: diagnostics.configured,
+    publicMessage: buildSlackPreflightPublicMessage(diagnostics.configured),
+    teamIds: input.teamIds,
+  };
+  if (input.isAdmin) {
+    return {
+      ...common,
+      isAdminView: true,
+      required: diagnostics.required,
+      missingEnv: diagnostics.missingEnv,
+      callbackUrl: diagnostics.callbackUrl,
+      bootstrap: diagnostics.bootstrap,
+    };
+  }
+  return {
+    ...common,
+    isAdminView: false,
+    bootstrap: {
+      enabled: diagnostics.bootstrap.enabled,
+    },
   };
 }
 
@@ -768,17 +811,45 @@ router.get('/slack/install-url', requirePortalAuth, async (req, res) => {
   try {
     const authedReq = req as AuthedPortalRequest;
     const portalUserId = String(authedReq.portalSession?.user?.id || '').trim();
+    const isAdmin = Boolean(authedReq.portalSession?.user?.isAdmin);
     if (!portalUserId) {
       return res.status(401).json({ error: 'AUTH_REQUIRED' });
+    }
+    const preflight = buildSlackPreflightDiagnostics();
+    if (!preflight.configured) {
+      const details = buildSlackPreflightPublicMessage(false);
+      return res.status(503).json({
+        ok: false,
+        error: 'SLACK_PLATFORM_NOT_READY',
+        code: 'SLACK_PLATFORM_NOT_READY',
+        details: isAdmin
+          ? `${details} Missing: ${preflight.missingEnv.join(', ')}.`
+          : details,
+      });
     }
     const state = createSlackInstallState(portalUserId);
     const installUrl = buildSlackInstallUrl(state);
     return res.json({ ok: true, installUrl });
   } catch (error: any) {
+    const message = String(error?.message || error);
+    if (message) {
+      const looksLikeConfigIssue =
+        message.includes('is required for Slack integration') ||
+        message.includes('must be set for Slack OAuth') ||
+        message.includes('is required for Slack OAuth state');
+      if (looksLikeConfigIssue) {
+        return res.status(503).json({
+          ok: false,
+          error: 'SLACK_PLATFORM_NOT_READY',
+          code: 'SLACK_PLATFORM_NOT_READY',
+          details: buildSlackPreflightPublicMessage(false),
+        });
+      }
+    }
     return res.status(500).json({
       ok: false,
       error: 'SLACK_INSTALL_URL_FAILED',
-      details: String(error?.message || error),
+      details: message,
     });
   }
 });
@@ -792,12 +863,13 @@ router.get('/slack/preflight', requirePortalAuth, async (req, res) => {
       return res.status(401).json({ error: 'AUTH_REQUIRED' });
     }
 
-    const report = buildSlackPreflightReport();
-    const teamIds = await listAccessibleSlackTeamIds(portalUserId, isAdmin);
+    const report = buildSlackPreflightResponse({
+      isAdmin,
+      teamIds: await listAccessibleSlackTeamIds(portalUserId, isAdmin),
+    });
     return res.json({
       ok: true,
       ...report,
-      teamIds,
     });
   } catch (error: any) {
     return res.status(500).json({
@@ -812,8 +884,15 @@ router.get('/slack/manifest', requirePortalAuth, async (req, res) => {
   try {
     const authedReq = req as AuthedPortalRequest;
     const portalUserId = String(authedReq.portalSession?.user?.id || '').trim();
+    const isAdmin = Boolean(authedReq.portalSession?.user?.isAdmin);
     if (!portalUserId) {
       return res.status(401).json({ error: 'AUTH_REQUIRED' });
+    }
+    if (!isAdmin) {
+      return res.status(403).json({
+        ok: false,
+        error: 'FORBIDDEN',
+      });
     }
 
     const bundle = buildSlackManifestBundle();

@@ -12,6 +12,7 @@ export function SlackAdvancedSettings() {
     savingSettings,
     error,
     statusMessage,
+    isAdminView,
     installations,
     selectedTeamId,
     setSelectedTeamId,
@@ -38,7 +39,8 @@ export function SlackAdvancedSettings() {
     purgeChannel,
   } = useSlackIntegrationData();
 
-  const blockedByPreflight = Boolean(preflight && !preflight.configured);
+  const platformReady = preflight ? (preflight.platformReady ?? preflight.configured) : true;
+  const blockedByPreflight = Boolean(preflight && !platformReady);
 
   return (
     <section className="space-y-5">
@@ -59,7 +61,9 @@ export function SlackAdvancedSettings() {
             {connecting
               ? "Redirecting..."
               : blockedByPreflight
-                ? "Set env vars first"
+                ? isAdminView
+                  ? "Finish platform setup"
+                  : "Platform setup pending"
                 : installations.length
                   ? "Reconnect Slack"
                   : "Connect Slack"}
@@ -80,7 +84,12 @@ export function SlackAdvancedSettings() {
         ) : null}
         {preflight ? (
           <p className="mt-3 text-xs" style={{ color: "var(--bat-text-muted)" }}>
-            Preflight: {preflight.configured ? "Ready" : `Missing ${preflight.missingEnv.join(", ") || "env vars"}`}
+            Preflight:{" "}
+            {preflight.configured
+              ? "Ready"
+              : isAdminView
+                ? `Missing ${preflight.missingEnv?.join(", ") || "platform configuration"}`
+                : preflight.publicMessage || "BAT Slack is being configured by BAT admins."}
           </p>
         ) : null}
       </div>
