@@ -1,0 +1,16 @@
+<svg width="628" height="160" viewBox="0 0 628 160" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="batWordmarkTitle batWordmarkDesc">
+  <title id="batWordmarkTitle">BAT Wordmark</title>
+  <desc id="batWordmarkDesc">BAT wordmark with geometric monogram icon and typographic lockup.</desc>
+  <rect width="628" height="160" rx="24" fill="#F6F5F1"/>
+  <g transform="translate(28 24)">
+    <rect x="0" y="0" width="56" height="56" rx="22" fill="#151614"/>
+    <rect x="0" y="56" width="56" height="56" rx="22" fill="#151614"/>
+    <rect x="56" y="0" width="78" height="56" rx="22" fill="#151614"/>
+    <rect x="56" y="56" width="78" height="56" rx="22" fill="#151614"/>
+    <circle cx="64" cy="28" r="16" fill="#F6F5F1"/>
+    <circle cx="64" cy="84" r="16" fill="#F6F5F1"/>
+  </g>
+  <g fill="#151614" font-family="'Sora','Helvetica Neue',Arial,sans-serif" font-weight="600" letter-spacing="6">
+    <text x="190" y="106" font-size="94">BAT</text>
+  </g>
+</svg>

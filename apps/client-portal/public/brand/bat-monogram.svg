@@ -1,0 +1,15 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="batMonogramTitle batMonogramDesc">
+  <title id="batMonogramTitle">BAT Monogram</title>
+  <desc id="batMonogramDesc">Geometric BAT monogram with four rounded quadrants and circular counters.</desc>
+  <rect width="256" height="256" rx="56" fill="#F6F5F1"/>
+  <g fill="#141513">
+    <rect x="52" y="52" width="64" height="64" rx="24"/>
+    <rect x="52" y="140" width="64" height="64" rx="24"/>
+    <rect x="116" y="52" width="88" height="64" rx="24"/>
+    <rect x="116" y="140" width="88" height="64" rx="24"/>
+  </g>
+  <g fill="#F6F5F1">
+    <circle cx="128" cy="84" r="20"/>
+    <circle cx="128" cy="172" r="20"/>
+  </g>
+</svg>
