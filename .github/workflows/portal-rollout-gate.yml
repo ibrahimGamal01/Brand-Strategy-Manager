@@ -5,6 +5,12 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      run_v2_clean_state_smoke:
+        description: 'Run manual post-reset V2 clean-state smoke checks'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   rollout-gate:
@@ -43,7 +49,12 @@ jobs:
           npm run test:deliverable-engine-regression --workspace=apps/backend
           npm run test:deep-pro-iteration-regression --workspace=apps/backend
           npm run test:client-right-rail-regression --workspace=apps/backend
-          npm run test:portal-auth-runtime-e2e --workspace=apps/backend
+        env:
+          PORTAL_E2E_BASE_URL: ${{ secrets.PORTAL_E2E_BASE_URL }}
+
+      - name: Online portal auth runtime e2e
+        if: ${{ vars.PORTAL_ENABLE_RUNTIME_E2E == 'true' && secrets.PORTAL_E2E_BASE_URL != '' }}
+        run: npm run test:portal-auth-runtime-e2e --workspace=apps/backend
         env:
           PORTAL_E2E_BASE_URL: ${{ secrets.PORTAL_E2E_BASE_URL }}
 
@@ -85,3 +96,27 @@ jobs:
         with:
           name: portal-rollout-readiness
           path: portal-rollout-readiness.json
+
+  ops-v2-clean-state-smoke:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_v2_clean_state_smoke == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: V2 clean-state smoke
+        run: npm run test:v2-clean-state-smoke --workspace=apps/backend
+        env:
+          V2_BASE_URL: ${{ secrets.PORTAL_E2E_BASE_URL }}
+          DATABASE_URL: ${{ secrets.RAILWAY_DATABASE_PUBLIC_URL }}

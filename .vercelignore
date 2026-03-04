@@ -2,6 +2,7 @@
 node_modules
 
 # Generated/backend runtime artifacts
+apps/backend
 apps/backend/storage
 apps/backend/sessions
 apps/backend/reports
@@ -14,10 +15,11 @@ logs.txt
 server.log
 curl_diag.log
 
-# Workspace/archive artifacts
-archive
-storage
-sessions
+# Workspace/archive artifacts (root only)
+/archive
+/storage
+/sessions
+
 
 # Heavy binary artifacts
 *.mp4

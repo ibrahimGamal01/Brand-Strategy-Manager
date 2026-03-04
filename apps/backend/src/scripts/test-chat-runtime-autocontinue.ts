@@ -218,10 +218,27 @@ function testPolicyNormalization() {
     maxToolMs: 50,
   });
 
-  assert.equal(policy.maxAutoContinuations, 2, 'Balanced mode should apply mode profile continuation cap.');
-  assert.equal(policy.maxToolRuns, 6, 'Balanced mode should apply mode profile tool-run cap.');
+  assert.equal(policy.responseMode, 'deep', 'Default runtime policy should be deep.');
+  assert.equal(policy.maxAutoContinuations, 4, 'Deep mode should apply mode profile continuation cap.');
+  assert.equal(policy.maxToolRuns, 10, 'Deep mode should apply mode profile tool-run cap.');
   assert.equal(policy.toolConcurrency, 3, 'Policy must clamp tool concurrency to 3.');
   assert.equal(policy.maxToolMs, 1000, 'Policy must clamp tool timeout to minimum 1000ms.');
+
+  const balancedPolicy = normalizePolicy({
+    responseMode: 'balanced',
+    maxAutoContinuations: 99,
+    maxToolRuns: 0,
+  });
+  assert.equal(
+    balancedPolicy.maxAutoContinuations,
+    2,
+    'Balanced mode should apply mode profile continuation cap when explicitly requested.'
+  );
+  assert.equal(
+    balancedPolicy.maxToolRuns,
+    6,
+    'Balanced mode should apply mode profile tool-run cap when explicitly requested.'
+  );
 
   const modePolicy = normalizePolicy(
     {
