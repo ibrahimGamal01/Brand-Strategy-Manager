@@ -12,6 +12,7 @@ import {
   fetchViralStudioContracts,
   fetchViralStudioDocument,
   fetchViralStudioIngestion,
+  fetchViralStudioTelemetry,
   fetchWorkspaceBrandDna,
   generateWorkspaceBrandDnaSummary,
   listViralStudioIngestions,
@@ -42,6 +43,7 @@ import {
   ViralStudioPlatform,
   ViralStudioPromptTemplate,
   ViralStudioReferenceAsset,
+  ViralStudioTelemetrySnapshot,
 } from "@/types/viral-studio";
 
 type BrandFormState = {
@@ -318,6 +320,12 @@ function formatUnitPercent(value: number): string {
   return `${(Math.max(0, Math.min(1, value)) * 100).toFixed(1)}%`;
 }
 
+function formatDurationMs(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "0 ms";
+  if (value < 1000) return `${Math.round(value)} ms`;
+  return `${(value / 1000).toFixed(2)} s`;
+}
+
 function daysSinceIso(value: string): number | null {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return null;
@@ -482,6 +490,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   const [isBusy, setIsBusy] = useState(false);
 
   const [contracts, setContracts] = useState<ViralStudioContractSnapshot | null>(null);
+  const [telemetry, setTelemetry] = useState<ViralStudioTelemetrySnapshot | null>(null);
   const [promptTemplates, setPromptTemplates] = useState<ViralStudioPromptTemplate[]>([]);
   const [brandProfile, setBrandProfile] = useState<BrandDNAProfile | null>(null);
   const [brandForm, setBrandForm] = useState<BrandFormState>({ ...DEFAULT_FORM_STATE });
@@ -533,19 +542,30 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   const brandReady = Boolean(brandProfile?.status === "final" && brandProfile?.completeness.ready);
   const onboardingLocked = !brandReady || isEditingBrandDna;
 
+  const refreshTelemetry = useCallback(async () => {
+    try {
+      const payload = await fetchViralStudioTelemetry(workspaceId);
+      setTelemetry(payload.telemetry);
+    } catch {
+      // Keep last telemetry snapshot if refresh fails.
+    }
+  }, [workspaceId]);
+
   const bootstrap = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [brandPayload, contractPayload, ingestionPayload, referencePayload] = await Promise.all([
+      const [brandPayload, contractPayload, telemetryPayload, ingestionPayload, referencePayload] = await Promise.all([
         fetchWorkspaceBrandDna(workspaceId),
         fetchViralStudioContracts(workspaceId),
+        fetchViralStudioTelemetry(workspaceId),
         listViralStudioIngestions(workspaceId),
         listViralStudioReferences(workspaceId),
       ]);
       setBrandProfile(brandPayload.profile);
       setBrandForm(toFormState(brandPayload.profile));
       setContracts(contractPayload.contract);
+      setTelemetry(telemetryPayload.telemetry);
       setPromptTemplates(contractPayload.promptTemplates || []);
       setIngestions(ingestionPayload.runs);
       setActiveIngestion(ingestionPayload.runs[0] || null);
@@ -563,6 +583,15 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   useEffect(() => {
     void bootstrap();
   }, [bootstrap]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void refreshTelemetry();
+    }, 5000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [refreshTelemetry]);
 
   useEffect(() => {
     if (!promptTemplates.length) return;
@@ -586,6 +615,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
           if (payload.run.status === "completed" || payload.run.status === "partial") {
             void listViralStudioReferences(workspaceId, { ingestionRunId: payload.run.id }).then((referencePayload) => {
               setReferences(referencePayload.items);
+              void refreshTelemetry();
             });
           }
         })
@@ -594,7 +624,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     return () => {
       window.clearInterval(poller);
     };
-  }, [workspaceId, activeIngestion]);
+  }, [workspaceId, activeIngestion, refreshTelemetry]);
 
   useEffect(() => {
     if (!showExtractionModal) return;
@@ -803,13 +833,14 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
           setIsEditingBrandDna(false);
           setOnboardingStep(4);
         }
+        void refreshTelemetry();
       } catch (saveError: unknown) {
         setError(String((saveError as Error)?.message || "Failed to save Brand DNA"));
       } finally {
         setIsBusy(false);
       }
     },
-    [workspaceId, brandForm, brandProfile]
+    [workspaceId, brandForm, brandProfile, refreshTelemetry]
   );
 
   const generateSummary = useCallback(async () => {
@@ -855,12 +886,13 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       setShowExtractionModal(false);
       setActiveIngestion(payload.run);
       setIngestions((previous) => [payload.run, ...previous.filter((row) => row.id !== payload.run.id)]);
+      void refreshTelemetry();
     } catch (runError: unknown) {
       setError(String((runError as Error)?.message || "Failed to start extraction"));
     } finally {
       setIsBusy(false);
     }
-  }, [workspaceId, sourcePlatform, sourceUrl, maxVideos, lookbackDays, ingestionPreset, brandReady]);
+  }, [workspaceId, sourcePlatform, sourceUrl, maxVideos, lookbackDays, ingestionPreset, brandReady, refreshTelemetry]);
 
   const applyIngestionPreset = useCallback((preset: IngestionPreset) => {
     setIngestionPreset(preset);
@@ -876,12 +908,13 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         try {
           const payload = await listViralStudioReferences(workspaceId, { ingestionRunId: run.id });
           setReferences(payload.items);
+          void refreshTelemetry();
         } catch {
           // Keep current list if refresh fails.
         }
       }
     },
-    [workspaceId]
+    [workspaceId, refreshTelemetry]
   );
 
   const retryExtraction = useCallback(
@@ -892,13 +925,14 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         const payload = await retryViralStudioIngestion(workspaceId, runId);
         setActiveIngestion(payload.run);
         setIngestions((previous) => [payload.run, ...previous.filter((row) => row.id !== payload.run.id)]);
+        void refreshTelemetry();
       } catch (retryError: unknown) {
         setError(String((retryError as Error)?.message || "Failed to retry extraction"));
       } finally {
         setIsBusy(false);
       }
     },
-    [workspaceId]
+    [workspaceId, refreshTelemetry]
   );
 
   const shortlistReference = useCallback(
@@ -914,6 +948,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
             ? `Reference #${payload.item.ranking.rank} cleared from shortlist.`
             : `Reference #${payload.item.ranking.rank} moved to ${shortlistLabel(payload.item.shortlistState)}.`
         );
+        void refreshTelemetry();
       } catch (shortlistError: unknown) {
         setError(String((shortlistError as Error)?.message || "Failed to update shortlist"));
       } finally {
@@ -924,7 +959,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         });
       }
     },
-    [workspaceId]
+    [workspaceId, refreshTelemetry]
   );
 
   useEffect(() => {
@@ -972,12 +1007,13 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       });
       setGeneration(payload.generation);
       setActivePromptSection("hooks");
+      void refreshTelemetry();
     } catch (generationError: unknown) {
       setError(String((generationError as Error)?.message || "Failed to generate pack"));
     } finally {
       setIsBusy(false);
     }
-  }, [workspaceId, selectedReferenceIds, promptText, brandReady, selectedTemplateId, generationFormatTarget]);
+  }, [workspaceId, selectedReferenceIds, promptText, brandReady, selectedTemplateId, generationFormatTarget, refreshTelemetry]);
 
   const runPromptSectionAction = useCallback(
     async (section: ViralStudioGenerationSection, mode: "refine" | "regenerate") => {
@@ -994,6 +1030,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         });
         setGeneration(payload.generation);
         setActivePromptSection(section);
+        void refreshTelemetry();
       } catch (refineError: unknown) {
         setError(String((refineError as Error)?.message || "Failed to refine generation section"));
       } finally {
@@ -1001,7 +1038,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         setIsBusy(false);
       }
     },
-    [workspaceId, generation, sectionInstructions]
+    [workspaceId, generation, sectionInstructions, refreshTelemetry]
   );
 
   const updateSectionInstruction = useCallback(
@@ -1059,12 +1096,13 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       setCompareLeftVersionId("current");
       setCompareRightVersionId("current");
       setPromoteVersionId(documentPayload.versions[documentPayload.versions.length - 1]?.id || "");
+      void refreshTelemetry();
     } catch (documentError: unknown) {
       setError(String((documentError as Error)?.message || "Failed to create document"));
     } finally {
       setIsBusy(false);
     }
-  }, [workspaceId, generation]);
+  }, [workspaceId, generation, refreshTelemetry]);
 
   const snapshotVersion = useCallback(async () => {
     if (!document) return;
@@ -1087,12 +1125,13 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         return [...previous, payload.version];
       });
       setPromoteVersionId(payload.version.id);
+      void refreshTelemetry();
     } catch (versionError: unknown) {
       setError(String((versionError as Error)?.message || "Failed to create document version"));
     } finally {
       setIsBusy(false);
     }
-  }, [workspaceId, document, documentDraft, documentDirty, persistDocumentDraft]);
+  }, [workspaceId, document, documentDraft, documentDirty, persistDocumentDraft, refreshTelemetry]);
 
   const saveDocumentNow = useCallback(async () => {
     if (!documentDraft || !documentDirty) return;
@@ -1130,12 +1169,13 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       });
       setCompareLeftVersionId(payload.promotedFromVersionId);
       setCompareRightVersionId(payload.version.id);
+      void refreshTelemetry();
     } catch (promoteError: unknown) {
       setError(String((promoteError as Error)?.message || "Failed to promote document version"));
     } finally {
       setIsBusy(false);
     }
-  }, [workspaceId, document, promoteVersionId, documentDraft, documentDirty, persistDocumentDraft]);
+  }, [workspaceId, document, promoteVersionId, documentDraft, documentDirty, persistDocumentDraft, refreshTelemetry]);
 
   const runVersionCompare = useCallback(async () => {
     if (!document) return;
@@ -1216,13 +1256,14 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         }
         const payload = await exportViralStudioDocument(workspaceId, document.id, format);
         setLastExport({ format: payload.export.format, content: payload.export.content.slice(0, 800) });
+        void refreshTelemetry();
       } catch (exportError: unknown) {
         setError(String((exportError as Error)?.message || "Failed to export document"));
       } finally {
         setIsBusy(false);
       }
     },
-    [workspaceId, document, documentDraft, documentDirty, persistDocumentDraft]
+    [workspaceId, document, documentDraft, documentDirty, persistDocumentDraft, refreshTelemetry]
   );
 
   useEffect(() => {
@@ -1437,6 +1478,76 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
               <ul>
                 {(contracts?.telemetryEvents || []).slice(0, 7).map((event) => <li key={event.name}>{event.name}</li>)}
               </ul>
+            </div>
+          </div>
+          <div className="vbs-telemetry-grid">
+            <div className="vbs-output">
+              <h3>Runtime Funnel</h3>
+              <ul>
+                <li>Onboarding finalized: {telemetry?.funnel.onboardingFinalized ? "yes" : "no"}</li>
+                <li>Ingestions started: {telemetry?.funnel.ingestionsStarted ?? 0}</li>
+                <li>Ingestions completed: {telemetry?.funnel.ingestionsCompleted ?? 0}</li>
+                <li>Ingestions failed: {telemetry?.funnel.ingestionsFailed ?? 0}</li>
+                <li>Generations completed: {telemetry?.funnel.generationsCompleted ?? 0}</li>
+                <li>Documents versioned: {telemetry?.funnel.documentsVersioned ?? 0}</li>
+                <li>Exports: {telemetry?.funnel.exports ?? 0}</li>
+              </ul>
+            </div>
+            <div className="vbs-output">
+              <h3>Latency (Avg)</h3>
+              <div className="vbs-telemetry-kpi">
+                <div>
+                  <span>Ingestion</span>
+                  <strong>{formatDurationMs(telemetry?.latencyMs.ingestionAvg ?? 0)}</strong>
+                </div>
+                <div>
+                  <span>Generation</span>
+                  <strong>{formatDurationMs(telemetry?.latencyMs.generationAvg ?? 0)}</strong>
+                </div>
+                <div>
+                  <span>Document</span>
+                  <strong>{formatDurationMs(telemetry?.latencyMs.documentAvg ?? 0)}</strong>
+                </div>
+              </div>
+              <p className="vbs-meta">Recent runtime events: {telemetry?.recent.length ?? 0}</p>
+            </div>
+          </div>
+          <div className="vbs-telemetry-grid">
+            <div className="vbs-output">
+              <h3>Error Classes</h3>
+              {telemetry && Object.keys(telemetry.errorClasses).length > 0 ? (
+                <ul>
+                  {Object.entries(telemetry.errorClasses)
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 8)
+                    .map(([name, count]) => (
+                      <li key={name}>
+                        {name}: {count}
+                      </li>
+                    ))}
+                </ul>
+              ) : (
+                <p className="vbs-meta">No runtime errors recorded in this telemetry window.</p>
+              )}
+            </div>
+            <div className="vbs-output">
+              <h3>Recent Events</h3>
+              {telemetry?.recent.length ? (
+                <ul>
+                  {telemetry.recent
+                    .slice()
+                    .reverse()
+                    .slice(0, 8)
+                    .map((event) => (
+                      <li key={`${event.at}-${event.name}`}>
+                        [{event.status}] {event.name} ({event.stage}) • {formatDurationMs(event.durationMs)} •{" "}
+                        {formatTimestamp(event.at)}
+                      </li>
+                    ))}
+                </ul>
+              ) : (
+                <p className="vbs-meta">No events yet.</p>
+              )}
             </div>
           </div>
         </article>

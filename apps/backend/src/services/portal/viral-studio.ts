@@ -343,6 +343,34 @@ export type TelemetryEventDefinition = {
   description: string;
 };
 
+export type ViralStudioTelemetryRuntimeEvent = {
+  name: string;
+  stage: 'onboarding' | 'ingestion' | 'curation' | 'generation' | 'document' | 'platform';
+  status: 'ok' | 'error';
+  durationMs: number;
+  at: string;
+};
+
+export type ViralStudioTelemetrySnapshot = {
+  workspaceId: string;
+  funnel: {
+    onboardingFinalized: boolean;
+    ingestionsStarted: number;
+    ingestionsCompleted: number;
+    ingestionsFailed: number;
+    generationsCompleted: number;
+    documentsVersioned: number;
+    exports: number;
+  };
+  errorClasses: Record<string, number>;
+  latencyMs: {
+    ingestionAvg: number;
+    generationAvg: number;
+    documentAvg: number;
+  };
+  recent: ViralStudioTelemetryRuntimeEvent[];
+};
+
 export type StateTransitionDefinition = {
   from: string;
   event: string;
@@ -377,6 +405,7 @@ type WorkspaceViralStudioStore = {
   generations: Map<string, GenerationPack>;
   documents: Map<string, StudioDocument>;
   documentVersions: Map<string, StudioDocumentVersion[]>;
+  telemetryLog: ViralStudioTelemetryRuntimeEvent[];
 };
 
 const DEFAULT_SCORING_WEIGHTS = {
@@ -582,9 +611,31 @@ function ensureWorkspaceStore(workspaceId: string): WorkspaceViralStudioStore {
     generations: new Map<string, GenerationPack>(),
     documents: new Map<string, StudioDocument>(),
     documentVersions: new Map<string, StudioDocumentVersion[]>(),
+    telemetryLog: [],
   };
   workspaceStores.set(normalized, created);
   return created;
+}
+
+function recordRuntimeTelemetry(
+  store: WorkspaceViralStudioStore,
+  input: {
+    name: string;
+    stage: ViralStudioTelemetryRuntimeEvent['stage'];
+    status: ViralStudioTelemetryRuntimeEvent['status'];
+    durationMs?: number;
+  }
+) {
+  store.telemetryLog.push({
+    name: cleanString(input.name),
+    stage: input.stage,
+    status: input.status,
+    durationMs: Math.max(0, Math.round(Number(input.durationMs || 0))),
+    at: toIsoNow(),
+  });
+  if (store.telemetryLog.length > 500) {
+    store.telemetryLog.splice(0, store.telemetryLog.length - 500);
+  }
 }
 
 function resolveVoiceSliders(
@@ -1691,6 +1742,30 @@ function startIngestionSimulation(workspaceId: string, runId: string) {
       error: outcome.error,
     });
     store.ingestions.set(runId, finalized);
+    const startedAtMs = active.startedAt ? new Date(active.startedAt).getTime() : Date.now();
+    const durationMs = Math.max(0, Date.now() - startedAtMs);
+    if (finalized.status === 'completed') {
+      recordRuntimeTelemetry(store, {
+        name: 'viral_studio_ingestion_completed',
+        stage: 'ingestion',
+        status: 'ok',
+        durationMs,
+      });
+    } else if (finalized.status === 'failed') {
+      recordRuntimeTelemetry(store, {
+        name: 'viral_studio_ingestion_failed',
+        stage: 'ingestion',
+        status: 'error',
+        durationMs,
+      });
+    } else if (finalized.status === 'partial') {
+      recordRuntimeTelemetry(store, {
+        name: 'viral_studio_ingestion_partial',
+        stage: 'ingestion',
+        status: 'error',
+        durationMs,
+      });
+    }
   }, 1680);
 }
 
@@ -1815,6 +1890,12 @@ function createIngestionRunRecord(
     updatedAt: now,
   };
   store.ingestions.set(run.id, run);
+  recordRuntimeTelemetry(store, {
+    name: 'viral_studio_ingestion_started',
+    stage: 'ingestion',
+    status: 'ok',
+    durationMs: 0,
+  });
   startIngestionSimulation(workspaceId, run.id);
   return clone(run);
 }
@@ -1903,6 +1984,7 @@ export function applyReferenceShortlistAction(
 
 export function createGenerationPack(workspaceId: string, input: CreateGenerationPackInput): GenerationPack {
   const store = ensureWorkspaceStore(workspaceId);
+  const startedAt = Date.now();
   const template = getTemplateById(input.templateId);
   const profile = store.brandDna;
   const selectedReferences = pickReferenceSelection(workspaceId, store, input.selectedReferenceIds);
@@ -1942,6 +2024,12 @@ export function createGenerationPack(workspaceId: string, input: CreateGeneratio
     updatedAt: now,
   };
   store.generations.set(generation.id, generation);
+  recordRuntimeTelemetry(store, {
+    name: 'viral_studio_generation_completed',
+    stage: 'generation',
+    status: generation.qualityCheck.passed ? 'ok' : 'error',
+    durationMs: Date.now() - startedAt,
+  });
   return clone(generation);
 }
 
@@ -1958,6 +2046,7 @@ export function refineGenerationPack(
   input: RefineGenerationInput
 ): GenerationPack | null {
   const store = ensureWorkspaceStore(workspaceId);
+  const startedAt = Date.now();
   const existing = store.generations.get(cleanString(generationId));
   if (!existing) return null;
   const mode: GenerationRefineMode = input.mode === 'regenerate' ? 'regenerate' : 'refine';
@@ -1986,6 +2075,12 @@ export function refineGenerationPack(
   next.revision += 1;
   next.updatedAt = toIsoNow();
   store.generations.set(next.id, next);
+  recordRuntimeTelemetry(store, {
+    name: 'viral_studio_generation_refined',
+    stage: 'generation',
+    status: next.qualityCheck.passed ? 'ok' : 'error',
+    durationMs: Date.now() - startedAt,
+  });
   return clone(next);
 }
 
@@ -2106,6 +2201,7 @@ export function createStudioDocumentVersion(
   input: CreateStudioDocumentVersionInput
 ): { document: StudioDocument; version: StudioDocumentVersion } | null {
   const store = ensureWorkspaceStore(workspaceId);
+  const startedAt = Date.now();
   const document = store.documents.get(cleanString(documentId));
   if (!document) return null;
 
@@ -2129,6 +2225,12 @@ export function createStudioDocumentVersion(
     updatedAt: toIsoNow(),
   };
   store.documents.set(document.id, updatedDocument);
+  recordRuntimeTelemetry(store, {
+    name: 'viral_studio_document_versioned',
+    stage: 'document',
+    status: 'ok',
+    durationMs: Date.now() - startedAt,
+  });
 
   return clone({
     document: updatedDocument,
@@ -2143,6 +2245,7 @@ export function promoteStudioDocumentVersion(
   input: PromoteStudioDocumentVersionInput
 ): PromoteStudioDocumentVersionResult | null {
   const store = ensureWorkspaceStore(workspaceId);
+  const startedAt = Date.now();
   const document = store.documents.get(cleanString(documentId));
   if (!document) return null;
   const versions = store.documentVersions.get(document.id) || [];
@@ -2173,6 +2276,12 @@ export function promoteStudioDocumentVersion(
 
   store.documentVersions.set(document.id, nextVersions);
   store.documents.set(document.id, updatedDocument);
+  recordRuntimeTelemetry(store, {
+    name: 'viral_studio_document_version_promoted',
+    stage: 'document',
+    status: 'ok',
+    durationMs: Date.now() - startedAt,
+  });
   return clone({
     document: updatedDocument,
     version: promotedVersion,
@@ -2230,26 +2339,83 @@ export function compareStudioDocumentVersions(
   });
 }
 
+export function getViralStudioTelemetrySnapshot(workspaceId: string): ViralStudioTelemetrySnapshot {
+  const store = ensureWorkspaceStore(workspaceId);
+  const recent = store.telemetryLog.slice(-120);
+  const countByName = (name: string) => recent.filter((event) => event.name === name).length;
+  const averageDuration = (stage: ViralStudioTelemetryRuntimeEvent['stage']): number => {
+    const durations = recent
+      .filter((event) => event.stage === stage)
+      .map((event) => Number(event.durationMs))
+      .filter((value) => Number.isFinite(value) && value >= 0);
+    if (durations.length === 0) return 0;
+    return Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length);
+  };
+  const errorClasses = recent
+    .filter((event) => event.status === 'error')
+    .reduce<Record<string, number>>((acc, event) => {
+      acc[event.name] = (acc[event.name] || 0) + 1;
+      return acc;
+    }, {});
+
+  return clone({
+    workspaceId: cleanString(workspaceId),
+    funnel: {
+      onboardingFinalized: Boolean(store.brandDna?.status === 'final' && store.brandDna?.completeness.ready),
+      ingestionsStarted: countByName('viral_studio_ingestion_started'),
+      ingestionsCompleted: countByName('viral_studio_ingestion_completed'),
+      ingestionsFailed: countByName('viral_studio_ingestion_failed') + countByName('viral_studio_ingestion_partial'),
+      generationsCompleted: countByName('viral_studio_generation_completed'),
+      documentsVersioned:
+        countByName('viral_studio_document_versioned') + countByName('viral_studio_document_version_promoted'),
+      exports: countByName('viral_studio_document_exported'),
+    },
+    errorClasses,
+    latencyMs: {
+      ingestionAvg: averageDuration('ingestion'),
+      generationAvg: averageDuration('generation'),
+      documentAvg: averageDuration('document'),
+    },
+    recent,
+  });
+}
+
 export function exportStudioDocument(
   workspaceId: string,
   documentId: string,
   format: ExportStudioDocumentFormat
 ): ExportStudioDocumentResult | null {
+  const store = ensureWorkspaceStore(workspaceId);
+  const startedAt = Date.now();
   const payload = getStudioDocumentWithVersions(workspaceId, documentId);
   if (!payload) return null;
   const { document, versions } = payload;
   if (format === 'json') {
-    return {
+    const output: ExportStudioDocumentResult = {
       format,
       fileName: `${document.id}.json`,
       contentType: 'application/json; charset=utf-8',
       content: JSON.stringify({ document, versions }, null, 2),
     };
+    recordRuntimeTelemetry(store, {
+      name: 'viral_studio_document_exported',
+      stage: 'document',
+      status: 'ok',
+      durationMs: Date.now() - startedAt,
+    });
+    return output;
   }
-  return {
+  const output: ExportStudioDocumentResult = {
     format: 'markdown',
     fileName: `${document.id}.md`,
     contentType: 'text/markdown; charset=utf-8',
     content: buildMarkdownDocument(document, versions),
   };
+  recordRuntimeTelemetry(store, {
+    name: 'viral_studio_document_exported',
+    stage: 'document',
+    status: 'ok',
+    durationMs: Date.now() - startedAt,
+  });
+  return output;
 }

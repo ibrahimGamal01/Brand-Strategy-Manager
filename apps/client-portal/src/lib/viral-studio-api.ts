@@ -13,6 +13,7 @@ import {
   ViralStudioPlatform,
   ViralStudioPromptTemplate,
   ViralStudioReferenceAsset,
+  ViralStudioTelemetrySnapshot,
 } from "@/types/viral-studio";
 
 export type ViralStudioApiError = Error & {
@@ -116,6 +117,15 @@ export async function fetchViralStudioContracts(workspaceId: string) {
     contract: ViralStudioContractSnapshot;
     promptTemplates: ViralStudioPromptTemplate[];
   }>(response);
+}
+
+export async function fetchViralStudioTelemetry(workspaceId: string) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/viral-studio/telemetry`, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+  });
+  return parseJson<{ ok: boolean; telemetry: ViralStudioTelemetrySnapshot }>(response);
 }
 
 export async function listViralStudioIngestions(workspaceId: string) {

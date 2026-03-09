@@ -15,6 +15,7 @@ import {
   getGenerationPack,
   getIngestionRun,
   getStudioDocumentWithVersions,
+  getViralStudioTelemetrySnapshot,
   getViralStudioContractSnapshot,
   listIngestionRuns,
   listPromptTemplates,
@@ -30,21 +31,71 @@ import {
 } from '../services/portal/viral-studio';
 
 const router = Router({ mergeParams: true });
+const workspaceRateLimitStore = new Map<string, { count: number; resetAt: number }>();
+const SANITIZE_CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
+
+const WORKSPACE_RATE_LIMITS = {
+  ingestionCreate: { max: 12, windowMs: 10 * 60_000 },
+  generationCreate: { max: 20, windowMs: 10 * 60_000 },
+  generationRefine: { max: 40, windowMs: 10 * 60_000 },
+} as const;
+const INGESTION_RETRY_BACKOFF_MS = [0, 8_000, 20_000, 45_000] as const;
+
+const PLATFORM_HOST_ALLOWLIST: Record<ViralStudioPlatform, string[]> = {
+  instagram: ['instagram.com'],
+  tiktok: ['tiktok.com'],
+  youtube: ['youtube.com', 'youtu.be'],
+};
 
 function safeString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
+  if (typeof value !== 'string') return '';
+  return value.replace(SANITIZE_CONTROL_CHARS, '').trim();
+}
+
+function safeStringWithMax(value: unknown, maxLength: number): string {
+  const normalized = safeString(value);
+  if (!normalized) return '';
+  return normalized.slice(0, Math.max(1, Math.floor(maxLength)));
 }
 
 function parseStringArray(value: unknown, maxItems = 20): string[] {
   if (!Array.isArray(value)) return [];
   return value
-    .map((entry) => String(entry || '').trim())
+    .map((entry) => safeStringWithMax(entry, 400))
     .filter(Boolean)
     .slice(0, maxItems);
 }
 
 function parseWorkspaceId(req: Request): string {
-  return safeString(req.params.workspaceId);
+  return safeStringWithMax(req.params.workspaceId, 120);
+}
+
+function consumeWorkspaceRateLimit(
+  workspaceId: string,
+  bucket: keyof typeof WORKSPACE_RATE_LIMITS
+): { allowed: true } | { allowed: false; retryAfterSec: number } {
+  const policy = WORKSPACE_RATE_LIMITS[bucket];
+  const now = Date.now();
+  const key = `${workspaceId}:${bucket}`;
+  const existing = workspaceRateLimitStore.get(key);
+  if (!existing || existing.resetAt <= now) {
+    workspaceRateLimitStore.set(key, { count: 1, resetAt: now + policy.windowMs });
+    return { allowed: true };
+  }
+  if (existing.count >= policy.max) {
+    return { allowed: false, retryAfterSec: Math.max(1, Math.ceil((existing.resetAt - now) / 1000)) };
+  }
+  existing.count += 1;
+  workspaceRateLimitStore.set(key, existing);
+  return { allowed: true };
+}
+
+function resolveIngestionRetryBackoffMs(attempt: number): number {
+  const normalizedAttempt = Math.max(1, Math.floor(Number(attempt || 1)));
+  if (normalizedAttempt <= 1) return INGESTION_RETRY_BACKOFF_MS[0];
+  if (normalizedAttempt === 2) return INGESTION_RETRY_BACKOFF_MS[1];
+  if (normalizedAttempt === 3) return INGESTION_RETRY_BACKOFF_MS[2];
+  return INGESTION_RETRY_BACKOFF_MS[3];
 }
 
 function parsePlatform(value: unknown): ViralStudioPlatform | null {
@@ -53,6 +104,24 @@ function parsePlatform(value: unknown): ViralStudioPlatform | null {
     return platform;
   }
   return null;
+}
+
+function validateSourceUrlByPlatform(sourceUrl: string, platform: ViralStudioPlatform): { ok: true; normalized: string } | { ok: false; reason: string } {
+  try {
+    const parsed = new URL(sourceUrl);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return { ok: false, reason: 'sourceUrl must use http or https protocol' };
+    }
+    const hostname = parsed.hostname.toLowerCase();
+    const allowed = PLATFORM_HOST_ALLOWLIST[platform];
+    const allowedMatch = allowed.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
+    if (!allowedMatch) {
+      return { ok: false, reason: `sourceUrl host must match ${allowed.join(', ')} for ${platform}` };
+    }
+    return { ok: true, normalized: parsed.toString() };
+  } catch {
+    return { ok: false, reason: 'sourceUrl must be a valid URL' };
+  }
 }
 
 function parseShortlistAction(value: unknown): ShortlistAction | null {
@@ -104,16 +173,19 @@ function parseDocumentSections(
   for (const entry of value) {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
     const record = entry as Record<string, unknown>;
-    const id = safeString(record.id);
+    const id = safeStringWithMax(record.id, 140);
     if (!id) continue;
     const section: { id: string; title?: string; kind?: StudioDocumentSection['kind']; content?: string | string[] } = { id };
-    if (typeof record.title === 'string') section.title = safeString(record.title);
+    if (typeof record.title === 'string') section.title = safeStringWithMax(record.title, 260);
     const kind = parseDocumentSectionKind(record.kind);
     if (kind) section.kind = kind;
     if (typeof record.content === 'string') {
-      section.content = record.content;
+      section.content = safeStringWithMax(record.content, 8000);
     } else if (Array.isArray(record.content)) {
-      section.content = record.content.map((line) => String(line || '').trim());
+      section.content = record.content
+        .map((line) => safeStringWithMax(line, 1200))
+        .filter(Boolean)
+        .slice(0, 240);
     }
     parsed.push(section);
   }
@@ -281,6 +353,19 @@ router.get('/viral-studio/contracts', (req, res) => {
   }
 });
 
+router.get('/viral-studio/telemetry', (req, res) => {
+  try {
+    const workspaceId = parseWorkspaceId(req);
+    if (!workspaceId) return res.status(400).json({ error: 'workspaceId is required' });
+    return res.json({
+      ok: true,
+      telemetry: getViralStudioTelemetrySnapshot(workspaceId),
+    });
+  } catch (error: any) {
+    return res.status(500).json({ ok: false, error: 'VIRAL_STUDIO_TELEMETRY_FETCH_FAILED', details: error?.message || String(error) });
+  }
+});
+
 router.get('/viral-studio/ingestions', (req, res) => {
   try {
     const workspaceId = parseWorkspaceId(req);
@@ -298,6 +383,13 @@ router.post('/viral-studio/ingestions', (req, res) => {
   try {
     const workspaceId = parseWorkspaceId(req);
     if (!workspaceId) return res.status(400).json({ error: 'workspaceId is required' });
+    const rateLimit = consumeWorkspaceRateLimit(workspaceId, 'ingestionCreate');
+    if (!rateLimit.allowed) {
+      return res.status(429).json({
+        error: 'RATE_LIMITED_INGESTION_CREATE',
+        details: `Too many extraction requests. Retry in ${rateLimit.retryAfterSec}s.`,
+      });
+    }
     const payload =
       req.body && typeof req.body === 'object' && !Array.isArray(req.body)
         ? (req.body as Record<string, unknown>)
@@ -310,6 +402,10 @@ router.post('/viral-studio/ingestions', (req, res) => {
     if (!sourceUrl) {
       return res.status(400).json({ error: 'sourceUrl is required' });
     }
+    const sourceValidation = validateSourceUrlByPlatform(sourceUrl, platform);
+    if (!sourceValidation.ok) {
+      return res.status(400).json({ error: 'INVALID_SOURCE_URL', details: sourceValidation.reason });
+    }
 
     const maxVideosParsed = Number(payload.maxVideos);
     const lookbackDaysParsed = Number(payload.lookbackDays);
@@ -319,7 +415,7 @@ router.post('/viral-studio/ingestions', (req, res) => {
 
     const run = createIngestionRun(workspaceId, {
       sourcePlatform: platform,
-      sourceUrl,
+      sourceUrl: sourceValidation.normalized,
       ...(Number.isFinite(maxVideosParsed) ? { maxVideos: maxVideosParsed } : {}),
       ...(Number.isFinite(lookbackDaysParsed) ? { lookbackDays: lookbackDaysParsed } : {}),
       sortBy,
@@ -362,6 +458,26 @@ router.post('/viral-studio/ingestions/:ingestionId/retry', (req, res) => {
     if (!workspaceId || !ingestionId) {
       return res.status(400).json({ error: 'workspaceId and ingestionId are required' });
     }
+    const sourceRun = getIngestionRun(workspaceId, ingestionId);
+    if (!sourceRun) {
+      return res.status(404).json({ error: 'Ingestion run not found' });
+    }
+    if (sourceRun.status !== 'failed' && sourceRun.status !== 'partial') {
+      return res.status(409).json({
+        error: 'INGESTION_RETRY_NOT_ALLOWED',
+        details: 'Retry is only available for failed or partial runs.',
+      });
+    }
+    const backoffMs = resolveIngestionRetryBackoffMs(sourceRun.attempt);
+    const endedAtMs = sourceRun.endedAt ? new Date(sourceRun.endedAt).getTime() : Date.now();
+    const retryEligibleAtMs = Number.isFinite(endedAtMs) ? endedAtMs + backoffMs : Date.now();
+    if (Date.now() < retryEligibleAtMs) {
+      return res.status(429).json({
+        error: 'INGESTION_RETRY_BACKOFF_ACTIVE',
+        details: `Retry backoff active. Retry after ${Math.max(1, Math.ceil((retryEligibleAtMs - Date.now()) / 1000))}s.`,
+      });
+    }
+
     const run = retryIngestionRun(workspaceId, ingestionId);
     if (!run) {
       return res.status(409).json({
@@ -372,6 +488,11 @@ router.post('/viral-studio/ingestions/:ingestionId/retry', (req, res) => {
     return res.status(202).json({
       ok: true,
       run,
+      retryPolicy: {
+        sourceAttempt: sourceRun.attempt,
+        sourceStatus: sourceRun.status,
+        backoffMs,
+      },
     });
   } catch (error: any) {
     return res.status(500).json({ ok: false, error: 'INGESTION_RETRY_FAILED', details: error?.message || String(error) });
@@ -434,6 +555,13 @@ router.post('/viral-studio/generations', async (req, res) => {
   try {
     const workspaceId = parseWorkspaceId(req);
     if (!workspaceId) return res.status(400).json({ error: 'workspaceId is required' });
+    const rateLimit = consumeWorkspaceRateLimit(workspaceId, 'generationCreate');
+    if (!rateLimit.allowed) {
+      return res.status(429).json({
+        error: 'RATE_LIMITED_GENERATION_CREATE',
+        details: `Too many generation requests. Retry in ${rateLimit.retryAfterSec}s.`,
+      });
+    }
     const brandProfile = await getBrandDNAProfile(workspaceId);
     if (!brandProfile || !brandProfile.completeness.ready || brandProfile.status !== 'final') {
       return res.status(409).json({
@@ -486,6 +614,13 @@ router.post('/viral-studio/generations/:generationId/refine', (req, res) => {
     const generationId = safeString(req.params.generationId);
     if (!workspaceId || !generationId) {
       return res.status(400).json({ error: 'workspaceId and generationId are required' });
+    }
+    const rateLimit = consumeWorkspaceRateLimit(workspaceId, 'generationRefine');
+    if (!rateLimit.allowed) {
+      return res.status(429).json({
+        error: 'RATE_LIMITED_GENERATION_REFINE',
+        details: `Too many refine requests. Retry in ${rateLimit.retryAfterSec}s.`,
+      });
     }
     const payload =
       req.body && typeof req.body === 'object' && !Array.isArray(req.body)

@@ -257,3 +257,29 @@ export type ViralStudioContractSnapshot = {
     description: string;
   }>;
 };
+
+export type ViralStudioTelemetrySnapshot = {
+  workspaceId: string;
+  funnel: {
+    onboardingFinalized: boolean;
+    ingestionsStarted: number;
+    ingestionsCompleted: number;
+    ingestionsFailed: number;
+    generationsCompleted: number;
+    documentsVersioned: number;
+    exports: number;
+  };
+  errorClasses: Record<string, number>;
+  latencyMs: {
+    ingestionAvg: number;
+    generationAvg: number;
+    documentAvg: number;
+  };
+  recent: Array<{
+    name: string;
+    stage: "onboarding" | "ingestion" | "curation" | "generation" | "document" | "platform";
+    status: "ok" | "error";
+    durationMs: number;
+    at: string;
+  }>;
+};

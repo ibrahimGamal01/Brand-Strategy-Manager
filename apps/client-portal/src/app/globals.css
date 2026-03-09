@@ -959,13 +959,49 @@ a {
   color: color-mix(in srgb, var(--vbs-ink) 76%, #6f7488);
 }
 
+.vbs-telemetry-grid {
+  margin-top: 0.65rem;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.vbs-telemetry-kpi {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.vbs-telemetry-kpi > div {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 20%, var(--bat-border));
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, white 94%, var(--vbs-sand));
+  padding: 0.45rem 0.5rem;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.vbs-telemetry-kpi span {
+  font-size: 0.64rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: color-mix(in srgb, var(--vbs-ink) 52%, #6f7488);
+}
+
+.vbs-telemetry-kpi strong {
+  font-size: 0.82rem;
+  color: var(--vbs-ink);
+}
+
 @media (max-width: 1100px) {
   .vbs-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 
   .vbs-form-grid,
-  .vbs-contract-grid {
+  .vbs-contract-grid,
+  .vbs-telemetry-grid,
+  .vbs-telemetry-kpi {
     grid-template-columns: minmax(0, 1fr);
   }
 
