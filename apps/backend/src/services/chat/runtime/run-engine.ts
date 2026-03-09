@@ -64,7 +64,6 @@ import {
 } from '../../portal/portal-library';
 import { canonicalDocFamily } from '../../documents/document-spec';
 import { flattenMemoryForRuntimeContext, readWorkspaceMemoryContext } from './workspace-memory';
-import { extractExplicitSearchQuery } from './search-query-sanitizer';
 
 type SendMessageInput = {
   researchJobId: string;
