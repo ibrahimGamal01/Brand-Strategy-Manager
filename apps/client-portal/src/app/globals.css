@@ -106,6 +106,28 @@ a {
   font-family: var(--vbs-body-font);
 }
 
+@keyframes vbs-hero-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes vbs-panel-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .vbs-hero {
   border-radius: 1rem;
   border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 25%, transparent);
@@ -117,6 +139,7 @@ a {
   padding: clamp(1rem, 3vw, 2rem);
   overflow: hidden;
   position: relative;
+  animation: vbs-hero-enter 420ms ease-out both;
 }
 
 .vbs-chip {
@@ -149,6 +172,14 @@ a {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
+}
+
+.vbs-grid > .vbs-panel {
+  animation: vbs-panel-enter 360ms ease-out both;
+}
+
+.vbs-grid > .vbs-panel:nth-child(2) {
+  animation-delay: 70ms;
 }
 
 .vbs-panel {
@@ -1021,6 +1052,11 @@ a {
   .vbs-actions button,
   .vbs-mini-actions button {
     transition: none;
+  }
+
+  .vbs-hero,
+  .vbs-grid > .vbs-panel {
+    animation: none;
   }
 
   .vbs-reference-card.is-updated {

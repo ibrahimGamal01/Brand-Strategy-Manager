@@ -1560,7 +1560,11 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                   ))}
                 </div>
               </div>
-              {curationNotice ? <p className="vbs-curation-notice">{curationNotice}</p> : null}
+              {curationNotice ? (
+                <p className="vbs-curation-notice" role="status" aria-live="polite">
+                  {curationNotice}
+                </p>
+              ) : null}
               <div className="vbs-mini-actions" style={{ marginTop: "0.45rem" }}>
                 {(["all", "instagram", "tiktok", "youtube"] as const).map((platform) => (
                   <button
@@ -1895,7 +1899,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                   Export JSON
                 </button>
               </div>
-              <p className="vbs-meta">
+              <p className="vbs-meta" role="status" aria-live="polite">
                 Document: {document ? document.title : "none"} • Versions: {versions.length} • Autosave:{" "}
                 {autosaveState === "saving"
                   ? "saving..."
