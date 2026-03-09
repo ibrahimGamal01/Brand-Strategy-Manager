@@ -56,7 +56,7 @@ async function waitForTerminalRun(
 ): Promise<IngestionRun> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    const run = getIngestionRun(workspaceId, runId);
+    const run = await getIngestionRun(workspaceId, runId);
     assert.ok(run, `Ingestion run ${runId} should exist`);
     if (isTerminalStatus(run.status)) {
       return run;
@@ -66,8 +66,8 @@ async function waitForTerminalRun(
   throw new Error(`Timed out waiting for terminal ingestion status (runId=${runId})`);
 }
 
-function assertReferencesLookHealthy(workspaceId: string, runId: string, expectedRanked: number): void {
-  const references = listReferenceAssets(workspaceId, { ingestionRunId: runId, includeExcluded: true });
+async function assertReferencesLookHealthy(workspaceId: string, runId: string, expectedRanked: number): Promise<void> {
+  const references = await listReferenceAssets(workspaceId, { ingestionRunId: runId, includeExcluded: true });
   assert.equal(
     references.length,
     expectedRanked,
@@ -123,7 +123,7 @@ async function run(): Promise<void> {
   assert.ok(contract.stateMachines.ingestion.states.includes('completed'));
   assert.ok(contract.stateMachines.ingestion.states.includes('failed'));
 
-  const quickRun = createIngestionRun(workspaceId, {
+  const quickRun = await createIngestionRun(workspaceId, {
     sourcePlatform: 'instagram',
     sourceUrl: 'https://instagram.com/brand-example',
     preset: 'quick-scan',
@@ -136,15 +136,15 @@ async function run(): Promise<void> {
 
   const quickFinal = await waitForTerminalRun(workspaceId, quickRun.id);
   assert.ok(isTerminalStatus(quickFinal.status));
-  assertReferencesLookHealthy(workspaceId, quickFinal.id, quickFinal.progress.ranked);
+  await assertReferencesLookHealthy(workspaceId, quickFinal.id, quickFinal.progress.ranked);
 
-  const quickReferences = listReferenceAssets(workspaceId, { ingestionRunId: quickFinal.id, includeExcluded: true });
+  const quickReferences = await listReferenceAssets(workspaceId, { ingestionRunId: quickFinal.id, includeExcluded: true });
   if (quickReferences.length > 0) {
     const target = quickReferences[0];
-    const shortlisted = applyReferenceShortlistAction(workspaceId, target.id, 'must-use');
+    const shortlisted = await applyReferenceShortlistAction(workspaceId, target.id, 'must-use');
     assert.ok(shortlisted, 'Shortlist action should update an existing reference');
     assert.equal(shortlisted?.shortlistState, 'must-use');
-    const shortlistOnly = listReferenceAssets(workspaceId, {
+    const shortlistOnly = await listReferenceAssets(workspaceId, {
       ingestionRunId: quickFinal.id,
       shortlistOnly: true,
       includeExcluded: true,
@@ -159,7 +159,7 @@ async function run(): Promise<void> {
     lookbackDays: 180,
     attempt: 1,
   });
-  const failedRun = createIngestionRun(workspaceId, {
+  const failedRun = await createIngestionRun(workspaceId, {
     sourcePlatform: 'youtube',
     sourceUrl: failedSourceUrl,
     maxVideos: 50,
@@ -169,15 +169,15 @@ async function run(): Promise<void> {
   });
   const failedFinal = await waitForTerminalRun(workspaceId, failedRun.id);
   assert.equal(failedFinal.status, 'failed');
-  assertReferencesLookHealthy(workspaceId, failedFinal.id, failedFinal.progress.ranked);
+  await assertReferencesLookHealthy(workspaceId, failedFinal.id, failedFinal.progress.ranked);
 
-  const retryRun = retryIngestionRun(workspaceId, failedFinal.id);
+  const retryRun = await retryIngestionRun(workspaceId, failedFinal.id);
   assert.ok(retryRun, 'Retry should be allowed for failed ingestion runs');
   assert.equal(retryRun?.attempt, failedFinal.attempt + 1);
   assert.equal(retryRun?.retryOfRunId, failedFinal.id);
   const retryFinal = await waitForTerminalRun(workspaceId, retryRun!.id);
   assert.ok(isTerminalStatus(retryFinal.status));
-  assertReferencesLookHealthy(workspaceId, retryFinal.id, retryFinal.progress.ranked);
+  await assertReferencesLookHealthy(workspaceId, retryFinal.id, retryFinal.progress.ranked);
 
   const completedSourceUrl = pickSourceUrlForStatus({
     target: 'completed',
@@ -186,7 +186,7 @@ async function run(): Promise<void> {
     lookbackDays: 180,
     attempt: 1,
   });
-  const completedRun = createIngestionRun(workspaceId, {
+  const completedRun = await createIngestionRun(workspaceId, {
     sourcePlatform: 'tiktok',
     sourceUrl: completedSourceUrl,
     maxVideos: 50,
@@ -196,14 +196,14 @@ async function run(): Promise<void> {
   });
   const completedFinal = await waitForTerminalRun(workspaceId, completedRun.id);
   assert.equal(completedFinal.status, 'completed');
-  assertReferencesLookHealthy(workspaceId, completedFinal.id, completedFinal.progress.ranked);
+  await assertReferencesLookHealthy(workspaceId, completedFinal.id, completedFinal.progress.ranked);
   assert.equal(
-    retryIngestionRun(workspaceId, completedFinal.id),
+    await retryIngestionRun(workspaceId, completedFinal.id),
     null,
     'Retry should not be allowed for completed runs'
   );
 
-  const runs = listIngestionRuns(workspaceId);
+  const runs = await listIngestionRuns(workspaceId);
   assert.equal(runs[0]?.id, completedRun.id, 'Ingestion run history should be sorted by newest first');
 
   console.log('viral-studio Plan 3/4 tests passed');

@@ -20,7 +20,7 @@ function isTerminal(status: IngestionStatus): boolean {
 async function waitForIngestionTerminal(workspaceId: string, runId: string, timeoutMs = 7000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    const run = getIngestionRun(workspaceId, runId);
+    const run = await getIngestionRun(workspaceId, runId);
     assert.ok(run, 'Ingestion run should exist');
     if (isTerminal(run.status)) return run;
     await sleep(140);
@@ -31,7 +31,7 @@ async function waitForIngestionTerminal(workspaceId: string, runId: string, time
 async function run(): Promise<void> {
   const workspaceId = `viral-studio-plan5-${Date.now()}`;
 
-  const run = createIngestionRun(workspaceId, {
+  const run = await createIngestionRun(workspaceId, {
     sourcePlatform: 'instagram',
     sourceUrl: 'https://instagram.com/plan5.reference',
     preset: 'quick-scan',
@@ -39,12 +39,12 @@ async function run(): Promise<void> {
   const finalized = await waitForIngestionTerminal(workspaceId, run.id);
   assert.ok(finalized.progress.ranked >= 0, 'Ingestion should report ranked count.');
 
-  const references = listReferenceAssets(workspaceId, { ingestionRunId: run.id, includeExcluded: true });
+  const references = await listReferenceAssets(workspaceId, { ingestionRunId: run.id, includeExcluded: true });
   assert.ok(references.length > 0, 'Plan 5 test requires generated references.');
-  const pinned = applyReferenceShortlistAction(workspaceId, references[0].id, 'must-use');
+  const pinned = await applyReferenceShortlistAction(workspaceId, references[0].id, 'must-use');
   assert.ok(pinned, 'Must-use shortlist action should succeed.');
 
-  const generation = createGenerationPack(workspaceId, {
+  const generation = await createGenerationPack(workspaceId, {
     templateId: 'full-script',
     prompt: 'Create a campaign-ready pack optimized for conversion.',
     selectedReferenceIds: references.slice(0, 3).map((item) => item.id),
@@ -58,7 +58,7 @@ async function run(): Promise<void> {
   assert.ok(generation.outputs.captions.length >= 3, 'Generation should output caption variants.');
   assert.ok(generation.outputs.ctas.length >= 3, 'Generation should output CTA variants.');
 
-  const refined = refineGenerationPack(workspaceId, generation.id, {
+  const refined = await refineGenerationPack(workspaceId, generation.id, {
     section: 'captions',
     instruction: 'Make opening lines more urgent but still credible.',
     mode: 'refine',
@@ -67,7 +67,7 @@ async function run(): Promise<void> {
   assert.equal(refined?.revision, 2, 'Refine should increment revision.');
   assert.notEqual(refined?.outputs.captions[0], generation.outputs.captions[0], 'Caption refinement should update section output.');
 
-  const regenerated = refineGenerationPack(workspaceId, generation.id, {
+  const regenerated = await refineGenerationPack(workspaceId, generation.id, {
     section: 'scripts.medium',
     instruction: 'Regenerate around one proof-centric narrative arc.',
     mode: 'regenerate',

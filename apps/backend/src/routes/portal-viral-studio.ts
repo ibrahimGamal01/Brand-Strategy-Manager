@@ -14,9 +14,11 @@ import {
   getBrandDNAProfile,
   getGenerationPack,
   getIngestionRun,
+  getViralStudioStorageMode,
   getStudioDocumentWithVersions,
   getViralStudioTelemetrySnapshot,
   getViralStudioContractSnapshot,
+  listIngestionRunEvents,
   listIngestionRuns,
   listPromptTemplates,
   listReferenceAssets,
@@ -353,33 +355,46 @@ router.get('/viral-studio/contracts', (req, res) => {
   }
 });
 
-router.get('/viral-studio/telemetry', (req, res) => {
+router.get('/viral-studio/telemetry', async (req, res) => {
   try {
     const workspaceId = parseWorkspaceId(req);
     if (!workspaceId) return res.status(400).json({ error: 'workspaceId is required' });
     return res.json({
       ok: true,
-      telemetry: getViralStudioTelemetrySnapshot(workspaceId),
+      telemetry: await getViralStudioTelemetrySnapshot(workspaceId),
     });
   } catch (error: any) {
     return res.status(500).json({ ok: false, error: 'VIRAL_STUDIO_TELEMETRY_FETCH_FAILED', details: error?.message || String(error) });
   }
 });
 
-router.get('/viral-studio/ingestions', (req, res) => {
+router.get('/viral-studio/storage-mode', async (req, res) => {
   try {
     const workspaceId = parseWorkspaceId(req);
     if (!workspaceId) return res.status(400).json({ error: 'workspaceId is required' });
     return res.json({
       ok: true,
-      runs: listIngestionRuns(workspaceId),
+      storage: await getViralStudioStorageMode(workspaceId),
+    });
+  } catch (error: any) {
+    return res.status(500).json({ ok: false, error: 'VIRAL_STUDIO_STORAGE_MODE_FETCH_FAILED', details: error?.message || String(error) });
+  }
+});
+
+router.get('/viral-studio/ingestions', async (req, res) => {
+  try {
+    const workspaceId = parseWorkspaceId(req);
+    if (!workspaceId) return res.status(400).json({ error: 'workspaceId is required' });
+    return res.json({
+      ok: true,
+      runs: await listIngestionRuns(workspaceId),
     });
   } catch (error: any) {
     return res.status(500).json({ ok: false, error: 'INGESTION_RUNS_FETCH_FAILED', details: error?.message || String(error) });
   }
 });
 
-router.post('/viral-studio/ingestions', (req, res) => {
+router.post('/viral-studio/ingestions', async (req, res) => {
   try {
     const workspaceId = parseWorkspaceId(req);
     if (!workspaceId) return res.status(400).json({ error: 'workspaceId is required' });
@@ -413,7 +428,7 @@ router.post('/viral-studio/ingestions', (req, res) => {
     const sortBy = sortByRaw === 'recent' || sortByRaw === 'views' ? sortByRaw : 'engagement';
     const preset = parseIngestionPreset(payload.preset);
 
-    const run = createIngestionRun(workspaceId, {
+    const run = await createIngestionRun(workspaceId, {
       sourcePlatform: platform,
       sourceUrl: sourceValidation.normalized,
       ...(Number.isFinite(maxVideosParsed) ? { maxVideos: maxVideosParsed } : {}),
@@ -431,14 +446,14 @@ router.post('/viral-studio/ingestions', (req, res) => {
   }
 });
 
-router.get('/viral-studio/ingestions/:ingestionId', (req, res) => {
+router.get('/viral-studio/ingestions/:ingestionId', async (req, res) => {
   try {
     const workspaceId = parseWorkspaceId(req);
     const ingestionId = safeString(req.params.ingestionId);
     if (!workspaceId || !ingestionId) {
       return res.status(400).json({ error: 'workspaceId and ingestionId are required' });
     }
-    const run = getIngestionRun(workspaceId, ingestionId);
+    const run = await getIngestionRun(workspaceId, ingestionId);
     if (!run) {
       return res.status(404).json({ error: 'Ingestion run not found' });
     }
@@ -451,14 +466,37 @@ router.get('/viral-studio/ingestions/:ingestionId', (req, res) => {
   }
 });
 
-router.post('/viral-studio/ingestions/:ingestionId/retry', (req, res) => {
+router.get('/viral-studio/ingestions/:ingestionId/events', async (req, res) => {
   try {
     const workspaceId = parseWorkspaceId(req);
     const ingestionId = safeString(req.params.ingestionId);
     if (!workspaceId || !ingestionId) {
       return res.status(400).json({ error: 'workspaceId and ingestionId are required' });
     }
-    const sourceRun = getIngestionRun(workspaceId, ingestionId);
+    const afterIdRaw = Number(Array.isArray(req.query.afterId) ? req.query.afterId[0] : req.query.afterId);
+    const limitRaw = Number(Array.isArray(req.query.limit) ? req.query.limit[0] : req.query.limit);
+    const events = await listIngestionRunEvents(workspaceId, ingestionId, {
+      ...(Number.isFinite(afterIdRaw) ? { afterId: afterIdRaw } : {}),
+      ...(Number.isFinite(limitRaw) ? { limit: limitRaw } : {}),
+    });
+    return res.json({
+      ok: true,
+      events,
+      count: events.length,
+    });
+  } catch (error: any) {
+    return res.status(500).json({ ok: false, error: 'INGESTION_EVENTS_FETCH_FAILED', details: error?.message || String(error) });
+  }
+});
+
+router.post('/viral-studio/ingestions/:ingestionId/retry', async (req, res) => {
+  try {
+    const workspaceId = parseWorkspaceId(req);
+    const ingestionId = safeString(req.params.ingestionId);
+    if (!workspaceId || !ingestionId) {
+      return res.status(400).json({ error: 'workspaceId and ingestionId are required' });
+    }
+    const sourceRun = await getIngestionRun(workspaceId, ingestionId);
     if (!sourceRun) {
       return res.status(404).json({ error: 'Ingestion run not found' });
     }
@@ -478,7 +516,7 @@ router.post('/viral-studio/ingestions/:ingestionId/retry', (req, res) => {
       });
     }
 
-    const run = retryIngestionRun(workspaceId, ingestionId);
+    const run = await retryIngestionRun(workspaceId, ingestionId);
     if (!run) {
       return res.status(409).json({
         error: 'INGESTION_RETRY_NOT_ALLOWED',
@@ -499,7 +537,7 @@ router.post('/viral-studio/ingestions/:ingestionId/retry', (req, res) => {
   }
 });
 
-router.get('/viral-studio/references', (req, res) => {
+router.get('/viral-studio/references', async (req, res) => {
   try {
     const workspaceId = parseWorkspaceId(req);
     if (!workspaceId) return res.status(400).json({ error: 'workspaceId is required' });
@@ -507,7 +545,7 @@ router.get('/viral-studio/references', (req, res) => {
     const shortlistOnly = safeString(Array.isArray(req.query.shortlistOnly) ? req.query.shortlistOnly[0] : req.query.shortlistOnly) === 'true';
     const includeExcluded = safeString(Array.isArray(req.query.includeExcluded) ? req.query.includeExcluded[0] : req.query.includeExcluded) === 'true';
 
-    const items = listReferenceAssets(workspaceId, {
+    const items = await listReferenceAssets(workspaceId, {
       ...(ingestionRunId ? { ingestionRunId } : {}),
       shortlistOnly,
       includeExcluded,
@@ -524,7 +562,7 @@ router.get('/viral-studio/references', (req, res) => {
   }
 });
 
-router.post('/viral-studio/references/shortlist', (req, res) => {
+router.post('/viral-studio/references/shortlist', async (req, res) => {
   try {
     const workspaceId = parseWorkspaceId(req);
     if (!workspaceId) return res.status(400).json({ error: 'workspaceId is required' });
@@ -537,7 +575,7 @@ router.post('/viral-studio/references/shortlist', (req, res) => {
     if (!referenceId) return res.status(400).json({ error: 'referenceId is required' });
     if (!action) return res.status(400).json({ error: 'action must be pin, exclude, must-use, or clear' });
 
-    const updated = applyReferenceShortlistAction(workspaceId, referenceId, action);
+    const updated = await applyReferenceShortlistAction(workspaceId, referenceId, action);
     if (!updated) {
       return res.status(404).json({ error: 'Reference not found' });
     }
@@ -573,7 +611,7 @@ router.post('/viral-studio/generations', async (req, res) => {
       req.body && typeof req.body === 'object' && !Array.isArray(req.body)
         ? (req.body as Record<string, unknown>)
         : {};
-    const generation = createGenerationPack(workspaceId, {
+    const generation = await createGenerationPack(workspaceId, {
       templateId: safeString(payload.templateId),
       prompt: safeString(payload.prompt),
       selectedReferenceIds: parseStringArray(payload.selectedReferenceIds, 12),
@@ -588,14 +626,14 @@ router.post('/viral-studio/generations', async (req, res) => {
   }
 });
 
-router.get('/viral-studio/generations/:generationId', (req, res) => {
+router.get('/viral-studio/generations/:generationId', async (req, res) => {
   try {
     const workspaceId = parseWorkspaceId(req);
     const generationId = safeString(req.params.generationId);
     if (!workspaceId || !generationId) {
       return res.status(400).json({ error: 'workspaceId and generationId are required' });
     }
-    const generation = getGenerationPack(workspaceId, generationId);
+    const generation = await getGenerationPack(workspaceId, generationId);
     if (!generation) {
       return res.status(404).json({ error: 'Generation not found' });
     }
@@ -608,7 +646,7 @@ router.get('/viral-studio/generations/:generationId', (req, res) => {
   }
 });
 
-router.post('/viral-studio/generations/:generationId/refine', (req, res) => {
+router.post('/viral-studio/generations/:generationId/refine', async (req, res) => {
   try {
     const workspaceId = parseWorkspaceId(req);
     const generationId = safeString(req.params.generationId);
@@ -651,10 +689,10 @@ router.post('/viral-studio/generations/:generationId/refine', (req, res) => {
       return res.status(400).json({ error: 'instruction is required' });
     }
 
-    if (!getGenerationPack(workspaceId, generationId)) {
+    if (!(await getGenerationPack(workspaceId, generationId))) {
       return res.status(404).json({ error: 'Generation not found' });
     }
-    const updated = refineGenerationPack(workspaceId, generationId, { section, instruction, mode });
+    const updated = await refineGenerationPack(workspaceId, generationId, { section, instruction, mode });
     if (!updated) {
       return res.status(404).json({ error: 'Generation not found' });
     }
@@ -668,7 +706,7 @@ router.post('/viral-studio/generations/:generationId/refine', (req, res) => {
   }
 });
 
-router.post('/viral-studio/documents', (req, res) => {
+router.post('/viral-studio/documents', async (req, res) => {
   try {
     const workspaceId = parseWorkspaceId(req);
     if (!workspaceId) return res.status(400).json({ error: 'workspaceId is required' });
@@ -679,7 +717,7 @@ router.post('/viral-studio/documents', (req, res) => {
     const generationId = safeString(payload.generationId);
     if (!generationId) return res.status(400).json({ error: 'generationId is required' });
 
-    const document = createStudioDocument(workspaceId, {
+    const document = await createStudioDocument(workspaceId, {
       title: safeString(payload.title),
       generationId,
     });
@@ -695,14 +733,14 @@ router.post('/viral-studio/documents', (req, res) => {
   }
 });
 
-router.get('/viral-studio/documents/:documentId', (req, res) => {
+router.get('/viral-studio/documents/:documentId', async (req, res) => {
   try {
     const workspaceId = parseWorkspaceId(req);
     const documentId = safeString(req.params.documentId);
     if (!workspaceId || !documentId) {
       return res.status(400).json({ error: 'workspaceId and documentId are required' });
     }
-    const payload = getStudioDocumentWithVersions(workspaceId, documentId);
+    const payload = await getStudioDocumentWithVersions(workspaceId, documentId);
     if (!payload) {
       return res.status(404).json({ error: 'Document not found' });
     }
@@ -715,7 +753,7 @@ router.get('/viral-studio/documents/:documentId', (req, res) => {
   }
 });
 
-router.patch('/viral-studio/documents/:documentId', (req, res) => {
+router.patch('/viral-studio/documents/:documentId', async (req, res) => {
   try {
     const workspaceId = parseWorkspaceId(req);
     const documentId = safeString(req.params.documentId);
@@ -728,7 +766,7 @@ router.patch('/viral-studio/documents/:documentId', (req, res) => {
         : {};
     const sections = parseDocumentSections(payload.sections);
     const orderedSectionIds = parseStringArray(payload.orderedSectionIds, 128);
-    const document = updateStudioDocument(workspaceId, documentId, {
+    const document = await updateStudioDocument(workspaceId, documentId, {
       ...(typeof payload.title === 'string' ? { title: safeString(payload.title) } : {}),
       ...(sections ? { sections } : {}),
       ...(orderedSectionIds.length > 0 ? { orderedSectionIds } : {}),
@@ -747,7 +785,7 @@ router.patch('/viral-studio/documents/:documentId', (req, res) => {
   }
 });
 
-router.post('/viral-studio/documents/:documentId/versions', (req, res) => {
+router.post('/viral-studio/documents/:documentId/versions', async (req, res) => {
   try {
     const workspaceId = parseWorkspaceId(req);
     const documentId = safeString(req.params.documentId);
@@ -758,7 +796,7 @@ router.post('/viral-studio/documents/:documentId/versions', (req, res) => {
       req.body && typeof req.body === 'object' && !Array.isArray(req.body)
         ? (req.body as Record<string, unknown>)
         : {};
-    const created = createStudioDocumentVersion(workspaceId, documentId, {
+    const created = await createStudioDocumentVersion(workspaceId, documentId, {
       author: safeString(payload.author),
       summary: safeString(payload.summary),
     });
@@ -774,7 +812,7 @@ router.post('/viral-studio/documents/:documentId/versions', (req, res) => {
   }
 });
 
-router.post('/viral-studio/documents/:documentId/versions/:versionId/promote', (req, res) => {
+router.post('/viral-studio/documents/:documentId/versions/:versionId/promote', async (req, res) => {
   try {
     const workspaceId = parseWorkspaceId(req);
     const documentId = safeString(req.params.documentId);
@@ -786,7 +824,7 @@ router.post('/viral-studio/documents/:documentId/versions/:versionId/promote', (
       req.body && typeof req.body === 'object' && !Array.isArray(req.body)
         ? (req.body as Record<string, unknown>)
         : {};
-    const promoted = promoteStudioDocumentVersion(workspaceId, documentId, versionId, {
+    const promoted = await promoteStudioDocumentVersion(workspaceId, documentId, versionId, {
       author: safeString(payload.author),
       summary: safeString(payload.summary),
     });
@@ -802,7 +840,7 @@ router.post('/viral-studio/documents/:documentId/versions/:versionId/promote', (
   }
 });
 
-router.get('/viral-studio/documents/:documentId/compare', (req, res) => {
+router.get('/viral-studio/documents/:documentId/compare', async (req, res) => {
   try {
     const workspaceId = parseWorkspaceId(req);
     const documentId = safeString(req.params.documentId);
@@ -811,7 +849,7 @@ router.get('/viral-studio/documents/:documentId/compare', (req, res) => {
     }
     const leftVersionId = safeString(Array.isArray(req.query.leftVersionId) ? req.query.leftVersionId[0] : req.query.leftVersionId) || 'current';
     const rightVersionId = safeString(Array.isArray(req.query.rightVersionId) ? req.query.rightVersionId[0] : req.query.rightVersionId) || 'current';
-    const comparison = compareStudioDocumentVersions(workspaceId, documentId, leftVersionId, rightVersionId);
+    const comparison = await compareStudioDocumentVersions(workspaceId, documentId, leftVersionId, rightVersionId);
     if (!comparison) {
       return res.status(404).json({ error: 'Document or versions not found' });
     }
@@ -824,7 +862,7 @@ router.get('/viral-studio/documents/:documentId/compare', (req, res) => {
   }
 });
 
-router.post('/viral-studio/documents/:documentId/export', (req, res) => {
+router.post('/viral-studio/documents/:documentId/export', async (req, res) => {
   try {
     const workspaceId = parseWorkspaceId(req);
     const documentId = safeString(req.params.documentId);
@@ -836,7 +874,7 @@ router.post('/viral-studio/documents/:documentId/export', (req, res) => {
         ? (req.body as Record<string, unknown>)
         : {};
     const format = parseExportFormat(payload.format);
-    const exported = exportStudioDocument(workspaceId, documentId, format);
+    const exported = await exportStudioDocument(workspaceId, documentId, format);
     if (!exported) {
       return res.status(404).json({ error: 'Document not found' });
     }

@@ -9,10 +9,12 @@ import {
   ViralStudioGenerationPack,
   ViralStudioGenerationRefineMode,
   ViralStudioGenerationSection,
+  ViralStudioIngestionEvent,
   ViralStudioIngestionRun,
   ViralStudioPlatform,
   ViralStudioPromptTemplate,
   ViralStudioReferenceAsset,
+  ViralStudioStorageModeDiagnostics,
   ViralStudioTelemetrySnapshot,
 } from "@/types/viral-studio";
 
@@ -128,6 +130,15 @@ export async function fetchViralStudioTelemetry(workspaceId: string) {
   return parseJson<{ ok: boolean; telemetry: ViralStudioTelemetrySnapshot }>(response);
 }
 
+export async function fetchViralStudioStorageMode(workspaceId: string) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/viral-studio/storage-mode`, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+  });
+  return parseJson<{ ok: boolean; storage: ViralStudioStorageModeDiagnostics }>(response);
+}
+
 export async function listViralStudioIngestions(workspaceId: string) {
   const response = await fetch(`/api/portal/workspaces/${workspaceId}/viral-studio/ingestions`, {
     method: "GET",
@@ -180,6 +191,27 @@ export async function fetchViralStudioIngestion(
     cache: "no-store",
   });
   return parseJson<{ ok: boolean; run: ViralStudioIngestionRun }>(response);
+}
+
+export async function listViralStudioIngestionEvents(
+  workspaceId: string,
+  ingestionId: string,
+  query?: { afterId?: number; limit?: number }
+) {
+  const params = new URLSearchParams();
+  if (typeof query?.afterId === "number") params.set("afterId", String(query.afterId));
+  if (typeof query?.limit === "number") params.set("limit", String(query.limit));
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/viral-studio/ingestions/${ingestionId}/events${suffix}`, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+  });
+  return parseJson<{
+    ok: boolean;
+    events: ViralStudioIngestionEvent[];
+    count: number;
+  }>(response);
 }
 
 export async function listViralStudioReferences(

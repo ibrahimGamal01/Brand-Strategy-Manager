@@ -8,34 +8,34 @@ datasource db {
 }
 
 model Client {
-  id                     String              @id @default(uuid())
-  name                   String
-  businessOverview       String?             @map("business_overview")
-  productsServices       String?             @map("products_services")
-  uniqueValueProposition String?             @map("unique_value_proposition")
-  visionMission          String?             @map("vision_mission")
-  brandStory             String?             @map("brand_story")
-  toneOfVoice            String?             @map("tone_of_voice")
-  brandPersonality       String?             @map("brand_personality")
-  keySellingPoints       String?             @map("key_selling_points")
-  currentSocialPresence  String?             @map("current_social_presence")
-  challenges             String?
-  goalsKpis              String?             @map("goals_kpis")
-  createdAt              DateTime            @default(now()) @map("created_at")
-  updatedAt              DateTime            @updatedAt @map("updated_at")
-  brainProfile           BrainProfile?
+  id                      String                   @id @default(uuid())
+  name                    String
+  businessOverview        String?                  @map("business_overview")
+  productsServices        String?                  @map("products_services")
+  uniqueValueProposition  String?                  @map("unique_value_proposition")
+  visionMission           String?                  @map("vision_mission")
+  brandStory              String?                  @map("brand_story")
+  toneOfVoice             String?                  @map("tone_of_voice")
+  brandPersonality        String?                  @map("brand_personality")
+  keySellingPoints        String?                  @map("key_selling_points")
+  currentSocialPresence   String?                  @map("current_social_presence")
+  challenges              String?
+  goalsKpis               String?                  @map("goals_kpis")
+  createdAt               DateTime                 @default(now()) @map("created_at")
+  updatedAt               DateTime                 @updatedAt @map("updated_at")
+  brainProfile            BrainProfile?
   brainProfileSuggestions BrainProfileSuggestion[]
-  brandMentions          BrandMention[]
-  buyerJourneyStages     BuyerJourneyStage[]
-  clientAccounts         ClientAccount[]
-  clientDocuments        ClientDocument[]
-  clientProfiles         ClientProfile[]
-  competitors            Competitor[]
-  contentPillars         ContentPillar[]
-  monitoringLogs         MonitoringLog[]
-  personas               Persona[]
-  platformStrategies     PlatformStrategy[]
-  researchJobs           ResearchJob[]
+  brandMentions           BrandMention[]
+  buyerJourneyStages      BuyerJourneyStage[]
+  clientAccounts          ClientAccount[]
+  clientDocuments         ClientDocument[]
+  clientProfiles          ClientProfile[]
+  competitors             Competitor[]
+  contentPillars          ContentPillar[]
+  monitoringLogs          MonitoringLog[]
+  personas                Persona[]
+  platformStrategies      PlatformStrategy[]
+  researchJobs            ResearchJob[]
 
   @@map("clients")
 }
@@ -60,73 +60,82 @@ model Persona {
 }
 
 model ResearchJob {
-  id                          String                       @id @default(uuid())
-  clientId                    String                       @map("client_id")
-  status                      ResearchJobStatus            @default(PENDING)
-  inputData                   Json?                        @map("input_data")
-  competitorsToFind           Int                          @default(10) @map("competitors_to_find")
-  priorityCompetitors         Int                          @default(3) @map("priority_competitors")
-  errorMessage                String?                      @map("error_message")
-  startedAt                   DateTime?                    @map("started_at")
-  completedAt                 DateTime?                    @map("completed_at")
-  continuityEnabled           Boolean                      @default(false) @map("continuity_enabled")
-  continuityErrorMessage      String?                      @map("continuity_error_message")
-  continuityIntervalHours     Int                          @default(2) @map("continuity_interval_hours")
-  continuityLastRunAt         DateTime?                    @map("continuity_last_run_at")
-  continuityNextRunAt         DateTime?                    @map("continuity_next_run_at")
-  continuityRunning           Boolean                      @default(false) @map("continuity_running")
-  aiAnalyses                  AiAnalysis[]
-  mediaAnalysisRuns           MediaAnalysisRun[]
-  aiBusinessAnalyses          AiBusinessAnalysis[]
-  aiQuestions                 AiQuestion[]
-  brainCommands               BrainCommand[]
-  brandIntelligenceRuns       BrandIntelligenceRun[]
-  clientProfileSnapshots      ClientProfileSnapshot[]
-  communityInsights           CommunityInsight[]
-  competitorCandidateProfiles CompetitorCandidateProfile[]
-  competitorEntities          CompetitorEntity[]
-  competitorIdentities        CompetitorIdentity[]
-  competitorOrchestrationRuns CompetitorOrchestrationRun[]
-  competitorProfileSnapshots  CompetitorProfileSnapshot[]
-  competitorSurfaces          CompetitorSurface[]
-  ddgImageResults             DdgImageResult[]
-  ddgNewsResults              DdgNewsResult[]
-  ddgVideoResults             DdgVideoResult[]
-  discoveredCompetitors       DiscoveredCompetitor[]
-  evidenceRefs                EvidenceRef[]
-  orchestrationPlans          OrchestrationPlan[]
-  rawSearchResults            RawSearchResult[]
-  events                      ResearchJobEvent[]
-  client                      Client                       @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  searchTrends                SearchTrend[]
-  socialProfiles              SocialProfile[]
-  socialTrends                SocialTrend[]
-  contentCalendarRuns         ContentCalendarRun[]
-  calendarChatSessions        CalendarChatSession[]
-  chatSessions                ChatSession[]
-  chatThreads                 ChatThread[]
-  strategyDocChatSessions     StrategyDocChatSession[]
-  clientIntakeAnswers         ClientIntakeAnswer[]
-  screenshotAttachments       ScreenshotAttachment[]
-  fileAttachments             FileAttachment[]
-  chatMutations               ChatMutation[]
-  userSuppliedContexts        UserSuppliedContext[]
-  webSources                  WebSource[]
-  webPageSnapshots            WebPageSnapshot[]
-  webExtractionRecipes        WebExtractionRecipe[]
-  webExtractionRuns           WebExtractionRun[]
-  adaptiveSelectorMemories    AdaptiveSelectorMemory[]
-  portalMemberships           PortalWorkspaceMembership[]
-  portalIntakeScanRuns        PortalIntakeScanRun[]
-  portalIntakeScanEvents      PortalIntakeScanEvent[]
-  workspaceEvidenceRefs       WorkspaceEvidenceRef[]
-  workspaceEvidenceLinks      WorkspaceEvidenceLink[]
-  connectorRuns               ConnectorRun[]
-  knowledgeLedgerVersions     KnowledgeLedgerVersion[]
-  workLedgerVersions          WorkLedgerVersion[]
-  documentSpecVersions        DocumentSpecVersion[]
-  documentSectionDrafts       DocumentSectionDraft[]
-  workspaceMemorySnapshots    WorkspaceMemorySnapshot[]
+  id                             String                          @id @default(uuid())
+  clientId                       String                          @map("client_id")
+  status                         ResearchJobStatus               @default(PENDING)
+  inputData                      Json?                           @map("input_data")
+  competitorsToFind              Int                             @default(10) @map("competitors_to_find")
+  priorityCompetitors            Int                             @default(3) @map("priority_competitors")
+  errorMessage                   String?                         @map("error_message")
+  startedAt                      DateTime?                       @map("started_at")
+  completedAt                    DateTime?                       @map("completed_at")
+  continuityEnabled              Boolean                         @default(false) @map("continuity_enabled")
+  continuityErrorMessage         String?                         @map("continuity_error_message")
+  continuityIntervalHours        Int                             @default(2) @map("continuity_interval_hours")
+  continuityLastRunAt            DateTime?                       @map("continuity_last_run_at")
+  continuityNextRunAt            DateTime?                       @map("continuity_next_run_at")
+  continuityRunning              Boolean                         @default(false) @map("continuity_running")
+  aiAnalyses                     AiAnalysis[]
+  mediaAnalysisRuns              MediaAnalysisRun[]
+  aiBusinessAnalyses             AiBusinessAnalysis[]
+  aiQuestions                    AiQuestion[]
+  brainCommands                  BrainCommand[]
+  brandIntelligenceRuns          BrandIntelligenceRun[]
+  clientProfileSnapshots         ClientProfileSnapshot[]
+  communityInsights              CommunityInsight[]
+  competitorCandidateProfiles    CompetitorCandidateProfile[]
+  competitorEntities             CompetitorEntity[]
+  competitorIdentities           CompetitorIdentity[]
+  competitorOrchestrationRuns    CompetitorOrchestrationRun[]
+  competitorProfileSnapshots     CompetitorProfileSnapshot[]
+  competitorSurfaces             CompetitorSurface[]
+  ddgImageResults                DdgImageResult[]
+  ddgNewsResults                 DdgNewsResult[]
+  ddgVideoResults                DdgVideoResult[]
+  discoveredCompetitors          DiscoveredCompetitor[]
+  evidenceRefs                   EvidenceRef[]
+  orchestrationPlans             OrchestrationPlan[]
+  rawSearchResults               RawSearchResult[]
+  events                         ResearchJobEvent[]
+  client                         Client                          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  searchTrends                   SearchTrend[]
+  socialProfiles                 SocialProfile[]
+  socialTrends                   SocialTrend[]
+  contentCalendarRuns            ContentCalendarRun[]
+  calendarChatSessions           CalendarChatSession[]
+  chatSessions                   ChatSession[]
+  chatThreads                    ChatThread[]
+  strategyDocChatSessions        StrategyDocChatSession[]
+  clientIntakeAnswers            ClientIntakeAnswer[]
+  screenshotAttachments          ScreenshotAttachment[]
+  fileAttachments                FileAttachment[]
+  chatMutations                  ChatMutation[]
+  userSuppliedContexts           UserSuppliedContext[]
+  webSources                     WebSource[]
+  webPageSnapshots               WebPageSnapshot[]
+  webExtractionRecipes           WebExtractionRecipe[]
+  webExtractionRuns              WebExtractionRun[]
+  adaptiveSelectorMemories       AdaptiveSelectorMemory[]
+  portalMemberships              PortalWorkspaceMembership[]
+  portalIntakeScanRuns           PortalIntakeScanRun[]
+  portalIntakeScanEvents         PortalIntakeScanEvent[]
+  workspaceEvidenceRefs          WorkspaceEvidenceRef[]
+  workspaceEvidenceLinks         WorkspaceEvidenceLink[]
+  connectorRuns                  ConnectorRun[]
+  knowledgeLedgerVersions        KnowledgeLedgerVersion[]
+  workLedgerVersions             WorkLedgerVersion[]
+  documentSpecVersions           DocumentSpecVersion[]
+  documentSectionDrafts          DocumentSectionDraft[]
+  workspaceMemorySnapshots       WorkspaceMemorySnapshot[]
+  viralStudioBrandDnaProfiles    ViralStudioBrandDnaProfile[]
+  viralStudioIngestionRuns       ViralStudioIngestionRun[]
+  viralStudioIngestionEvents     ViralStudioIngestionEvent[]
+  viralStudioReferenceAssets     ViralStudioReferenceAsset[]
+  viralStudioGenerationPacks     ViralStudioGenerationPack[]
+  viralStudioGenerationRevisions ViralStudioGenerationRevision[]
+  viralStudioDocuments           ViralStudioDocument[]
+  viralStudioDocumentVersions    ViralStudioDocumentVersion[]
+  viralStudioTelemetryEvents     ViralStudioTelemetryEvent[]
 
   @@map("research_jobs")
 }
@@ -142,15 +151,15 @@ enum PortalEmailTokenType {
 }
 
 model PortalUser {
-  id              String                     @id @default(uuid())
-  email           String                     @unique
-  passwordHash    String                     @map("password_hash")
-  fullName        String?                    @map("full_name")
-  companyName     String?                    @map("company_name")
-  emailVerifiedAt DateTime?                  @map("email_verified_at")
-  isAdmin         Boolean                    @default(false) @map("is_admin")
-  createdAt       DateTime                   @default(now()) @map("created_at")
-  updatedAt       DateTime                   @updatedAt @map("updated_at")
+  id              String                      @id @default(uuid())
+  email           String                      @unique
+  passwordHash    String                      @map("password_hash")
+  fullName        String?                     @map("full_name")
+  companyName     String?                     @map("company_name")
+  emailVerifiedAt DateTime?                   @map("email_verified_at")
+  isAdmin         Boolean                     @default(false) @map("is_admin")
+  createdAt       DateTime                    @default(now()) @map("created_at")
+  updatedAt       DateTime                    @updatedAt @map("updated_at")
   memberships     PortalWorkspaceMembership[]
   sessions        PortalSession[]
   emailTokens     PortalEmailToken[]
@@ -174,15 +183,15 @@ model PortalWorkspaceMembership {
 }
 
 model PortalSession {
-  id         String     @id @default(uuid())
-  userId     String     @map("user_id")
-  tokenHash  String     @unique @map("token_hash")
-  expiresAt  DateTime   @map("expires_at")
-  revokedAt  DateTime?  @map("revoked_at")
-  lastSeenAt DateTime?  @map("last_seen_at")
-  userAgent  String?    @map("user_agent")
-  ipAddress  String?    @map("ip_address")
-  createdAt  DateTime   @default(now()) @map("created_at")
+  id         String    @id @default(uuid())
+  userId     String    @map("user_id")
+  tokenHash  String    @unique @map("token_hash")
+  expiresAt  DateTime  @map("expires_at")
+  revokedAt  DateTime? @map("revoked_at")
+  lastSeenAt DateTime? @map("last_seen_at")
+  userAgent  String?   @map("user_agent")
+  ipAddress  String?   @map("ip_address")
+  createdAt  DateTime  @default(now()) @map("created_at")
 
   user PortalUser @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -192,13 +201,13 @@ model PortalSession {
 }
 
 model PortalEmailToken {
-  id        String             @id @default(uuid())
-  userId    String             @map("user_id")
+  id        String               @id @default(uuid())
+  userId    String               @map("user_id")
   type      PortalEmailTokenType
-  tokenHash String             @unique @map("token_hash")
-  expiresAt DateTime           @map("expires_at")
-  usedAt    DateTime?          @map("used_at")
-  createdAt DateTime           @default(now()) @map("created_at")
+  tokenHash String               @unique @map("token_hash")
+  expiresAt DateTime             @map("expires_at")
+  usedAt    DateTime?            @map("used_at")
+  createdAt DateTime             @default(now()) @map("created_at")
 
   user PortalUser @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -208,23 +217,23 @@ model PortalEmailToken {
 }
 
 model PortalIntakeScanRun {
-  id               String                 @id @default(uuid())
-  workspaceId      String                 @map("workspace_id")
-  mode             String
-  status           String
-  initiatedBy      String                 @map("initiated_by")
-  targetsJson      Json                   @map("targets_json")
-  crawlSettingsJson Json?                 @map("crawl_settings_json")
-  targetsCompleted Int                    @default(0) @map("targets_completed")
-  snapshotsSaved   Int                    @default(0) @map("snapshots_saved")
-  pagesPersisted   Int                    @default(0) @map("pages_persisted")
-  warnings         Int                    @default(0)
-  failures         Int                    @default(0)
-  error            String?
-  startedAt        DateTime               @default(now()) @map("started_at")
-  endedAt          DateTime?              @map("ended_at")
-  createdAt        DateTime               @default(now()) @map("created_at")
-  updatedAt        DateTime               @updatedAt @map("updated_at")
+  id                String    @id @default(uuid())
+  workspaceId       String    @map("workspace_id")
+  mode              String
+  status            String
+  initiatedBy       String    @map("initiated_by")
+  targetsJson       Json      @map("targets_json")
+  crawlSettingsJson Json?     @map("crawl_settings_json")
+  targetsCompleted  Int       @default(0) @map("targets_completed")
+  snapshotsSaved    Int       @default(0) @map("snapshots_saved")
+  pagesPersisted    Int       @default(0) @map("pages_persisted")
+  warnings          Int       @default(0)
+  failures          Int       @default(0)
+  error             String?
+  startedAt         DateTime  @default(now()) @map("started_at")
+  endedAt           DateTime? @map("ended_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
 
   workspace ResearchJob             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   events    PortalIntakeScanEvent[]
@@ -235,13 +244,13 @@ model PortalIntakeScanRun {
 }
 
 model PortalIntakeScanEvent {
-  id         Int      @id @default(autoincrement())
-  scanRunId  String   @map("scan_run_id")
-  workspaceId String  @map("workspace_id")
-  type       String
-  message    String
-  payloadJson Json?   @map("payload_json")
-  createdAt  DateTime @default(now()) @map("created_at")
+  id          Int      @id @default(autoincrement())
+  scanRunId   String   @map("scan_run_id")
+  workspaceId String   @map("workspace_id")
+  type        String
+  message     String
+  payloadJson Json?    @map("payload_json")
+  createdAt   DateTime @default(now()) @map("created_at")
 
   scanRun   PortalIntakeScanRun @relation(fields: [scanRunId], references: [id], onDelete: Cascade)
   workspace ResearchJob         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -276,27 +285,27 @@ model ResearchJobEvent {
 }
 
 model RawSearchResult {
-  id            String      @id @default(uuid())
-  researchJobId String      @map("research_job_id")
-  query         String
-  source        String      @default("duckduckgo")
-  title         String
-  href          String
-  body          String
-  isProcessed   Boolean     @default(false) @map("is_processed")
-  extractedData Json?       @map("extracted_data")
-  firstSeenAt   DateTime    @default(now()) @map("first_seen_at")
-  lastSeenAt    DateTime    @default(now()) @map("last_seen_at")
-  seenCount     Int         @default(1) @map("seen_count")
-  isActive      Boolean     @default(true) @map("is_active")
-  archivedAt    DateTime?   @map("archived_at")
-  archivedBy    String?     @map("archived_by")
-  manuallyModified Boolean  @default(false) @map("manually_modified")
-  lastModifiedAt DateTime?  @map("last_modified_at")
-  lastModifiedBy String?    @map("last_modified_by")
-  createdAt     DateTime    @default(now()) @map("created_at")
-  updatedAt     DateTime    @updatedAt @map("updated_at")
-  researchJob   ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  id               String      @id @default(uuid())
+  researchJobId    String      @map("research_job_id")
+  query            String
+  source           String      @default("duckduckgo")
+  title            String
+  href             String
+  body             String
+  isProcessed      Boolean     @default(false) @map("is_processed")
+  extractedData    Json?       @map("extracted_data")
+  firstSeenAt      DateTime    @default(now()) @map("first_seen_at")
+  lastSeenAt       DateTime    @default(now()) @map("last_seen_at")
+  seenCount        Int         @default(1) @map("seen_count")
+  isActive         Boolean     @default(true) @map("is_active")
+  archivedAt       DateTime?   @map("archived_at")
+  archivedBy       String?     @map("archived_by")
+  manuallyModified Boolean     @default(false) @map("manually_modified")
+  lastModifiedAt   DateTime?   @map("last_modified_at")
+  lastModifiedBy   String?     @map("last_modified_by")
+  createdAt        DateTime    @default(now()) @map("created_at")
+  updatedAt        DateTime    @updatedAt @map("updated_at")
+  researchJob      ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
 
   @@unique([researchJobId, href])
   @@index([researchJobId])
@@ -322,35 +331,35 @@ model WebSource {
   researchJob      ResearchJob              @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
   snapshots        WebPageSnapshot[]
 
+  @@unique([researchJobId, url])
   @@index([researchJobId, domain])
   @@index([isActive])
-  @@unique([researchJobId, url])
   @@map("web_sources")
 }
 
 model WebPageSnapshot {
-  id               String         @id @default(uuid())
-  researchJobId    String         @map("research_job_id")
-  webSourceId      String         @map("web_source_id")
-  fetchedAt        DateTime       @default(now()) @map("fetched_at")
-  fetcherUsed      WebFetcherMode @default(AUTO) @map("fetcher_used")
-  finalUrl         String?        @map("final_url")
-  statusCode       Int?           @map("status_code")
-  contentHash      String?        @map("content_hash")
-  htmlPath         String?        @map("html_path")
-  textPath         String?        @map("text_path")
-  cleanText        String?        @map("clean_text")
+  id               String             @id @default(uuid())
+  researchJobId    String             @map("research_job_id")
+  webSourceId      String             @map("web_source_id")
+  fetchedAt        DateTime           @default(now()) @map("fetched_at")
+  fetcherUsed      WebFetcherMode     @default(AUTO) @map("fetcher_used")
+  finalUrl         String?            @map("final_url")
+  statusCode       Int?               @map("status_code")
+  contentHash      String?            @map("content_hash")
+  htmlPath         String?            @map("html_path")
+  textPath         String?            @map("text_path")
+  cleanText        String?            @map("clean_text")
   metadata         Json?
-  isActive         Boolean        @default(true) @map("is_active")
-  archivedAt       DateTime?      @map("archived_at")
-  archivedBy       String?        @map("archived_by")
-  manuallyModified Boolean        @default(false) @map("manually_modified")
-  lastModifiedAt   DateTime?      @map("last_modified_at")
-  lastModifiedBy   String?        @map("last_modified_by")
-  createdAt        DateTime       @default(now()) @map("created_at")
-  updatedAt        DateTime       @updatedAt @map("updated_at")
-  webSource        WebSource      @relation(fields: [webSourceId], references: [id], onDelete: Cascade)
-  researchJob      ResearchJob    @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  isActive         Boolean            @default(true) @map("is_active")
+  archivedAt       DateTime?          @map("archived_at")
+  archivedBy       String?            @map("archived_by")
+  manuallyModified Boolean            @default(false) @map("manually_modified")
+  lastModifiedAt   DateTime?          @map("last_modified_at")
+  lastModifiedBy   String?            @map("last_modified_by")
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+  webSource        WebSource          @relation(fields: [webSourceId], references: [id], onDelete: Cascade)
+  researchJob      ResearchJob        @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
   extractionRuns   WebExtractionRun[]
 
   @@index([researchJobId, fetchedAt])
@@ -361,21 +370,21 @@ model WebPageSnapshot {
 }
 
 model WebExtractionRecipe {
-  id               String      @id @default(uuid())
-  researchJobId    String      @map("research_job_id")
+  id               String             @id @default(uuid())
+  researchJobId    String             @map("research_job_id")
   name             String
-  targetDomain     String?     @map("target_domain")
+  targetDomain     String?            @map("target_domain")
   schema           Json
-  createdBy        String?     @map("created_by")
-  isActive         Boolean     @default(true) @map("is_active")
-  archivedAt       DateTime?   @map("archived_at")
-  archivedBy       String?     @map("archived_by")
-  manuallyModified Boolean     @default(false) @map("manually_modified")
-  lastModifiedAt   DateTime?   @map("last_modified_at")
-  lastModifiedBy   String?     @map("last_modified_by")
-  createdAt        DateTime    @default(now()) @map("created_at")
-  updatedAt        DateTime    @updatedAt @map("updated_at")
-  researchJob      ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  createdBy        String?            @map("created_by")
+  isActive         Boolean            @default(true) @map("is_active")
+  archivedAt       DateTime?          @map("archived_at")
+  archivedBy       String?            @map("archived_by")
+  manuallyModified Boolean            @default(false) @map("manually_modified")
+  lastModifiedAt   DateTime?          @map("last_modified_at")
+  lastModifiedBy   String?            @map("last_modified_by")
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+  researchJob      ResearchJob        @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
   runs             WebExtractionRun[]
 
   @@index([researchJobId, name])
@@ -426,54 +435,54 @@ model AdaptiveSelectorMemory {
 }
 
 model DdgNewsResult {
-  id            String      @id @default(uuid())
-  researchJobId String      @map("research_job_id")
-  query         String
-  title         String
-  body          String?
-  url           String
-  source        String?
-  imageUrl      String?     @map("image_url")
-  publishedAt   String?     @map("published_at")
-  isActive      Boolean     @default(true) @map("is_active")
-  archivedAt    DateTime?   @map("archived_at")
-  archivedBy    String?     @map("archived_by")
-  manuallyModified Boolean  @default(false) @map("manually_modified")
-  lastModifiedAt DateTime?  @map("last_modified_at")
-  lastModifiedBy String?    @map("last_modified_by")
-  createdAt     DateTime    @default(now()) @map("created_at")
-  updatedAt     DateTime    @updatedAt @map("updated_at")
-  researchJob   ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  id               String      @id @default(uuid())
+  researchJobId    String      @map("research_job_id")
+  query            String
+  title            String
+  body             String?
+  url              String
+  source           String?
+  imageUrl         String?     @map("image_url")
+  publishedAt      String?     @map("published_at")
+  isActive         Boolean     @default(true) @map("is_active")
+  archivedAt       DateTime?   @map("archived_at")
+  archivedBy       String?     @map("archived_by")
+  manuallyModified Boolean     @default(false) @map("manually_modified")
+  lastModifiedAt   DateTime?   @map("last_modified_at")
+  lastModifiedBy   String?     @map("last_modified_by")
+  createdAt        DateTime    @default(now()) @map("created_at")
+  updatedAt        DateTime    @updatedAt @map("updated_at")
+  researchJob      ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
 
   @@index([researchJobId])
   @@map("ddg_news_results")
 }
 
 model DdgVideoResult {
-  id            String       @id @default(uuid())
-  researchJobId String       @map("research_job_id")
-  query         String
-  title         String
-  description   String?
-  url           String
-  embedUrl      String?      @map("embed_url")
-  duration      String?
-  publisher     String?
-  uploader      String?
-  viewCount     Int?         @map("view_count")
-  thumbnailUrl  String?      @map("thumbnail_url")
-  publishedAt   String?      @map("published_at")
-  isActive      Boolean      @default(true) @map("is_active")
-  archivedAt    DateTime?    @map("archived_at")
-  archivedBy    String?      @map("archived_by")
-  manuallyModified Boolean   @default(false) @map("manually_modified")
-  lastModifiedAt DateTime?   @map("last_modified_at")
-  lastModifiedBy String?     @map("last_modified_by")
-  createdAt     DateTime     @default(now()) @map("created_at")
-  updatedAt     DateTime     @updatedAt @map("updated_at")
-  isDownloaded  Boolean      @default(false) @map("is_downloaded")
-  researchJob   ResearchJob  @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
-  mediaAssets   MediaAsset[]
+  id               String       @id @default(uuid())
+  researchJobId    String       @map("research_job_id")
+  query            String
+  title            String
+  description      String?
+  url              String
+  embedUrl         String?      @map("embed_url")
+  duration         String?
+  publisher        String?
+  uploader         String?
+  viewCount        Int?         @map("view_count")
+  thumbnailUrl     String?      @map("thumbnail_url")
+  publishedAt      String?      @map("published_at")
+  isActive         Boolean      @default(true) @map("is_active")
+  archivedAt       DateTime?    @map("archived_at")
+  archivedBy       String?      @map("archived_by")
+  manuallyModified Boolean      @default(false) @map("manually_modified")
+  lastModifiedAt   DateTime?    @map("last_modified_at")
+  lastModifiedBy   String?      @map("last_modified_by")
+  createdAt        DateTime     @default(now()) @map("created_at")
+  updatedAt        DateTime     @updatedAt @map("updated_at")
+  isDownloaded     Boolean      @default(false) @map("is_downloaded")
+  researchJob      ResearchJob  @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  mediaAssets      MediaAsset[]
 
   @@index([researchJobId])
   @@index([isDownloaded])
@@ -481,26 +490,26 @@ model DdgVideoResult {
 }
 
 model DdgImageResult {
-  id            String       @id @default(uuid())
-  researchJobId String       @map("research_job_id")
-  query         String
-  title         String
-  imageUrl      String       @map("image_url")
-  thumbnailUrl  String?      @map("thumbnail_url")
-  sourceUrl     String       @map("source_url")
-  width         Int?
-  height        Int?
-  isActive      Boolean      @default(true) @map("is_active")
-  archivedAt    DateTime?    @map("archived_at")
-  archivedBy    String?      @map("archived_by")
-  manuallyModified Boolean   @default(false) @map("manually_modified")
-  lastModifiedAt DateTime?   @map("last_modified_at")
-  lastModifiedBy String?     @map("last_modified_by")
-  createdAt     DateTime     @default(now()) @map("created_at")
-  updatedAt     DateTime     @updatedAt @map("updated_at")
-  isDownloaded  Boolean      @default(false) @map("is_downloaded")
-  researchJob   ResearchJob  @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
-  mediaAssets   MediaAsset[]
+  id               String       @id @default(uuid())
+  researchJobId    String       @map("research_job_id")
+  query            String
+  title            String
+  imageUrl         String       @map("image_url")
+  thumbnailUrl     String?      @map("thumbnail_url")
+  sourceUrl        String       @map("source_url")
+  width            Int?
+  height           Int?
+  isActive         Boolean      @default(true) @map("is_active")
+  archivedAt       DateTime?    @map("archived_at")
+  archivedBy       String?      @map("archived_by")
+  manuallyModified Boolean      @default(false) @map("manually_modified")
+  lastModifiedAt   DateTime?    @map("last_modified_at")
+  lastModifiedBy   String?      @map("last_modified_by")
+  createdAt        DateTime     @default(now()) @map("created_at")
+  updatedAt        DateTime     @updatedAt @map("updated_at")
+  isDownloaded     Boolean      @default(false) @map("is_downloaded")
+  researchJob      ResearchJob  @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  mediaAssets      MediaAsset[]
 
   @@index([researchJobId])
   @@index([isDownloaded])
@@ -657,28 +666,28 @@ model AiBusinessAnalysis {
 }
 
 model AiQuestion {
-  id            String         @id @default(uuid())
-  researchJobId String         @map("research_job_id")
-  questionType  AiQuestionType @map("question_type")
-  question      String
-  answer        String?
-  answerJson    Json?          @map("answer_json")
-  contextUsed   String?        @map("context_used")
-  promptUsed    String?        @map("prompt_used")
-  modelUsed     String?        @map("model_used")
-  tokensUsed    Int?           @map("tokens_used")
-  durationMs    Int?           @map("duration_ms")
-  isAnswered    Boolean        @default(false) @map("is_answered")
-  isActive      Boolean        @default(true) @map("is_active")
-  archivedAt    DateTime?      @map("archived_at")
-  archivedBy    String?        @map("archived_by")
-  manuallyModified Boolean     @default(false) @map("manually_modified")
-  lastModifiedAt DateTime?     @map("last_modified_at")
-  lastModifiedBy String?       @map("last_modified_by")
-  createdAt     DateTime       @default(now()) @map("created_at")
-  updatedAt     DateTime       @updatedAt @map("updated_at")
-  answeredAt    DateTime?      @map("answered_at")
-  researchJob   ResearchJob    @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  id               String         @id @default(uuid())
+  researchJobId    String         @map("research_job_id")
+  questionType     AiQuestionType @map("question_type")
+  question         String
+  answer           String?
+  answerJson       Json?          @map("answer_json")
+  contextUsed      String?        @map("context_used")
+  promptUsed       String?        @map("prompt_used")
+  modelUsed        String?        @map("model_used")
+  tokensUsed       Int?           @map("tokens_used")
+  durationMs       Int?           @map("duration_ms")
+  isAnswered       Boolean        @default(false) @map("is_answered")
+  isActive         Boolean        @default(true) @map("is_active")
+  archivedAt       DateTime?      @map("archived_at")
+  archivedBy       String?        @map("archived_by")
+  manuallyModified Boolean        @default(false) @map("manually_modified")
+  lastModifiedAt   DateTime?      @map("last_modified_at")
+  lastModifiedBy   String?        @map("last_modified_by")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+  answeredAt       DateTime?      @map("answered_at")
+  researchJob      ResearchJob    @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
 
   @@unique([researchJobId, questionType])
   @@index([researchJobId])
@@ -970,27 +979,27 @@ model CompetitorCandidateEvidence {
 }
 
 model CompetitorEntity {
-  id               String                    @id @default(uuid())
-  researchJobId    String                    @map("research_job_id")
-  entityType       CompetitorEntityType      @default(BUSINESS) @map("entity_type")
+  id               String                      @id @default(uuid())
+  researchJobId    String                      @map("research_job_id")
+  entityType       CompetitorEntityType        @default(BUSINESS) @map("entity_type")
   name             String
-  primaryDomain    String?                   @map("primary_domain")
-  canonicalUrl     String?                   @map("canonical_url")
+  primaryDomain    String?                     @map("primary_domain")
+  canonicalUrl     String?                     @map("canonical_url")
   relationshipType CompetitorRelationshipType? @map("relationship_type")
   confidence       Float?
   tags             Json?
-  fingerprintJson  Json?                     @map("fingerprint_json")
-  createdBy        String                    @default("SYSTEM") @map("created_by")
-  status           CompetitorEntityStatus    @default(ACTIVE)
-  createdAt        DateTime                  @default(now()) @map("created_at")
-  updatedAt        DateTime                  @updatedAt @map("updated_at")
-  researchJob      ResearchJob               @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  fingerprintJson  Json?                       @map("fingerprint_json")
+  createdBy        String                      @default("SYSTEM") @map("created_by")
+  status           CompetitorEntityStatus      @default(ACTIVE)
+  createdAt        DateTime                    @default(now()) @map("created_at")
+  updatedAt        DateTime                    @updatedAt @map("updated_at")
+  researchJob      ResearchJob                 @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
   surfaces         CompetitorSurface[]
   evidenceRefs     EvidenceRef[]
 
+  @@unique([researchJobId, entityType, primaryDomain], map: "comp_entities_rj_et_pd_key")
   @@index([researchJobId, relationshipType, confidence(sort: Desc)], map: "competitor_entities_relationship_idx")
   @@index([researchJobId, primaryDomain], map: "competitor_entities_domain_idx")
-  @@unique([researchJobId, entityType, primaryDomain], map: "comp_entities_rj_et_pd_key")
   @@map("competitor_entities")
 }
 
@@ -1019,51 +1028,51 @@ model CompetitorSurface {
 }
 
 model EvidenceRef {
-  id            String          @id @default(uuid())
-  researchJobId String          @map("research_job_id")
-  entityId      String?         @map("entity_id")
-  surfaceId     String?         @map("surface_id")
+  id            String             @id @default(uuid())
+  researchJobId String             @map("research_job_id")
+  entityId      String?            @map("entity_id")
+  surfaceId     String?            @map("surface_id")
   kind          EvidenceRefKind
-  refId         String?         @map("ref_id")
+  refId         String?            @map("ref_id")
   url           String?
   label         String?
   metadata      Json?
-  createdAt     DateTime        @default(now()) @map("created_at")
-  updatedAt     DateTime        @updatedAt @map("updated_at")
-  entity        CompetitorEntity? @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+  entity        CompetitorEntity?  @relation(fields: [entityId], references: [id], onDelete: Cascade)
   surface       CompetitorSurface? @relation(fields: [surfaceId], references: [id], onDelete: Cascade)
-  researchJob   ResearchJob     @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  researchJob   ResearchJob        @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
 
+  @@unique([researchJobId, kind, refId], map: "evidence_refs_job_kind_ref_key")
   @@index([researchJobId, kind, createdAt(sort: Desc)], map: "evidence_refs_job_kind_created_idx")
   @@index([entityId, kind], map: "evidence_refs_entity_kind_idx")
   @@index([surfaceId], map: "evidence_refs_surface_idx")
-  @@unique([researchJobId, kind, refId], map: "evidence_refs_job_kind_ref_key")
   @@map("evidence_refs")
 }
 
 model WorkspaceEvidenceRef {
-  id          String                @id @default(uuid())
-  researchJobId String              @map("research_job_id")
-  kind        String
-  refId       String?               @map("ref_id")
-  url         String?
-  label       String?
-  snippet     String?
-  contentHash String?               @map("content_hash")
-  provider    String?
-  runId       String?               @map("run_id")
-  status      WorkspaceEvidenceStatus @default(RAW)
-  confidence  Float                 @default(0)
-  metadata    Json?
-  fetchedAt   DateTime              @default(now()) @map("fetched_at")
-  createdAt   DateTime              @default(now()) @map("created_at")
-  updatedAt   DateTime              @updatedAt @map("updated_at")
-  links       WorkspaceEvidenceLink[]
-  researchJob ResearchJob           @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  id            String                  @id @default(uuid())
+  researchJobId String                  @map("research_job_id")
+  kind          String
+  refId         String?                 @map("ref_id")
+  url           String?
+  label         String?
+  snippet       String?
+  contentHash   String?                 @map("content_hash")
+  provider      String?
+  runId         String?                 @map("run_id")
+  status        WorkspaceEvidenceStatus @default(RAW)
+  confidence    Float                   @default(0)
+  metadata      Json?
+  fetchedAt     DateTime                @default(now()) @map("fetched_at")
+  createdAt     DateTime                @default(now()) @map("created_at")
+  updatedAt     DateTime                @updatedAt @map("updated_at")
+  links         WorkspaceEvidenceLink[]
+  researchJob   ResearchJob             @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
 
+  @@unique([researchJobId, kind, refId], map: "workspace_evidence_refs_job_kind_ref_key")
   @@index([researchJobId, kind, createdAt(sort: Desc)], map: "workspace_evidence_refs_job_kind_created_idx")
   @@index([researchJobId, runId], map: "workspace_evidence_refs_job_run_idx")
-  @@unique([researchJobId, kind, refId], map: "workspace_evidence_refs_job_kind_ref_key")
   @@map("workspace_evidence_refs")
 }
 
@@ -1078,25 +1087,25 @@ model WorkspaceEvidenceLink {
   evidenceRef   WorkspaceEvidenceRef @relation(fields: [evidenceRefId], references: [id], onDelete: Cascade)
   researchJob   ResearchJob          @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
 
+  @@unique([researchJobId, evidenceRefId, entityType, entityId, role], map: "workspace_evidence_links_unique_link_key")
   @@index([researchJobId, entityType, entityId], map: "workspace_evidence_links_job_entity_idx")
   @@index([evidenceRefId], map: "workspace_evidence_links_ref_idx")
-  @@unique([researchJobId, evidenceRefId, entityType, entityId, role], map: "workspace_evidence_links_unique_link_key")
   @@map("workspace_evidence_links")
 }
 
 model ConnectorRun {
-  id            String     @id @default(uuid())
-  researchJobId String     @map("research_job_id")
+  id            String      @id @default(uuid())
+  researchJobId String      @map("research_job_id")
   platform      String
   provider      String
   target        String
   ok            Boolean
-  confidence    Float      @default(0)
-  coverage      Float      @default(0)
+  confidence    Float       @default(0)
+  coverage      Float       @default(0)
   error         String?
   warnings      Json?
   meta          Json?
-  createdAt     DateTime   @default(now()) @map("created_at")
+  createdAt     DateTime    @default(now()) @map("created_at")
   researchJob   ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
 
   @@index([researchJobId, platform, target, createdAt(sort: Desc)], map: "connector_runs_job_platform_target_created_idx")
@@ -1105,12 +1114,12 @@ model ConnectorRun {
 }
 
 model KnowledgeLedgerVersion {
-  id            String     @id @default(uuid())
-  researchJobId String     @map("research_job_id")
-  runId         String?    @map("run_id")
-  source        String     @default("runtime")
-  payloadJson   Json       @map("payload_json")
-  createdAt     DateTime   @default(now()) @map("created_at")
+  id            String      @id @default(uuid())
+  researchJobId String      @map("research_job_id")
+  runId         String?     @map("run_id")
+  source        String      @default("runtime")
+  payloadJson   Json        @map("payload_json")
+  createdAt     DateTime    @default(now()) @map("created_at")
   researchJob   ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
 
   @@index([researchJobId, createdAt(sort: Desc)], map: "knowledge_ledger_versions_job_created_idx")
@@ -1120,16 +1129,16 @@ model KnowledgeLedgerVersion {
 }
 
 model WorkLedgerVersion {
-  id            String                   @id @default(uuid())
-  researchJobId String                   @map("research_job_id")
-  runId         String?                  @map("run_id")
-  documentId    String?                  @map("document_id")
-  versionId     String?                  @map("version_id")
+  id            String                    @id @default(uuid())
+  researchJobId String                    @map("research_job_id")
+  runId         String?                   @map("run_id")
+  documentId    String?                   @map("document_id")
+  versionId     String?                   @map("version_id")
   stage         String
-  payloadJson   Json                     @map("payload_json")
-  createdAt     DateTime                 @default(now()) @map("created_at")
-  researchJob   ResearchJob              @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
-  document      WorkspaceDocument?       @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  payloadJson   Json                      @map("payload_json")
+  createdAt     DateTime                  @default(now()) @map("created_at")
+  researchJob   ResearchJob               @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  document      WorkspaceDocument?        @relation(fields: [documentId], references: [id], onDelete: SetNull)
   version       WorkspaceDocumentVersion? @relation(fields: [versionId], references: [id], onDelete: SetNull)
 
   @@index([researchJobId, createdAt(sort: Desc)], map: "work_ledger_versions_job_created_idx")
@@ -1141,18 +1150,18 @@ model WorkLedgerVersion {
 }
 
 model DocumentSpecVersion {
-  id                   String                   @id @default(uuid())
-  researchJobId        String                   @map("research_job_id")
-  runId                String?                  @map("run_id")
-  documentId           String?                  @map("document_id")
-  versionId            String?                  @map("version_id")
-  schemaVersion        String                   @default("v1") @map("schema_version")
-  specJson             Json                     @map("spec_json")
-  repaired             Boolean                  @default(false)
-  validationErrorsJson Json?                    @map("validation_errors_json")
-  createdAt            DateTime                 @default(now()) @map("created_at")
-  researchJob          ResearchJob              @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
-  document             WorkspaceDocument?       @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  id                   String                    @id @default(uuid())
+  researchJobId        String                    @map("research_job_id")
+  runId                String?                   @map("run_id")
+  documentId           String?                   @map("document_id")
+  versionId            String?                   @map("version_id")
+  schemaVersion        String                    @default("v1") @map("schema_version")
+  specJson             Json                      @map("spec_json")
+  repaired             Boolean                   @default(false)
+  validationErrorsJson Json?                     @map("validation_errors_json")
+  createdAt            DateTime                  @default(now()) @map("created_at")
+  researchJob          ResearchJob               @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  document             WorkspaceDocument?        @relation(fields: [documentId], references: [id], onDelete: SetNull)
   version              WorkspaceDocumentVersion? @relation(fields: [versionId], references: [id], onDelete: SetNull)
 
   @@index([researchJobId, createdAt(sort: Desc)], map: "document_spec_versions_job_created_idx")
@@ -1163,21 +1172,21 @@ model DocumentSpecVersion {
 }
 
 model DocumentSectionDraft {
-  id                 String                   @id @default(uuid())
-  researchJobId      String                   @map("research_job_id")
-  runId              String?                  @map("run_id")
-  documentId         String?                  @map("document_id")
-  versionId          String?                  @map("version_id")
-  sectionId          String                   @map("section_id")
-  sectionKind        String                   @map("section_kind")
+  id                 String                    @id @default(uuid())
+  researchJobId      String                    @map("research_job_id")
+  runId              String?                   @map("run_id")
+  documentId         String?                   @map("document_id")
+  versionId          String?                   @map("version_id")
+  sectionId          String                    @map("section_id")
+  sectionKind        String                    @map("section_kind")
   title              String
-  contentMd          String                   @map("content_md")
-  evidenceRefIdsJson Json?                    @map("evidence_ref_ids_json")
-  status             String                   @default("insufficient_evidence")
-  partialReason      String?                  @map("partial_reason")
-  createdAt          DateTime                 @default(now()) @map("created_at")
-  researchJob        ResearchJob              @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
-  document           WorkspaceDocument?       @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  contentMd          String                    @map("content_md")
+  evidenceRefIdsJson Json?                     @map("evidence_ref_ids_json")
+  status             String                    @default("insufficient_evidence")
+  partialReason      String?                   @map("partial_reason")
+  createdAt          DateTime                  @default(now()) @map("created_at")
+  researchJob        ResearchJob               @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  document           WorkspaceDocument?        @relation(fields: [documentId], references: [id], onDelete: SetNull)
   version            WorkspaceDocumentVersion? @relation(fields: [versionId], references: [id], onDelete: SetNull)
 
   @@index([researchJobId, createdAt(sort: Desc)], map: "document_section_drafts_job_created_idx")
@@ -1207,27 +1216,235 @@ model WorkspaceMemorySnapshot {
   @@map("workspace_memory_snapshots")
 }
 
+model ViralStudioBrandDnaProfile {
+  id                 String      @id @default(uuid())
+  workspaceId        String      @map("workspace_id")
+  status             String
+  mission            String      @default("")
+  valueProposition   String      @default("") @map("value_proposition")
+  productOrService   String      @default("") @map("product_or_service")
+  region             String      @default("")
+  audienceJson       Json?       @map("audience_json")
+  painsJson          Json?       @map("pains_json")
+  desiresJson        Json?       @map("desires_json")
+  objectionsJson     Json?       @map("objections_json")
+  voiceSlidersJson   Json?       @map("voice_sliders_json")
+  bannedPhrasesJson  Json?       @map("banned_phrases_json")
+  requiredClaimsJson Json?       @map("required_claims_json")
+  exemplarsJson      Json?       @map("exemplars_json")
+  summary            String      @default("")
+  completenessJson   Json?       @map("completeness_json")
+  payloadJson        Json        @map("payload_json")
+  createdAt          DateTime    @default(now()) @map("created_at")
+  updatedAt          DateTime    @updatedAt @map("updated_at")
+  workspace          ResearchJob @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId], map: "viral_studio_brand_dna_workspace_unique")
+  @@index([workspaceId, createdAt(sort: Desc)], map: "viral_studio_brand_dna_workspace_created_idx")
+  @@index([workspaceId, updatedAt(sort: Desc)], map: "viral_studio_brand_dna_workspace_updated_idx")
+  @@map("viral_studio_brand_dna_profiles")
+}
+
+model ViralStudioIngestionRun {
+  id             String                      @id
+  workspaceId    String                      @map("workspace_id")
+  sourcePlatform String                      @map("source_platform")
+  sourceUrl      String                      @map("source_url")
+  maxVideos      Int                         @map("max_videos")
+  lookbackDays   Int                         @map("lookback_days")
+  sortBy         String                      @map("sort_by")
+  preset         String
+  attempt        Int                         @default(1)
+  retryOfRunId   String?                     @map("retry_of_run_id")
+  status         String
+  found          Int                         @default(0)
+  downloaded     Int                         @default(0)
+  analyzed       Int                         @default(0)
+  ranked         Int                         @default(0)
+  error          String?
+  startedAt      DateTime?                   @map("started_at")
+  endedAt        DateTime?                   @map("ended_at")
+  assetRef       String?                     @unique @map("asset_ref")
+  payloadJson    Json                        @map("payload_json")
+  createdAt      DateTime                    @default(now()) @map("created_at")
+  updatedAt      DateTime                    @updatedAt @map("updated_at")
+  workspace      ResearchJob                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  events         ViralStudioIngestionEvent[]
+  references     ViralStudioReferenceAsset[]
+
+  @@index([workspaceId, createdAt(sort: Desc)], map: "viral_studio_ingestion_runs_workspace_created_idx")
+  @@index([workspaceId, status, createdAt(sort: Desc)], map: "viral_studio_ingestion_runs_workspace_status_created_idx")
+  @@index([retryOfRunId], map: "viral_studio_ingestion_runs_retry_of_idx")
+  @@map("viral_studio_ingestion_runs")
+}
+
+model ViralStudioIngestionEvent {
+  id             Int                     @id @default(autoincrement())
+  ingestionRunId String                  @map("ingestion_run_id")
+  workspaceId    String                  @map("workspace_id")
+  type           String
+  status         String?
+  message        String
+  payloadJson    Json?                   @map("payload_json")
+  createdAt      DateTime                @default(now()) @map("created_at")
+  ingestionRun   ViralStudioIngestionRun @relation(fields: [ingestionRunId], references: [id], onDelete: Cascade)
+  workspace      ResearchJob             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, id], map: "viral_studio_ingestion_events_workspace_id_idx")
+  @@index([ingestionRunId, id], map: "viral_studio_ingestion_events_run_id_idx")
+  @@map("viral_studio_ingestion_events")
+}
+
+model ViralStudioReferenceAsset {
+  id                 String                  @id
+  workspaceId        String                  @map("workspace_id")
+  ingestionRunId     String                  @map("ingestion_run_id")
+  sourcePlatform     String                  @map("source_platform")
+  sourceUrl          String                  @map("source_url")
+  caption            String
+  viralScore         Float                   @default(0) @map("viral_score")
+  rank               Int                     @default(0)
+  shortlistState     String                  @default("none") @map("shortlist_state")
+  assetRef           String?                 @unique @map("asset_ref")
+  explainabilityJson Json?                   @map("explainability_json")
+  payloadJson        Json                    @map("payload_json")
+  createdAt          DateTime                @default(now()) @map("created_at")
+  updatedAt          DateTime                @updatedAt @map("updated_at")
+  ingestionRun       ViralStudioIngestionRun @relation(fields: [ingestionRunId], references: [id], onDelete: Cascade)
+  workspace          ResearchJob             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt(sort: Desc)], map: "viral_studio_reference_assets_workspace_created_idx")
+  @@index([workspaceId, shortlistState, createdAt(sort: Desc)], map: "viral_studio_reference_assets_workspace_shortlist_created_idx")
+  @@index([ingestionRunId], map: "viral_studio_reference_assets_ingestion_run_idx")
+  @@map("viral_studio_reference_assets")
+}
+
+model ViralStudioGenerationPack {
+  id                       String                          @id
+  workspaceId              String                          @map("workspace_id")
+  status                   String
+  promptTemplateId         String                          @map("prompt_template_id")
+  formatTarget             String                          @map("format_target")
+  inputPrompt              String                          @map("input_prompt")
+  revision                 Int                             @default(1)
+  selectedReferenceIdsJson Json?                           @map("selected_reference_ids_json")
+  promptContextJson        Json                            @map("prompt_context_json")
+  outputsJson              Json                            @map("outputs_json")
+  qualityCheckJson         Json?                           @map("quality_check_json")
+  assetRef                 String?                         @unique @map("asset_ref")
+  payloadJson              Json                            @map("payload_json")
+  createdAt                DateTime                        @default(now()) @map("created_at")
+  updatedAt                DateTime                        @updatedAt @map("updated_at")
+  workspace                ResearchJob                     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  revisions                ViralStudioGenerationRevision[]
+  documents                ViralStudioDocument[]
+
+  @@index([workspaceId, createdAt(sort: Desc)], map: "viral_studio_generation_packs_workspace_created_idx")
+  @@index([workspaceId, status, createdAt(sort: Desc)], map: "viral_studio_generation_packs_workspace_status_created_idx")
+  @@map("viral_studio_generation_packs")
+}
+
+model ViralStudioGenerationRevision {
+  id               String                    @id @default(uuid())
+  workspaceId      String                    @map("workspace_id")
+  generationId     String                    @map("generation_id")
+  revisionNumber   Int                       @map("revision_number")
+  mode             String?
+  section          String?
+  instruction      String?
+  payloadJson      Json                      @map("payload_json")
+  qualityCheckJson Json?                     @map("quality_check_json")
+  createdAt        DateTime                  @default(now()) @map("created_at")
+  generation       ViralStudioGenerationPack @relation(fields: [generationId], references: [id], onDelete: Cascade)
+  workspace        ResearchJob               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([generationId, revisionNumber], map: "viral_studio_generation_revisions_generation_revision_unique")
+  @@index([workspaceId, createdAt(sort: Desc)], map: "viral_studio_generation_revisions_workspace_created_idx")
+  @@index([generationId], map: "viral_studio_generation_revisions_generation_idx")
+  @@map("viral_studio_generation_revisions")
+}
+
+model ViralStudioDocument {
+  id                      String                       @id
+  workspaceId             String                       @map("workspace_id")
+  generationId            String                       @map("generation_id")
+  title                   String
+  linkedGenerationIdsJson Json?                        @map("linked_generation_ids_json")
+  sectionsJson            Json                         @map("sections_json")
+  currentVersionId        String?                      @map("current_version_id")
+  assetRef                String?                      @unique @map("asset_ref")
+  payloadJson             Json                         @map("payload_json")
+  createdAt               DateTime                     @default(now()) @map("created_at")
+  updatedAt               DateTime                     @updatedAt @map("updated_at")
+  generation              ViralStudioGenerationPack    @relation(fields: [generationId], references: [id], onDelete: Cascade)
+  workspace               ResearchJob                  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  versions                ViralStudioDocumentVersion[]
+
+  @@index([workspaceId, createdAt(sort: Desc)], map: "viral_studio_documents_workspace_created_idx")
+  @@index([workspaceId, currentVersionId], map: "viral_studio_documents_workspace_version_idx")
+  @@index([generationId], map: "viral_studio_documents_generation_idx")
+  @@map("viral_studio_documents")
+}
+
+model ViralStudioDocumentVersion {
+  id                   String              @id
+  workspaceId          String              @map("workspace_id")
+  documentId           String              @map("document_id")
+  versionNumber        Int                 @map("version_number")
+  author               String
+  summary              String
+  basedOnVersionId     String?             @map("based_on_version_id")
+  snapshotSectionsJson Json                @map("snapshot_sections_json")
+  assetRef             String?             @unique @map("asset_ref")
+  payloadJson          Json                @map("payload_json")
+  createdAt            DateTime            @default(now()) @map("created_at")
+  document             ViralStudioDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  workspace            ResearchJob         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, versionNumber], map: "viral_studio_document_versions_document_version_unique")
+  @@index([workspaceId, createdAt(sort: Desc)], map: "viral_studio_document_versions_workspace_created_idx")
+  @@index([documentId, versionNumber], map: "viral_studio_document_versions_document_version_idx")
+  @@index([documentId], map: "viral_studio_document_versions_document_idx")
+  @@map("viral_studio_document_versions")
+}
+
+model ViralStudioTelemetryEvent {
+  id          Int         @id @default(autoincrement())
+  workspaceId String      @map("workspace_id")
+  name        String
+  stage       String
+  status      String
+  durationMs  Int         @default(0) @map("duration_ms")
+  payloadJson Json?       @map("payload_json")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  workspace   ResearchJob @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt(sort: Desc)], map: "viral_studio_telemetry_events_workspace_created_idx")
+  @@index([workspaceId, stage, createdAt(sort: Desc)], map: "viral_studio_telemetry_events_workspace_stage_created_idx")
+  @@map("viral_studio_telemetry_events")
+}
+
 model ClientAccount {
-  id              String       @id @default(uuid())
-  clientId        String       @map("client_id")
-  platform        String
-  handle          String
-  profileUrl      String?      @map("profile_url")
-  followerCount   Int?         @map("follower_count")
-  followingCount  Int?         @map("following_count")
-  bio             String?
-  profileImageUrl String?      @map("profile_image_url")
-  lastScrapedAt   DateTime?    @map("last_scraped_at")
-  isActive        Boolean      @default(true) @map("is_active")
-  archivedAt      DateTime?    @map("archived_at")
-  archivedBy      String?      @map("archived_by")
-  manuallyModified Boolean     @default(false) @map("manually_modified")
-  lastModifiedAt  DateTime?    @map("last_modified_at")
-  lastModifiedBy  String?      @map("last_modified_by")
-  createdAt       DateTime     @default(now()) @map("created_at")
-  updatedAt       DateTime     @updatedAt @map("updated_at")
-  client          Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  clientPosts     ClientPost[]
+  id               String       @id @default(uuid())
+  clientId         String       @map("client_id")
+  platform         String
+  handle           String
+  profileUrl       String?      @map("profile_url")
+  followerCount    Int?         @map("follower_count")
+  followingCount   Int?         @map("following_count")
+  bio              String?
+  profileImageUrl  String?      @map("profile_image_url")
+  lastScrapedAt    DateTime?    @map("last_scraped_at")
+  isActive         Boolean      @default(true) @map("is_active")
+  archivedAt       DateTime?    @map("archived_at")
+  archivedBy       String?      @map("archived_by")
+  manuallyModified Boolean      @default(false) @map("manually_modified")
+  lastModifiedAt   DateTime?    @map("last_modified_at")
+  lastModifiedBy   String?      @map("last_modified_by")
+  createdAt        DateTime     @default(now()) @map("created_at")
+  updatedAt        DateTime     @updatedAt @map("updated_at")
+  client           Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  clientPosts      ClientPost[]
 
   @@unique([clientId, platform, handle])
   @@map("client_accounts")
@@ -1384,29 +1601,29 @@ model ClientProfile {
 }
 
 model ClientProfileSnapshot {
-  id                          String               @id @default(uuid())
-  clientProfileId             String               @map("client_profile_id")
-  researchJobId               String?              @map("research_job_id")
-  followerCount               Int?                 @map("follower_count")
-  followingCount              Int?                 @map("following_count")
-  bio                         String?
-  profileImageUrl             String?              @map("profile_image_url")
-  postsCount                  Int?                 @map("posts_count")
-  isVerified                  Boolean              @default(false) @map("is_verified")
-  isPrivate                   Boolean              @default(false) @map("is_private")
-  readinessScore              Float?               @map("readiness_score")
-  readinessStatus             String?              @map("readiness_status")
-  readinessReasons            Json?                @map("readiness_reasons")
-  lastReadinessAt             DateTime?            @map("last_readiness_at")
-  lastMediaDownloadQueuedAt   DateTime?            @map("last_media_download_queued_at")
-  runId                       String?              @map("run_id")
-  orchestrationState          Json?                @map("orchestration_state")
-  scrapedAt                   DateTime             @default(now()) @map("scraped_at")
-  createdAt                   DateTime             @default(now()) @map("created_at")
-  updatedAt                   DateTime             @updatedAt @map("updated_at")
-  posts                       ClientPostSnapshot[]
-  clientProfile               ClientProfile        @relation(fields: [clientProfileId], references: [id], onDelete: Cascade)
-  researchJob                 ResearchJob?         @relation(fields: [researchJobId], references: [id])
+  id                        String               @id @default(uuid())
+  clientProfileId           String               @map("client_profile_id")
+  researchJobId             String?              @map("research_job_id")
+  followerCount             Int?                 @map("follower_count")
+  followingCount            Int?                 @map("following_count")
+  bio                       String?
+  profileImageUrl           String?              @map("profile_image_url")
+  postsCount                Int?                 @map("posts_count")
+  isVerified                Boolean              @default(false) @map("is_verified")
+  isPrivate                 Boolean              @default(false) @map("is_private")
+  readinessScore            Float?               @map("readiness_score")
+  readinessStatus           String?              @map("readiness_status")
+  readinessReasons          Json?                @map("readiness_reasons")
+  lastReadinessAt           DateTime?            @map("last_readiness_at")
+  lastMediaDownloadQueuedAt DateTime?            @map("last_media_download_queued_at")
+  runId                     String?              @map("run_id")
+  orchestrationState        Json?                @map("orchestration_state")
+  scrapedAt                 DateTime             @default(now()) @map("scraped_at")
+  createdAt                 DateTime             @default(now()) @map("created_at")
+  updatedAt                 DateTime             @updatedAt @map("updated_at")
+  posts                     ClientPostSnapshot[]
+  clientProfile             ClientProfile        @relation(fields: [clientProfileId], references: [id], onDelete: Cascade)
+  researchJob               ResearchJob?         @relation(fields: [researchJobId], references: [id])
 
   @@index([researchJobId])
   @@index([researchJobId, readinessStatus, scrapedAt(sort: Desc)])
@@ -1459,29 +1676,29 @@ model CompetitorProfile {
 }
 
 model CompetitorProfileSnapshot {
-  id                          String                   @id @default(uuid())
-  competitorProfileId         String                   @map("competitor_profile_id")
-  researchJobId               String?                  @map("research_job_id")
-  followerCount               Int?                     @map("follower_count")
-  followingCount              Int?                     @map("following_count")
-  bio                         String?
-  profileImageUrl             String?                  @map("profile_image_url")
-  postsCount                  Int?                     @map("posts_count")
-  isVerified                  Boolean                  @default(false) @map("is_verified")
-  isPrivate                   Boolean                  @default(false) @map("is_private")
-  readinessScore              Float?                   @map("readiness_score")
-  readinessStatus             String?                  @map("readiness_status")
-  readinessReasons            Json?                    @map("readiness_reasons")
-  lastReadinessAt             DateTime?                @map("last_readiness_at")
-  lastMediaDownloadQueuedAt   DateTime?                @map("last_media_download_queued_at")
-  runId                       String?                  @map("run_id")
-  orchestrationState          Json?                    @map("orchestration_state")
-  scrapedAt                   DateTime                 @default(now()) @map("scraped_at")
-  createdAt                   DateTime                 @default(now()) @map("created_at")
-  updatedAt                   DateTime                 @updatedAt @map("updated_at")
-  posts                       CompetitorPostSnapshot[]
-  competitorProfile           CompetitorProfile        @relation(fields: [competitorProfileId], references: [id], onDelete: Cascade)
-  researchJob                 ResearchJob?             @relation(fields: [researchJobId], references: [id])
+  id                        String                   @id @default(uuid())
+  competitorProfileId       String                   @map("competitor_profile_id")
+  researchJobId             String?                  @map("research_job_id")
+  followerCount             Int?                     @map("follower_count")
+  followingCount            Int?                     @map("following_count")
+  bio                       String?
+  profileImageUrl           String?                  @map("profile_image_url")
+  postsCount                Int?                     @map("posts_count")
+  isVerified                Boolean                  @default(false) @map("is_verified")
+  isPrivate                 Boolean                  @default(false) @map("is_private")
+  readinessScore            Float?                   @map("readiness_score")
+  readinessStatus           String?                  @map("readiness_status")
+  readinessReasons          Json?                    @map("readiness_reasons")
+  lastReadinessAt           DateTime?                @map("last_readiness_at")
+  lastMediaDownloadQueuedAt DateTime?                @map("last_media_download_queued_at")
+  runId                     String?                  @map("run_id")
+  orchestrationState        Json?                    @map("orchestration_state")
+  scrapedAt                 DateTime                 @default(now()) @map("scraped_at")
+  createdAt                 DateTime                 @default(now()) @map("created_at")
+  updatedAt                 DateTime                 @updatedAt @map("updated_at")
+  posts                     CompetitorPostSnapshot[]
+  competitorProfile         CompetitorProfile        @relation(fields: [competitorProfileId], references: [id], onDelete: Cascade)
+  researchJob               ResearchJob?             @relation(fields: [researchJobId], references: [id])
 
   @@index([researchJobId])
   @@index([researchJobId, readinessStatus, scrapedAt(sort: Desc)])
@@ -1883,25 +2100,25 @@ enum MediaAnalysisRunStatus {
 }
 
 model MediaAnalysisRun {
-  id                String                 @id @default(uuid())
-  researchJobId     String                 @map("research_job_id")
-  status            MediaAnalysisRunStatus @default(RUNNING)
-  allowDegraded     Boolean                @default(false) @map("allow_degraded")
-  skipAlreadyAnalyzed Boolean              @default(true) @map("skip_already_analyzed")
-  requestedLimit    Int                    @map("requested_limit")
-  maxEligibleAssets Int                    @map("max_eligible_assets")
-  maxEligiblePosts  Int                    @map("max_eligible_posts")
-  downloadedTotal   Int                    @default(0) @map("downloaded_total")
-  qualifiedForAi    Int                    @default(0) @map("qualified_for_ai")
-  analysisWindow    Int                    @default(0) @map("analysis_window")
-  analyzedInWindow  Int                    @default(0) @map("analyzed_in_window")
-  attemptedAssets   Int                    @default(0) @map("attempted_assets")
-  succeededCount    Int                    @default(0) @map("succeeded_count")
-  failedCount       Int                    @default(0) @map("failed_count")
-  skippedReason     String?                @map("skipped_reason")
-  diagnostics       Json?
-  startedAt         DateTime               @default(now()) @map("started_at")
-  completedAt       DateTime?              @map("completed_at")
+  id                  String                 @id @default(uuid())
+  researchJobId       String                 @map("research_job_id")
+  status              MediaAnalysisRunStatus @default(RUNNING)
+  allowDegraded       Boolean                @default(false) @map("allow_degraded")
+  skipAlreadyAnalyzed Boolean                @default(true) @map("skip_already_analyzed")
+  requestedLimit      Int                    @map("requested_limit")
+  maxEligibleAssets   Int                    @map("max_eligible_assets")
+  maxEligiblePosts    Int                    @map("max_eligible_posts")
+  downloadedTotal     Int                    @default(0) @map("downloaded_total")
+  qualifiedForAi      Int                    @default(0) @map("qualified_for_ai")
+  analysisWindow      Int                    @default(0) @map("analysis_window")
+  analyzedInWindow    Int                    @default(0) @map("analyzed_in_window")
+  attemptedAssets     Int                    @default(0) @map("attempted_assets")
+  succeededCount      Int                    @default(0) @map("succeeded_count")
+  failedCount         Int                    @default(0) @map("failed_count")
+  skippedReason       String?                @map("skipped_reason")
+  diagnostics         Json?
+  startedAt           DateTime               @default(now()) @map("started_at")
+  completedAt         DateTime?              @map("completed_at")
 
   researchJob ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
 
@@ -2092,7 +2309,7 @@ model ChatSession {
   updatedAt     DateTime @updatedAt @map("updated_at")
   lastActiveAt  DateTime @default(now()) @map("last_active_at")
 
-  researchJob ResearchJob    @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  researchJob ResearchJob      @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
   messages    ChatMessage[]
   blockEvents ChatBlockEvent[]
   savedBlocks ChatSavedBlock[]
@@ -2103,17 +2320,17 @@ model ChatSession {
 }
 
 model ChatThread {
-  id             String     @id @default(uuid())
-  researchJobId  String     @map("research_job_id")
+  id             String    @id @default(uuid())
+  researchJobId  String    @map("research_job_id")
   title          String
-  pinnedBranchId String?    @map("pinned_branch_id")
-  archivedAt     DateTime?  @map("archived_at")
-  createdAt      DateTime   @default(now()) @map("created_at")
-  updatedAt      DateTime   @updatedAt @map("updated_at")
+  pinnedBranchId String?   @map("pinned_branch_id")
+  archivedAt     DateTime? @map("archived_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
-  researchJob   ResearchJob        @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
-  pinnedBranch  ChatBranch?        @relation("ChatThreadPinnedBranch", fields: [pinnedBranchId], references: [id], onDelete: SetNull)
-  branches      ChatBranch[]
+  researchJob  ResearchJob  @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  pinnedBranch ChatBranch?  @relation("ChatThreadPinnedBranch", fields: [pinnedBranchId], references: [id], onDelete: SetNull)
+  branches     ChatBranch[]
 
   @@index([researchJobId, updatedAt(sort: Desc)])
   @@index([pinnedBranchId])
@@ -2135,15 +2352,15 @@ model ChatBranch {
   status              ChatBranchStatus @default(ACTIVE)
   createdAt           DateTime         @default(now()) @map("created_at")
 
-  thread             ChatThread          @relation(fields: [threadId], references: [id], onDelete: Cascade)
-  forkedFromMessage  ChatBranchMessage?  @relation("ChatBranchForkedMessage", fields: [forkedFromMessageId], references: [id], onDelete: SetNull)
-  forkedFromBranch   ChatBranch?         @relation("ChatBranchForkSource", fields: [forkedFromBranchId], references: [id], onDelete: SetNull)
-  forkChildren       ChatBranch[]        @relation("ChatBranchForkSource")
-  pinnedByThreads    ChatThread[]        @relation("ChatThreadPinnedBranch")
-  messages           ChatBranchMessage[]
-  runs               AgentRun[]
-  processEvents      ProcessEvent[]
-  queueItems         MessageQueueItem[]
+  thread            ChatThread          @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  forkedFromMessage ChatBranchMessage?  @relation("ChatBranchForkedMessage", fields: [forkedFromMessageId], references: [id], onDelete: SetNull)
+  forkedFromBranch  ChatBranch?         @relation("ChatBranchForkSource", fields: [forkedFromBranchId], references: [id], onDelete: SetNull)
+  forkChildren      ChatBranch[]        @relation("ChatBranchForkSource")
+  pinnedByThreads   ChatThread[]        @relation("ChatThreadPinnedBranch")
+  messages          ChatBranchMessage[]
+  runs              AgentRun[]
+  processEvents     ProcessEvent[]
+  queueItems        MessageQueueItem[]
 
   @@index([threadId, createdAt(sort: Desc)])
   @@index([threadId, status, createdAt(sort: Desc)])
@@ -2160,19 +2377,19 @@ enum ChatBranchMessageRole {
 }
 
 model ChatBranchMessage {
-  id              String                @id @default(uuid())
-  branchId        String                @map("branch_id")
-  role            ChatBranchMessageRole
-  content         String
-  blocksJson      Json?                 @map("blocks_json")
-  citationsJson   Json?                 @map("citations_json")
-  reasoningJson   Json?                 @map("reasoning_json")
-  inputOptionsJson Json?                @map("input_options_json")
-  attachmentIdsJson Json?               @map("attachment_ids_json")
-  documentIdsJson Json?                 @map("document_ids_json")
-  parentMessageId String?               @map("parent_message_id")
-  clientVisible   Boolean               @default(true) @map("client_visible")
-  createdAt       DateTime              @default(now()) @map("created_at")
+  id                String                @id @default(uuid())
+  branchId          String                @map("branch_id")
+  role              ChatBranchMessageRole
+  content           String
+  blocksJson        Json?                 @map("blocks_json")
+  citationsJson     Json?                 @map("citations_json")
+  reasoningJson     Json?                 @map("reasoning_json")
+  inputOptionsJson  Json?                 @map("input_options_json")
+  attachmentIdsJson Json?                 @map("attachment_ids_json")
+  documentIdsJson   Json?                 @map("document_ids_json")
+  parentMessageId   String?               @map("parent_message_id")
+  clientVisible     Boolean               @default(true) @map("client_visible")
+  createdAt         DateTime              @default(now()) @map("created_at")
 
   branch         ChatBranch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
   parentMessage  ChatBranchMessage?  @relation("ChatBranchMessageParent", fields: [parentMessageId], references: [id], onDelete: SetNull)
@@ -2205,20 +2422,20 @@ enum AgentRunStatus {
 }
 
 model AgentRun {
-  id               String              @id @default(uuid())
-  branchId         String              @map("branch_id")
-  triggerType      AgentRunTriggerType @map("trigger_type")
-  triggerMessageId String?             @map("trigger_message_id")
-  status           AgentRunStatus      @default(QUEUED)
-  policyJson       Json?               @map("policy_json")
-  planJson         Json?               @map("plan_json")
-  inputOptionsJson Json?               @map("input_options_json")
-  attachmentIdsJson Json?              @map("attachment_ids_json")
-  documentIdsJson Json?                @map("document_ids_json")
-  startedAt        DateTime?           @map("started_at")
-  endedAt          DateTime?           @map("ended_at")
-  error            String?
-  createdAt        DateTime            @default(now()) @map("created_at")
+  id                String              @id @default(uuid())
+  branchId          String              @map("branch_id")
+  triggerType       AgentRunTriggerType @map("trigger_type")
+  triggerMessageId  String?             @map("trigger_message_id")
+  status            AgentRunStatus      @default(QUEUED)
+  policyJson        Json?               @map("policy_json")
+  planJson          Json?               @map("plan_json")
+  inputOptionsJson  Json?               @map("input_options_json")
+  attachmentIdsJson Json?               @map("attachment_ids_json")
+  documentIdsJson   Json?               @map("document_ids_json")
+  startedAt         DateTime?           @map("started_at")
+  endedAt           DateTime?           @map("ended_at")
+  error             String?
+  createdAt         DateTime            @default(now()) @map("created_at")
 
   branch         ChatBranch         @relation(fields: [branchId], references: [id], onDelete: Cascade)
   triggerMessage ChatBranchMessage? @relation("AgentRunTriggerMessage", fields: [triggerMessageId], references: [id], onDelete: SetNull)
@@ -2240,17 +2457,17 @@ enum ToolRunStatus {
 }
 
 model ToolRun {
-  id                   String        @id @default(uuid())
-  agentRunId           String        @map("agent_run_id")
-  toolName             String        @map("tool_name")
-  argsJson             Json          @map("args_json")
-  status               ToolRunStatus @default(QUEUED)
-  resultJson           Json?         @map("result_json")
-  startedAt            DateTime?     @map("started_at")
-  endedAt              DateTime?     @map("ended_at")
-  costJson             Json?         @map("cost_json")
-  producedArtifactsJson Json?        @map("produced_artifacts_json")
-  createdAt            DateTime      @default(now()) @map("created_at")
+  id                    String        @id @default(uuid())
+  agentRunId            String        @map("agent_run_id")
+  toolName              String        @map("tool_name")
+  argsJson              Json          @map("args_json")
+  status                ToolRunStatus @default(QUEUED)
+  resultJson            Json?         @map("result_json")
+  startedAt             DateTime?     @map("started_at")
+  endedAt               DateTime?     @map("ended_at")
+  costJson              Json?         @map("cost_json")
+  producedArtifactsJson Json?         @map("produced_artifacts_json")
+  createdAt             DateTime      @default(now()) @map("created_at")
 
   agentRun      AgentRun       @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
   processEvents ProcessEvent[]
@@ -2279,20 +2496,20 @@ enum ProcessEventType {
 }
 
 model ProcessEvent {
-  id         String            @id @default(uuid())
-  agentRunId String?           @map("agent_run_id")
-  toolRunId  String?           @map("tool_run_id")
-  branchId   String            @map("branch_id")
-  eventSeq   BigInt            @default(autoincrement()) @map("event_seq")
-  level      ProcessEventLevel @default(INFO)
-  type       ProcessEventType
-  message    String
-  payloadJson Json?            @map("payload_json")
-  createdAt  DateTime          @default(now()) @map("created_at")
+  id          String            @id @default(uuid())
+  agentRunId  String?           @map("agent_run_id")
+  toolRunId   String?           @map("tool_run_id")
+  branchId    String            @map("branch_id")
+  eventSeq    BigInt            @default(autoincrement()) @map("event_seq")
+  level       ProcessEventLevel @default(INFO)
+  type        ProcessEventType
+  message     String
+  payloadJson Json?             @map("payload_json")
+  createdAt   DateTime          @default(now()) @map("created_at")
 
-  branch   ChatBranch  @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  agentRun AgentRun?   @relation(fields: [agentRunId], references: [id], onDelete: SetNull)
-  toolRun  ToolRun?    @relation(fields: [toolRunId], references: [id], onDelete: SetNull)
+  branch   ChatBranch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  agentRun AgentRun?  @relation(fields: [agentRunId], references: [id], onDelete: SetNull)
+  toolRun  ToolRun?   @relation(fields: [toolRunId], references: [id], onDelete: SetNull)
 
   @@index([branchId, createdAt])
   @@index([branchId, eventSeq])
@@ -2336,17 +2553,17 @@ enum WorkspaceDocumentExportFormat {
 }
 
 model MessageQueueItem {
-  id        String                 @id @default(uuid())
-  branchId  String                 @map("branch_id")
-  userId    String                 @map("user_id")
-  content   String
-  inputOptionsJson Json?           @map("input_options_json")
-  attachmentIdsJson Json?          @map("attachment_ids_json")
-  documentIdsJson Json?            @map("document_ids_json")
-  steerJson Json?                  @map("steer_json")
-  position  Int
-  status    MessageQueueItemStatus @default(QUEUED)
-  createdAt DateTime               @default(now()) @map("created_at")
+  id                String                 @id @default(uuid())
+  branchId          String                 @map("branch_id")
+  userId            String                 @map("user_id")
+  content           String
+  inputOptionsJson  Json?                  @map("input_options_json")
+  attachmentIdsJson Json?                  @map("attachment_ids_json")
+  documentIdsJson   Json?                  @map("document_ids_json")
+  steerJson         Json?                  @map("steer_json")
+  position          Int
+  status            MessageQueueItemStatus @default(QUEUED)
+  createdAt         DateTime               @default(now()) @map("created_at")
 
   branch ChatBranch @relation(fields: [branchId], references: [id], onDelete: Cascade)
 
@@ -2356,27 +2573,27 @@ model MessageQueueItem {
 }
 
 model WorkspaceDocument {
-  id                   String                      @id @default(uuid())
-  researchJobId        String                      @map("research_job_id")
-  clientId             String                      @map("client_id")
-  sourceKind           WorkspaceDocumentSourceKind @default(UPLOADED) @map("source_kind")
-  sourceAttachmentId   String?                     @map("source_attachment_id")
-  sourceClientDocumentId String?                   @map("source_client_document_id")
-  title                String
-  originalFileName     String                      @map("original_file_name")
-  mimeType             String                      @map("mime_type")
-  storagePath          String                      @map("storage_path")
-  parserStatus         WorkspaceDocumentParserStatus @default(PENDING) @map("parser_status")
-  parserQualityScore   Float?                      @map("parser_quality_score")
-  parserMetaJson       Json?                       @map("parser_meta_json")
-  latestVersionId      String?                     @map("latest_version_id")
-  createdAt            DateTime                    @default(now()) @map("created_at")
-  updatedAt            DateTime                    @updatedAt @map("updated_at")
+  id                     String                        @id @default(uuid())
+  researchJobId          String                        @map("research_job_id")
+  clientId               String                        @map("client_id")
+  sourceKind             WorkspaceDocumentSourceKind   @default(UPLOADED) @map("source_kind")
+  sourceAttachmentId     String?                       @map("source_attachment_id")
+  sourceClientDocumentId String?                       @map("source_client_document_id")
+  title                  String
+  originalFileName       String                        @map("original_file_name")
+  mimeType               String                        @map("mime_type")
+  storagePath            String                        @map("storage_path")
+  parserStatus           WorkspaceDocumentParserStatus @default(PENDING) @map("parser_status")
+  parserQualityScore     Float?                        @map("parser_quality_score")
+  parserMetaJson         Json?                         @map("parser_meta_json")
+  latestVersionId        String?                       @map("latest_version_id")
+  createdAt              DateTime                      @default(now()) @map("created_at")
+  updatedAt              DateTime                      @updatedAt @map("updated_at")
 
-  versions      WorkspaceDocumentVersion[]
-  chunks        WorkspaceDocumentChunk[]
-  ingestionRuns WorkspaceDocumentIngestionRun[]
-  exports       WorkspaceDocumentExport[]
+  versions             WorkspaceDocumentVersion[]
+  chunks               WorkspaceDocumentChunk[]
+  ingestionRuns        WorkspaceDocumentIngestionRun[]
+  exports              WorkspaceDocumentExport[]
   workLedgerVersions   WorkLedgerVersion[]
   documentSpecVersions DocumentSpecVersion[]
   sectionDrafts        DocumentSectionDraft[]
@@ -2401,9 +2618,9 @@ model WorkspaceDocumentVersion {
   createdAt     DateTime @default(now()) @map("created_at")
   runId         String?  @map("run_id")
 
-  document WorkspaceDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  chunks   WorkspaceDocumentChunk[]
-  exports  WorkspaceDocumentExport[]
+  document             WorkspaceDocument         @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  chunks               WorkspaceDocumentChunk[]
+  exports              WorkspaceDocumentExport[]
   workLedgerVersions   WorkLedgerVersion[]
   documentSpecVersions DocumentSpecVersion[]
   sectionDrafts        DocumentSectionDraft[]
@@ -2434,18 +2651,18 @@ model WorkspaceDocumentChunk {
 }
 
 model WorkspaceDocumentIngestionRun {
-  id          String                         @id @default(uuid())
-  researchJobId String                       @map("research_job_id")
-  branchId    String?                        @map("branch_id")
-  documentId  String                         @map("document_id")
-  status      WorkspaceDocumentIngestionStatus @default(QUEUED)
-  parser      String
-  warningsJson Json?                         @map("warnings_json")
-  pagesTotal  Int?                           @map("pages_total")
-  pagesParsed Int?                           @map("pages_parsed")
-  startedAt   DateTime?                      @map("started_at")
-  endedAt     DateTime?                      @map("ended_at")
-  createdAt   DateTime                       @default(now()) @map("created_at")
+  id            String                           @id @default(uuid())
+  researchJobId String                           @map("research_job_id")
+  branchId      String?                          @map("branch_id")
+  documentId    String                           @map("document_id")
+  status        WorkspaceDocumentIngestionStatus @default(QUEUED)
+  parser        String
+  warningsJson  Json?                            @map("warnings_json")
+  pagesTotal    Int?                             @map("pages_total")
+  pagesParsed   Int?                             @map("pages_parsed")
+  startedAt     DateTime?                        @map("started_at")
+  endedAt       DateTime?                        @map("ended_at")
+  createdAt     DateTime                         @default(now()) @map("created_at")
 
   document WorkspaceDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
 
@@ -2456,15 +2673,15 @@ model WorkspaceDocumentIngestionRun {
 }
 
 model WorkspaceDocumentExport {
-  id                String                     @id @default(uuid())
-  documentId        String                     @map("document_id")
-  documentVersionId String                     @map("document_version_id")
+  id                String                        @id @default(uuid())
+  documentId        String                        @map("document_id")
+  documentVersionId String                        @map("document_version_id")
   format            WorkspaceDocumentExportFormat
-  storagePath       String                     @map("storage_path")
-  mimeType          String                     @map("mime_type")
-  fileSizeBytes     Int?                       @map("file_size_bytes")
-  createdAt         DateTime                   @default(now()) @map("created_at")
-  createdBy         String                     @map("created_by")
+  storagePath       String                        @map("storage_path")
+  mimeType          String                        @map("mime_type")
+  fileSizeBytes     Int?                          @map("file_size_bytes")
+  createdAt         DateTime                      @default(now()) @map("created_at")
+  createdBy         String                        @map("created_by")
 
   document        WorkspaceDocument        @relation(fields: [documentId], references: [id], onDelete: Cascade)
   documentVersion WorkspaceDocumentVersion @relation(fields: [documentVersionId], references: [id], onDelete: Cascade)
@@ -2490,15 +2707,14 @@ model ChatMessage {
   followUp      Json?           @map("follow_up")
   createdAt     DateTime        @default(now()) @map("created_at")
 
-  session     ChatSession      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  blockEvents ChatBlockEvent[]
-  savedBlocks ChatSavedBlock[]
+  session         ChatSession      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  blockEvents     ChatBlockEvent[]
+  savedBlocks     ChatSavedBlock[]
   fileAttachments FileAttachment[]
 
   @@index([sessionId, createdAt])
   @@map("chat_messages")
 }
-
 
 enum ChatBlockEventType {
   VIEW
@@ -2551,18 +2767,18 @@ enum ChatMutationKind {
 }
 
 model ChatMutation {
-  id            String           @id @default(uuid())
-  researchJobId String           @map("research_job_id")
-  sessionId     String           @map("session_id")
+  id            String                     @id @default(uuid())
+  researchJobId String                     @map("research_job_id")
+  sessionId     String                     @map("session_id")
   kind          ChatMutationKind
   section       String
-  requestJson   Json             @map("request_json")
-  previewJson   Json             @map("preview_json")
-  createdAt     DateTime         @default(now()) @map("created_at")
-  appliedAt     DateTime?        @map("applied_at")
-  undoneAt      DateTime?        @map("undone_at")
-  researchJob   ResearchJob      @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
-  session       ChatSession      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  requestJson   Json                       @map("request_json")
+  previewJson   Json                       @map("preview_json")
+  createdAt     DateTime                   @default(now()) @map("created_at")
+  appliedAt     DateTime?                  @map("applied_at")
+  undoneAt      DateTime?                  @map("undone_at")
+  researchJob   ResearchJob                @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  session       ChatSession                @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   undoSnapshots ChatMutationUndoSnapshot[]
 
   @@index([researchJobId, createdAt(sort: Desc)])
@@ -2621,15 +2837,15 @@ model ScreenshotAttachment {
 }
 
 model FileAttachment {
-  id            String      @id @default(uuid())
-  researchJobId String      @map("research_job_id")
-  chatMessageId String?     @map("chat_message_id")
-  fileName      String      @map("file_name")
-  storagePath   String      @map("storage_path")
-  mimeType      String      @map("mime_type")
-  fileSizeBytes Int?        @map("file_size_bytes")
-  createdAt     DateTime    @default(now()) @map("created_at")
-  researchJob   ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  id            String       @id @default(uuid())
+  researchJobId String       @map("research_job_id")
+  chatMessageId String?      @map("chat_message_id")
+  fileName      String       @map("file_name")
+  storagePath   String       @map("storage_path")
+  mimeType      String       @map("mime_type")
+  fileSizeBytes Int?         @map("file_size_bytes")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  researchJob   ResearchJob  @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
   chatMessage   ChatMessage? @relation(fields: [chatMessageId], references: [id], onDelete: SetNull)
 
   @@index([researchJobId])
@@ -2707,12 +2923,12 @@ enum StrategyDocChatStatus {
 }
 
 model StrategyDocChatMessage {
-  id            String             @id @default(uuid())
-  sessionId     String             @map("session_id")
-  role          StrategyDocChatRole
-  content       String
-  contextSnippet Json?             @map("context_snippet")
-  createdAt     DateTime           @default(now()) @map("created_at")
+  id             String              @id @default(uuid())
+  sessionId      String              @map("session_id")
+  role           StrategyDocChatRole
+  content        String
+  contextSnippet Json?               @map("context_snippet")
+  createdAt      DateTime            @default(now()) @map("created_at")
 
   session StrategyDocChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
@@ -2731,10 +2947,10 @@ enum StrategyDocChatRole {
 model UserSuppliedContext {
   id            String      @id @default(uuid())
   researchJobId String      @map("research_job_id")
-  category      String      // "website" | "social_profile" | "fact" | "correction" | "document_url" | "free_text"
-  key           String      // natural dedup key within category (e.g. domain name, platform_handle)
-  value         String      // the actual data value
-  label         String?     // human-readable display label
+  category      String // "website" | "social_profile" | "fact" | "correction" | "document_url" | "free_text"
+  key           String // natural dedup key within category (e.g. domain name, platform_handle)
+  value         String // the actual data value
+  label         String? // human-readable display label
   sourceMessage String?     @map("source_message") // original user message that triggered saving
   isActive      Boolean     @default(true) @map("is_active")
   createdAt     DateTime    @default(now()) @map("created_at")

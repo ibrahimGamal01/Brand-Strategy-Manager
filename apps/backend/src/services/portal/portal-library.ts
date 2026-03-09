@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma';
 import { fileManager } from '../storage/file-manager';
+import { resolveViralStudioAssetReference } from './viral-studio';
 
 export type PortalLibraryCollection =
   | 'web'
@@ -1018,11 +1019,38 @@ export async function resolvePortalWorkspaceLibraryRefs(
   const unresolvedRefs: string[] = [];
   for (const ref of refs) {
     const item = byRef.get(ref);
-    if (!item) {
+    if (item) {
+      resolved.push(item);
+      continue;
+    }
+    const viralAsset = await resolveViralStudioAssetReference(workspaceId, ref);
+    if (!viralAsset) {
       unresolvedRefs.push(ref);
       continue;
     }
-    resolved.push(item);
+    const metadataPairs = Object.entries(viralAsset.metadata || {}).slice(0, 4);
+    resolved.push({
+      id: viralAsset.assetRef,
+      libraryRef: viralAsset.assetRef,
+      collection:
+        viralAsset.kind === 'reference' || viralAsset.kind === 'ingestion' ? 'social' : 'deliverables',
+      title: viralAsset.title,
+      summary: viralAsset.summary,
+      snippet: viralAsset.summary,
+      freshness: viralAsset.createdAt,
+      tags: ['viral-studio', viralAsset.kind],
+      evidenceLabel: `Viral Studio ${viralAsset.kind}`,
+      ...(viralAsset.sourceUrl ? { evidenceHref: viralAsset.sourceUrl } : {}),
+      trustStatus: 'high',
+      trustScore: 0.92,
+      trustReasonCodes: ['VIRAL_STUDIO_DURABLE_REF', 'TRUSTED'],
+      ...(metadataPairs.length
+        ? {
+            details: metadataPairs.map(([key, value]) => `${key}: ${compactInline(value, 140)}`),
+          }
+        : {}),
+      actions: [{ key: 'use_in_answer', label: 'Use in answer' }],
+    });
   }
   return {
     items: resolved,

@@ -1,5 +1,37 @@
 import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma';
+import {
+  repositoryAppendIngestionEvent,
+  repositoryAppendTelemetryEvent,
+  repositoryAttachStorageMode,
+  repositoryGetBrandDnaProfile,
+  repositoryGetDocumentWithVersions,
+  repositoryGetGenerationPack,
+  repositoryGetIngestionRun,
+  repositoryGetWorkspacePersistenceCounts,
+  repositoryListIngestionEvents,
+  repositoryListIngestionRuns,
+  repositoryListReferenceAssets,
+  repositoryListTelemetryEvents,
+  repositoryLoadWorkspaceSnapshot,
+  repositoryReplaceIngestionReferences,
+  repositoryResolveViralStudioAssetRef,
+  repositoryUpsertBrandDnaProfile,
+  repositoryUpsertDocument,
+  repositoryUpsertDocumentVersion,
+  repositoryUpsertGenerationPack,
+  repositoryUpsertGenerationRevision,
+  repositoryUpsertIngestionRun,
+  repositoryUpsertReferenceAsset,
+  type ViralStudioIngestionEventRecord,
+  type ViralStudioResolvedAssetRef,
+} from './viral-studio-repository';
+import {
+  getViralStudioStorageModeDiagnostics,
+  resolveViralStudioWorkspaceStorageMode,
+  type ViralStudioPersistenceMode,
+} from './viral-studio-persistence';
+import { buildViralStudioAssetRef } from './viral-studio-asset-refs';
 
 export type ViralStudioPlatform = 'instagram' | 'tiktok' | 'youtube';
 export type IngestionSortBy = 'engagement' | 'recent' | 'views';
@@ -44,6 +76,8 @@ export type BrandDNAProfile = {
   completeness: BrandDnaCompleteness;
   createdAt: string;
   updatedAt: string;
+  persistedAt?: string;
+  storageMode?: ViralStudioPersistenceMode;
 };
 
 export type UpsertBrandDNAInput = Partial<{
@@ -91,6 +125,10 @@ export type IngestionRun = {
   updatedAt: string;
   startedAt?: string;
   endedAt?: string;
+  persistedAt?: string;
+  eventCount?: number;
+  storageMode?: ViralStudioPersistenceMode;
+  assetRef?: string;
 };
 
 export type CreateIngestionRunInput = {
@@ -153,6 +191,9 @@ export type ReferenceAsset = {
   shortlistState: ShortlistState;
   createdAt: string;
   updatedAt: string;
+  persistedAt?: string;
+  storageMode?: ViralStudioPersistenceMode;
+  assetRef?: string;
 };
 
 export type ReferenceListFilters = {
@@ -236,6 +277,10 @@ export type GenerationPack = {
   revision: number;
   createdAt: string;
   updatedAt: string;
+  persistedAt?: string;
+  revisionCount?: number;
+  storageMode?: ViralStudioPersistenceMode;
+  assetRef?: string;
 };
 
 export type CreateGenerationPackInput = {
@@ -267,6 +312,10 @@ export type StudioDocument = {
   currentVersionId: string | null;
   createdAt: string;
   updatedAt: string;
+  persistedAt?: string;
+  versionCount?: number;
+  storageMode?: ViralStudioPersistenceMode;
+  assetRef?: string;
 };
 
 export type StudioDocumentVersion = {
@@ -278,6 +327,10 @@ export type StudioDocumentVersion = {
   basedOnVersionId?: string;
   snapshotSections: StudioDocumentSection[];
   createdAt: string;
+  persistedAt?: string;
+  versionNumber?: number;
+  storageMode?: ViralStudioPersistenceMode;
+  assetRef?: string;
 };
 
 export type CreateStudioDocumentInput = {
@@ -398,9 +451,42 @@ export type ViralStudioContractSnapshot = {
   telemetryEvents: TelemetryEventDefinition[];
 };
 
+export type ViralStudioStorageModeDiagnostics = {
+  workspaceId: string;
+  mode: ViralStudioPersistenceMode;
+  readStrategy: 'memory-first' | 'db-first';
+  readsFromDb: boolean;
+  writesToDb: boolean;
+  writesToMemory: boolean;
+  gatedDbRead: boolean;
+  env: {
+    VIRAL_STUDIO_PERSISTENCE_MODE: string;
+    VIRAL_STUDIO_DB_READ_WORKSPACES: string;
+  };
+  counts: Record<string, number>;
+};
+
+export type ViralStudioWorkspaceReconciliation = {
+  workspaceId: string;
+  storageMode: ViralStudioPersistenceMode;
+  memory: {
+    ingestions: number;
+    references: number;
+    generations: number;
+    documents: number;
+    documentVersions: number;
+    telemetryEvents: number;
+    hasBrandDna: boolean;
+  };
+  database: Record<string, number>;
+  deltas: Record<string, number>;
+};
+
 type WorkspaceViralStudioStore = {
+  workspaceId: string;
   brandDna: BrandDNAProfile | null;
   ingestions: Map<string, IngestionRun>;
+  ingestionEvents: Map<string, ViralStudioIngestionEventRecord[]>;
   references: Map<string, ReferenceAsset>;
   generations: Map<string, GenerationPack>;
   documents: Map<string, StudioDocument>;
@@ -559,6 +645,15 @@ const TELEMETRY_EVENTS: TelemetryEventDefinition[] = [
 ];
 
 const workspaceStores = new Map<string, WorkspaceViralStudioStore>();
+const hydratedWorkspaces = new Set<string>();
+const hydrationPromises = new Map<string, Promise<void>>();
+const scheduledIngestionRuns = new Set<string>();
+let dbCircuitOpenUntilMs = 0;
+const DB_CIRCUIT_OPEN_WINDOW_MS = 30_000;
+const LEGACY_BRAND_DNA_SNAPSHOT_FALLBACK_ENABLED =
+  String(process.env.VIRAL_STUDIO_ENABLE_LEGACY_SNAPSHOT_FALLBACK || '')
+    .trim()
+    .toLowerCase() === 'true';
 const BRAND_DNA_SCOPE = 'workspace_profile';
 const BRAND_DNA_BRANCH = 'global';
 const BRAND_DNA_KEY = 'viral_studio_brand_dna';
@@ -605,8 +700,10 @@ function ensureWorkspaceStore(workspaceId: string): WorkspaceViralStudioStore {
   const existing = workspaceStores.get(normalized);
   if (existing) return existing;
   const created: WorkspaceViralStudioStore = {
+    workspaceId: normalized,
     brandDna: null,
     ingestions: new Map<string, IngestionRun>(),
+    ingestionEvents: new Map<string, ViralStudioIngestionEventRecord[]>(),
     references: new Map<string, ReferenceAsset>(),
     generations: new Map<string, GenerationPack>(),
     documents: new Map<string, StudioDocument>(),
@@ -615,6 +712,207 @@ function ensureWorkspaceStore(workspaceId: string): WorkspaceViralStudioStore {
   };
   workspaceStores.set(normalized, created);
   return created;
+}
+
+function resolveWorkspacePersistence(workspaceId: string) {
+  return resolveViralStudioWorkspaceStorageMode(cleanString(workspaceId));
+}
+
+function resolveWorkspaceStorageModeValue(workspaceId: string): ViralStudioPersistenceMode {
+  return resolveWorkspacePersistence(workspaceId).mode;
+}
+
+function attachStorageModeToRecord<T extends Record<string, unknown>>(workspaceId: string, payload: T): T {
+  const mode = resolveWorkspaceStorageModeValue(workspaceId);
+  return repositoryAttachStorageMode(payload, mode) as T;
+}
+
+function attachStorageModeToList<T extends Record<string, unknown>>(workspaceId: string, payload: T[]): T[] {
+  return payload.map((item) => attachStorageModeToRecord(workspaceId, item));
+}
+
+function shouldPersistToDb(workspaceId: string): boolean {
+  return resolveWorkspacePersistence(workspaceId).writesToDb && Date.now() >= dbCircuitOpenUntilMs;
+}
+
+function shouldUseDbReads(workspaceId: string): boolean {
+  return resolveWorkspacePersistence(workspaceId).readsFromDb && Date.now() >= dbCircuitOpenUntilMs;
+}
+
+function shouldUseMemoryWrites(workspaceId: string): boolean {
+  return resolveWorkspacePersistence(workspaceId).writesToMemory;
+}
+
+function recordIngestionEventInMemory(
+  workspaceId: string,
+  ingestionRunId: string,
+  event: ViralStudioIngestionEventRecord
+) {
+  const store = ensureWorkspaceStore(workspaceId);
+  const existing = store.ingestionEvents.get(ingestionRunId) || [];
+  existing.push(event);
+  if (existing.length > 800) {
+    existing.splice(0, existing.length - 800);
+  }
+  store.ingestionEvents.set(ingestionRunId, existing);
+  const run = store.ingestions.get(ingestionRunId);
+  if (run) {
+    run.eventCount = existing.length;
+    run.updatedAt = toIsoNow();
+    store.ingestions.set(ingestionRunId, run);
+  }
+}
+
+async function persistIngestionEventBestEffort(input: {
+  workspaceId: string;
+  ingestionRunId: string;
+  type: string;
+  status?: string;
+  message: string;
+  payload?: Record<string, unknown>;
+}) {
+  const event: ViralStudioIngestionEventRecord = {
+    id: Date.now(),
+    workspaceId: input.workspaceId,
+    ingestionRunId: input.ingestionRunId,
+    type: cleanString(input.type) || 'event',
+    ...(cleanString(input.status) ? { status: cleanString(input.status) } : {}),
+    message: cleanString(input.message) || 'Event',
+    ...(input.payload ? { payload: clone(input.payload) } : {}),
+    createdAt: toIsoNow(),
+  };
+  recordIngestionEventInMemory(input.workspaceId, input.ingestionRunId, event);
+  if (!shouldPersistToDb(input.workspaceId)) {
+    return;
+  }
+  try {
+    const saved = await repositoryAppendIngestionEvent({
+      workspaceId: input.workspaceId,
+      ingestionRunId: input.ingestionRunId,
+      type: input.type,
+      ...(input.status ? { status: input.status } : {}),
+      message: input.message,
+      ...(input.payload ? { payload: input.payload } : {}),
+    });
+    recordIngestionEventInMemory(input.workspaceId, input.ingestionRunId, saved);
+  } catch (error) {
+    recordPersistenceErrorTelemetry(input.workspaceId);
+  }
+}
+
+async function persistTelemetryEventBestEffort(workspaceId: string, event: ViralStudioTelemetryRuntimeEvent) {
+  if (!shouldPersistToDb(workspaceId)) return;
+  try {
+    await repositoryAppendTelemetryEvent(workspaceId, event);
+  } catch {
+    recordPersistenceErrorTelemetry(workspaceId);
+  }
+}
+
+async function hydrateWorkspaceFromDbIfNeeded(workspaceId: string): Promise<void> {
+  const normalized = cleanString(workspaceId);
+  if (!normalized) return;
+  if (!shouldUseDbReads(normalized) && resolveWorkspaceStorageModeValue(normalized) !== 'db') return;
+  if (hydratedWorkspaces.has(normalized)) return;
+  const inflight = hydrationPromises.get(normalized);
+  if (inflight) {
+    await inflight;
+    return;
+  }
+  const task = (async () => {
+    const dbProbe = await safeDbRead(
+      normalized,
+      async () => {
+        await repositoryGetBrandDnaProfile(normalized);
+        return true;
+      },
+      false
+    );
+    if (!dbProbe && Date.now() < dbCircuitOpenUntilMs) {
+      hydratedWorkspaces.add(normalized);
+      return;
+    }
+    const snapshot = await safeDbRead(
+      normalized,
+      () => repositoryLoadWorkspaceSnapshot(normalized),
+      {
+        brandDna: null,
+        ingestions: [],
+        references: [],
+        generations: [],
+        documents: [],
+        telemetry: [],
+      }
+    );
+    const store = ensureWorkspaceStore(normalized);
+    store.brandDna = snapshot.brandDna ? clone(snapshot.brandDna) : null;
+    store.ingestions.clear();
+    for (const run of snapshot.ingestions) {
+      store.ingestions.set(run.id, clone(run));
+    }
+    store.ingestionEvents.clear();
+    for (const run of snapshot.ingestions) {
+      const eventCount = Math.max(0, Math.floor(Number((run as any).eventCount || 0)));
+      if (eventCount > 0) {
+        store.ingestionEvents.set(run.id, []);
+      }
+    }
+    store.references.clear();
+    for (const reference of snapshot.references) {
+      store.references.set(reference.id, clone(reference));
+    }
+    store.generations.clear();
+    for (const generation of snapshot.generations) {
+      store.generations.set(generation.id, clone(generation));
+    }
+    store.documents.clear();
+    store.documentVersions.clear();
+    for (const item of snapshot.documents) {
+      store.documents.set(item.document.id, clone(item.document));
+      store.documentVersions.set(item.document.id, clone(item.versions));
+    }
+    store.telemetryLog = clone(snapshot.telemetry.slice(-500));
+    hydratedWorkspaces.add(normalized);
+    for (const run of snapshot.ingestions) {
+      if (run.status !== 'queued' && run.status !== 'running') continue;
+      startIngestionSimulation(normalized, run.id);
+    }
+  })()
+    .catch(() => undefined)
+    .finally(() => {
+      hydrationPromises.delete(normalized);
+    });
+  hydrationPromises.set(normalized, task);
+  await task;
+}
+
+async function persistWorkspaceEntityBestEffort(workspaceId: string, task: () => Promise<void>) {
+  if (!shouldPersistToDb(workspaceId)) return;
+  try {
+    await task();
+  } catch {
+    recordPersistenceErrorTelemetry(workspaceId);
+  }
+}
+
+function recordPersistenceErrorTelemetry(workspaceId: string) {
+  dbCircuitOpenUntilMs = Date.now() + DB_CIRCUIT_OPEN_WINDOW_MS;
+  const store = ensureWorkspaceStore(workspaceId);
+  recordRuntimeTelemetry(store, {
+    name: 'viral_studio_persistence_error',
+    stage: 'platform',
+    status: 'error',
+    durationMs: 0,
+  });
+}
+
+async function safeDbRead<T>(workspaceId: string, task: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await task();
+  } catch {
+    recordPersistenceErrorTelemetry(workspaceId);
+    return fallback;
+  }
 }
 
 function recordRuntimeTelemetry(
@@ -635,6 +933,10 @@ function recordRuntimeTelemetry(
   });
   if (store.telemetryLog.length > 500) {
     store.telemetryLog.splice(0, store.telemetryLog.length - 500);
+  }
+  const workspaceId = cleanString(store.workspaceId);
+  if (workspaceId && cleanString(input.name) !== 'viral_studio_persistence_error') {
+    void persistTelemetryEventBestEffort(workspaceId, store.telemetryLog[store.telemetryLog.length - 1]);
   }
 }
 
@@ -966,6 +1268,7 @@ function buildSyntheticReference(input: {
   index: number;
   total: number;
 }): ReferenceAsset {
+  const referenceId = crypto.randomUUID();
   const seed = toShortHash(`${input.run.sourceUrl}:${input.index}:${input.run.id}`);
   const views = 15000 + (seed % 940000);
   const likes = Math.floor(views * (0.01 + ((seed >> 3) % 500) / 10000));
@@ -996,7 +1299,7 @@ function buildSyntheticReference(input: {
   });
 
   return {
-    id: crypto.randomUUID(),
+    id: referenceId,
     workspaceId: input.workspaceId,
     ingestionRunId: input.run.id,
     sourcePlatform: input.run.sourcePlatform,
@@ -1033,6 +1336,11 @@ function buildSyntheticReference(input: {
     shortlistState: 'none',
     createdAt: toIsoNow(),
     updatedAt: toIsoNow(),
+    assetRef: buildViralStudioAssetRef({
+      workspaceId: input.workspaceId,
+      kind: 'reference',
+      id: referenceId,
+    }),
   };
 }
 
@@ -1239,11 +1547,27 @@ function updateStoredReferencesWithSortedOrder(store: WorkspaceViralStudioStore,
   }
 }
 
-function pickReferenceSelection(
+function listReferenceAssetsFromStore(
+  store: WorkspaceViralStudioStore,
+  filters?: ReferenceListFilters
+): ReferenceAsset[] {
+  const ingestionRunId = cleanString(filters?.ingestionRunId);
+  const shortlistOnly = Boolean(filters?.shortlistOnly);
+  const includeExcluded = Boolean(filters?.includeExcluded);
+  const rows = Array.from(store.references.values()).filter((reference) => {
+    if (ingestionRunId && reference.ingestionRunId !== ingestionRunId) return false;
+    if (shortlistOnly && reference.shortlistState === 'none') return false;
+    if (!includeExcluded && reference.shortlistState === 'exclude') return false;
+    return true;
+  });
+  return sortReferencesForOutput(rows);
+}
+
+async function pickReferenceSelection(
   workspaceId: string,
   store: WorkspaceViralStudioStore,
   inputIds?: string[]
-): ReferenceAsset[] {
+): Promise<ReferenceAsset[]> {
   const requestedIds = Array.isArray(inputIds) ? inputIds.map((value) => cleanString(value)).filter(Boolean) : [];
   if (requestedIds.length > 0) {
     const direct = requestedIds
@@ -1253,7 +1577,15 @@ function pickReferenceSelection(
     if (direct.length > 0) return direct.slice(0, 8);
   }
 
-  const sorted = listReferenceAssets(workspaceId, { includeExcluded: false });
+  let sorted = listReferenceAssetsFromStore(store, { includeExcluded: false });
+  if (!sorted.length && shouldPersistToDb(workspaceId)) {
+    sorted = await safeDbRead(
+      workspaceId,
+      () => repositoryListReferenceAssets(workspaceId, { includeExcluded: false }),
+      []
+    );
+    updateStoredReferencesWithSortedOrder(store, sorted);
+  }
   const mustUse = sorted.filter((item) => item.shortlistState === 'must-use');
   const pinned = sorted.filter((item) => item.shortlistState === 'pin');
   const fallback = sorted.filter((item) => item.shortlistState === 'none');
@@ -1649,23 +1981,51 @@ function buildIngestionOutcome(run: IngestionRun): {
 }
 
 function startIngestionSimulation(workspaceId: string, runId: string) {
+  const normalizedWorkspaceId = cleanString(workspaceId);
+  const key = `${normalizedWorkspaceId}:${cleanString(runId)}`;
+  if (!normalizedWorkspaceId || !runId) return;
+  if (scheduledIngestionRuns.has(key)) return;
+  scheduledIngestionRuns.add(key);
   const store = ensureWorkspaceStore(workspaceId);
   const applyPatch = (
     expectedStatuses: IngestionStatus[],
-    patchFactory: (active: IngestionRun) => Partial<Omit<IngestionRun, 'id' | 'workspaceId' | 'sourcePlatform' | 'sourceUrl' | 'createdAt'>>
+    patchFactory: (active: IngestionRun) => Partial<Omit<IngestionRun, 'id' | 'workspaceId' | 'sourcePlatform' | 'sourceUrl' | 'createdAt'>>,
+    event?: {
+      type: string;
+      message: string;
+      status?: string;
+      payload?: Record<string, unknown>;
+    }
   ) => {
     const active = store.ingestions.get(runId);
     if (!active) return;
     if (!expectedStatuses.includes(active.status)) return;
     const patched = refreshIngestionRun(active, patchFactory(active));
     store.ingestions.set(runId, patched);
+    void persistWorkspaceEntityBestEffort(workspaceId, async () => {
+      await repositoryUpsertIngestionRun(patched);
+    });
+    if (event) {
+      void persistIngestionEventBestEffort({
+        workspaceId,
+        ingestionRunId: runId,
+        type: event.type,
+        status: event.status,
+        message: event.message,
+        ...(event.payload ? { payload: event.payload } : {}),
+      });
+    }
   };
 
   setTimeout(() => {
     applyPatch(['queued'], () => ({
       status: 'running',
       startedAt: toIsoNow(),
-    }));
+    }), {
+      type: 'ingestion.status.running',
+      status: 'running',
+      message: 'Ingestion worker started processing.',
+    });
   }, 120);
 
   setTimeout(() => {
@@ -1679,6 +2039,10 @@ function startIngestionSimulation(workspaceId: string, runId: string) {
           ranked: 0,
         },
       };
+    }, {
+      type: 'ingestion.progress.scan',
+      status: 'running',
+      message: 'Discovery phase updated.',
     });
   }, 420);
 
@@ -1693,6 +2057,10 @@ function startIngestionSimulation(workspaceId: string, runId: string) {
           ranked: 0,
         },
       };
+    }, {
+      type: 'ingestion.progress.download',
+      status: 'running',
+      message: 'Download phase updated.',
     });
   }, 820);
 
@@ -1707,17 +2075,24 @@ function startIngestionSimulation(workspaceId: string, runId: string) {
           ranked: 0,
         },
       };
+    }, {
+      type: 'ingestion.progress.analysis',
+      status: 'running',
+      message: 'Analysis phase updated.',
     });
   }, 1260);
 
   setTimeout(() => {
     const active = store.ingestions.get(runId);
-    if (!active || isTerminalIngestionStatus(active.status)) return;
-    if (active.status !== 'running') return;
+    if (!active || isTerminalIngestionStatus(active.status) || active.status !== 'running') {
+      scheduledIngestionRuns.delete(key);
+      return;
+    }
 
     const outcome = buildIngestionOutcome(active);
+    let generatedReferences: ReferenceAsset[] = [];
     if (outcome.referenceCount > 0) {
-      const generated = sortReferencesForOutput(
+      generatedReferences = sortReferencesForOutput(
         new Array(outcome.referenceCount).fill(null).map((_, index) =>
           buildSyntheticReference({
             workspaceId,
@@ -1727,7 +2102,7 @@ function startIngestionSimulation(workspaceId: string, runId: string) {
           })
         )
       );
-      updateStoredReferencesWithSortedOrder(store, generated);
+      updateStoredReferencesWithSortedOrder(store, generatedReferences);
     }
 
     const finalized = refreshIngestionRun(active, {
@@ -1741,7 +2116,35 @@ function startIngestionSimulation(workspaceId: string, runId: string) {
       endedAt: toIsoNow(),
       error: outcome.error,
     });
+    finalized.eventCount = (finalized.eventCount || 0) + 1;
+    finalized.assetRef = finalized.assetRef || buildViralStudioAssetRef({
+      workspaceId: finalized.workspaceId,
+      kind: 'ingestion',
+      id: finalized.id,
+    });
     store.ingestions.set(runId, finalized);
+    void persistIngestionEventBestEffort({
+      workspaceId,
+      ingestionRunId: runId,
+      type: 'ingestion.status.finalized',
+      status: finalized.status,
+      message:
+        finalized.status === 'completed'
+          ? 'Ingestion completed successfully.'
+          : finalized.status === 'partial'
+            ? 'Ingestion completed with partial coverage.'
+            : 'Ingestion failed.',
+      payload: {
+        progress: finalized.progress,
+        ...(outcome.error ? { error: outcome.error } : {}),
+      },
+    });
+    void persistWorkspaceEntityBestEffort(workspaceId, async () => {
+      await repositoryUpsertIngestionRun(finalized);
+      if (generatedReferences.length > 0 || outcome.referenceCount === 0) {
+        await repositoryReplaceIngestionReferences(workspaceId, finalized.id, generatedReferences);
+      }
+    });
     const startedAtMs = active.startedAt ? new Date(active.startedAt).getTime() : Date.now();
     const durationMs = Math.max(0, Date.now() - startedAtMs);
     if (finalized.status === 'completed') {
@@ -1766,6 +2169,7 @@ function startIngestionSimulation(workspaceId: string, runId: string) {
         durationMs,
       });
     }
+    scheduledIngestionRuns.delete(key);
   }, 1680);
 }
 
@@ -1826,15 +2230,44 @@ export function getViralStudioContractSnapshot(): ViralStudioContractSnapshot {
 }
 
 export async function getBrandDNAProfile(workspaceId: string): Promise<BrandDNAProfile | null> {
+  await hydrateWorkspaceFromDbIfNeeded(workspaceId);
   const store = ensureWorkspaceStore(workspaceId);
+  if (shouldUseDbReads(workspaceId)) {
+    const persisted = await safeDbRead(workspaceId, () => repositoryGetBrandDnaProfile(workspaceId), null);
+    if (persisted) {
+      if (shouldUseMemoryWrites(workspaceId)) {
+        store.brandDna = clone(persisted);
+      }
+      return attachStorageModeToRecord(workspaceId, clone(persisted) as Record<string, unknown>) as BrandDNAProfile;
+    }
+    if (store.brandDna) {
+      return attachStorageModeToRecord(workspaceId, clone(store.brandDna) as Record<string, unknown>) as BrandDNAProfile;
+    }
+    return null;
+  }
+
+  if (store.brandDna) {
+    return attachStorageModeToRecord(workspaceId, clone(store.brandDna) as Record<string, unknown>) as BrandDNAProfile;
+  }
+
+  if (shouldPersistToDb(workspaceId)) {
+    const persisted = await safeDbRead(workspaceId, () => repositoryGetBrandDnaProfile(workspaceId), null);
+    if (persisted) {
+      store.brandDna = clone(persisted);
+      return attachStorageModeToRecord(workspaceId, clone(persisted) as Record<string, unknown>) as BrandDNAProfile;
+    }
+  }
+
+  if (!LEGACY_BRAND_DNA_SNAPSHOT_FALLBACK_ENABLED) {
+    return null;
+  }
   try {
-    const persisted = await loadPersistedBrandDna(workspaceId);
-    store.brandDna = persisted;
-    if (!persisted) return null;
-    return clone(persisted);
+    const fallback = await loadPersistedBrandDna(workspaceId);
+    if (!fallback) return null;
+    store.brandDna = fallback;
+    return attachStorageModeToRecord(workspaceId, clone(fallback) as Record<string, unknown>) as BrandDNAProfile;
   } catch {
-    if (!store.brandDna) return null;
-    return clone(store.brandDna);
+    return null;
   }
 }
 
@@ -1843,28 +2276,59 @@ export async function upsertBrandDNAProfile(
   input: UpsertBrandDNAInput,
   mode: 'create' | 'patch'
 ): Promise<BrandDNAProfile> {
+  await hydrateWorkspaceFromDbIfNeeded(workspaceId);
   const store = ensureWorkspaceStore(workspaceId);
   const existing = await getBrandDNAProfile(workspaceId);
   if (mode === 'create' && existing) {
     const merged = mergeBrandDna(workspaceId, input, existing);
-    store.brandDna = merged;
-    await persistBrandDna(workspaceId, merged);
-    return clone(merged);
+    if (shouldUseMemoryWrites(workspaceId)) {
+      store.brandDna = merged;
+    }
+    await persistWorkspaceEntityBestEffort(workspaceId, async () => {
+      await repositoryUpsertBrandDnaProfile(workspaceId, merged);
+    });
+    if (LEGACY_BRAND_DNA_SNAPSHOT_FALLBACK_ENABLED) {
+      await persistBrandDna(workspaceId, merged).catch(() => undefined);
+    }
+    return attachStorageModeToRecord(workspaceId, clone(merged) as Record<string, unknown>) as BrandDNAProfile;
   }
   const merged = mergeBrandDna(workspaceId, input, existing);
-  store.brandDna = merged;
-  await persistBrandDna(workspaceId, merged);
-  return clone(merged);
+  if (shouldUseMemoryWrites(workspaceId)) {
+    store.brandDna = merged;
+  }
+  await persistWorkspaceEntityBestEffort(workspaceId, async () => {
+    await repositoryUpsertBrandDnaProfile(workspaceId, merged);
+  });
+  if (LEGACY_BRAND_DNA_SNAPSHOT_FALLBACK_ENABLED) {
+    await persistBrandDna(workspaceId, merged).catch(() => undefined);
+  }
+  if (merged.status === 'final') {
+    recordRuntimeTelemetry(store, {
+      name: 'viral_studio_brand_dna_finalized',
+      stage: 'onboarding',
+      status: 'ok',
+      durationMs: 0,
+    });
+  } else {
+    recordRuntimeTelemetry(store, {
+      name: 'viral_studio_brand_dna_saved',
+      stage: 'onboarding',
+      status: 'ok',
+      durationMs: 0,
+    });
+  }
+  return attachStorageModeToRecord(workspaceId, clone(merged) as Record<string, unknown>) as BrandDNAProfile;
 }
 
-function createIngestionRunRecord(
+async function createIngestionRunRecord(
   workspaceId: string,
   input: CreateIngestionRunInput,
   options?: {
     attempt?: number;
     retryOfRunId?: string;
   }
-): IngestionRun {
+): Promise<IngestionRun> {
+  await hydrateWorkspaceFromDbIfNeeded(workspaceId);
   const store = ensureWorkspaceStore(workspaceId);
   const presetPolicy = resolveIngestionPreset(input.preset);
   const now = toIsoNow();
@@ -1889,7 +2353,27 @@ function createIngestionRunRecord(
     createdAt: now,
     updatedAt: now,
   };
+  run.assetRef = buildViralStudioAssetRef({
+    workspaceId,
+    kind: 'ingestion',
+    id: run.id,
+  });
   store.ingestions.set(run.id, run);
+  await persistWorkspaceEntityBestEffort(workspaceId, async () => {
+    await repositoryUpsertIngestionRun(run);
+  });
+  await persistIngestionEventBestEffort({
+    workspaceId,
+    ingestionRunId: run.id,
+    type: 'ingestion.status.queued',
+    status: 'queued',
+    message: 'Ingestion run queued.',
+    payload: {
+      sourcePlatform: run.sourcePlatform,
+      sourceUrl: run.sourceUrl,
+      attempt: run.attempt,
+    },
+  });
   recordRuntimeTelemetry(store, {
     name: 'viral_studio_ingestion_started',
     stage: 'ingestion',
@@ -1897,32 +2381,71 @@ function createIngestionRunRecord(
     durationMs: 0,
   });
   startIngestionSimulation(workspaceId, run.id);
-  return clone(run);
+  return attachStorageModeToRecord(workspaceId, clone(run) as Record<string, unknown>) as IngestionRun;
 }
 
-export function createIngestionRun(workspaceId: string, input: CreateIngestionRunInput): IngestionRun {
+export async function createIngestionRun(workspaceId: string, input: CreateIngestionRunInput): Promise<IngestionRun> {
   return createIngestionRunRecord(workspaceId, input);
 }
 
-export function listIngestionRuns(workspaceId: string): IngestionRun[] {
+export async function listIngestionRuns(workspaceId: string): Promise<IngestionRun[]> {
+  await hydrateWorkspaceFromDbIfNeeded(workspaceId);
   const store = ensureWorkspaceStore(workspaceId);
-  return clone(
-    Array.from(store.ingestions.values()).sort((a, b) => {
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    })
-  );
+  if (shouldUseDbReads(workspaceId)) {
+    const dbRuns = await safeDbRead(workspaceId, () => repositoryListIngestionRuns(workspaceId), null as IngestionRun[] | null);
+    if (Array.isArray(dbRuns) && dbRuns.length > 0) {
+      for (const run of dbRuns) {
+        store.ingestions.set(run.id, clone(run));
+      }
+      return attachStorageModeToList(workspaceId, clone(dbRuns) as Record<string, unknown>[]) as IngestionRun[];
+    }
+  }
+  let rows = Array.from(store.ingestions.values());
+  if (rows.length === 0 && shouldPersistToDb(workspaceId)) {
+    rows = await safeDbRead(workspaceId, () => repositoryListIngestionRuns(workspaceId), []);
+    for (const run of rows) {
+      store.ingestions.set(run.id, clone(run));
+    }
+  }
+  const sorted = rows.sort((a, b) => {
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+  });
+  return attachStorageModeToList(workspaceId, clone(sorted) as Record<string, unknown>[]) as IngestionRun[];
 }
 
-export function getIngestionRun(workspaceId: string, ingestionRunId: string): IngestionRun | null {
+export async function getIngestionRun(workspaceId: string, ingestionRunId: string): Promise<IngestionRun | null> {
+  await hydrateWorkspaceFromDbIfNeeded(workspaceId);
   const store = ensureWorkspaceStore(workspaceId);
+  if (shouldUseDbReads(workspaceId)) {
+    const row = await safeDbRead(
+      workspaceId,
+      () => repositoryGetIngestionRun(workspaceId, cleanString(ingestionRunId)),
+      null
+    );
+    if (row) {
+      store.ingestions.set(row.id, clone(row));
+      return attachStorageModeToRecord(workspaceId, clone(row) as Record<string, unknown>) as IngestionRun;
+    }
+  }
   const run = store.ingestions.get(cleanString(ingestionRunId));
-  if (!run) return null;
-  return clone(run);
+  if (run) {
+    return attachStorageModeToRecord(workspaceId, clone(run) as Record<string, unknown>) as IngestionRun;
+  }
+  if (!shouldPersistToDb(workspaceId)) return null;
+  const fallback = await safeDbRead(
+    workspaceId,
+    () => repositoryGetIngestionRun(workspaceId, cleanString(ingestionRunId)),
+    null
+  );
+  if (!fallback) return null;
+  store.ingestions.set(fallback.id, clone(fallback));
+  return attachStorageModeToRecord(workspaceId, clone(fallback) as Record<string, unknown>) as IngestionRun;
 }
 
-export function retryIngestionRun(workspaceId: string, ingestionRunId: string): IngestionRun | null {
+export async function retryIngestionRun(workspaceId: string, ingestionRunId: string): Promise<IngestionRun | null> {
+  await hydrateWorkspaceFromDbIfNeeded(workspaceId);
   const store = ensureWorkspaceStore(workspaceId);
-  const source = store.ingestions.get(cleanString(ingestionRunId));
+  const source = (await getIngestionRun(workspaceId, cleanString(ingestionRunId))) || store.ingestions.get(cleanString(ingestionRunId));
   if (!source) return null;
   if (source.status !== 'failed' && source.status !== 'partial') {
     return null;
@@ -1944,32 +2467,46 @@ export function retryIngestionRun(workspaceId: string, ingestionRunId: string): 
   );
 }
 
-export function listReferenceAssets(workspaceId: string, filters?: ReferenceListFilters): ReferenceAsset[] {
+export async function listReferenceAssets(workspaceId: string, filters?: ReferenceListFilters): Promise<ReferenceAsset[]> {
+  await hydrateWorkspaceFromDbIfNeeded(workspaceId);
   const store = ensureWorkspaceStore(workspaceId);
-  const ingestionRunId = cleanString(filters?.ingestionRunId);
-  const shortlistOnly = Boolean(filters?.shortlistOnly);
-  const includeExcluded = Boolean(filters?.includeExcluded);
-
-  const rows = Array.from(store.references.values()).filter((reference) => {
-    if (ingestionRunId && reference.ingestionRunId !== ingestionRunId) return false;
-    if (shortlistOnly && reference.shortlistState === 'none') return false;
-    if (!includeExcluded && reference.shortlistState === 'exclude') return false;
-    return true;
-  });
-
-  const sorted = sortReferencesForOutput(rows);
+  if (shouldUseDbReads(workspaceId)) {
+    const dbRows = await safeDbRead(
+      workspaceId,
+      () => repositoryListReferenceAssets(workspaceId, filters),
+      null as ReferenceAsset[] | null
+    );
+    if (Array.isArray(dbRows) && dbRows.length > 0) {
+      updateStoredReferencesWithSortedOrder(store, dbRows);
+      return attachStorageModeToList(workspaceId, clone(dbRows) as Record<string, unknown>[]) as ReferenceAsset[];
+    }
+  }
+  let sorted = listReferenceAssetsFromStore(store, filters);
+  if (!sorted.length && shouldPersistToDb(workspaceId)) {
+    sorted = await safeDbRead(workspaceId, () => repositoryListReferenceAssets(workspaceId, filters), []);
+  }
   updateStoredReferencesWithSortedOrder(store, sorted);
-  return clone(sorted);
+  return attachStorageModeToList(workspaceId, clone(sorted) as Record<string, unknown>[]) as ReferenceAsset[];
 }
 
-export function applyReferenceShortlistAction(
+export async function applyReferenceShortlistAction(
   workspaceId: string,
   referenceId: string,
   action: ShortlistAction
-): ReferenceAsset | null {
+): Promise<ReferenceAsset | null> {
+  await hydrateWorkspaceFromDbIfNeeded(workspaceId);
   const store = ensureWorkspaceStore(workspaceId);
   const key = cleanString(referenceId);
-  const existing = store.references.get(key);
+  let existing = store.references.get(key);
+  if (!existing && shouldPersistToDb(workspaceId)) {
+    const loaded = await safeDbRead(
+      workspaceId,
+      () => repositoryListReferenceAssets(workspaceId, { includeExcluded: true }),
+      []
+    );
+    updateStoredReferencesWithSortedOrder(store, loaded);
+    existing = store.references.get(key);
+  }
   if (!existing) return null;
   const nextState: ShortlistState =
     action === 'clear' ? 'none' : action === 'must-use' ? 'must-use' : action === 'exclude' ? 'exclude' : 'pin';
@@ -1977,17 +2514,34 @@ export function applyReferenceShortlistAction(
     ...existing,
     shortlistState: nextState,
     updatedAt: toIsoNow(),
+    assetRef:
+      existing.assetRef ||
+      buildViralStudioAssetRef({
+        workspaceId,
+        kind: 'reference',
+        id: existing.id,
+      }),
   };
   store.references.set(updated.id, updated);
-  return clone(updated);
+  await persistWorkspaceEntityBestEffort(workspaceId, async () => {
+    await repositoryUpsertReferenceAsset(updated);
+  });
+  recordRuntimeTelemetry(store, {
+    name: 'viral_studio_reference_shortlisted',
+    stage: 'curation',
+    status: 'ok',
+    durationMs: 0,
+  });
+  return attachStorageModeToRecord(workspaceId, clone(updated) as Record<string, unknown>) as ReferenceAsset;
 }
 
-export function createGenerationPack(workspaceId: string, input: CreateGenerationPackInput): GenerationPack {
+export async function createGenerationPack(workspaceId: string, input: CreateGenerationPackInput): Promise<GenerationPack> {
+  await hydrateWorkspaceFromDbIfNeeded(workspaceId);
   const store = ensureWorkspaceStore(workspaceId);
   const startedAt = Date.now();
   const template = getTemplateById(input.templateId);
   const profile = store.brandDna;
-  const selectedReferences = pickReferenceSelection(workspaceId, store, input.selectedReferenceIds);
+  const selectedReferences = await pickReferenceSelection(workspaceId, store, input.selectedReferenceIds);
   const selectedReferenceIds = selectedReferences.map((item) => item.id);
   const formatTarget: GenerationFormatTarget =
     input.formatTarget === 'reel-60' || input.formatTarget === 'shorts' || input.formatTarget === 'story'
@@ -2023,31 +2577,83 @@ export function createGenerationPack(workspaceId: string, input: CreateGeneratio
     createdAt: now,
     updatedAt: now,
   };
+  generation.assetRef = buildViralStudioAssetRef({
+    workspaceId,
+    kind: 'generation',
+    id: generation.id,
+  });
   store.generations.set(generation.id, generation);
+  await persistWorkspaceEntityBestEffort(workspaceId, async () => {
+    await repositoryUpsertGenerationPack(generation);
+    await repositoryUpsertGenerationRevision({
+      workspaceId,
+      generationId: generation.id,
+      revisionNumber: generation.revision,
+      mode: 'create',
+      section: 'all',
+      instruction: generation.inputPrompt,
+      payload: generation,
+      qualityCheck: generation.qualityCheck as unknown as Record<string, unknown>,
+    });
+  });
   recordRuntimeTelemetry(store, {
     name: 'viral_studio_generation_completed',
     stage: 'generation',
     status: generation.qualityCheck.passed ? 'ok' : 'error',
     durationMs: Date.now() - startedAt,
   });
-  return clone(generation);
+  return attachStorageModeToRecord(workspaceId, clone(generation) as Record<string, unknown>) as GenerationPack;
 }
 
-export function getGenerationPack(workspaceId: string, generationId: string): GenerationPack | null {
+export async function getGenerationPack(workspaceId: string, generationId: string): Promise<GenerationPack | null> {
+  await hydrateWorkspaceFromDbIfNeeded(workspaceId);
   const store = ensureWorkspaceStore(workspaceId);
+  if (shouldUseDbReads(workspaceId)) {
+    const row = await safeDbRead(
+      workspaceId,
+      () => repositoryGetGenerationPack(workspaceId, cleanString(generationId)),
+      null
+    );
+    if (row) {
+      store.generations.set(row.id, clone(row));
+      return attachStorageModeToRecord(workspaceId, clone(row) as Record<string, unknown>) as GenerationPack;
+    }
+  }
   const generation = store.generations.get(cleanString(generationId));
-  if (!generation) return null;
-  return clone(generation);
+  if (generation) {
+    return attachStorageModeToRecord(workspaceId, clone(generation) as Record<string, unknown>) as GenerationPack;
+  }
+  if (!shouldPersistToDb(workspaceId)) return null;
+  const fallback = await safeDbRead(
+    workspaceId,
+    () => repositoryGetGenerationPack(workspaceId, cleanString(generationId)),
+    null
+  );
+  if (!fallback) return null;
+  store.generations.set(fallback.id, clone(fallback));
+  return attachStorageModeToRecord(workspaceId, clone(fallback) as Record<string, unknown>) as GenerationPack;
 }
 
-export function refineGenerationPack(
+export async function refineGenerationPack(
   workspaceId: string,
   generationId: string,
   input: RefineGenerationInput
-): GenerationPack | null {
+): Promise<GenerationPack | null> {
+  await hydrateWorkspaceFromDbIfNeeded(workspaceId);
   const store = ensureWorkspaceStore(workspaceId);
   const startedAt = Date.now();
-  const existing = store.generations.get(cleanString(generationId));
+  let existing = store.generations.get(cleanString(generationId));
+  if (!existing && shouldPersistToDb(workspaceId)) {
+    const loaded = await safeDbRead(
+      workspaceId,
+      () => repositoryGetGenerationPack(workspaceId, cleanString(generationId)),
+      null
+    );
+    if (loaded) {
+      store.generations.set(loaded.id, clone(loaded));
+      existing = loaded;
+    }
+  }
   if (!existing) return null;
   const mode: GenerationRefineMode = input.mode === 'regenerate' ? 'regenerate' : 'refine';
   const instruction =
@@ -2056,7 +2662,7 @@ export function refineGenerationPack(
       ? 'Rebuild this section with a fresh angle while preserving Brand DNA constraints.'
       : 'Tighten clarity and sharpen conversion intent.');
   const next: GenerationPack = clone(existing);
-  const selectedReferences = pickReferenceSelection(workspaceId, store, existing.selectedReferenceIds);
+  const selectedReferences = await pickReferenceSelection(workspaceId, store, existing.selectedReferenceIds);
   const regeneratedOutputs = buildOutputsFromPromptContext({
     context: existing.promptContext,
     selectedReferences,
@@ -2074,19 +2680,55 @@ export function refineGenerationPack(
   next.qualityCheck = runQualityGate(next.outputs, store.brandDna);
   next.revision += 1;
   next.updatedAt = toIsoNow();
+  next.revisionCount = Math.max(next.revision, Number(next.revisionCount || 0));
+  next.assetRef =
+    next.assetRef ||
+    buildViralStudioAssetRef({
+      workspaceId,
+      kind: 'generation',
+      id: next.id,
+    });
   store.generations.set(next.id, next);
+  await persistWorkspaceEntityBestEffort(workspaceId, async () => {
+    await repositoryUpsertGenerationPack(next);
+    await repositoryUpsertGenerationRevision({
+      workspaceId,
+      generationId: next.id,
+      revisionNumber: next.revision,
+      mode,
+      section: input.section,
+      instruction,
+      payload: next,
+      qualityCheck: next.qualityCheck as unknown as Record<string, unknown>,
+    });
+  });
   recordRuntimeTelemetry(store, {
     name: 'viral_studio_generation_refined',
     stage: 'generation',
     status: next.qualityCheck.passed ? 'ok' : 'error',
     durationMs: Date.now() - startedAt,
   });
-  return clone(next);
+  return attachStorageModeToRecord(workspaceId, clone(next) as Record<string, unknown>) as GenerationPack;
 }
 
-export function createStudioDocument(workspaceId: string, input: CreateStudioDocumentInput): StudioDocument {
+export async function createStudioDocument(
+  workspaceId: string,
+  input: CreateStudioDocumentInput
+): Promise<StudioDocument> {
+  await hydrateWorkspaceFromDbIfNeeded(workspaceId);
   const store = ensureWorkspaceStore(workspaceId);
-  const generation = store.generations.get(cleanString(input.generationId));
+  let generation = store.generations.get(cleanString(input.generationId));
+  if (!generation && shouldPersistToDb(workspaceId)) {
+    const loaded = await safeDbRead(
+      workspaceId,
+      () => repositoryGetGenerationPack(workspaceId, cleanString(input.generationId)),
+      null
+    );
+    if (loaded) {
+      store.generations.set(loaded.id, clone(loaded));
+      generation = loaded;
+    }
+  }
   if (!generation) {
     throw new Error('Generation not found for document creation');
   }
@@ -2101,9 +2743,23 @@ export function createStudioDocument(workspaceId: string, input: CreateStudioDoc
     createdAt: now,
     updatedAt: now,
   };
+  document.assetRef = buildViralStudioAssetRef({
+    workspaceId,
+    kind: 'document',
+    id: document.id,
+  });
   store.documents.set(document.id, document);
   store.documentVersions.set(document.id, []);
-  return clone(document);
+  await persistWorkspaceEntityBestEffort(workspaceId, async () => {
+    await repositoryUpsertDocument(document, generation.id);
+  });
+  recordRuntimeTelemetry(store, {
+    name: 'viral_studio_document_created',
+    stage: 'document',
+    status: 'ok',
+    durationMs: 0,
+  });
+  return attachStorageModeToRecord(workspaceId, clone(document) as Record<string, unknown>) as StudioDocument;
 }
 
 function reorderDocumentSections(
@@ -2130,13 +2786,26 @@ function reorderDocumentSections(
   return clone(ordered);
 }
 
-export function updateStudioDocument(
+export async function updateStudioDocument(
   workspaceId: string,
   documentId: string,
   input: UpdateStudioDocumentInput
-): StudioDocument | null {
+): Promise<StudioDocument | null> {
+  await hydrateWorkspaceFromDbIfNeeded(workspaceId);
   const store = ensureWorkspaceStore(workspaceId);
-  const existing = store.documents.get(cleanString(documentId));
+  let existing = store.documents.get(cleanString(documentId));
+  if (!existing && shouldPersistToDb(workspaceId)) {
+    const loaded = await safeDbRead(
+      workspaceId,
+      () => repositoryGetDocumentWithVersions(workspaceId, cleanString(documentId)),
+      null
+    );
+    if (loaded) {
+      store.documents.set(loaded.document.id, clone(loaded.document));
+      store.documentVersions.set(loaded.document.id, clone(loaded.versions));
+      existing = loaded.document;
+    }
+  }
   if (!existing) return null;
   const next: StudioDocument = clone(existing);
 
@@ -2177,33 +2846,90 @@ export function updateStudioDocument(
   }
 
   next.updatedAt = toIsoNow();
+  next.assetRef =
+    next.assetRef ||
+    buildViralStudioAssetRef({
+      workspaceId,
+      kind: 'document',
+      id: next.id,
+    });
   store.documents.set(next.id, next);
-  return clone(next);
+  await persistWorkspaceEntityBestEffort(workspaceId, async () => {
+    const generationId = cleanString(next.linkedGenerationIds?.[0]);
+    if (!generationId) return;
+    await repositoryUpsertDocument(next, generationId);
+  });
+  return attachStorageModeToRecord(workspaceId, clone(next) as Record<string, unknown>) as StudioDocument;
 }
 
-export function getStudioDocumentWithVersions(
+export async function getStudioDocumentWithVersions(
   workspaceId: string,
   documentId: string
-): { document: StudioDocument; versions: StudioDocumentVersion[] } | null {
+): Promise<{ document: StudioDocument; versions: StudioDocumentVersion[] } | null> {
+  await hydrateWorkspaceFromDbIfNeeded(workspaceId);
   const store = ensureWorkspaceStore(workspaceId);
+  if (shouldUseDbReads(workspaceId)) {
+    const dbPayload = await safeDbRead(
+      workspaceId,
+      () => repositoryGetDocumentWithVersions(workspaceId, cleanString(documentId)),
+      null
+    );
+    if (dbPayload) {
+      store.documents.set(dbPayload.document.id, clone(dbPayload.document));
+      store.documentVersions.set(dbPayload.document.id, clone(dbPayload.versions));
+      return {
+        document: attachStorageModeToRecord(workspaceId, clone(dbPayload.document) as Record<string, unknown>) as StudioDocument,
+        versions: attachStorageModeToList(workspaceId, clone(dbPayload.versions) as Record<string, unknown>[]) as StudioDocumentVersion[],
+      };
+    }
+  }
   const document = store.documents.get(cleanString(documentId));
-  if (!document) return null;
-  const versions = store.documentVersions.get(document.id) || [];
-  return clone({
-    document,
-    versions,
-  });
+  if (document) {
+    const versions = store.documentVersions.get(document.id) || [];
+    return {
+      document: attachStorageModeToRecord(workspaceId, clone(document) as Record<string, unknown>) as StudioDocument,
+      versions: attachStorageModeToList(workspaceId, clone(versions) as Record<string, unknown>[]) as StudioDocumentVersion[],
+    };
+  }
+  if (!shouldPersistToDb(workspaceId)) return null;
+  const fallback = await safeDbRead(
+    workspaceId,
+    () => repositoryGetDocumentWithVersions(workspaceId, cleanString(documentId)),
+    null
+  );
+  if (!fallback) return null;
+  store.documents.set(fallback.document.id, clone(fallback.document));
+  store.documentVersions.set(fallback.document.id, clone(fallback.versions));
+  return {
+    document: attachStorageModeToRecord(workspaceId, clone(fallback.document) as Record<string, unknown>) as StudioDocument,
+    versions: attachStorageModeToList(workspaceId, clone(fallback.versions) as Record<string, unknown>[]) as StudioDocumentVersion[],
+  };
 }
 
-export function createStudioDocumentVersion(
+export async function createStudioDocumentVersion(
   workspaceId: string,
   documentId: string,
   input: CreateStudioDocumentVersionInput
-): { document: StudioDocument; version: StudioDocumentVersion } | null {
+): Promise<{ document: StudioDocument; version: StudioDocumentVersion } | null> {
+  await hydrateWorkspaceFromDbIfNeeded(workspaceId);
   const store = ensureWorkspaceStore(workspaceId);
   const startedAt = Date.now();
-  const document = store.documents.get(cleanString(documentId));
+  let document = store.documents.get(cleanString(documentId));
+  if (!document && shouldPersistToDb(workspaceId)) {
+    const loaded = await safeDbRead(
+      workspaceId,
+      () => repositoryGetDocumentWithVersions(workspaceId, cleanString(documentId)),
+      null
+    );
+    if (loaded) {
+      store.documents.set(loaded.document.id, clone(loaded.document));
+      store.documentVersions.set(loaded.document.id, clone(loaded.versions));
+      document = loaded.document;
+    }
+  }
   if (!document) return null;
+  const currentVersions = store.documentVersions.get(document.id) || [];
+  const versionNumber = currentVersions.length + 1;
 
   const version: StudioDocumentVersion = {
     id: crypto.randomUUID(),
@@ -2213,7 +2939,13 @@ export function createStudioDocumentVersion(
     summary: cleanString(input.summary) || 'Manual publish snapshot',
     snapshotSections: clone(document.sections),
     createdAt: toIsoNow(),
+    versionNumber,
   };
+  version.assetRef = buildViralStudioAssetRef({
+    workspaceId,
+    kind: 'document-version',
+    id: version.id,
+  });
 
   const versions = store.documentVersions.get(document.id) || [];
   versions.push(version);
@@ -2223,30 +2955,50 @@ export function createStudioDocumentVersion(
     ...document,
     currentVersionId: version.id,
     updatedAt: toIsoNow(),
+    versionCount: versions.length,
   };
   store.documents.set(document.id, updatedDocument);
+  await persistWorkspaceEntityBestEffort(workspaceId, async () => {
+    const generationId = cleanString(updatedDocument.linkedGenerationIds?.[0]);
+    if (!generationId) return;
+    await repositoryUpsertDocument(updatedDocument, generationId);
+    await repositoryUpsertDocumentVersion(version, versionNumber);
+  });
   recordRuntimeTelemetry(store, {
-    name: 'viral_studio_document_versioned',
+    name: 'viral_studio_document_version_created',
     stage: 'document',
     status: 'ok',
     durationMs: Date.now() - startedAt,
   });
 
-  return clone({
-    document: updatedDocument,
-    version,
-  });
+  return {
+    document: attachStorageModeToRecord(workspaceId, clone(updatedDocument) as Record<string, unknown>) as StudioDocument,
+    version: attachStorageModeToRecord(workspaceId, clone(version) as Record<string, unknown>) as StudioDocumentVersion,
+  };
 }
 
-export function promoteStudioDocumentVersion(
+export async function promoteStudioDocumentVersion(
   workspaceId: string,
   documentId: string,
   versionId: string,
   input: PromoteStudioDocumentVersionInput
-): PromoteStudioDocumentVersionResult | null {
+): Promise<PromoteStudioDocumentVersionResult | null> {
+  await hydrateWorkspaceFromDbIfNeeded(workspaceId);
   const store = ensureWorkspaceStore(workspaceId);
   const startedAt = Date.now();
-  const document = store.documents.get(cleanString(documentId));
+  let document = store.documents.get(cleanString(documentId));
+  if (!document && shouldPersistToDb(workspaceId)) {
+    const loaded = await safeDbRead(
+      workspaceId,
+      () => repositoryGetDocumentWithVersions(workspaceId, cleanString(documentId)),
+      null
+    );
+    if (loaded) {
+      store.documents.set(loaded.document.id, clone(loaded.document));
+      store.documentVersions.set(loaded.document.id, clone(loaded.versions));
+      document = loaded.document;
+    }
+  }
   if (!document) return null;
   const versions = store.documentVersions.get(document.id) || [];
   const target = versions.find((entry) => entry.id === cleanString(versionId));
@@ -2254,6 +3006,7 @@ export function promoteStudioDocumentVersion(
 
   const now = toIsoNow();
   const promotedSections = clone(target.snapshotSections);
+  const versionNumber = versions.length + 1;
   const promotedVersion: StudioDocumentVersion = {
     id: crypto.randomUUID(),
     workspaceId,
@@ -2265,37 +3018,50 @@ export function promoteStudioDocumentVersion(
     basedOnVersionId: target.id,
     snapshotSections: clone(promotedSections),
     createdAt: now,
+    versionNumber,
   };
+  promotedVersion.assetRef = buildViralStudioAssetRef({
+    workspaceId,
+    kind: 'document-version',
+    id: promotedVersion.id,
+  });
   const nextVersions = [...versions, promotedVersion];
   const updatedDocument: StudioDocument = {
     ...document,
     sections: promotedSections,
     currentVersionId: promotedVersion.id,
     updatedAt: now,
+    versionCount: nextVersions.length,
   };
 
   store.documentVersions.set(document.id, nextVersions);
   store.documents.set(document.id, updatedDocument);
+  await persistWorkspaceEntityBestEffort(workspaceId, async () => {
+    const generationId = cleanString(updatedDocument.linkedGenerationIds?.[0]);
+    if (!generationId) return;
+    await repositoryUpsertDocument(updatedDocument, generationId);
+    await repositoryUpsertDocumentVersion(promotedVersion, versionNumber);
+  });
   recordRuntimeTelemetry(store, {
     name: 'viral_studio_document_version_promoted',
     stage: 'document',
     status: 'ok',
     durationMs: Date.now() - startedAt,
   });
-  return clone({
-    document: updatedDocument,
-    version: promotedVersion,
+  return {
+    document: attachStorageModeToRecord(workspaceId, clone(updatedDocument) as Record<string, unknown>) as StudioDocument,
+    version: attachStorageModeToRecord(workspaceId, clone(promotedVersion) as Record<string, unknown>) as StudioDocumentVersion,
     promotedFromVersionId: target.id,
-  });
+  };
 }
 
-export function compareStudioDocumentVersions(
+export async function compareStudioDocumentVersions(
   workspaceId: string,
   documentId: string,
   leftVersionId: string,
   rightVersionId: string
-): StudioDocumentVersionComparison | null {
-  const payload = getStudioDocumentWithVersions(workspaceId, documentId);
+): Promise<StudioDocumentVersionComparison | null> {
+  const payload = await getStudioDocumentWithVersions(workspaceId, documentId);
   if (!payload) return null;
   const { document, versions } = payload;
   const leftSections = resolveDocumentVersionSections(document, versions, leftVersionId);
@@ -2330,18 +3096,26 @@ export function compareStudioDocumentVersions(
   });
 
   const changedSections = sectionDiffs.filter((entry) => entry.changed).length;
-  return clone({
+  return {
     leftVersionId: cleanString(leftVersionId) || 'current',
     rightVersionId: cleanString(rightVersionId) || 'current',
     totalSections: sectionDiffs.length,
     changedSections,
     sectionDiffs,
-  });
+  };
 }
 
-export function getViralStudioTelemetrySnapshot(workspaceId: string): ViralStudioTelemetrySnapshot {
+export async function getViralStudioTelemetrySnapshot(workspaceId: string): Promise<ViralStudioTelemetrySnapshot> {
+  await hydrateWorkspaceFromDbIfNeeded(workspaceId);
   const store = ensureWorkspaceStore(workspaceId);
-  const recent = store.telemetryLog.slice(-120);
+  let recent = store.telemetryLog.slice(-120);
+  if ((shouldUseDbReads(workspaceId) || (recent.length === 0 && shouldPersistToDb(workspaceId)))) {
+    const persisted = await safeDbRead(workspaceId, () => repositoryListTelemetryEvents(workspaceId, 240), []);
+    if (persisted.length > 0) {
+      recent = persisted.slice(-120);
+      store.telemetryLog = clone(persisted.slice(-500));
+    }
+  }
   const countByName = (name: string) => recent.filter((event) => event.name === name).length;
   const averageDuration = (stage: ViralStudioTelemetryRuntimeEvent['stage']): number => {
     const durations = recent
@@ -2358,7 +3132,7 @@ export function getViralStudioTelemetrySnapshot(workspaceId: string): ViralStudi
       return acc;
     }, {});
 
-  return clone({
+  return attachStorageModeToRecord(workspaceId, {
     workspaceId: cleanString(workspaceId),
     funnel: {
       onboardingFinalized: Boolean(store.brandDna?.status === 'final' && store.brandDna?.completeness.ready),
@@ -2367,7 +3141,7 @@ export function getViralStudioTelemetrySnapshot(workspaceId: string): ViralStudi
       ingestionsFailed: countByName('viral_studio_ingestion_failed') + countByName('viral_studio_ingestion_partial'),
       generationsCompleted: countByName('viral_studio_generation_completed'),
       documentsVersioned:
-        countByName('viral_studio_document_versioned') + countByName('viral_studio_document_version_promoted'),
+        countByName('viral_studio_document_version_created') + countByName('viral_studio_document_version_promoted'),
       exports: countByName('viral_studio_document_exported'),
     },
     errorClasses,
@@ -2377,17 +3151,107 @@ export function getViralStudioTelemetrySnapshot(workspaceId: string): ViralStudi
       documentAvg: averageDuration('document'),
     },
     recent,
-  });
+  } as Record<string, unknown>) as ViralStudioTelemetrySnapshot;
 }
 
-export function exportStudioDocument(
+export async function listIngestionRunEvents(
+  workspaceId: string,
+  ingestionRunId: string,
+  options?: {
+    afterId?: number;
+    limit?: number;
+  }
+): Promise<ViralStudioIngestionEventRecord[]> {
+  await hydrateWorkspaceFromDbIfNeeded(workspaceId);
+  if (shouldUseDbReads(workspaceId) || shouldPersistToDb(workspaceId)) {
+    const rows = await safeDbRead(
+      workspaceId,
+      () => repositoryListIngestionEvents(workspaceId, ingestionRunId, options),
+      null as ViralStudioIngestionEventRecord[] | null
+    );
+    if (Array.isArray(rows) && rows.length > 0) {
+      const store = ensureWorkspaceStore(workspaceId);
+      store.ingestionEvents.set(ingestionRunId, clone(rows));
+      return rows;
+    }
+  }
+  const store = ensureWorkspaceStore(workspaceId);
+  const rows = clone(store.ingestionEvents.get(ingestionRunId) || []);
+  const afterId = typeof options?.afterId === 'number' ? options.afterId : undefined;
+  const filtered = typeof afterId === 'number' ? rows.filter((row) => row.id > afterId) : rows;
+  const limit = Math.max(1, Math.min(500, Number(options?.limit || 240)));
+  return filtered.slice(-limit);
+}
+
+export async function getViralStudioStorageMode(workspaceId: string): Promise<ViralStudioStorageModeDiagnostics> {
+  await hydrateWorkspaceFromDbIfNeeded(workspaceId);
+  const diagnostics = getViralStudioStorageModeDiagnostics(workspaceId);
+  const counts = shouldPersistToDb(workspaceId)
+    ? await safeDbRead(workspaceId, () => repositoryGetWorkspacePersistenceCounts(workspaceId), {})
+    : {};
+  return {
+    ...diagnostics,
+    counts,
+  };
+}
+
+export async function getViralStudioWorkspaceReconciliation(
+  workspaceId: string
+): Promise<ViralStudioWorkspaceReconciliation> {
+  await hydrateWorkspaceFromDbIfNeeded(workspaceId);
+  const store = ensureWorkspaceStore(workspaceId);
+  const database = shouldPersistToDb(workspaceId)
+    ? await safeDbRead(workspaceId, () => repositoryGetWorkspacePersistenceCounts(workspaceId), {})
+    : {};
+  const memory = {
+    ingestions: store.ingestions.size,
+    references: store.references.size,
+    generations: store.generations.size,
+    documents: store.documents.size,
+    documentVersions: Array.from(store.documentVersions.values()).reduce((sum, rows) => sum + rows.length, 0),
+    telemetryEvents: store.telemetryLog.length,
+    hasBrandDna: Boolean(store.brandDna),
+  };
+  const deltas: Record<string, number> = {
+    brandDna: (memory.hasBrandDna ? 1 : 0) - Number(database.brandDna || 0),
+    ingestionRuns: memory.ingestions - Number(database.ingestionRuns || 0),
+    ingestionEvents: Array.from(store.ingestionEvents.values()).reduce((sum, rows) => sum + rows.length, 0) - Number(database.ingestionEvents || 0),
+    references: memory.references - Number(database.references || 0),
+    generations: memory.generations - Number(database.generations || 0),
+    generationRevisions: 0 - Number(database.generationRevisions || 0),
+    documents: memory.documents - Number(database.documents || 0),
+    documentVersions: memory.documentVersions - Number(database.documentVersions || 0),
+    telemetryEvents: memory.telemetryEvents - Number(database.telemetryEvents || 0),
+  };
+  return {
+    workspaceId,
+    storageMode: resolveWorkspaceStorageModeValue(workspaceId),
+    memory,
+    database,
+    deltas,
+  };
+}
+
+export async function resolveViralStudioAssetReference(
+  workspaceId: string,
+  assetRef: string
+): Promise<ViralStudioResolvedAssetRef | null> {
+  if (!shouldPersistToDb(workspaceId)) return null;
+  return safeDbRead(
+    workspaceId,
+    () => repositoryResolveViralStudioAssetRef(workspaceId, assetRef),
+    null
+  );
+}
+
+export async function exportStudioDocument(
   workspaceId: string,
   documentId: string,
   format: ExportStudioDocumentFormat
-): ExportStudioDocumentResult | null {
+): Promise<ExportStudioDocumentResult | null> {
   const store = ensureWorkspaceStore(workspaceId);
   const startedAt = Date.now();
-  const payload = getStudioDocumentWithVersions(workspaceId, documentId);
+  const payload = await getStudioDocumentWithVersions(workspaceId, documentId);
   if (!payload) return null;
   const { document, versions } = payload;
   if (format === 'json') {

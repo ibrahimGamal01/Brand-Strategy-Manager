@@ -339,14 +339,16 @@ function buildViralStudioCitations(source: ViralStudioReferenceAsset[]): ViralSt
   const citations: ViralStudioChatCitation[] = [];
   for (const item of source) {
     const url = sanitizeHttpUrl(item.sourceUrl);
+    const libraryRef = String(item.assetRef || "").trim();
     const label = `${toPlatformLabel(item.sourcePlatform)} reference #${item.ranking.rank}`;
-    const key = `${label}|${url || ""}`.toLowerCase();
+    const key = `${libraryRef || item.id}|${label}|${url || ""}`.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
     citations.push({
-      id: item.id,
+      id: libraryRef || item.id,
       label,
       ...(url ? { url } : {}),
+      ...(libraryRef ? { libraryRef } : {}),
     });
     if (citations.length >= 12) break;
   }
@@ -411,6 +413,13 @@ function buildGenerationChatBridgePayload(
     .filter((item): item is ViralStudioReferenceAsset => Boolean(item));
   const source = selectedReferences.length > 0 ? selectedReferences.slice(0, 8) : references.slice(0, 8);
   const citations = buildViralStudioCitations(source);
+  if (generation.assetRef) {
+    citations.unshift({
+      id: generation.assetRef,
+      label: `Generation pack (${toGenerationFormatLabel(generation.formatTarget)})`,
+      libraryRef: generation.assetRef,
+    });
+  }
   const libraryRefs = citations
     .map((item) => String(item.libraryRef || "").trim())
     .filter(Boolean)

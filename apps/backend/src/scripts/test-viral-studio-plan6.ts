@@ -16,19 +16,19 @@ function asText(content: string | string[]): string {
 async function run(): Promise<void> {
   const workspaceId = `viral-studio-plan6-${Date.now()}`;
 
-  const generation = createGenerationPack(workspaceId, {
+  const generation = await createGenerationPack(workspaceId, {
     templateId: 'full-script',
     prompt: 'Build a campaign pack for conversion-focused reels.',
     formatTarget: 'reel-60',
   });
-  const document = createStudioDocument(workspaceId, {
+  const document = await createStudioDocument(workspaceId, {
     generationId: generation.id,
     title: 'Plan 6 Workspace Document',
   });
   assert.ok(document.sections.length >= 6, 'Document should initialize with generation sections.');
 
   const firstSection = document.sections[0];
-  const moved = updateStudioDocument(workspaceId, document.id, {
+  const moved = await updateStudioDocument(workspaceId, document.id, {
     sections: [
       {
         id: firstSection.id,
@@ -42,7 +42,7 @@ async function run(): Promise<void> {
   assert.ok(moved, 'Document update should succeed.');
   assert.equal(moved?.sections[1].title, 'Hooks (Edited)', 'Edited section should keep updated title after reorder.');
 
-  const versionA = createStudioDocumentVersion(workspaceId, document.id, {
+  const versionA = await createStudioDocumentVersion(workspaceId, document.id, {
     author: 'plan6-test',
     summary: 'Version A baseline',
   });
@@ -50,7 +50,7 @@ async function run(): Promise<void> {
   assert.ok(versionA?.document.currentVersionId, 'Document should point to current version after publish.');
 
   const secondSection = moved!.sections[1];
-  const updatedAgain = updateStudioDocument(workspaceId, document.id, {
+  const updatedAgain = await updateStudioDocument(workspaceId, document.id, {
     sections: [
       {
         id: secondSection.id,
@@ -60,17 +60,17 @@ async function run(): Promise<void> {
   });
   assert.ok(updatedAgain, 'Second document update should succeed.');
 
-  const versionB = createStudioDocumentVersion(workspaceId, document.id, {
+  const versionB = await createStudioDocumentVersion(workspaceId, document.id, {
     author: 'plan6-test',
     summary: 'Version B changed hooks',
   });
   assert.ok(versionB, 'Version B creation should succeed.');
 
-  const comparison = compareStudioDocumentVersions(workspaceId, document.id, versionA!.version.id, versionB!.version.id);
+  const comparison = await compareStudioDocumentVersions(workspaceId, document.id, versionA!.version.id, versionB!.version.id);
   assert.ok(comparison, 'Version compare should return payload.');
   assert.ok((comparison?.changedSections || 0) >= 1, 'Comparison should detect changed sections.');
 
-  const promoted = promoteStudioDocumentVersion(workspaceId, document.id, versionA!.version.id, {
+  const promoted = await promoteStudioDocumentVersion(workspaceId, document.id, versionA!.version.id, {
     author: 'plan6-test',
     summary: 'Promote baseline back to current',
   });
@@ -78,7 +78,7 @@ async function run(): Promise<void> {
   assert.ok(promoted?.version.basedOnVersionId, 'Promote snapshot should carry source version id.');
   assert.equal(promoted?.promotedFromVersionId, versionA!.version.id);
 
-  const afterPromote = getStudioDocumentWithVersions(workspaceId, document.id);
+  const afterPromote = await getStudioDocumentWithVersions(workspaceId, document.id);
   assert.ok(afterPromote, 'Document should still be retrievable after promote.');
   assert.equal(
     asText(afterPromote!.document.sections[1].content),

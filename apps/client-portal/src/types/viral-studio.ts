@@ -30,6 +30,8 @@ export type BrandDNAProfile = {
   };
   createdAt: string;
   updatedAt: string;
+  persistedAt?: string;
+  storageMode?: "memory" | "dual" | "db";
 };
 
 export type ViralStudioIngestionRun = {
@@ -55,6 +57,10 @@ export type ViralStudioIngestionRun = {
   updatedAt: string;
   startedAt?: string;
   endedAt?: string;
+  persistedAt?: string;
+  eventCount?: number;
+  storageMode?: "memory" | "dual" | "db";
+  assetRef?: string;
 };
 
 export type ViralStudioReferenceAsset = {
@@ -108,6 +114,9 @@ export type ViralStudioReferenceAsset = {
   shortlistState: "none" | "pin" | "exclude" | "must-use";
   createdAt: string;
   updatedAt: string;
+  persistedAt?: string;
+  storageMode?: "memory" | "dual" | "db";
+  assetRef?: string;
 };
 
 export type ViralStudioGenerationPack = {
@@ -161,6 +170,10 @@ export type ViralStudioGenerationPack = {
   revision: number;
   createdAt: string;
   updatedAt: string;
+  persistedAt?: string;
+  revisionCount?: number;
+  storageMode?: "memory" | "dual" | "db";
+  assetRef?: string;
 };
 
 export type ViralStudioGenerationSection =
@@ -191,6 +204,10 @@ export type ViralStudioDocument = {
   currentVersionId: string | null;
   createdAt: string;
   updatedAt: string;
+  persistedAt?: string;
+  versionCount?: number;
+  storageMode?: "memory" | "dual" | "db";
+  assetRef?: string;
 };
 
 export type ViralStudioDocumentVersion = {
@@ -202,6 +219,10 @@ export type ViralStudioDocumentVersion = {
   basedOnVersionId?: string;
   snapshotSections: ViralStudioDocumentSection[];
   createdAt: string;
+  persistedAt?: string;
+  versionNumber?: number;
+  storageMode?: "memory" | "dual" | "db";
+  assetRef?: string;
 };
 
 export type ViralStudioDocumentVersionComparison = {
@@ -282,4 +303,30 @@ export type ViralStudioTelemetrySnapshot = {
     durationMs: number;
     at: string;
   }>;
+};
+
+export type ViralStudioIngestionEvent = {
+  id: number;
+  workspaceId: string;
+  ingestionRunId: string;
+  type: string;
+  status?: string;
+  message: string;
+  payload?: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type ViralStudioStorageModeDiagnostics = {
+  workspaceId: string;
+  mode: "memory" | "dual" | "db";
+  readStrategy: "memory-first" | "db-first";
+  readsFromDb: boolean;
+  writesToDb: boolean;
+  writesToMemory: boolean;
+  gatedDbRead: boolean;
+  env: {
+    VIRAL_STUDIO_PERSISTENCE_MODE: string;
+    VIRAL_STUDIO_DB_READ_WORKSPACES: string;
+  };
+  counts: Record<string, number>;
 };
