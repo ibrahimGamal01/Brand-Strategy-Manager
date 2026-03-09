@@ -661,6 +661,84 @@ function normalizeMessageBlocks(value: unknown): ChatMessageBlock[] {
     ];
   }
 
+  if (type === "viral_studio_context") {
+    const contextKindRaw = String(block.contextKind || block.contextType || "").trim().toLowerCase();
+    const contextKind: "shortlist" | "generation_pack" | "context" =
+      contextKindRaw === "shortlist" || contextKindRaw === "generation_pack" ? contextKindRaw : "context";
+    const objective = typeof block.objective === "string" ? block.objective.trim() : "";
+    const summary = typeof block.summary === "string" ? block.summary.trim() : "";
+
+    const cards = Array.isArray(block.cards)
+      ? block.cards
+          .map((card, index) => {
+            if (!isRecord(card)) return null;
+            const title = String(card.title || card.heading || "").trim();
+            if (!title) return null;
+            const score = Number(card.score);
+            const notes = Array.isArray(card.notes)
+              ? card.notes.map((note) => String(note || "").trim()).filter(Boolean).slice(0, 3)
+              : [];
+            return {
+              id: String(card.id || `card-${index + 1}`).trim() || `card-${index + 1}`,
+              title,
+              ...(typeof card.subtitle === "string" && card.subtitle.trim() ? { subtitle: card.subtitle.trim() } : {}),
+              ...(typeof card.sourcePlatform === "string" && card.sourcePlatform.trim()
+                ? { sourcePlatform: card.sourcePlatform.trim() }
+                : {}),
+              ...(typeof card.sourceUrl === "string" && card.sourceUrl.trim() ? { sourceUrl: card.sourceUrl.trim() } : {}),
+              ...(Number.isFinite(score) ? { score } : {}),
+              ...(notes.length ? { notes } : {}),
+            };
+          })
+          .filter(
+            (
+              card
+            ): card is {
+              id: string;
+              title: string;
+              subtitle?: string;
+              sourcePlatform?: string;
+              sourceUrl?: string;
+              score?: number;
+              notes?: string[];
+            } => Boolean(card)
+          )
+          .slice(0, 12)
+      : [];
+
+    const citations = Array.isArray(block.citations)
+      ? block.citations
+          .map((citation, index) => {
+            if (!isRecord(citation)) return null;
+            const label = String(citation.label || citation.title || "").trim();
+            if (!label) return null;
+            return {
+              id: String(citation.id || `citation-${index + 1}`).trim() || `citation-${index + 1}`,
+              label,
+              ...(typeof citation.href === "string" && citation.href.trim() ? { href: citation.href.trim() } : {}),
+              ...(typeof citation.url === "string" && citation.url.trim() ? { href: citation.url.trim() } : {}),
+              ...(typeof citation.libraryRef === "string" && citation.libraryRef.trim()
+                ? { libraryRef: citation.libraryRef.trim() }
+                : {}),
+            };
+          })
+          .filter((citation): citation is { id: string; label: string; href?: string; libraryRef?: string } => Boolean(citation))
+          .slice(0, 16)
+      : [];
+
+    if (!summary && !objective && cards.length === 0 && citations.length === 0) return [];
+    return [
+      {
+        type: "viral_studio_context",
+        contextKind,
+        ...(objective ? { objective } : {}),
+        ...(summary ? { summary } : {}),
+        cards,
+        citations,
+      },
+    ];
+  }
+
   return [
     {
       type,

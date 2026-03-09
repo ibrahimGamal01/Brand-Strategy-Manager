@@ -58,6 +58,7 @@ import {
   startPortalSignupEnrichment,
   syncPortalIntakeContinuousEnrichment,
 } from '../services/portal/portal-signup-enrichment';
+import portalViralStudioRouter from './portal-viral-studio';
 
 const router = Router();
 const authRateLimitStore = new Map<string, { count: number; resetAt: number }>();
@@ -986,5 +987,7 @@ router.post('/workspaces/:workspaceId/intake', requirePortalAuth, requireWorkspa
     return res.status(status).json({ success: false, error: message || 'Failed to submit workspace intake' });
   }
 });
+
+router.use('/workspaces/:workspaceId', requirePortalAuth, requireWorkspaceMembership, portalViralStudioRouter);
 
 export default router;

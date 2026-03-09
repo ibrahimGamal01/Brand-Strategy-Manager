@@ -14,6 +14,15 @@
   --bat-success: #166534;
   --bat-warning: #a16207;
 
+  --vbs-ink: #0b132b;
+  --vbs-cobalt: #2563eb;
+  --vbs-teal: #0f766e;
+  --vbs-coral: #f97316;
+  --vbs-sand: #f8f4ec;
+  --vbs-display-font: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+  --vbs-body-font: "IBM Plex Sans", "Segoe UI", sans-serif;
+  --vbs-editorial-font: "Source Serif 4", "Georgia", serif;
+
   --radius-sm: 8px;
   --radius-md: 10px;
   --radius-lg: 12px;

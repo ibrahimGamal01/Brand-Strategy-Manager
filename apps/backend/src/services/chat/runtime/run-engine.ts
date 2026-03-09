@@ -76,6 +76,8 @@ type SendMessageInput = {
   libraryRefs?: string[];
   attachmentIds?: string[];
   documentIds?: string[];
+  blocksJson?: unknown;
+  citationsJson?: unknown;
 };
 
 type SendMessageResult = {
@@ -551,6 +553,193 @@ function normalizeIdList(value: unknown): string[] {
     .map((entry) => String(entry || '').trim())
     .filter(Boolean)
     .slice(0, 20);
+}
+
+type RuntimeUserCitation = {
+  id: string;
+  label: string;
+  url?: string;
+  libraryRef?: string;
+};
+
+type RuntimeViralStudioContextCard = {
+  id: string;
+  title: string;
+  subtitle?: string;
+  sourcePlatform?: string;
+  sourceUrl?: string;
+  score?: number;
+  notes?: string[];
+};
+
+type RuntimeViralStudioContextBlock = {
+  type: 'viral_studio_context';
+  contextKind: string;
+  objective?: string;
+  summary?: string;
+  cards: RuntimeViralStudioContextCard[];
+  citations: RuntimeUserCitation[];
+};
+
+function sanitizeHttpUrl(value: unknown): string | undefined {
+  const raw = String(value || '').trim();
+  if (!raw) return undefined;
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return undefined;
+    return parsed.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeRuntimeUserCitations(value: unknown, maxItems = 16): RuntimeUserCitation[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const citations: RuntimeUserCitation[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) continue;
+    const id = compactPromptString(item.id || item.refId || item.libraryRef || `citation-${citations.length + 1}`, 80);
+    const label = compactPromptString(item.label || item.title || item.name || '', 180);
+    if (!label) continue;
+    const key = `${id}|${label}`.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const libraryRef = compactPromptString(item.libraryRef || item.refId || '', 200);
+    const url = sanitizeHttpUrl(item.url || item.href || item.sourceUrl);
+    citations.push({
+      id: id || `citation-${citations.length + 1}`,
+      label,
+      ...(url ? { url } : {}),
+      ...(libraryRef ? { libraryRef } : {}),
+    });
+    if (citations.length >= maxItems) break;
+  }
+  return citations;
+}
+
+function normalizeRuntimeViralStudioBlocks(value: unknown): RuntimeViralStudioContextBlock[] {
+  const rawBlocks = Array.isArray(value) ? value : value ? [value] : [];
+  const normalized: RuntimeViralStudioContextBlock[] = [];
+  for (const entry of rawBlocks) {
+    if (!isRecord(entry)) continue;
+    if (String(entry.type || '').trim().toLowerCase() !== 'viral_studio_context') continue;
+    const contextKind = compactPromptString(entry.contextKind || entry.contextType || 'context', 40).toLowerCase() || 'context';
+    const cards: RuntimeViralStudioContextCard[] = Array.isArray(entry.cards)
+      ? entry.cards
+          .map((card, index) => {
+            if (!isRecord(card)) return null;
+            const title = compactPromptString(card.title || card.heading || '', 180);
+            if (!title) return null;
+            const notes = Array.isArray(card.notes)
+              ? card.notes.map((note) => compactPromptString(note, 180)).filter(Boolean).slice(0, 3)
+              : [];
+            const score = Number(card.score);
+            return {
+              id: compactPromptString(card.id || `card-${index + 1}`, 80) || `card-${index + 1}`,
+              title,
+              ...(compactPromptString(card.subtitle || card.summary || '', 180)
+                ? { subtitle: compactPromptString(card.subtitle || card.summary || '', 180) }
+                : {}),
+              ...(compactPromptString(card.sourcePlatform || card.platform || '', 32)
+                ? { sourcePlatform: compactPromptString(card.sourcePlatform || card.platform || '', 32) }
+                : {}),
+              ...(sanitizeHttpUrl(card.sourceUrl || card.url || card.href)
+                ? { sourceUrl: sanitizeHttpUrl(card.sourceUrl || card.url || card.href) }
+                : {}),
+              ...(Number.isFinite(score) ? { score: Math.max(0, Math.min(1_000, score)) } : {}),
+              ...(notes.length ? { notes } : {}),
+            };
+          })
+          .filter((card): card is RuntimeViralStudioContextCard => Boolean(card))
+          .slice(0, 12)
+      : [];
+
+    const citations = normalizeRuntimeUserCitations(entry.citations, 16);
+    normalized.push({
+      type: 'viral_studio_context',
+      contextKind,
+      ...(compactPromptString(entry.objective, 240) ? { objective: compactPromptString(entry.objective, 240) } : {}),
+      ...(compactPromptString(entry.summary, 280) ? { summary: compactPromptString(entry.summary, 280) } : {}),
+      cards,
+      citations,
+    });
+    if (normalized.length >= 4) break;
+  }
+  return normalized;
+}
+
+function extractLibraryRefsFromRuntimeCitations(value: unknown): string[] {
+  return normalizeRuntimeUserCitations(value, 40)
+    .map((item) => String(item.libraryRef || '').trim())
+    .filter(Boolean)
+    .slice(0, 40);
+}
+
+function extractLibraryRefsFromRuntimeViralBlocks(value: unknown): string[] {
+  const refs: string[] = [];
+  for (const block of normalizeRuntimeViralStudioBlocks(value)) {
+    for (const citation of block.citations) {
+      const ref = String(citation.libraryRef || '').trim();
+      if (!ref) continue;
+      refs.push(ref);
+      if (refs.length >= 40) break;
+    }
+    if (refs.length >= 40) break;
+  }
+  return refs;
+}
+
+function buildViralStudioTriggerHint(
+  blocks: RuntimeViralStudioContextBlock[],
+  citations: RuntimeUserCitation[]
+): string {
+  if (!blocks.length && !citations.length) return '';
+  const lines: string[] = ['Viral Studio structured context (user-provided):'];
+  const cards: RuntimeViralStudioContextCard[] = [];
+  for (const block of blocks) {
+    const kind = String(block.contextKind || 'context').replace(/_/g, ' ');
+    const summary = block.summary ? `: ${block.summary}` : '';
+    lines.push(`- ${kind}${summary}`);
+    if (block.objective) {
+      lines.push(`  Objective: ${block.objective}`);
+    }
+    cards.push(...block.cards);
+  }
+  if (cards.length > 0) {
+    lines.push('Top context cards:');
+    for (const [index, card] of cards.slice(0, 8).entries()) {
+      const scorePart = typeof card.score === 'number' ? ` | score ${card.score.toFixed(3)}` : '';
+      const sourcePart = card.sourceUrl ? ` | source ${card.sourceUrl}` : '';
+      const subtitle = card.subtitle ? ` | ${card.subtitle}` : '';
+      lines.push(`${index + 1}. ${card.title}${subtitle}${scorePart}${sourcePart}`);
+    }
+  }
+  const normalizedCitations =
+    citations.length > 0 ? citations : blocks.flatMap((block) => block.citations).slice(0, 10);
+  if (normalizedCitations.length > 0) {
+    lines.push('Citations to prefer:');
+    for (const [index, item] of normalizedCitations.slice(0, 8).entries()) {
+      const refPart = item.libraryRef ? ` [ref ${item.libraryRef}]` : '';
+      const urlPart = item.url ? ` (${item.url})` : '';
+      lines.push(`${index + 1}. ${item.label}${refPart}${urlPart}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+function buildViralStudioRuntimeSnapshot(
+  blocks: RuntimeViralStudioContextBlock[],
+  citations: RuntimeUserCitation[]
+): Record<string, unknown> {
+  if (!blocks.length && !citations.length) return {};
+  const normalizedCitations = citations.length > 0 ? citations : blocks.flatMap((block) => block.citations);
+  return {
+    viralStudioContext: {
+      blocks: blocks.slice(0, 4),
+      citations: normalizedCitations.slice(0, 16),
+    },
+  };
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
@@ -4030,6 +4219,8 @@ export class RuntimeRunEngine {
       ...(inputOptionsWithRefs ? { inputOptionsJson: inputOptionsWithRefs } : {}),
       ...(attachmentIds.length ? { attachmentIdsJson: attachmentIds } : {}),
       ...(documentIds.length ? { documentIdsJson: documentIds } : {}),
+      ...(input.blocksJson !== undefined ? { blocksJson: input.blocksJson } : {}),
+      ...(input.citationsJson !== undefined ? { citationsJson: input.citationsJson } : {}),
       clientVisible: true,
     });
 
@@ -4592,6 +4783,12 @@ export class RuntimeRunEngine {
     if (!run) return;
 
     const triggerMessageRaw = run.triggerMessage?.content || 'Continue with available results.';
+    const triggerBlocksRaw = (run.triggerMessage as any)?.blocksJson;
+    const triggerCitationsRaw = (run.triggerMessage as any)?.citationsJson;
+    const triggerViralStudioBlocks = normalizeRuntimeViralStudioBlocks(triggerBlocksRaw);
+    const triggerCitations = normalizeRuntimeUserCitations(triggerCitationsRaw, 16);
+    const viralStudioHint = buildViralStudioTriggerHint(triggerViralStudioBlocks, triggerCitations);
+    const viralStudioSnapshot = buildViralStudioRuntimeSnapshot(triggerViralStudioBlocks, triggerCitations);
     const triggerAttachmentIds = normalizeDocumentIds([
       ...normalizeIdList((run.triggerMessage as any)?.attachmentIdsJson),
       ...normalizeIdList((run as any).attachmentIdsJson),
@@ -4610,11 +4807,20 @@ export class RuntimeRunEngine {
           documentIds: triggerDocumentIds,
         })
       : '';
-    const triggerMessage = documentGroundingHint ? `${triggerMessageRaw}\n\n${documentGroundingHint}` : triggerMessageRaw;
+    let triggerMessage = documentGroundingHint ? `${triggerMessageRaw}\n\n${documentGroundingHint}` : triggerMessageRaw;
+    if (viralStudioHint) {
+      triggerMessage = `${triggerMessage}\n\n${viralStudioHint}`;
+    }
     let plan = normalizeRunPlan(run.planJson) || buildPlanFromMessage(triggerMessage);
     let runtimeContextSnapshot = isRecord(plan.runtime?.contextSnapshot)
       ? (plan.runtime.contextSnapshot as Record<string, unknown>)
       : {};
+    if (Object.keys(viralStudioSnapshot).length > 0) {
+      runtimeContextSnapshot = {
+        ...runtimeContextSnapshot,
+        ...viralStudioSnapshot,
+      };
+    }
     const runStartedAt = run.startedAt || run.createdAt || new Date(0);
     const runMessages = await listBranchMessages(run.branchId, 180);
     const steerNotes = extractRunSteerNotes(
@@ -5759,6 +5965,12 @@ export class RuntimeRunEngine {
         isRecord(fresh.inputOptionsJson) ? (fresh.inputOptionsJson as RuntimeInputOptions) : undefined
       );
       const triggerMessageRaw = fresh.triggerMessage?.content || 'Continue workflow';
+      const triggerBlocksRaw = (fresh.triggerMessage as any)?.blocksJson;
+      const triggerCitationsRaw = (fresh.triggerMessage as any)?.citationsJson;
+      const triggerViralStudioBlocks = normalizeRuntimeViralStudioBlocks(triggerBlocksRaw);
+      const triggerCitations = normalizeRuntimeUserCitations(triggerCitationsRaw, 16);
+      const viralStudioHint = buildViralStudioTriggerHint(triggerViralStudioBlocks, triggerCitations);
+      const viralStudioSnapshot = buildViralStudioRuntimeSnapshot(triggerViralStudioBlocks, triggerCitations);
       const triggerAttachmentIds = normalizeDocumentIds([
         ...normalizeIdList((fresh.triggerMessage as any)?.attachmentIdsJson),
         ...normalizeIdList((fresh as any).attachmentIdsJson),
@@ -5780,6 +5992,9 @@ export class RuntimeRunEngine {
       let triggerMessageForPlanning = documentGroundingHint
         ? `${triggerMessageRaw}\n\n${documentGroundingHint}`
         : triggerMessageRaw;
+      if (viralStudioHint) {
+        triggerMessageForPlanning = `${triggerMessageForPlanning}\n\n${viralStudioHint}`;
+      }
 
       if (!fresh.startedAt) {
         await updateAgentRun(fresh.id, {
@@ -5841,6 +6056,13 @@ export class RuntimeRunEngine {
         }
       }
 
+      if (Object.keys(viralStudioSnapshot).length > 0) {
+        runtimeContextSnapshot = {
+          ...(runtimeContextSnapshot || {}),
+          ...viralStudioSnapshot,
+        };
+      }
+
       try {
         const workspaceMemory = await readWorkspaceMemoryContext({
           researchJobId: fresh.branch.thread.researchJobId,
@@ -5885,7 +6107,9 @@ export class RuntimeRunEngine {
 
       const pinnedLibraryRefs = mergeLibraryRefs(
         normalizeIdList((fresh.inputOptionsJson as any)?.libraryRefs),
-        extractLibraryRefsFromText(triggerMessageRaw)
+        extractLibraryRefsFromText(triggerMessageRaw),
+        extractLibraryRefsFromRuntimeCitations(triggerCitationsRaw),
+        extractLibraryRefsFromRuntimeViralBlocks(triggerBlocksRaw)
       );
       if (pinnedLibraryRefs.length > 0) {
         const resolvedRefs = await resolvePortalWorkspaceLibraryRefs(

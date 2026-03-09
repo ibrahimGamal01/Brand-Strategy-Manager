@@ -402,7 +402,9 @@ function MessageBlocks({
   onRunAction?: (actionLabel: string, actionKey: string, payload?: Record<string, unknown>) => void;
   onOpenPreview?: (input: ArtifactPreviewInput) => void;
 }) {
-  if (!message.blocks?.length || message.role !== "assistant") return null;
+  if (!message.blocks?.length) return null;
+  const supportsNonAssistantBlocks = message.blocks.some((block) => block.type === "viral_studio_context");
+  if (message.role !== "assistant" && !supportsNonAssistantBlocks) return null;
 
   const isDecisionBlock = (
     block: ChatMessageBlock
@@ -430,10 +432,82 @@ function MessageBlocks({
     block: ChatMessageBlock
   ): block is Extract<ChatMessageBlock, { type: "document_artifact" }> =>
     block.type === "document_artifact";
+  const isViralStudioContextBlock = (
+    block: ChatMessageBlock
+  ): block is Extract<ChatMessageBlock, { type: "viral_studio_context" }> =>
+    block.type === "viral_studio_context";
 
   return (
     <div className="mt-3 space-y-2">
       {message.blocks.map((block, index) => {
+        if (isViralStudioContextBlock(block)) {
+          const contextLabel =
+            block.contextKind === "generation_pack"
+              ? "Viral Studio generation"
+              : block.contextKind === "shortlist"
+                ? "Viral Studio shortlist"
+                : "Viral Studio context";
+          return (
+            <div key={`${message.id}-viral-context-${index}`} className="rounded-md border border-sky-200 bg-sky-50/70 p-2.5">
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-sky-700">{contextLabel}</p>
+              {block.summary ? <p className="mt-1 text-sm text-zinc-800">{block.summary}</p> : null}
+              {block.objective ? <p className="mt-1 text-xs text-zinc-600">Objective: {block.objective}</p> : null}
+              {block.cards.length ? (
+                <div className="mt-2 space-y-2">
+                  {block.cards.slice(0, 6).map((card) => (
+                    <div key={`${message.id}-${card.id}`} className="rounded border border-sky-100 bg-white px-2 py-1.5">
+                      <p className="text-xs font-semibold text-zinc-900">{card.title}</p>
+                      <p className="mt-0.5 text-xs text-zinc-600">
+                        {[
+                          card.subtitle || "",
+                          card.sourcePlatform ? card.sourcePlatform.toUpperCase() : "",
+                          typeof card.score === "number" ? `score ${card.score.toFixed(3)}` : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" • ")}
+                      </p>
+                      {card.sourceUrl ? (
+                        <a
+                          href={card.sourceUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-1 inline-flex text-xs text-sky-700 hover:underline"
+                        >
+                          Source
+                        </a>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {block.citations.length ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {block.citations.slice(0, 8).map((citation) =>
+                    citation.href ? (
+                      <a
+                        key={`${message.id}-${citation.id}`}
+                        href={citation.href}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded-full border border-sky-200 bg-white px-2 py-0.5 text-xs text-sky-700 hover:bg-sky-100"
+                      >
+                        {citation.label}
+                      </a>
+                    ) : (
+                      <span
+                        key={`${message.id}-${citation.id}`}
+                        className="rounded-full border border-sky-200 bg-white px-2 py-0.5 text-xs text-sky-700"
+                      >
+                        {citation.label}
+                      </span>
+                    )
+                  )}
+                </div>
+              ) : null}
+            </div>
+          );
+        }
+
         if (isDecisionBlock(block)) {
           return (
             <div

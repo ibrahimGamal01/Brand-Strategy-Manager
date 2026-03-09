@@ -845,6 +845,17 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   };
 
   const onCommand = (command: string) => {
+    if (command === "Open Viral Studio") {
+      router.push(`/app/w/${workspaceId}/viral-studio`);
+      return;
+    }
+    if (command === "Use Viral Studio context") {
+      injectComposerText(
+        "Use Viral Studio context from this workspace (brand DNA, shortlisted viral references, and latest generated pack) and convert it into a business execution plan.",
+        "replace"
+      );
+      return;
+    }
     if (command === "Run V3 competitor finder (standard)") {
       injectComposerText(
         "Run the V3 competitor finder in standard mode and summarize direct plus adjacent competitors with evidence.",
@@ -1033,17 +1044,29 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
               </div>
 
               <div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveLibraryCollection("all");
-                    setLibraryOpen(true);
-                  }}
-                  className="mb-2 inline-flex items-center gap-1 rounded-md border border-zinc-700 px-2.5 py-1 text-xs text-zinc-200 hover:bg-zinc-800"
-                >
-                  <Library className="h-3.5 w-3.5" />
-                  Open library
-                </button>
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveLibraryCollection("all");
+                      setLibraryOpen(true);
+                    }}
+                    className="inline-flex items-center gap-1 rounded-md border border-zinc-700 px-2.5 py-1 text-xs text-zinc-200 hover:bg-zinc-800"
+                  >
+                    <Library className="h-3.5 w-3.5" />
+                    Open library
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      router.push(`/app/w/${workspaceId}/viral-studio`);
+                    }}
+                    className="inline-flex items-center gap-1 rounded-md border border-zinc-700 px-2.5 py-1 text-xs text-zinc-200 hover:bg-zinc-800"
+                  >
+                    <FileText className="h-3.5 w-3.5" />
+                    Viral Studio
+                  </button>
+                </div>
                 <div className="space-y-1.5">
                   {quickLibraryItems.map((item) => (
                     <button
@@ -1117,6 +1140,14 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                     {rightRailCollapsed ? "Docs" : resolvedRightRailMode === "docs" ? "Hide docs" : "Docs"}
                   </button>
                 ) : null}
+                <button
+                  type="button"
+                  onClick={() => router.push(`/app/w/${workspaceId}/viral-studio`)}
+                  className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  Viral Studio
+                </button>
               </div>
             </header>
 

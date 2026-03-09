@@ -812,6 +812,8 @@ export async function sendRuntimeMessage(
     libraryRefs?: string[];
     attachmentIds?: string[];
     documentIds?: string[];
+    blocksJson?: unknown;
+    citationsJson?: unknown;
   }
 ) {
   const response = await fetch(`/api/research-jobs/${workspaceId}/runtime/branches/${branchId}/messages`, {

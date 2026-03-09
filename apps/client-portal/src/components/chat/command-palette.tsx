@@ -16,6 +16,8 @@ const commands = [
   "Search web evidence",
   "Open library: Web",
   "Open library: Competitors",
+  "Open Viral Studio",
+  "Use Viral Studio context",
   "Add constraint",
   "Switch workspace"
 ];

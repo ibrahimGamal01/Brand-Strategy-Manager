@@ -98,3 +98,700 @@ a {
 .bat-scrollbar::-webkit-scrollbar-track {
   background: transparent;
 }
+
+.vbs-shell {
+  display: grid;
+  gap: 1rem;
+  padding-bottom: 1.25rem;
+  font-family: var(--vbs-body-font);
+}
+
+.vbs-hero {
+  border-radius: 1rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 25%, transparent);
+  background:
+    radial-gradient(circle at 85% 10%, color-mix(in srgb, var(--vbs-coral) 30%, transparent) 0%, transparent 40%),
+    radial-gradient(circle at 10% 90%, color-mix(in srgb, var(--vbs-teal) 30%, transparent) 0%, transparent 35%),
+    linear-gradient(130deg, color-mix(in srgb, var(--vbs-ink) 92%, black) 0%, color-mix(in srgb, var(--vbs-cobalt) 74%, var(--vbs-ink)) 56%, color-mix(in srgb, var(--vbs-teal) 62%, var(--vbs-ink)) 100%);
+  color: #f8fbff;
+  padding: clamp(1rem, 3vw, 2rem);
+  overflow: hidden;
+  position: relative;
+}
+
+.vbs-chip {
+  display: inline-flex;
+  border-radius: 999px;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  background: color-mix(in srgb, white 16%, transparent);
+  border: 1px solid color-mix(in srgb, white 32%, transparent);
+}
+
+.vbs-title {
+  margin: 0.55rem 0 0;
+  font-family: var(--vbs-display-font);
+  font-size: clamp(1.6rem, 4vw, 2.5rem);
+  letter-spacing: -0.02em;
+}
+
+.vbs-subtitle {
+  margin: 0.55rem 0 0;
+  max-width: 60ch;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  color: color-mix(in srgb, white 85%, #d0d9ee);
+}
+
+.vbs-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.vbs-panel {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 14%, var(--bat-border));
+  border-radius: 1rem;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--vbs-sand) 45%, white) 0%, white 46%, color-mix(in srgb, var(--vbs-cobalt) 6%, white) 100%);
+  padding: 1rem;
+  box-shadow: 0 12px 24px rgba(16, 24, 40, 0.08);
+}
+
+.vbs-panel-title {
+  margin: 0;
+  font-family: var(--vbs-display-font);
+  font-size: 1.1rem;
+  color: var(--vbs-ink);
+}
+
+.vbs-panel-subtitle {
+  margin: 0.35rem 0 0.8rem;
+  color: color-mix(in srgb, var(--vbs-ink) 72%, #6f7488);
+  font-size: 0.82rem;
+}
+
+.vbs-alert {
+  border: 1px solid #f4b8b4;
+  background: #fff5f4;
+  color: #9f2317;
+  border-radius: 0.9rem;
+  padding: 0.8rem 0.9rem;
+  font-size: 0.86rem;
+}
+
+.vbs-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.vbs-form-grid label,
+.vbs-slider-grid label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  color: color-mix(in srgb, var(--vbs-ink) 68%, #6f7488);
+}
+
+.vbs-form-grid input,
+.vbs-form-grid select,
+.vbs-form-grid textarea,
+.vbs-panel textarea {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 18%, var(--bat-border));
+  border-radius: 0.65rem;
+  padding: 0.55rem 0.65rem;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  background: color-mix(in srgb, white 88%, var(--vbs-sand));
+  color: var(--vbs-ink);
+}
+
+.vbs-form-grid input:focus-visible,
+.vbs-form-grid select:focus-visible,
+.vbs-form-grid textarea:focus-visible,
+.vbs-panel textarea:focus-visible,
+.vbs-actions button:focus-visible,
+.vbs-mini-actions button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--vbs-cobalt) 70%, white);
+  outline-offset: 2px;
+}
+
+.vbs-slider-grid {
+  margin-top: 0.75rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.vbs-slider-grid input[type="range"] {
+  width: 100%;
+}
+
+.vbs-actions {
+  margin-top: 0.85rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.vbs-actions button,
+.vbs-mini-actions button {
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 30%, var(--bat-border));
+  background: color-mix(in srgb, var(--vbs-cobalt) 12%, white);
+  color: var(--vbs-ink);
+  padding: 0.45rem 0.85rem;
+  font-size: 0.79rem;
+  cursor: pointer;
+  transition: transform 180ms ease, background 180ms ease;
+}
+
+.vbs-actions button:hover,
+.vbs-mini-actions button:hover {
+  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--vbs-cobalt) 18%, white);
+}
+
+.vbs-actions button:disabled,
+.vbs-mini-actions button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.vbs-meta {
+  margin-top: 0.65rem;
+  font-size: 0.76rem;
+  color: color-mix(in srgb, var(--vbs-ink) 62%, #6f7488);
+}
+
+.vbs-kpi-grid {
+  margin-top: 0.75rem;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.vbs-kpi-grid > div {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 20%, var(--bat-border));
+  border-radius: 0.75rem;
+  padding: 0.55rem 0.65rem;
+  display: grid;
+  gap: 0.2rem;
+  background: color-mix(in srgb, var(--vbs-sand) 54%, white);
+}
+
+.vbs-kpi-grid span {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: color-mix(in srgb, var(--vbs-ink) 54%, #6f7488);
+}
+
+.vbs-kpi-grid strong {
+  font-size: 0.95rem;
+  color: var(--vbs-ink);
+}
+
+.vbs-reference-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.vbs-reference-toolbar {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.vbs-chip-toggle {
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 24%, var(--bat-border));
+  background: color-mix(in srgb, var(--vbs-sand) 46%, white);
+  color: var(--vbs-ink);
+  padding: 0.35rem 0.75rem;
+  font-size: 0.75rem;
+}
+
+.vbs-chip-toggle.is-active {
+  border-color: color-mix(in srgb, var(--vbs-cobalt) 56%, var(--bat-border));
+  background: color-mix(in srgb, var(--vbs-cobalt) 22%, white);
+}
+
+.vbs-curation-notice {
+  margin: 0.55rem 0 0;
+  border: 1px solid color-mix(in srgb, var(--vbs-teal) 30%, var(--bat-border));
+  background: color-mix(in srgb, var(--vbs-teal) 14%, white);
+  color: color-mix(in srgb, var(--vbs-teal) 72%, var(--vbs-ink));
+  border-radius: 0.65rem;
+  font-size: 0.76rem;
+  padding: 0.4rem 0.55rem;
+}
+
+.vbs-ingestion-timeline {
+  margin-top: 0.75rem;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.vbs-ingestion-step {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 18%, var(--bat-border));
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--vbs-sand) 50%, white);
+  padding: 0.5rem 0.55rem;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.vbs-ingestion-step span {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: color-mix(in srgb, var(--vbs-ink) 58%, #6f7488);
+}
+
+.vbs-ingestion-step strong {
+  font-size: 0.95rem;
+  color: var(--vbs-ink);
+}
+
+.vbs-run-history {
+  margin-top: 0.55rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.vbs-run-row {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 14%, var(--bat-border));
+  border-radius: 0.75rem;
+  padding: 0.55rem 0.65rem;
+  background: color-mix(in srgb, var(--vbs-sand) 38%, white);
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.vbs-run-row p {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.vbs-reference-board-grid {
+  margin-top: 0.6rem;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.vbs-reference-board-list {
+  margin-top: 0.6rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.55rem;
+}
+
+.vbs-reference-card {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 16%, var(--bat-border));
+  border-radius: 0.8rem;
+  background: color-mix(in srgb, white 88%, var(--vbs-sand));
+  padding: 0.6rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.vbs-reference-card.is-selected {
+  border-color: color-mix(in srgb, var(--vbs-cobalt) 48%, var(--bat-border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--vbs-cobalt) 15%, transparent);
+}
+
+.vbs-reference-card.is-updated {
+  border-color: color-mix(in srgb, var(--vbs-teal) 52%, var(--bat-border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--vbs-teal) 16%, transparent);
+  animation: vbs-pulse-card 540ms ease-out;
+}
+
+.vbs-reference-card-head {
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  display: grid;
+  gap: 0.25rem;
+  cursor: pointer;
+}
+
+.vbs-reference-card-head p {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.vbs-rank-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 40%, var(--bat-border));
+  background: color-mix(in srgb, var(--vbs-cobalt) 20%, white);
+  color: var(--vbs-ink);
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.15rem 0.5rem;
+}
+
+.vbs-analysis-drawer {
+  margin-top: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 30%, var(--bat-border));
+  border-radius: 0.8rem;
+  background: linear-gradient(170deg, color-mix(in srgb, white 86%, var(--vbs-sand)) 0%, white 100%);
+  padding: 0.75rem;
+}
+
+.vbs-analysis-kpi-grid {
+  margin-top: 0.55rem;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.vbs-analysis-kpi-grid > div {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 16%, var(--bat-border));
+  border-radius: 0.65rem;
+  background: color-mix(in srgb, white 92%, var(--vbs-sand));
+  padding: 0.5rem;
+  display: grid;
+  gap: 0.1rem;
+}
+
+.vbs-analysis-kpi-grid span {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: color-mix(in srgb, var(--vbs-ink) 54%, #6f7488);
+}
+
+.vbs-analysis-kpi-grid strong {
+  font-size: 0.9rem;
+  color: var(--vbs-ink);
+}
+
+.vbs-analysis-kpi-grid p {
+  margin: 0;
+  font-size: 0.7rem;
+  color: color-mix(in srgb, var(--vbs-ink) 62%, #6f7488);
+}
+
+.vbs-delta-positive {
+  color: color-mix(in srgb, var(--vbs-teal) 78%, var(--vbs-ink));
+}
+
+.vbs-delta-negative {
+  color: color-mix(in srgb, var(--vbs-coral) 82%, var(--vbs-ink));
+}
+
+.vbs-top-driver-row {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.vbs-driver-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 25%, var(--bat-border));
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.7rem;
+  background: color-mix(in srgb, var(--vbs-cobalt) 10%, white);
+  color: var(--vbs-ink);
+}
+
+.vbs-analysis-grid {
+  margin-top: 0.55rem;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.vbs-normalized-grid {
+  margin-top: 0.45rem;
+}
+
+.vbs-analysis-metric p {
+  margin: 0;
+  font-size: 0.72rem;
+  color: color-mix(in srgb, var(--vbs-ink) 66%, #6f7488);
+}
+
+.vbs-analysis-metric strong {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.8rem;
+  color: var(--vbs-ink);
+}
+
+.vbs-analysis-bar {
+  margin-top: 0.35rem;
+  width: 100%;
+  height: 0.42rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--vbs-cobalt) 10%, white);
+  overflow: hidden;
+}
+
+.vbs-analysis-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--vbs-teal) 76%, white), color-mix(in srgb, var(--vbs-cobalt) 70%, white));
+}
+
+.vbs-source-context {
+  margin-top: 0.65rem;
+  border-top: 1px dashed color-mix(in srgb, var(--vbs-cobalt) 24%, var(--bat-border));
+  padding-top: 0.55rem;
+}
+
+.vbs-source-context h4 {
+  margin: 0;
+  font-size: 0.82rem;
+  font-family: var(--vbs-display-font);
+  color: var(--vbs-ink);
+}
+
+.vbs-reference-row {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 16%, var(--bat-border));
+  border-radius: 0.75rem;
+  padding: 0.65rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  align-items: center;
+  background: color-mix(in srgb, var(--vbs-sand) 42%, white);
+}
+
+.vbs-reference-row p {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.vbs-mini-actions {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+
+.vbs-shortlist-actions {
+  margin-top: 0.1rem;
+}
+
+.vbs-action-chip {
+  min-height: 2rem;
+}
+
+.vbs-action-chip.is-active {
+  border-color: color-mix(in srgb, var(--vbs-cobalt) 45%, var(--bat-border));
+  font-weight: 600;
+}
+
+.vbs-action-pin.is-active {
+  border-color: color-mix(in srgb, var(--vbs-cobalt) 52%, var(--bat-border));
+  background: color-mix(in srgb, var(--vbs-cobalt) 18%, white);
+}
+
+.vbs-action-must-use.is-active {
+  border-color: color-mix(in srgb, var(--vbs-teal) 56%, var(--bat-border));
+  background: color-mix(in srgb, var(--vbs-teal) 16%, white);
+}
+
+.vbs-action-exclude.is-active {
+  border-color: color-mix(in srgb, var(--vbs-coral) 58%, var(--bat-border));
+  background: color-mix(in srgb, var(--vbs-coral) 15%, white);
+}
+
+.vbs-action-clear.is-active {
+  border-color: color-mix(in srgb, var(--vbs-ink) 38%, var(--bat-border));
+  background: color-mix(in srgb, var(--vbs-sand) 64%, white);
+}
+
+.vbs-output {
+  margin-top: 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 18%, var(--bat-border));
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, white 92%, var(--vbs-sand));
+  padding: 0.75rem;
+}
+
+.vbs-output h3 {
+  margin: 0.6rem 0 0.35rem;
+  font-family: var(--vbs-display-font);
+  font-size: 0.9rem;
+  color: var(--vbs-ink);
+}
+
+.vbs-output p,
+.vbs-output li {
+  font-size: 0.83rem;
+  color: color-mix(in srgb, var(--vbs-ink) 78%, #6f7488);
+}
+
+.vbs-output ul {
+  margin: 0;
+  padding-left: 1rem;
+}
+
+.vbs-export-preview {
+  margin-top: 0.7rem;
+  border: 1px dashed color-mix(in srgb, var(--vbs-cobalt) 30%, var(--bat-border));
+  border-radius: 0.75rem;
+  padding: 0.65rem;
+}
+
+.vbs-export-preview pre {
+  margin: 0.5rem 0 0;
+  white-space: pre-wrap;
+  max-height: 11rem;
+  overflow: auto;
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.vbs-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: color-mix(in srgb, var(--vbs-ink) 48%, transparent);
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.vbs-modal {
+  width: min(840px, 100%);
+  border-radius: 1rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 26%, var(--bat-border));
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--vbs-sand) 58%, white) 0%,
+    white 44%,
+    color-mix(in srgb, var(--vbs-cobalt) 5%, white) 100%
+  );
+  box-shadow: 0 18px 40px rgba(11, 19, 43, 0.3);
+  padding: 1rem;
+}
+
+.vbs-modal h3 {
+  margin: 0;
+  font-family: var(--vbs-display-font);
+  font-size: 1.08rem;
+  color: var(--vbs-ink);
+}
+
+.vbs-contract-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.vbs-contract-grid h3 {
+  margin: 0 0 0.4rem;
+  font-family: var(--vbs-display-font);
+  font-size: 0.9rem;
+  color: var(--vbs-ink);
+}
+
+.vbs-contract-grid ul {
+  margin: 0;
+  padding-left: 1rem;
+}
+
+.vbs-contract-grid li {
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--vbs-ink) 76%, #6f7488);
+}
+
+@media (max-width: 1100px) {
+  .vbs-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vbs-form-grid,
+  .vbs-contract-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vbs-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .vbs-ingestion-timeline {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .vbs-reference-board-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vbs-analysis-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vbs-analysis-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .vbs-title {
+    font-size: 1.45rem;
+  }
+
+  .vbs-panel {
+    padding: 0.85rem;
+  }
+
+  .vbs-kpi-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vbs-ingestion-timeline {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vbs-run-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .vbs-reference-toolbar {
+    gap: 0.65rem;
+  }
+
+  .vbs-analysis-kpi-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@keyframes vbs-pulse-card {
+  0% {
+    transform: scale(0.995);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vbs-actions button,
+  .vbs-mini-actions button {
+    transition: none;
+  }
+
+  .vbs-reference-card.is-updated {
+    animation: none;
+  }
+}

@@ -133,6 +133,27 @@ export type ChatMessageBlock =
       actions?: ChatMessageAction[];
     }
   | {
+      type: "viral_studio_context";
+      contextKind: "shortlist" | "generation_pack" | "context";
+      objective?: string;
+      summary?: string;
+      cards: Array<{
+        id: string;
+        title: string;
+        subtitle?: string;
+        sourcePlatform?: string;
+        sourceUrl?: string;
+        score?: number;
+        notes?: string[];
+      }>;
+      citations: Array<{
+        id: string;
+        label: string;
+        href?: string;
+        libraryRef?: string;
+      }>;
+    }
+  | {
       type: Exclude<
         string,
         | "decision_requests"
@@ -143,6 +164,7 @@ export type ChatMessageBlock =
         | "document_edit_applied"
         | "document_export_result"
         | "document_artifact"
+        | "viral_studio_context"
       >;
       [key: string]: unknown;
     };

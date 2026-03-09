@@ -76,6 +76,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function sanitizeStructuredJson(value: unknown, maxBytes = 48_000): unknown | undefined {
+  if (value === null || value === undefined) return undefined;
+  if (!Array.isArray(value) && !isRecord(value)) return undefined;
+  try {
+    const raw = JSON.stringify(value);
+    if (!raw || raw.length > maxBytes) return undefined;
+    return JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+}
+
 router.use('/:id/runtime', requirePortalAuth, requireWorkspaceMembership);
 
 function handleUploadMulterErrors(req: any, res: any, next: any) {
@@ -435,6 +447,8 @@ router.post('/:id/runtime/branches/:branchId/messages', async (req, res) => {
     const documentIds = Array.isArray(req.body?.documentIds)
       ? req.body.documentIds.map((entry: unknown) => String(entry || '').trim()).filter(Boolean).slice(0, 20)
       : undefined;
+    const blocksJson = sanitizeStructuredJson(req.body?.blocksJson);
+    const citationsJson = sanitizeStructuredJson(req.body?.citationsJson, 24_000);
     if (!content && !attachmentIds?.length && !documentIds?.length) {
       return res.status(400).json({ error: 'content is required when no attachments/documents are provided' });
     }
@@ -453,6 +467,8 @@ router.post('/:id/runtime/branches/:branchId/messages', async (req, res) => {
       ...(libraryRefs ? { libraryRefs } : {}),
       ...(attachmentIds ? { attachmentIds } : {}),
       ...(documentIds ? { documentIds } : {}),
+      ...(blocksJson !== undefined ? { blocksJson } : {}),
+      ...(citationsJson !== undefined ? { citationsJson } : {}),
     });
 
     return res.status(202).json(result);

@@ -112,6 +112,13 @@ export function WorkspacePicker({
               >
                 Open Library
               </Link>
+              <Link
+                href={`/app/w/${workspace.id}/viral-studio`}
+                className="rounded-full border px-3 py-1.5 text-sm"
+                style={{ borderColor: "var(--bat-border)" }}
+              >
+                Open Viral Studio
+              </Link>
             </div>
           </article>
         ))}
