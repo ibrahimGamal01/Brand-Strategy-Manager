@@ -74,7 +74,10 @@ async function apiRequest<T = JsonObject>(
 }
 
 async function waitForAssistantMessage(baseUrl: string, workspaceId: string, branchId: string, jar: CookieJar) {
-  const maxAttempts = 30;
+  const configuredAttempts = Number(process.env.PORTAL_RUNTIME_ASSISTANT_MAX_ATTEMPTS || '');
+  const maxAttempts = Number.isFinite(configuredAttempts) && configuredAttempts > 0
+    ? Math.floor(configuredAttempts)
+    : (process.env.PORTAL_E2E_BASE_URL ? 120 : 30);
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 1000));
     const messages = await apiRequest<{ messages?: Array<{ role?: string }> }>(
@@ -129,11 +132,24 @@ async function waitForSignupScanRun(baseUrl: string, workspaceId: string, jar: C
   return null;
 }
 
+function optionalBoolEnv(name: string): boolean | null {
+  const raw = String(process.env[name] || '').trim().toLowerCase();
+  if (!raw) return null;
+  if (raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on') return true;
+  if (raw === '0' || raw === 'false' || raw === 'no' || raw === 'off') return false;
+  return null;
+}
+
 async function main() {
   const baseUrl = String(
     process.env.PORTAL_E2E_BASE_URL || process.env.BACKEND_BASE_URL || 'http://localhost:3001'
   ).replace(/\/+$/, '');
   const mode = process.env.PORTAL_E2E_BASE_URL ? 'online' : 'local';
+  const health = await apiRequest<{ aiMode?: string }>(baseUrl, '/api/health', { method: 'GET' });
+  const aiMode = String(health.data.aiMode || '').trim().toLowerCase();
+  const runtimeReplyOverride = optionalBoolEnv('PORTAL_RUNTIME_REQUIRE_ASSISTANT_REPLY');
+  const requireRuntimeAssistantReply =
+    runtimeReplyOverride !== null ? runtimeReplyOverride : !(mode === 'online' && aiMode === 'off');
   const timestamp = Date.now();
   const email = `portal.e2e.${timestamp}@example.com`;
   const password = 'TestPass123!';
@@ -515,8 +531,14 @@ async function main() {
   );
   assert.equal(sendMessage.status, 202, 'Runtime message enqueue failed');
 
-  const hasAssistant = await waitForAssistantMessage(baseUrl, workspaceId, branchId, jar);
-  assert.equal(hasAssistant, true, 'Runtime engine did not produce an assistant reply within timeout');
+  if (requireRuntimeAssistantReply) {
+    const hasAssistant = await waitForAssistantMessage(baseUrl, workspaceId, branchId, jar);
+    assert.equal(hasAssistant, true, 'Runtime engine did not produce an assistant reply within timeout');
+  } else {
+    console.warn(
+      `[PortalAuthRuntimeE2E] Skipping assistant-reply assertion (mode=${mode}, aiMode=${aiMode || 'unknown'}).`
+    );
+  }
 
   const events = await apiRequest<{ events?: Array<{ type?: string }> }>(
     baseUrl,
@@ -530,7 +552,11 @@ async function main() {
       ? events.data.events.map((event) => String(event.type || '').toUpperCase())
       : []
   );
-  assert.ok(eventTypes.has('PROCESS_STARTED'), 'Expected PROCESS_STARTED event');
+  if (requireRuntimeAssistantReply) {
+    assert.ok(eventTypes.has('PROCESS_STARTED'), 'Expected PROCESS_STARTED event');
+  } else if (!eventTypes.has('PROCESS_STARTED')) {
+    console.warn('[PortalAuthRuntimeE2E] PROCESS_STARTED not observed while assistant assertions are skipped.');
+  }
 
   const logout = await apiRequest(baseUrl, '/api/portal/auth/logout', { method: 'POST' }, jar);
   assert.equal(logout.status, 200, 'Logout failed');
@@ -560,6 +586,7 @@ async function main() {
         ok: true,
         mode,
         baseUrl,
+        aiMode: aiMode || 'unknown',
         workspaceId,
         branchId,
         emailProvider: signup.data.emailDelivery?.provider || 'unknown',

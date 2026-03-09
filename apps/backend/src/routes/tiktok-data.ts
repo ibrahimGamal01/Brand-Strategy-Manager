@@ -1,11 +1,9 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { SocialScraperService } from '../services/scrapers/social-scraper';
 import { tiktokService } from '../services/scraper/tiktok-service';
 
 const router = Router();
 const prisma = new PrismaClient();
-const scraperService = new SocialScraperService();
 
 /**
  * DELETE /api/tiktok/profile/:profileId

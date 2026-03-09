@@ -11,13 +11,103 @@ Capabilities:
 """
 
 import json
+import os
 import sys
 import re
+import time
 from typing import List, Dict, Optional
 from ddgs import DDGS
+from proxy_manager import (
+    ProxyRotator,
+    compute_backoff_seconds,
+    get_retry_attempts,
+    is_retryable_proxy_error,
+    redact_proxy_url,
+)
 
 # Maximum results per query (DDG practical limit is around 100-200)
 MAX_RESULTS_PER_QUERY = 100
+PROXY_ROTATOR = ProxyRotator.from_env_and_file()
+MAX_PROXY_RETRIES = get_retry_attempts(default=4)
+
+
+def _env_true(name: str, fallback: bool = False) -> bool:
+    raw = str(os.environ.get(name, "")).strip().lower()
+    if not raw:
+        return fallback
+    return raw in {"1", "true", "yes", "y", "on"}
+
+
+def _self_rotation_disabled() -> bool:
+    return _env_true("SCRAPER_PROXY_DISABLE_SELF_ROTATION", False)
+
+
+def _allow_direct_fallback() -> bool:
+    if _self_rotation_disabled():
+        return False
+    raw = str(os.environ.get("SCRAPER_PROXY_ALLOW_DIRECT", "")).strip().lower()
+    if not raw:
+        return True
+    return raw in {"1", "true", "yes", "y", "on"}
+
+
+def _run_ddgs_call(callable_fn, *, action: str):
+    attempts = MAX_PROXY_RETRIES if _self_rotation_disabled() or PROXY_ROTATOR.has_proxies() else 1
+    last_error: Optional[Exception] = None
+
+    for attempt in range(1, attempts + 1):
+        proxy_url = PROXY_ROTATOR.get_next_proxy_url()
+        proxy_label = redact_proxy_url(proxy_url) if proxy_url else "direct"
+        try:
+            ddgs = DDGS(proxy=proxy_url) if proxy_url else DDGS()
+            return callable_fn(ddgs)
+        except Exception as exc:
+            last_error = exc
+            if proxy_url:
+                PROXY_ROTATOR.mark_failed(proxy_url)
+
+            retryable = is_retryable_proxy_error(exc)
+            if attempt >= attempts or not retryable:
+                break
+
+            wait_s = compute_backoff_seconds(attempt)
+            print(
+                f"[DDG] {action} failed via {proxy_label} (attempt {attempt}/{attempts}): {exc}. Retrying in {wait_s:.2f}s",
+                file=sys.stderr,
+            )
+            time.sleep(wait_s)
+
+    if PROXY_ROTATOR.has_proxies() and _allow_direct_fallback():
+        try:
+            print(f"[DDG] {action} falling back to direct request", file=sys.stderr)
+            return callable_fn(DDGS())
+        except Exception as exc:
+            last_error = exc
+
+    if last_error:
+        raise last_error
+    raise RuntimeError(f"DDGS call failed for {action}")
+
+
+def _raise_if_transport_exhausted(
+    *,
+    action: str,
+    total_queries: int,
+    successful_queries: int,
+    retryable_failures: int,
+    last_retryable_error: Optional[Exception],
+) -> None:
+    if successful_queries > 0:
+        return
+    if total_queries <= 0:
+        return
+    if retryable_failures <= 0:
+        return
+    if last_retryable_error:
+        raise RuntimeError(
+            f"{action} exhausted due to transport/proxy failures: {last_retryable_error}"
+        ) from last_retryable_error
+    raise RuntimeError(f"{action} exhausted due to transport/proxy failures")
 
 
 def raw_search(queries: List[str], max_per_query: int = MAX_RESULTS_PER_QUERY) -> List[Dict]:
@@ -27,13 +117,18 @@ def raw_search(queries: List[str], max_per_query: int = MAX_RESULTS_PER_QUERY) -
     """
     all_results = []
     seen_hrefs = set()  # Dedupe by URL
-    
-    ddgs = DDGS()
-    
+    successful_queries = 0
+    retryable_failures = 0
+    last_retryable_error: Optional[Exception] = None
+
     for query in queries:
         try:
             print(f"[DDG] Searching: {query}", file=sys.stderr)
-            results = list(ddgs.text(query, max_results=max_per_query))
+            results = _run_ddgs_call(
+                lambda client: list(client.text(query, max_results=max_per_query)),
+                action=f"text search '{query}'",
+            )
+            successful_queries += 1
             
             for r in results:
                 href = r.get('href', '')
@@ -50,8 +145,19 @@ def raw_search(queries: List[str], max_per_query: int = MAX_RESULTS_PER_QUERY) -
             
         except Exception as e:
             print(f"[DDG] Query failed: {query} - {e}", file=sys.stderr)
+            if is_retryable_proxy_error(e):
+                retryable_failures += 1
+                last_retryable_error = e
             continue
-    
+
+    _raise_if_transport_exhausted(
+        action="raw_search",
+        total_queries=len(queries),
+        successful_queries=successful_queries,
+        retryable_failures=retryable_failures,
+        last_retryable_error=last_retryable_error,
+    )
+
     return all_results
 
 
@@ -125,6 +231,8 @@ def search_brand_context(brand_name: str) -> Dict:
         results['context_summary'] = ' | '.join(snippets)[:1000]
         
     except Exception as e:
+        if is_retryable_proxy_error(e):
+            raise
         results['error'] = str(e)
     
     return results
@@ -280,6 +388,8 @@ def validate_handle(handle: str, platform: str = 'instagram') -> Dict:
             result['reason'] = f'No clear references found for @{handle}'
             
     except Exception as e:
+        if is_retryable_proxy_error(e):
+            raise
         result['error'] = str(e)
         result['reason'] = f'Search failed: {e}'
     
@@ -293,13 +403,18 @@ def search_news(queries: List[str], max_per_query: int = 50) -> List[Dict]:
     """
     all_results = []
     seen_urls = set()
-    
-    ddgs = DDGS()
-    
+    successful_queries = 0
+    retryable_failures = 0
+    last_retryable_error: Optional[Exception] = None
+
     for query in queries:
         try:
             print(f"[DDG] News search: {query}", file=sys.stderr)
-            results = list(ddgs.news(query, max_results=max_per_query))
+            results = _run_ddgs_call(
+                lambda client: list(client.news(query, max_results=max_per_query)),
+                action=f"news search '{query}'",
+            )
+            successful_queries += 1
             
             for r in results:
                 url = r.get('url', '')
@@ -319,8 +434,19 @@ def search_news(queries: List[str], max_per_query: int = 50) -> List[Dict]:
             
         except Exception as e:
             print(f"[DDG] News query failed: {query} - {e}", file=sys.stderr)
+            if is_retryable_proxy_error(e):
+                retryable_failures += 1
+                last_retryable_error = e
             continue
-    
+
+    _raise_if_transport_exhausted(
+        action="search_news",
+        total_queries=len(queries),
+        successful_queries=successful_queries,
+        retryable_failures=retryable_failures,
+        last_retryable_error=last_retryable_error,
+    )
+
     return all_results
 
 
@@ -331,13 +457,18 @@ def search_videos(queries: List[str], max_per_query: int = 30) -> List[Dict]:
     """
     all_results = []
     seen_urls = set()
-    
-    ddgs = DDGS()
-    
+    successful_queries = 0
+    retryable_failures = 0
+    last_retryable_error: Optional[Exception] = None
+
     for query in queries:
         try:
             print(f"[DDG] Video search: {query}", file=sys.stderr)
-            results = list(ddgs.videos(query, max_results=max_per_query))
+            results = _run_ddgs_call(
+                lambda client: list(client.videos(query, max_results=max_per_query)),
+                action=f"video search '{query}'",
+            )
+            successful_queries += 1
             
             for r in results:
                 url = r.get('content', '')
@@ -363,8 +494,19 @@ def search_videos(queries: List[str], max_per_query: int = 30) -> List[Dict]:
             
         except Exception as e:
             print(f"[DDG] Video query failed: {query} - {e}", file=sys.stderr)
+            if is_retryable_proxy_error(e):
+                retryable_failures += 1
+                last_retryable_error = e
             continue
-    
+
+    _raise_if_transport_exhausted(
+        action="search_videos",
+        total_queries=len(queries),
+        successful_queries=successful_queries,
+        retryable_failures=retryable_failures,
+        last_retryable_error=last_retryable_error,
+    )
+
     return all_results
 
 
@@ -375,13 +517,18 @@ def search_images(queries: List[str], max_per_query: int = 50) -> List[Dict]:
     """
     all_results = []
     seen_urls = set()
-    
-    ddgs = DDGS()
-    
+    successful_queries = 0
+    retryable_failures = 0
+    last_retryable_error: Optional[Exception] = None
+
     for query in queries:
         try:
             print(f"[DDG] Image search: {query}", file=sys.stderr)
-            results = list(ddgs.images(query, max_results=max_per_query))
+            results = _run_ddgs_call(
+                lambda client: list(client.images(query, max_results=max_per_query)),
+                action=f"image search '{query}'",
+            )
+            successful_queries += 1
             
             for r in results:
                 image_url = r.get('image', '')
@@ -401,8 +548,19 @@ def search_images(queries: List[str], max_per_query: int = 50) -> List[Dict]:
             
         except Exception as e:
             print(f"[DDG] Image query failed: {query} - {e}", file=sys.stderr)
+            if is_retryable_proxy_error(e):
+                retryable_failures += 1
+                last_retryable_error = e
             continue
-    
+
+    _raise_if_transport_exhausted(
+        action="search_images",
+        total_queries=len(queries),
+        successful_queries=successful_queries,
+        retryable_failures=retryable_failures,
+        last_retryable_error=last_retryable_error,
+    )
+
     return all_results
 
 
@@ -503,8 +661,10 @@ def search_social_profiles(brand_name: str, max_per_query: int = 30) -> Dict:
         ],
     }
     
-    ddgs = DDGS()
     seen_urls = set()
+    successful_queries = 0
+    retryable_failures = 0
+    last_retryable_error: Optional[Exception] = None
     
     for platform, queries in platform_queries.items():
         handles = set()
@@ -512,7 +672,11 @@ def search_social_profiles(brand_name: str, max_per_query: int = 30) -> Dict:
         for query in queries:
             try:
                 print(f"[DDG] Social search ({platform}): {query}", file=sys.stderr)
-                search_results = list(ddgs.text(query, max_results=max_per_query))
+                search_results = _run_ddgs_call(
+                    lambda client: list(client.text(query, max_results=max_per_query)),
+                    action=f"social text search '{query}'",
+                )
+                successful_queries += 1
                 
                 for r in search_results:
                     href = r.get('href', '')
@@ -569,6 +733,9 @@ def search_social_profiles(brand_name: str, max_per_query: int = 30) -> Dict:
                 
             except Exception as e:
                 print(f"[DDG] Social search error ({platform}): {e}", file=sys.stderr)
+                if is_retryable_proxy_error(e):
+                    retryable_failures += 1
+                    last_retryable_error = e
                 continue
         
         results[platform] = list(handles)
@@ -580,6 +747,15 @@ def search_social_profiles(brand_name: str, max_per_query: int = 30) -> Dict:
     }
     results['totals']['total'] = sum(results['totals'].values())
     results['totals']['raw'] = len(results['raw_results'])
+
+    total_queries = sum(len(queries) for queries in platform_queries.values())
+    _raise_if_transport_exhausted(
+        action="search_social_profiles",
+        total_queries=total_queries,
+        successful_queries=successful_queries,
+        retryable_failures=retryable_failures,
+        last_retryable_error=last_retryable_error,
+    )
     
     return results
 
@@ -605,7 +781,6 @@ def scrape_social_content(handles: Dict[str, str], max_items: int = 30) -> Dict:
         'totals': {}
     }
     
-    ddgs = DDGS()
     seen_images = set()
     seen_videos = set()
     
@@ -656,7 +831,10 @@ def scrape_social_content(handles: Dict[str, str], max_items: int = 30) -> Dict:
             print(f"[DDG] looking for profile stats: site:{platform}.com @{handle}", file=sys.stderr)
             stats_query = f'site:{platform}.com @{handle}'
             # Fetch just top 3 results to find the main profile page
-            text_results = list(ddgs.text(stats_query, max_results=3))
+            text_results = _run_ddgs_call(
+                lambda client: list(client.text(stats_query, max_results=3)),
+                action=f"profile stats search '{stats_query}'",
+            )
             
             for r in text_results:
                 href = r.get('href', '')
@@ -703,7 +881,10 @@ def scrape_social_content(handles: Dict[str, str], max_items: int = 30) -> Dict:
         for query in queries_images:
             try:
                 print(f"[DDG] Image search: {query}", file=sys.stderr)
-                images = list(ddgs.images(query, max_results=limit_images))
+                images = _run_ddgs_call(
+                    lambda client: list(client.images(query, max_results=limit_images)),
+                    action=f"social image search '{query}'",
+                )
                 
                 for img in images:
                     image_url = img.get('image', '')
@@ -764,7 +945,10 @@ def scrape_social_content(handles: Dict[str, str], max_items: int = 30) -> Dict:
         for query in queries_videos:
             try:
                 print(f"[DDG] Video search: {query}", file=sys.stderr)
-                videos = list(ddgs.videos(query, max_results=limit_videos))
+                videos = _run_ddgs_call(
+                    lambda client: list(client.videos(query, max_results=limit_videos)),
+                    action=f"social video search '{query}'",
+                )
                 
                 for vid in videos:
                     if len([v for v in result['videos'] if v['platform'] == platform]) >= limit_videos:

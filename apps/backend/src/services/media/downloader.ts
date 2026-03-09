@@ -5,9 +5,20 @@ import { prisma } from '../../lib/prisma';
 import { tiktokService } from '../scraper/tiktok-service';
 import { resolveInstagramMediaViaApify } from '../scraper/apify-instagram-media-downloader';
 import { createScraperProxyPool, runScriptJsonWithRetries } from '../scraper/script-runner';
+import {
+  executeWithProxyPolicy,
+  isProxyPolicyError,
+  isRetryableNetworkError,
+} from '../network/proxy-rotation';
 import { extractMediaUrls, extractImageMetadata, generateVideoThumbnail, extractVideoDuration } from './download-helpers';
 import { downloadGenericMedia } from './download-generic';
 import { emitResearchJobEvent } from '../social/research-job-events';
+import {
+  acquireInstagramSession,
+  isInstagramLoginGatePayload,
+  recordInstagramSessionFailure,
+  recordInstagramSessionSuccess,
+} from '../scraper/instagram-session-pool';
 
 async function resolveInstagramMediaViaCamoufox(sourceUrl: string): Promise<{
   success: boolean;
@@ -48,6 +59,9 @@ async function resolveInstagramMediaViaCamoufox(sourceUrl: string): Promise<{
       scraperUsed: 'camoufox_local',
     };
   } catch (e: any) {
+    if (isProxyPolicyError(e)) {
+      throw e;
+    }
     return { success: false, mediaUrls: [], error: e.message || 'Camoufox resolve failed', scraperUsed: 'camoufox_local' };
   }
 }
@@ -92,6 +106,77 @@ const instagramMediaResolverProxyPool = createScraperProxyPool('instagram-media-
   'PROXY_URLS',
   'PROXY_URL',
 ]);
+const instagramMediaDownloadProxyPool = createScraperProxyPool(
+  'instagram-media-download',
+  [
+    'INSTAGRAM_MEDIA_RESOLVER_PROXY_URLS',
+    'INSTAGRAM_SCRAPER_PROXY_URLS',
+    'MEDIA_DOWNLOADER_PROXY_URLS',
+    'MEDIA_PROXY_URLS',
+    'SCRAPER_PROXY_URLS',
+    'PROXY_URLS',
+    'PROXY_URL',
+  ],
+  { policyScope: 'instagram' }
+);
+const tiktokMediaDownloadProxyPool = createScraperProxyPool(
+  'tiktok-media-download',
+  [
+    'TIKTOK_DOWNLOADER_PROXY_URLS',
+    'TIKTOK_SCRAPER_PROXY_URLS',
+    'MEDIA_DOWNLOADER_PROXY_URLS',
+    'MEDIA_PROXY_URLS',
+    'SCRAPER_PROXY_URLS',
+    'PROXY_URLS',
+    'PROXY_URL',
+  ],
+  { policyScope: 'tiktok' }
+);
+
+function inferMediaProxyScope(url: string, platformHint?: string | null): 'instagram' | 'tiktok' | null {
+  const platform = String(platformHint || '').toLowerCase();
+  const value = String(url || '').toLowerCase();
+  if (platform.includes('instagram')) return 'instagram';
+  if (platform.includes('tiktok')) return 'tiktok';
+  if (
+    value.includes('instagram.com') ||
+    value.includes('cdninstagram') ||
+    value.includes('fbcdn') ||
+    value.includes('cdn.cstatic')
+  ) {
+    return 'instagram';
+  }
+  if (
+    value.includes('tiktok.com') ||
+    value.includes('muscdn') ||
+    value.includes('byteoversea') ||
+    value.includes('bytedance')
+  ) {
+    return 'tiktok';
+  }
+  return null;
+}
+
+function extractStatusCode(error: any): number | null {
+  const direct = Number(error?.response?.status || error?.status || 0);
+  if (Number.isFinite(direct) && direct > 0) {
+    return direct;
+  }
+
+  const message = String(error?.message || '');
+  const match = message.match(/\bstatus(?:\s+code)?\s*(\d{3})\b/i);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isInstagramLoginGateError(error: any): boolean {
+  if (isInstagramLoginGatePayload(error?.response?.data)) {
+    return true;
+  }
+  const message = String(error?.message || '').toLowerCase();
+  return message.includes('please wait a few minutes') || message.includes('require_login');
+}
 
 function generateMediaFilename(extension: string): string {
   const cleanExt = extension.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'bin';
@@ -185,15 +270,30 @@ export async function downloadPostMedia(
       thumbnailUrl?: string;
       error?: string;
       scraperUsed?: string;
-    } = await resolveInstagramMediaViaApify(sourceUrl, {
-      researchJobId: eventContext?.researchJobId,
-      runId: eventContext?.runId,
-      source: eventContext?.source,
-      platform: eventContext?.platform,
-      handle: eventContext?.handle,
-      entityType: eventContext?.entityType || 'social_post',
-      entityId: eventContext?.entityId || postId,
-    });
+    } = (
+      await executeWithProxyPolicy({
+        scope: 'instagram',
+        proxyPool: instagramMediaResolverProxyPool,
+        maxAttempts: Math.max(1, Number(process.env.INSTAGRAM_MEDIA_RESOLVE_ATTEMPTS || 2)),
+        retryPredicate: isRetryableNetworkError,
+        operation: async ({ target }) =>
+          resolveInstagramMediaViaApify(
+            sourceUrl,
+            {
+              researchJobId: eventContext?.researchJobId,
+              runId: eventContext?.runId,
+              source: eventContext?.source,
+              platform: eventContext?.platform,
+              handle: eventContext?.handle,
+              entityType: eventContext?.entityType || 'social_post',
+              entityId: eventContext?.entityId || postId,
+            },
+            {
+              proxyUrl: target.proxyUrl || undefined,
+            }
+          ),
+      })
+    ).value;
     if (!resolved.success || resolved.mediaUrls.length === 0) {
       resolved = await resolveInstagramMediaViaCamoufox(sourceUrl);
       if (resolved.success) {
@@ -220,6 +320,8 @@ export async function downloadPostMedia(
   for (const url of Array.from(new Set(preparedUrls))) {
     if (!url) continue;
 
+    let instagramSessionId: string | null = null;
+    const mediaProxyScope = inferMediaProxyScope(url, eventContext?.platform || null);
     try {
       const isTikTokPhoto = /\/photo\/\d+/i.test(url);
       const isVideo = isTikTokPhoto
@@ -256,8 +358,11 @@ export async function downloadPostMedia(
           Origin: 'https://www.instagram.com',
         };
         if (url.includes('instagram.com')) {
-          const cookie = process.env.INSTAGRAM_SESSION_COOKIES || '';
-          if (cookie) headers['Cookie'] = cookie;
+          const session = acquireInstagramSession();
+          if (session?.cookie) {
+            headers['Cookie'] = session.cookie;
+            instagramSessionId = session.id;
+          }
           headers['User-Agent'] =
             'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
         }
@@ -267,11 +372,32 @@ export async function downloadPostMedia(
           entityType === 'CLIENT' ? `media/client/${entityId}/${postId}` : `media/competitor/${entityId}/${postId}`;
         const r2Key = `${r2Prefix}/${filename}`;
 
-        const saved = await fileManager.downloadAndSaveOrUpload(url, storagePath, r2Key, headers, {
-          contextLabel: `post-${postId}`,
-        });
+        const runDownload = async (selectedProxyUrl?: string | null) =>
+          fileManager.downloadAndSaveOrUpload(url, storagePath, r2Key, headers, {
+            contextLabel: `post-${postId}`,
+            proxyUrl: selectedProxyUrl,
+          });
+
+        const saved =
+          mediaProxyScope === 'instagram' || mediaProxyScope === 'tiktok'
+            ? (
+                await executeWithProxyPolicy({
+                  scope: mediaProxyScope,
+                  proxyPool:
+                    mediaProxyScope === 'instagram'
+                      ? instagramMediaDownloadProxyPool
+                      : tiktokMediaDownloadProxyPool,
+                  maxAttempts: Math.max(1, Number(process.env.MEDIA_DOWNLOAD_MAX_ATTEMPTS || 3)),
+                  retryPredicate: isRetryableNetworkError,
+                  operation: async ({ target }) => runDownload(target.proxyUrl),
+                })
+              ).value
+            : await runDownload(undefined);
         // Use the returned storagePath (R2 key in R2 mode, local path in local mode)
         storagePath = saved.storagePath;
+        if (instagramSessionId) {
+          recordInstagramSessionSuccess(instagramSessionId);
+        }
       }
 
       const stats = storagePath.startsWith('media/') ? null : fileManager.getStats(storagePath);
@@ -356,6 +482,20 @@ export async function downloadPostMedia(
         });
       }
     } catch (error: any) {
+      if (isProxyPolicyError(error)) {
+        throw error;
+      }
+      if (instagramSessionId) {
+        const status = extractStatusCode(error);
+        const loginGate = isInstagramLoginGateError(error);
+        if (loginGate || status === 401 || status === 403 || status === 429) {
+          recordInstagramSessionFailure(
+            instagramSessionId,
+            loginGate ? 'LOGIN_GATE' : status === 429 ? 'RATE_429' : 'AUTH_401'
+          );
+        }
+      }
+
       console.error(`[Downloader] Failed to download ${url}:`, error.message);
       if (eventContext?.researchJobId) {
         emitResearchJobEvent({

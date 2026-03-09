@@ -19,19 +19,132 @@ import json
 import os
 import subprocess
 import re
+import time
 from datetime import datetime
+from typing import Optional
+from proxy_manager import (
+    ProxyRotator,
+    compute_backoff_seconds,
+    get_retry_attempts,
+    is_retryable_proxy_error,
+    redact_proxy_url,
+)
 
-PROXY_URL = (
-    os.environ.get('SCRAPER_PROXY_URL')
-    or os.environ.get('HTTPS_PROXY')
-    or os.environ.get('HTTP_PROXY')
-    or ''
-).strip()
+PROXY_ROTATOR = ProxyRotator.from_env_and_file()
+MAX_PROXY_RETRIES = get_retry_attempts(default=4)
 
-def with_proxy(cmd):
-    if PROXY_URL and '--proxy' not in cmd:
-        return [*cmd, '--proxy', PROXY_URL]
-    return cmd
+
+def _env_true(name: str, fallback: bool = False) -> bool:
+    raw = str(os.environ.get(name, "")).strip().lower()
+    if not raw:
+        return fallback
+    return raw in {"1", "true", "yes", "y", "on"}
+
+
+def _effective_proxy_url() -> Optional[str]:
+    if _env_true("SCRAPER_PROXY_FORCE_DIRECT", False):
+        return None
+    value = str(os.environ.get("SCRAPER_PROXY_URL", "")).strip()
+    if value:
+        return value
+    return None
+
+
+SELF_ROTATION_DISABLED = _env_true("SCRAPER_PROXY_DISABLE_SELF_ROTATION", False)
+
+
+def _clear_inherited_proxy_env() -> None:
+    for key in (
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+    ):
+        os.environ.pop(key, None)
+
+
+def _build_subprocess_env() -> dict:
+    env = dict(os.environ)
+    for key in (
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+    ):
+        env.pop(key, None)
+    return env
+
+
+if SELF_ROTATION_DISABLED:
+    _clear_inherited_proxy_env()
+
+
+def with_proxy(cmd, proxy_url=None):
+    if proxy_url and '--proxy' not in cmd:
+        return [*cmd, '--proxy', proxy_url]
+    return list(cmd)
+
+
+def _is_retryable_subprocess_failure(stderr: str, return_code: int) -> bool:
+    merged = f"{stderr or ''} {return_code}".lower()
+    if any(token in merged for token in ('429', '403', '503', '502', 'proxy', 'timeout', 'timed out', 'connection')):
+        return True
+    return False
+
+
+def run_ytdlp_with_proxy_retry(cmd, *, timeout: int, action: str):
+    attempts = MAX_PROXY_RETRIES if SELF_ROTATION_DISABLED or PROXY_ROTATOR.has_proxies() else 1
+
+    for attempt in range(1, attempts + 1):
+        proxy_url = _effective_proxy_url() if SELF_ROTATION_DISABLED else PROXY_ROTATOR.get_next_proxy_url()
+        proxy_label = redact_proxy_url(proxy_url) if proxy_url else "direct"
+        try:
+            result = subprocess.run(
+                with_proxy(cmd, proxy_url),
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                env=_build_subprocess_env(),
+            )
+        except subprocess.TimeoutExpired as exc:
+            if proxy_url and not SELF_ROTATION_DISABLED:
+                PROXY_ROTATOR.mark_failed(proxy_url)
+            if attempt >= attempts:
+                raise
+            wait_s = compute_backoff_seconds(attempt)
+            print(
+                f"[TikTok] {action} timed out via {proxy_label} (attempt {attempt}/{attempts}). Retrying in {wait_s:.2f}s",
+                file=sys.stderr,
+            )
+            time.sleep(wait_s)
+            continue
+
+        if result.returncode == 0 or result.stdout:
+            if proxy_url and not SELF_ROTATION_DISABLED:
+                PROXY_ROTATOR.mark_success(proxy_url)
+            return result, proxy_url
+
+        retryable = _is_retryable_subprocess_failure(result.stderr, result.returncode)
+        if proxy_url and not SELF_ROTATION_DISABLED:
+            PROXY_ROTATOR.mark_failed(proxy_url)
+
+        if attempt < attempts and retryable:
+            wait_s = compute_backoff_seconds(attempt)
+            print(
+                f"[TikTok] {action} failed via {proxy_label} (attempt {attempt}/{attempts}): {result.stderr[:180]}. Retrying in {wait_s:.2f}s",
+                file=sys.stderr,
+            )
+            time.sleep(wait_s)
+            continue
+
+        return result, proxy_url
+
+    # Unreachable, but keeps static analyzers happy.
+    return subprocess.CompletedProcess(cmd, returncode=1, stdout='', stderr='Proxy retry exhausted'), None
 
 def check_ytdlp_installed() -> bool:
     """Check if yt-dlp is installed and accessible."""
@@ -45,18 +158,49 @@ def check_ytdlp_installed() -> bool:
         return False
 
 
+def _run_ddg_text_query(query: str, max_results: int = 10):
+    from ddgs import DDGS
+
+    attempts = MAX_PROXY_RETRIES if SELF_ROTATION_DISABLED or PROXY_ROTATOR.has_proxies() else 1
+    last_error = None
+
+    for attempt in range(1, attempts + 1):
+        proxy_url = _effective_proxy_url() if SELF_ROTATION_DISABLED else PROXY_ROTATOR.get_next_proxy_url()
+        proxy_label = redact_proxy_url(proxy_url) if proxy_url else "direct"
+        try:
+            ddgs = DDGS(proxy=proxy_url) if proxy_url else DDGS()
+            results = list(ddgs.text(query, max_results=max_results))
+            if proxy_url and not SELF_ROTATION_DISABLED:
+                PROXY_ROTATOR.mark_success(proxy_url)
+            return results
+        except Exception as exc:
+            last_error = exc
+            if proxy_url and not SELF_ROTATION_DISABLED:
+                PROXY_ROTATOR.mark_failed(proxy_url)
+            retryable = is_retryable_proxy_error(exc)
+            if attempt >= attempts or not retryable:
+                raise
+            wait_s = compute_backoff_seconds(attempt)
+            print(
+                f"[TikTok] DDG query failed via {proxy_label} (attempt {attempt}/{attempts}): {exc}. Retrying in {wait_s:.2f}s",
+                file=sys.stderr,
+            )
+            time.sleep(wait_s)
+
+    if last_error:
+        raise last_error
+    return []
+
+
 def search_tiktok_profile_ddg(handle: str) -> dict:
     """
     Fallback: Use DuckDuckGo to find TikTok profile info when yt-dlp fails.
     Returns basic profile info from search results.
     """
-    from ddgs import DDGS
-    
     handle = handle.replace('@', '')
     print(f"[TikTok] Fallback: Searching DDG for @{handle}...", file=sys.stderr)
     
     try:
-        ddgs = DDGS()
         queries = [
             f'site:tiktok.com/@{handle}',
             f'"{handle}" tiktok profile',
@@ -66,7 +210,7 @@ def search_tiktok_profile_ddg(handle: str) -> dict:
         found_data = False
         
         for query in queries:
-            results = list(ddgs.text(query, max_results=10))
+            results = _run_ddg_text_query(query, max_results=10)
             for r in results:
                 href = r.get('href', '')
                 body = r.get('body', '')
@@ -149,7 +293,11 @@ def get_profile_and_videos(handle: str, max_videos: int = 30) -> dict:
             profile_url
         ]
         
-        result = subprocess.run(with_proxy(cmd), capture_output=True, text=True, timeout=120)
+        result, used_proxy = run_ytdlp_with_proxy_retry(
+            cmd,
+            timeout=120,
+            action=f"profile scrape @{handle}",
+        )
         
         if result.returncode != 0 and not result.stdout:
             # yt-dlp failed, try DDG fallback
@@ -157,6 +305,9 @@ def get_profile_and_videos(handle: str, max_videos: int = 30) -> dict:
             if result.stderr:
                 print(f"[TikTok] yt-dlp error: {result.stderr[:200]}", file=sys.stderr)
             return search_tiktok_profile_ddg(handle)
+
+        if used_proxy:
+            print(f"[TikTok] Profile scrape used proxy {redact_proxy_url(used_proxy)}", file=sys.stderr)
         
         # Parse the JSON lines output
         videos = []
@@ -240,7 +391,13 @@ def download_video(video_url: str, output_path: str) -> dict:
             video_url
         ]
         
-        result = subprocess.run(with_proxy(cmd), capture_output=True, text=True, timeout=120)
+        result, used_proxy = run_ytdlp_with_proxy_retry(
+            cmd,
+            timeout=120,
+            action=f"video download {video_url}",
+        )
+        if used_proxy:
+            print(f"[TikTok] Download used proxy {redact_proxy_url(used_proxy)}", file=sys.stderr)
         
         if result.returncode == 0:
             # Get the actual file path (yt-dlp might add extension)

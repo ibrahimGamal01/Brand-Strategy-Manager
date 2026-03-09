@@ -6,14 +6,54 @@ Run: python3 camoufox_tiktok_scraper.py profile <handle> [max_videos]
 """
 
 import json
+import os
 import sys
 import time
+from urllib.parse import unquote, urlparse
 
 try:
     from camoufox.sync_api import Camoufox
 except ImportError:
     print(json.dumps({"error": "camoufox not installed. pip install camoufox[geoip]"}))
     sys.exit(1)
+
+
+def _env_true(name: str, fallback: bool = False) -> bool:
+    raw = str(os.environ.get(name, "")).strip().lower()
+    if not raw:
+        return fallback
+    return raw in {"1", "true", "yes", "y", "on"}
+
+
+def _resolve_camoufox_proxy_config():
+    if _env_true("SCRAPER_PROXY_FORCE_DIRECT", False):
+        return None
+
+    raw = str(os.environ.get("SCRAPER_PROXY_URL", "")).strip()
+    if not raw:
+        return None
+    candidate = raw if "://" in raw else f"http://{raw}"
+    parsed = urlparse(candidate)
+    if not parsed.hostname:
+        raise ValueError("Invalid SCRAPER_PROXY_URL: missing hostname")
+
+    scheme = (parsed.scheme or "http").lower()
+    if scheme not in {"http", "https", "socks5", "socks4"}:
+        raise ValueError(f"Invalid SCRAPER_PROXY_URL: unsupported scheme '{scheme}'")
+
+    try:
+        port = parsed.port or (443 if scheme == "https" else 80)
+    except Exception as exc:
+        raise ValueError("Invalid SCRAPER_PROXY_URL: invalid port") from exc
+
+    proxy = {
+        "server": f"{scheme}://{parsed.hostname}:{port}",
+    }
+    if parsed.username:
+        proxy["username"] = unquote(parsed.username)
+    if parsed.password:
+        proxy["password"] = unquote(parsed.password)
+    return proxy
 
 
 def extract_tiktok_profile_js():
@@ -114,7 +154,14 @@ def scrape_profile(handle: str, max_videos: int = 30) -> dict:
 
     url = f"https://www.tiktok.com/@{handle}"
     try:
-        with Camoufox(headless=True) as browser:
+        launch_options = {
+            "headless": True,
+        }
+        proxy_config = _resolve_camoufox_proxy_config()
+        if proxy_config:
+            launch_options["proxy"] = proxy_config
+
+        with Camoufox(**launch_options) as browser:
             page = browser.new_page()
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
             time.sleep(4)

@@ -6,6 +6,7 @@
  */
 
 import axios from 'axios';
+import { proxyUrlToAxiosConfig } from '../network/proxy-rotation';
 
 const APIFY_API_TOKEN = process.env.APIFY_API_TOKEN || '';
 const APIFY_ACTOR_ID = process.env.APIFY_ACTOR_ID || 'apify~instagram-api-scraper';
@@ -49,7 +50,8 @@ export interface ApifyScrapeResult {
  */
 export async function scrapeWithApify(
   username: string,
-  postsLimit: number = 30
+  postsLimit: number = 30,
+  options: { proxyUrl?: string | null } = {}
 ): Promise<ApifyScrapeResult> {
   if (!APIFY_API_TOKEN) {
     console.warn('[Apify] API token not configured, skipping');
@@ -65,19 +67,29 @@ export async function scrapeWithApify(
   console.log(`[Apify] Scraping @${cleanUsername} with limit ${postsLimit}`);
 
   try {
+    const proxyConfig = proxyUrlToAxiosConfig(options.proxyUrl || null);
+    if (options.proxyUrl && !proxyConfig) {
+      return {
+        success: false,
+        error: 'Unsupported proxy protocol for Apify request',
+        scraper_used: 'apify',
+      };
+    }
+
     // Use synchronous endpoint to get results immediately
     const endpoint = `${APIFY_BASE_URL}/acts/${APIFY_ACTOR_ID}/run-sync-get-dataset-items`;
     
     // Apify expects full URLs, not just usernames
     const profileUrl = `https://www.instagram.com/${cleanUsername}/`;
-    const requestConfig = {
+    const requestConfig: any = {
       params: {
         token: APIFY_API_TOKEN
       },
       headers: {
         'Content-Type': 'application/json'
       },
-      timeout: 120000 // 2 minute timeout for actor to run
+      timeout: 120000, // 2 minute timeout for actor to run
+      proxy: proxyConfig ?? false,
     };
     
     const input = {

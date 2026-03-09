@@ -1,18 +1,17 @@
 /**
  * Social Media Scraper Service
  * 
- * Integrates Python scrapers (Instaloader & yt-dlp) into the main workflow.
- * Executes Python scripts to scrape data and saves it to the database.
+ * Compatibility layer for legacy /api/scrapers routes.
+ * Delegates to policy-managed scraper services to avoid bypassing proxy policy.
  */
 
-import { PythonShell } from 'python-shell';
 import { PrismaClient } from '@prisma/client';
-import path from 'path';
+import { scrapeInstagramProfile } from '../scraper/instagram-service';
+import { tiktokService } from '../scraper/tiktok-service';
 
 const prisma = new PrismaClient();
 
 // Configuration
-const SCRIPTS_DIR = path.join(__dirname, '../../../scripts/social-scrapers');
 const DEFAULT_MAX_POSTS = 20;
 
 export interface ScrapeResult {
@@ -82,51 +81,78 @@ export class SocialScraperService {
   }
 
   /**
-   * Run the Python script for the specific platform
+   * Run platform scraping via policy-managed services.
    */
   private async runPythonScraper(platform: 'INSTAGRAM' | 'TIKTOK', handle: string): Promise<any> {
-    const scriptName = platform === 'INSTAGRAM' ? 'instagram.py' : 'tiktok.py';
-    const scriptPath = path.join(SCRIPTS_DIR, scriptName);
+    if (platform === 'INSTAGRAM') {
+      const result = await scrapeInstagramProfile(handle, DEFAULT_MAX_POSTS);
+      if (!result.success || !result.data) {
+        return {
+          success: false,
+          error: result.error || 'Instagram scraping failed',
+          scraper_used: result.scraper_used || 'instagram-service',
+        };
+      }
 
-    const options = {
-      mode: 'json' as const,
-      pythonPath: 'python3',
-      pythonOptions: ['-u'], // unbuffered stdout
-      arg: [handle, String(DEFAULT_MAX_POSTS)],
-      scriptPath: SCRIPTS_DIR
+      return {
+        success: true,
+        profile: {
+          handle: result.data.handle,
+          followers: result.data.follower_count,
+          following: result.data.following_count,
+          bio: result.data.bio,
+          posts_count: result.data.total_posts,
+        },
+        posts: result.data.posts.map((post) => ({
+          id: post.external_post_id,
+          url: post.post_url,
+          caption: post.caption || '',
+          likes: post.likes || 0,
+          comments: post.comments || 0,
+          views: 0,
+          shares: 0,
+          type: post.is_video ? 'VIDEO' : 'IMAGE',
+          date: post.timestamp || '',
+          media_url: post.media_url || '',
+        })),
+        scraper_used: result.scraper_used || 'instagram-service',
+      };
+    }
+
+    const result = await tiktokService.scrapeProfile(handle, DEFAULT_MAX_POSTS);
+    if (!result.success || !result.profile) {
+      return {
+        success: false,
+        error: result.error || 'TikTok scraping failed',
+        scraper_used: 'tiktok-service',
+      };
+    }
+
+    return {
+      success: true,
+      profile: {
+        handle: result.profile.handle,
+        followers: result.profile.follower_count || 0,
+        following: 0,
+        bio: result.profile.bio || '',
+        posts_count: result.total_videos || 0,
+      },
+      posts: (result.videos || []).map((video) => ({
+        id: video.video_id,
+        url: video.url,
+        caption: video.description || video.title || '',
+        description: video.description || video.title || '',
+        likes: video.like_count || 0,
+        comments: video.comment_count || 0,
+        shares: video.share_count || 0,
+        views: video.view_count || 0,
+        type: 'VIDEO',
+        date: video.upload_date || '',
+        duration: video.duration || 0,
+        thumbnail: video.thumbnail || '',
+      })),
+      scraper_used: 'tiktok-service',
     };
-    
-    // Using PythonShell properly with arguments
-    // The previous implementation had 'arg' instead of 'args' and incorrect options passing for run
-    const runOptions = {
-        mode: 'text' as const, // We capture text and parse it ourselves to be safe
-        pythonPath: 'python3',
-        pythonOptions: ['-u'],
-        scriptPath: SCRIPTS_DIR,
-        args: [handle, String(DEFAULT_MAX_POSTS)]
-    };
-
-    return new Promise((resolve, reject) => {
-      PythonShell.run(scriptName, runOptions).then(results => {
-        if (!results || results.length === 0) {
-            reject(new Error('No output from scraper script'));
-            return;
-        }
-
-        // The scripts output exactly one line of JSON
-        // Or multiple lines if there were errors caught, but the last line should be the JSON result
-        try {
-            const lastLine = results[results.length - 1];
-            const parsed = JSON.parse(lastLine);
-            resolve(parsed);
-        } catch (e) {
-            console.error('Failed to parse scraper output:', results);
-            reject(new Error('Invalid JSON output from scraper'));
-        }
-      }).catch(err => {
-        reject(err);
-      });
-    });
   }
 
   /**

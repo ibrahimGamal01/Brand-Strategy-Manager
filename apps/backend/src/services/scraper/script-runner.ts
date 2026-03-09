@@ -4,11 +4,13 @@ import path from 'path';
 import { promisify } from 'util';
 import {
   applyProxyEnv,
-  computeRetryBackoffMs,
   createProxyPoolFromEnv,
+  executeWithProxyPolicy,
   isRetryableNetworkError,
+  isProxyPolicyError,
+  ProxyPolicyScope,
+  resolveAllowDirectForScope,
   RotatingProxyPool,
-  sleep,
 } from '../network/proxy-rotation';
 
 const execFileAsync = promisify(execFile);
@@ -23,6 +25,14 @@ export type ScriptRunnerOutput<T = unknown> = {
   scriptPath: string;
 };
 
+export type ScriptRunnerProxyPolicy = {
+  scope: ProxyPolicyScope;
+  allowDirect: boolean;
+  selectedTargetId?: string;
+  selectedProxyUrl?: string | null;
+  attempt?: number;
+};
+
 type RunScriptJsonOptions = {
   label: string;
   executable: string;
@@ -34,6 +44,7 @@ type RunScriptJsonOptions = {
   maxBufferBytes?: number;
   maxAttempts?: number;
   proxyPool?: RotatingProxyPool;
+  proxyPolicy?: Partial<ScriptRunnerProxyPolicy>;
   extraEnv?: Record<string, string | undefined>;
 };
 
@@ -99,23 +110,29 @@ function parseJsonFromOutput<T>(stdout: string): T {
 export function resolveBackendScriptPath(scriptFileName: string): string | null {
   const cwd = process.cwd();
   const candidates = [
-    path.join(cwd, 'scripts', scriptFileName),
     path.join(cwd, 'apps/backend/scripts', scriptFileName),
+    path.join(cwd, 'scripts', scriptFileName),
     path.isAbsolute(scriptFileName) ? scriptFileName : path.join(cwd, scriptFileName),
   ];
   return candidates.find((candidate) => existsSync(candidate)) || null;
 }
 
-export function createScraperProxyPool(scope: string, envKeys: string[]): RotatingProxyPool {
+export function createScraperProxyPool(
+  scope: string,
+  envKeys: string[],
+  options: { policyScope?: ProxyPolicyScope; allowDirect?: boolean } = {}
+): RotatingProxyPool {
+  const policyScope = options.policyScope || scope;
+  const allowDirect = resolveAllowDirectForScope(policyScope, options.allowDirect);
   return createProxyPoolFromEnv({
     name: `scraper-${scope}`,
     envKeys,
-    includeDirect: true,
-    includeDirectEnvKey: 'SCRAPER_PROXY_ALLOW_DIRECT',
+    includeDirect: allowDirect,
     maxFailuresBeforeCooldown: Number(process.env.SCRAPER_PROXY_MAX_FAILURES || 2),
     maxFailuresEnvKey: 'SCRAPER_PROXY_MAX_FAILURES',
     cooldownMs: Number(process.env.SCRAPER_PROXY_COOLDOWN_MS || 120_000),
     cooldownEnvKey: 'SCRAPER_PROXY_COOLDOWN_MS',
+    fileEnvKey: 'PROXY_LIST_PATH',
   });
 }
 
@@ -131,63 +148,72 @@ export async function runScriptJsonWithRetries<T>(
     Number(options.maxAttempts || DEFAULT_COMMAND_MAX_ATTEMPTS),
     normalizePositiveInt(DEFAULT_COMMAND_MAX_ATTEMPTS, 3)
   );
+  const policyScope = options.proxyPolicy?.scope || options.label;
+  const policyAllowDirect = resolveAllowDirectForScope(
+    policyScope,
+    options.proxyPolicy?.allowDirect
+  );
 
-  let lastError: Error | null = null;
+  try {
+    const execution = await executeWithProxyPolicy<{
+      stdout: string;
+      stderr: string;
+      parsed: T;
+    }>({
+      scope: policyScope,
+      label: options.label,
+      proxyPool: options.proxyPool,
+      maxAttempts,
+      allowDirect: policyAllowDirect,
+      retryPredicate: isRetryableNetworkError,
+      operation: async ({ attempt, scope, target }) => {
+        const policyState: ScriptRunnerProxyPolicy = {
+          scope,
+          allowDirect: policyAllowDirect,
+          selectedTargetId: target.id,
+          selectedProxyUrl: target.proxyUrl,
+          attempt,
+        };
+        const envWithProxy = applyProxyEnv(process.env, target, { setScraperProxyVar: true });
+        envWithProxy.SCRAPER_PROXY_SCOPE = String(policyState.scope);
+        envWithProxy.SCRAPER_PROXY_ATTEMPT = String(policyState.attempt);
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const target = options.proxyPool?.acquire();
-    const envWithProxy = applyProxyEnv(process.env, target || {
-      id: `${options.label}:direct`,
-      proxyUrl: null,
-      label: 'direct',
-      isDirect: true,
-    }, { setScraperProxyVar: true });
-
-    if (options.extraEnv) {
-      for (const [key, value] of Object.entries(options.extraEnv)) {
-        if (typeof value === 'string') envWithProxy[key] = value;
-        else delete envWithProxy[key];
-      }
-    }
-
-    try {
-      const { stdout, stderr } = await execFileAsync(
-        options.executable,
-        [...(options.scriptArgsPrefix || []), scriptPath, ...(options.args || [])],
-        {
-          cwd: options.cwd || process.cwd(),
-          timeout: options.timeoutMs || 120_000,
-          maxBuffer: options.maxBufferBytes || 10 * 1024 * 1024,
-          env: envWithProxy,
+        if (options.extraEnv) {
+          for (const [key, value] of Object.entries(options.extraEnv)) {
+            if (typeof value === 'string') envWithProxy[key] = value;
+            else delete envWithProxy[key];
+          }
         }
-      );
 
-      const parsed = parseJsonFromOutput<T>(stdout);
-      if (target?.id) options.proxyPool?.recordSuccess(target.id);
+        const { stdout, stderr } = await execFileAsync(
+          options.executable,
+          [...(options.scriptArgsPrefix || []), scriptPath, ...(options.args || [])],
+          {
+            cwd: options.cwd || process.cwd(),
+            timeout: options.timeoutMs || 120_000,
+            maxBuffer: options.maxBufferBytes || 10 * 1024 * 1024,
+            env: envWithProxy,
+          }
+        );
 
-      return {
-        stdout,
-        stderr,
-        parsed,
-        attempts: attempt,
-        scriptPath,
-      };
-    } catch (error: any) {
-      if (target?.id) options.proxyPool?.recordFailure(target.id);
+        return {
+          stdout,
+          stderr,
+          parsed: parseJsonFromOutput<T>(stdout),
+        };
+      },
+    });
 
-      const stderr = sanitizeForLog(String(error?.stderr || error?.message || 'unknown script error'));
-      const retryable = isRetryableNetworkError(error);
-      lastError = new Error(
-        `[${options.label}] attempt ${attempt}/${maxAttempts} failed${target ? ` via ${target.label}` : ''}: ${stderr}`
-      );
-
-      if (!retryable || attempt >= maxAttempts) {
-        break;
-      }
-
-      await sleep(computeRetryBackoffMs(attempt));
+    return {
+      ...execution.value,
+      attempts: execution.attempt,
+      scriptPath,
+    };
+  } catch (error: any) {
+    if (isProxyPolicyError(error)) {
+      throw error;
     }
+    const stderr = sanitizeForLog(String(error?.stderr || error?.message || 'unknown script error'));
+    throw new Error(`[${options.label}] script execution failed: ${stderr}`);
   }
-
-  throw lastError || new Error(`[${options.label}] script execution failed`);
 }

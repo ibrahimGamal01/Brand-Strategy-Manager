@@ -9,11 +9,48 @@ import type {
   ScraplingFetchResponse,
   ScraplingMode,
 } from './scrapling-types';
+import {
+  computeRetryBackoffMs,
+  createProxyPoolFromEnv,
+  isRetryableNetworkError,
+  logProxyAttempt,
+  proxyUrlToAxiosConfig,
+  resolveAllowDirectForScope,
+  sleep,
+  type ProxyAcquireTarget,
+} from '../network/proxy-rotation';
 
 const DEFAULT_TIMEOUT_MS = Number(process.env.SCRAPLING_TIMEOUT_MS || 20_000);
 const WORKER_URL = String(process.env.SCRAPLING_WORKER_URL || '').replace(/\/$/, '');
 const SCRAPLING_WARNING_THROTTLE_MS = Math.max(10_000, Number(process.env.SCRAPLING_WARNING_THROTTLE_MS || 60_000));
+const SCRAPLING_FETCH_MAX_ATTEMPTS = Math.max(
+  1,
+  Number(process.env.SCRAPLING_FETCH_MAX_ATTEMPTS || process.env.SCRAPER_COMMAND_MAX_ATTEMPTS || 3)
+);
 const scraplingWarningTimestamps = new Map<string, number>();
+
+type ScraplingProxyStrategy = 'NONE' | 'ROTATE' | 'FIXED';
+
+const scraplingRotateProxyPool = createProxyPoolFromEnv({
+  name: 'scrapling-rotate',
+  envKeys: ['SCRAPLING_PROXY_URLS', 'SCRAPER_PROXY_URLS', 'PROXY_URLS', 'PROXY_URL'],
+  includeDirect: false,
+  maxFailuresBeforeCooldown: Number(process.env.SCRAPER_PROXY_MAX_FAILURES || 2),
+  maxFailuresEnvKey: 'SCRAPER_PROXY_MAX_FAILURES',
+  cooldownMs: Number(process.env.SCRAPER_PROXY_COOLDOWN_MS || 120_000),
+  cooldownEnvKey: 'SCRAPER_PROXY_COOLDOWN_MS',
+  fileEnvKey: 'PROXY_LIST_PATH',
+});
+
+const scraplingFixedProxyPool = createProxyPoolFromEnv({
+  name: 'scrapling-fixed',
+  envKeys: ['SCRAPLING_PROXY_URL', 'SCRAPER_PROXY_URL', 'PROXY_URL'],
+  includeDirect: false,
+  maxFailuresBeforeCooldown: Number(process.env.SCRAPER_PROXY_MAX_FAILURES || 2),
+  maxFailuresEnvKey: 'SCRAPER_PROXY_MAX_FAILURES',
+  cooldownMs: Number(process.env.SCRAPER_PROXY_COOLDOWN_MS || 120_000),
+  cooldownEnvKey: 'SCRAPER_PROXY_COOLDOWN_MS',
+});
 
 function warnScraplingWithThrottle(key: string, message: string, detail?: unknown): void {
   const now = Date.now();
@@ -64,6 +101,123 @@ function normalizeMode(raw: unknown): ScraplingMode {
   return 'AUTO';
 }
 
+function normalizeProxyStrategy(raw: unknown): ScraplingProxyStrategy {
+  const value = String(raw || 'NONE').trim().toUpperCase();
+  if (value === 'FIXED' || value === 'ROTATE') return value;
+  return 'NONE';
+}
+
+function buildDirectTarget(id: string): ProxyAcquireTarget {
+  return {
+    id,
+    proxyUrl: null,
+    label: 'direct',
+    isDirect: true,
+    cooldownHit: false,
+  };
+}
+
+function decorateWithProxyMetadata(
+  result: ScraplingFetchResponse,
+  params: {
+    requestedStrategy: ScraplingProxyStrategy;
+    resolvedStrategy: ScraplingProxyStrategy | 'NONE';
+    target: ProxyAcquireTarget;
+    attempt: number;
+    allowDirect: boolean;
+  }
+): ScraplingFetchResponse {
+  return {
+    ...result,
+    metadata: {
+      ...(result.metadata || {}),
+      requestedProxyStrategy: params.requestedStrategy,
+      resolvedProxyStrategy: params.resolvedStrategy,
+      proxyStrategy: params.resolvedStrategy,
+      proxyTargetId: params.target.id,
+      proxyTarget: params.target.label,
+      proxyIsDirect: params.target.isDirect,
+      proxyAttempt: params.attempt,
+      proxyScope: 'scrapling',
+      proxyAllowDirect: params.allowDirect,
+    },
+  };
+}
+
+function selectScraplingTarget(params: {
+  requestedStrategy: ScraplingProxyStrategy;
+  attempt: number;
+  maxAttempts: number;
+  allowDirect: boolean;
+}): {
+  target: ProxyAcquireTarget;
+  resolvedStrategy: ScraplingProxyStrategy | 'NONE';
+  pool: 'rotate' | 'fixed' | null;
+} {
+  const { requestedStrategy, attempt, maxAttempts, allowDirect } = params;
+  const directFallbackAttempt = allowDirect && requestedStrategy !== 'NONE' && attempt === maxAttempts && maxAttempts > 1;
+
+  if (requestedStrategy === 'NONE') {
+    return {
+      target: buildDirectTarget('scrapling:direct'),
+      resolvedStrategy: 'NONE',
+      pool: null,
+    };
+  }
+
+  if (requestedStrategy === 'FIXED') {
+    if (directFallbackAttempt) {
+      return {
+        target: buildDirectTarget('scrapling:fixed:direct'),
+        resolvedStrategy: 'NONE',
+        pool: null,
+      };
+    }
+    if (!scraplingFixedProxyPool.hasConfiguredProxies()) {
+      if (allowDirect) {
+        return {
+          target: buildDirectTarget('scrapling:fixed:direct'),
+          resolvedStrategy: 'NONE',
+          pool: null,
+        };
+      }
+      throw new Error('Scrapling FIXED proxy strategy requested but no fixed proxy is configured');
+    }
+    const target = scraplingFixedProxyPool.acquire();
+    return {
+      target,
+      resolvedStrategy: target.isDirect ? 'NONE' : 'FIXED',
+      pool: 'fixed',
+    };
+  }
+
+  if (directFallbackAttempt) {
+    return {
+      target: buildDirectTarget('scrapling:rotate:direct'),
+      resolvedStrategy: 'NONE',
+      pool: null,
+    };
+  }
+
+  if (!scraplingRotateProxyPool.hasConfiguredProxies()) {
+    if (allowDirect) {
+      return {
+        target: buildDirectTarget('scrapling:rotate:direct'),
+        resolvedStrategy: 'NONE',
+        pool: null,
+      };
+    }
+    throw new Error('Scrapling ROTATE proxy strategy requested but no rotating proxies are configured');
+  }
+
+  const target = scraplingRotateProxyPool.acquire();
+  return {
+    target,
+    resolvedStrategy: target.isDirect ? 'NONE' : 'ROTATE',
+    pool: 'rotate',
+  };
+}
+
 function hasUsableWorkerContent(payload: { html?: string | null; text?: string | null }): boolean {
   const html = String(payload.html || '').trim();
   const text = String(payload.text || '').trim();
@@ -95,6 +249,7 @@ async function fetchViaWorker(payload: ScraplingFetchRequest): Promise<Scrapling
 }
 
 async function fetchViaFallback(payload: ScraplingFetchRequest): Promise<ScraplingFetchResponse> {
+  const proxyConfig = proxyUrlToAxiosConfig(payload.proxyUrl || null);
   const response = await axios.get(payload.url, {
     timeout: payload.timeoutMs || DEFAULT_TIMEOUT_MS,
     responseType: 'text',
@@ -104,6 +259,7 @@ async function fetchViaFallback(payload: ScraplingFetchRequest): Promise<Scrapli
       Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       'Accept-Language': 'en-US,en;q=0.9',
     },
+    proxy: proxyConfig ?? false,
     validateStatus: () => true,
   });
 
@@ -122,6 +278,7 @@ async function fetchViaFallback(payload: ScraplingFetchRequest): Promise<Scrapli
     metadata: {
       sourceTransport: 'HTTP_FALLBACK',
       fallback: true,
+      proxyTarget: payload.proxyUrl || null,
       contentType: String(response.headers['content-type'] || ''),
     },
     fallbackReason: 'SCRAPLING_WORKER_URL is not configured; used lightweight HTTP fallback.',
@@ -315,47 +472,146 @@ export const scraplingClient = {
   },
 
   async fetch(request: ScraplingFetchRequest): Promise<ScraplingFetchResponse> {
-    const payload: ScraplingFetchRequest = {
+    const requestedStrategy = normalizeProxyStrategy(request.proxyStrategy);
+    const allowDirect = resolveAllowDirectForScope('scrapling');
+    const maxAttempts = requestedStrategy === 'NONE' ? 1 : SCRAPLING_FETCH_MAX_ATTEMPTS;
+
+    const payloadBase: ScraplingFetchRequest = {
       ...request,
       mode: normalizeMode(request.mode),
+      proxyStrategy: requestedStrategy,
       timeoutMs: request.timeoutMs || DEFAULT_TIMEOUT_MS,
       returnHtml: request.returnHtml !== false,
       returnText: request.returnText !== false,
     };
 
-    if (!WORKER_URL) {
-      return fetchViaFallback(payload);
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const selection = selectScraplingTarget({
+        requestedStrategy,
+        attempt,
+        maxAttempts,
+        allowDirect,
+      });
+      const { target, resolvedStrategy, pool } = selection;
+      const payloadAttempt: ScraplingFetchRequest = {
+        ...payloadBase,
+        proxyUrl: target.proxyUrl || undefined,
+      };
+
+      logProxyAttempt({
+        scope: 'scrapling',
+        attempt,
+        target,
+        outcome: 'attempt',
+      });
+      if (requestedStrategy !== 'NONE' && target.isDirect) {
+        logProxyAttempt({
+          scope: 'scrapling',
+          attempt,
+          target,
+          outcome: 'direct_fallback',
+          retryable: null,
+        });
+      }
+
+      try {
+        let result = WORKER_URL ? await fetchViaWorker(payloadAttempt) : await fetchViaFallback(payloadAttempt);
+        if (WORKER_URL && result.ok && !result.blockedSuspected && !hasUsableWorkerContent(result)) {
+          warnScraplingWithThrottle(
+            'worker-empty-fetch',
+            '[ScraplingClient] Worker returned empty html/text, falling back to HTTP fetch.'
+          );
+          const fallback = await fetchViaFallback(payloadAttempt);
+          fallback.fallbackReason =
+            result.fallbackReason ||
+            'Worker returned empty html/text payload; used HTTP fallback for usable content.';
+          fallback.metadata = {
+            ...(result.metadata || {}),
+            ...(fallback.metadata || {}),
+            workerEmptyPayload: true,
+          };
+          result = fallback;
+        }
+
+        const retryableResult = !result.ok && (result.blockedSuspected || isBlockedLike(result.statusCode));
+        if (pool === 'rotate' && target.proxyUrl) {
+          if (retryableResult) scraplingRotateProxyPool.recordFailure(target.id);
+          else scraplingRotateProxyPool.recordSuccess(target.id);
+        }
+        if (pool === 'fixed' && target.proxyUrl) {
+          if (retryableResult) scraplingFixedProxyPool.recordFailure(target.id);
+          else scraplingFixedProxyPool.recordSuccess(target.id);
+        }
+
+        logProxyAttempt({
+          scope: 'scrapling',
+          attempt,
+          target,
+          outcome: retryableResult ? 'failure' : 'success',
+          retryable: retryableResult ? true : false,
+        });
+
+        const decorated = decorateWithProxyMetadata(result, {
+          requestedStrategy,
+          resolvedStrategy,
+          target,
+          attempt,
+          allowDirect,
+        });
+
+        if (retryableResult && attempt < maxAttempts) {
+          await sleep(computeRetryBackoffMs(attempt));
+          continue;
+        }
+
+        return decorated;
+      } catch (error: any) {
+        lastError = error as Error;
+        const retryable = isRetryableNetworkError(error);
+        if (pool === 'rotate' && target.proxyUrl) {
+          scraplingRotateProxyPool.recordFailure(target.id);
+        }
+        if (pool === 'fixed' && target.proxyUrl) {
+          scraplingFixedProxyPool.recordFailure(target.id);
+        }
+        logProxyAttempt({
+          scope: 'scrapling',
+          attempt,
+          target,
+          outcome: 'failure',
+          error,
+          retryable,
+        });
+
+        if (retryable && attempt < maxAttempts) {
+          await sleep(computeRetryBackoffMs(attempt));
+          continue;
+        }
+
+        if (WORKER_URL) {
+          warnScraplingWithThrottle(
+            'worker-fetch-failed',
+            '[ScraplingClient] Worker fetch failed, falling back to lightweight mode:',
+            error?.message || error
+          );
+          const fallback = await fetchViaFallback(payloadAttempt);
+          fallback.fallbackReason = `Worker fetch failed: ${error?.message || 'unknown error'}`;
+          return decorateWithProxyMetadata(fallback, {
+            requestedStrategy,
+            resolvedStrategy,
+            target,
+            attempt,
+            allowDirect,
+          });
+        }
+
+        throw error;
+      }
     }
 
-    try {
-      const workerResult = await fetchViaWorker(payload);
-      if (workerResult.ok && !workerResult.blockedSuspected && !hasUsableWorkerContent(workerResult)) {
-        warnScraplingWithThrottle(
-          'worker-empty-fetch',
-          '[ScraplingClient] Worker returned empty html/text, falling back to HTTP fetch.'
-        );
-        const fallback = await fetchViaFallback(payload);
-        fallback.fallbackReason =
-          workerResult.fallbackReason ||
-          'Worker returned empty html/text payload; used HTTP fallback for usable content.';
-        fallback.metadata = {
-          ...(workerResult.metadata || {}),
-          ...(fallback.metadata || {}),
-          workerEmptyPayload: true,
-        };
-        return fallback;
-      }
-      return workerResult;
-    } catch (error: any) {
-      warnScraplingWithThrottle(
-        'worker-fetch-failed',
-        '[ScraplingClient] Worker fetch failed, falling back to lightweight mode:',
-        error?.message || error
-      );
-      const fallback = await fetchViaFallback(payload);
-      fallback.fallbackReason = `Worker fetch failed: ${error?.message || 'unknown error'}`;
-      return fallback;
-    }
+    throw lastError || new Error('Scrapling fetch failed');
   },
 
   async crawl(request: ScraplingCrawlRequest): Promise<ScraplingCrawlResponse> {

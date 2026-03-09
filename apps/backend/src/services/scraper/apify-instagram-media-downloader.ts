@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { emitResearchJobEvent } from '../social/research-job-events';
+import { proxyUrlToAxiosConfig } from '../network/proxy-rotation';
 
 const APIFY_BASE_URL = 'https://api.apify.com/v2';
 const APIFY_MEDIA_DOWNLOADER_ACTOR_ID =
@@ -96,7 +97,8 @@ function unique(values: string[]): string[] {
 
 export async function resolveInstagramMediaViaApify(
   inputUrl: string,
-  eventContext: InstagramResolveEventContext = {}
+  eventContext: InstagramResolveEventContext = {},
+  options: { proxyUrl?: string | null } = {}
 ): Promise<ResolveInstagramMediaResult> {
   const normalizedUrl = normalizeInstagramPageUrl(inputUrl);
   const shouldEmit = Boolean(eventContext.researchJobId);
@@ -160,6 +162,16 @@ export async function resolveInstagramMediaViaApify(
   }
 
   try {
+    const proxyConfig = proxyUrlToAxiosConfig(options.proxyUrl || null);
+    if (options.proxyUrl && !proxyConfig) {
+      return {
+        success: false,
+        mediaUrls: [],
+        error: 'Unsupported proxy protocol for Apify media resolve request',
+        scraperUsed: 'apify_instagram_media_downloader',
+      };
+    }
+
     const endpoint = `${APIFY_BASE_URL}/acts/${APIFY_MEDIA_DOWNLOADER_ACTOR_ID}/run-sync-get-dataset-items`;
     const payload = { instagram_urls: [normalizedUrl] };
 
@@ -167,6 +179,7 @@ export async function resolveInstagramMediaViaApify(
       params: { token: APIFY_MEDIA_DOWNLOADER_TOKEN },
       headers: { 'Content-Type': 'application/json' },
       timeout: 120000,
+      proxy: proxyConfig ?? false,
     });
 
     const items = Array.isArray(response.data) ? response.data : [];

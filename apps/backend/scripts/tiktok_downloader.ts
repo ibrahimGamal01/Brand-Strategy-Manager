@@ -7,11 +7,32 @@ import path from 'path';
 // Use stealth plugin to avoid detection
 puppeteer.use(StealthPlugin());
 
+function envTrue(name: string, fallback = false): boolean {
+    const raw = String(process.env[name] || '').trim().toLowerCase();
+    if (!raw) return fallback;
+    return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+}
+
 function resolveProxyConfig() {
-    const raw = (process.env.SCRAPER_PROXY_URL || process.env.HTTPS_PROXY || process.env.HTTP_PROXY || '').trim();
+    if (envTrue('SCRAPER_PROXY_FORCE_DIRECT', false)) return null;
+    const executionOnlyMode = envTrue('SCRAPER_PROXY_DISABLE_SELF_ROTATION', false);
+    const explicitScraperProxy = (process.env.SCRAPER_PROXY_URL || '').trim();
+    const raw = (
+        executionOnlyMode
+            ? explicitScraperProxy
+            : (explicitScraperProxy || process.env.HTTPS_PROXY || process.env.HTTP_PROXY || '')
+    ).trim();
     if (!raw) return null;
+    const candidate = raw.includes('://') ? raw : `http://${raw}`;
     try {
-        const parsed = new URL(raw);
+        const parsed = new URL(candidate);
+        const protocol = parsed.protocol.toLowerCase();
+        if (protocol !== 'http:' && protocol !== 'https:') {
+            if (executionOnlyMode || explicitScraperProxy) {
+                throw new Error(`Unsupported SCRAPER_PROXY_URL protocol: ${protocol}`);
+            }
+            return null;
+        }
         const port = parsed.port ? Number(parsed.port) : parsed.protocol === 'https:' ? 443 : 80;
         if (!Number.isFinite(port)) return null;
         return {
@@ -35,6 +56,9 @@ function resolveProxyConfig() {
             },
         };
     } catch {
+        if (executionOnlyMode || explicitScraperProxy) {
+            throw new Error('Invalid SCRAPER_PROXY_URL format');
+        }
         return null;
     }
 }

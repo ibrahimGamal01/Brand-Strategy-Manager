@@ -11,14 +11,24 @@
  * 4. Raw Results Storage (for later processing)
  */
 
-import { spawn } from 'child_process';
-import path from 'path';
-import { existsSync } from 'fs';
 import { PrismaClient } from '@prisma/client';
+import { createScraperProxyPool, runScriptJsonWithRetries } from '../scraper/script-runner';
 
 const prisma = new PrismaClient();
 const DEFAULT_DDG_TIMEOUT_MS = 180_000;
 const MAX_DDG_ERROR_SNIPPET = 4_000;
+const DEFAULT_DDG_SCRIPT_ATTEMPTS = Number(process.env.DDG_SCRIPT_MAX_ATTEMPTS || process.env.SCRAPER_COMMAND_MAX_ATTEMPTS || 4);
+
+const ddgProxyPool = createScraperProxyPool(
+  'ddg-search',
+  [
+    'DDG_PROXY_URLS',
+    'SCRAPER_PROXY_URLS',
+    'PROXY_URLS',
+    'PROXY_URL',
+  ],
+  { policyScope: 'ddg' }
+);
 
 interface DdgRunResult {
   stdout: string;
@@ -57,84 +67,30 @@ function logDdgFailure(scope: string, error: unknown): void {
   console.error(`[DDGSearch] ${scope} failed:`, message);
 }
 
-function resolveDdgScriptPath(): string {
-  const cwd = process.cwd();
-  const candidates = [
-    path.join(cwd, 'scripts/ddg_search.py'),
-    path.join(cwd, 'apps/backend/scripts/ddg_search.py'),
-    path.resolve(cwd, '../backend/scripts/ddg_search.py'),
-    path.resolve(__dirname, '../../../scripts/ddg_search.py'),
-  ];
-
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-  }
-
-  throw new Error(`ddg_search.py not found. Checked: ${candidates.join(', ')}`);
-}
-
 async function runDdgCommand(
   args: string[],
   timeoutMs: number = DEFAULT_DDG_TIMEOUT_MS
 ): Promise<DdgRunResult> {
-  const scriptPath = resolveDdgScriptPath();
-  return await new Promise<DdgRunResult>((resolve, reject) => {
-    const child = spawn('python3', [scriptPath, ...args], {
-      cwd: process.cwd(),
-      env: { ...process.env, PYTHONUNBUFFERED: '1' },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    let stdout = '';
-    let stderr = '';
-    let settled = false;
-
-    const timeout = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      child.kill('SIGKILL');
-      reject(
-        new Error(
-          `DDG command timed out after ${timeoutMs}ms: python3 ${path.basename(scriptPath)} ${args.join(' ')}`
-        )
-      );
-    }, timeoutMs);
-
-    child.stdout.on('data', (chunk: Buffer | string) => {
-      stdout += chunk.toString();
-    });
-
-    child.stderr.on('data', (chunk: Buffer | string) => {
-      stderr += chunk.toString();
-    });
-
-    child.on('error', (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      reject(error);
-    });
-
-    child.on('close', (code, signal) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-
-      if (code === 0) {
-        resolve({ stdout, stderr });
-        return;
-      }
-
-      const stderrSnippet = trimForLog(stderr);
-      reject(
-        new Error(
-          `DDG command failed (code=${code ?? 'null'}, signal=${signal ?? 'none'}): python3 ${path.basename(scriptPath)} ${args.join(' ')}${stderrSnippet ? ` | stderr=${stderrSnippet}` : ''}`
-        )
-      );
-    });
+  const run = await runScriptJsonWithRetries<unknown>({
+    label: 'ddg-search',
+    executable: 'python3',
+    scriptFileName: 'ddg_search.py',
+    args,
+    timeoutMs,
+    maxBufferBytes: 12 * 1024 * 1024,
+    maxAttempts: DEFAULT_DDG_SCRIPT_ATTEMPTS,
+    proxyPool: ddgProxyPool,
+    proxyPolicy: {
+      scope: 'ddg',
+    },
+    extraEnv: {
+      PYTHONUNBUFFERED: '1',
+    },
   });
+
+  const stdout = JSON.stringify(run.parsed);
+  const stderr = trimForLog(run.stderr);
+  return { stdout, stderr };
 }
 
 export interface RawSearchResult {

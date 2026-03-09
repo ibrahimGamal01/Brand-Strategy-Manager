@@ -1,7 +1,21 @@
-import { createGraphQLScraper } from './instagram-graphql';
+import { createGraphQLScraper, isInstagramGraphQLTemporarilyBlocked } from './instagram-graphql';
 import axios from 'axios';
 import { extractCsrf } from './instagram-cookie';
 import { createScraperProxyPool, runScriptJsonWithRetries } from './script-runner';
+import {
+  executeWithProxyPolicy,
+  isProxyPolicyError,
+  isRetryableNetworkError,
+  proxyUrlToAxiosConfig,
+  resolveAllowDirectForScope,
+} from '../network/proxy-rotation';
+import {
+  acquireInstagramSession,
+  getInstagramGlobalGateRemainingMs,
+  isInstagramLoginGatePayload,
+  recordInstagramSessionFailure,
+  recordInstagramSessionSuccess,
+} from './instagram-session-pool';
 
 const instagramScraperProxyPool = createScraperProxyPool('instagram-scraper', [
   'INSTAGRAM_SCRAPER_PROXY_URLS',
@@ -9,6 +23,14 @@ const instagramScraperProxyPool = createScraperProxyPool('instagram-scraper', [
   'PROXY_URLS',
   'PROXY_URL',
 ]);
+
+const WEB_PROFILE_MAX_AUTH_RETRIES = Math.max(
+  0,
+  Number(process.env.INSTAGRAM_WEB_PROFILE_MAX_AUTH_RETRIES || 1)
+);
+const INSTAGRAM_APIFY_ATTEMPTS = Math.max(1, Number(process.env.INSTAGRAM_APIFY_ATTEMPTS || 2));
+const INSTAGRAM_WEB_PROFILE_ATTEMPTS = Math.max(1, Number(process.env.INSTAGRAM_WEB_PROFILE_ATTEMPTS || 2));
+const INSTAGRAM_METADATA_ENRICH_ATTEMPTS = Math.max(1, Number(process.env.INSTAGRAM_METADATA_ENRICH_ATTEMPTS || 2));
 
 
 export interface InstagramComment {
@@ -65,6 +87,15 @@ type InstagramMetadataPatch = Partial<
   >
 >;
 
+type MetadataEnrichmentDeps = {
+  createGraphQLScraperFn: typeof createGraphQLScraper;
+  scrapeMetadataViaPublicHtmlFn: (username: string, proxyUrl?: string | null) => Promise<InstagramMetadataPatch>;
+};
+
+type MetadataEnrichmentOptions = {
+  proxyUrl?: string | null;
+};
+
 function applyMetadataPatch(data: InstagramProfileData, patch: InstagramMetadataPatch): void {
   if (Number.isFinite(Number(patch.follower_count)) && Number(patch.follower_count) > 0) {
     data.follower_count = Number(patch.follower_count);
@@ -87,6 +118,20 @@ function applyMetadataPatch(data: InstagramProfileData, patch: InstagramMetadata
   if (typeof patch.is_private === 'boolean') {
     data.is_private = Boolean(patch.is_private);
   }
+}
+
+async function runInstagramPolicyOperation<T>(
+  operation: (proxyUrl: string | null, attempt: number) => Promise<T>,
+  options: { maxAttempts?: number } = {}
+): Promise<T> {
+  const execution = await executeWithProxyPolicy<T>({
+    scope: 'instagram',
+    proxyPool: instagramScraperProxyPool,
+    maxAttempts: Math.max(1, Number(options.maxAttempts || INSTAGRAM_WEB_PROFILE_ATTEMPTS)),
+    retryPredicate: isRetryableNetworkError,
+    operation: async ({ target, attempt }) => operation(target.proxyUrl, attempt),
+  });
+  return execution.value;
 }
 
 function decodeEscapedJsonString(value: string): string {
@@ -133,8 +178,15 @@ function extractStringFromHtml(html: string, patterns: RegExp[]): string | null 
   return null;
 }
 
-async function scrapeMetadataViaPublicHtml(username: string): Promise<InstagramMetadataPatch> {
+async function scrapeMetadataViaPublicHtml(
+  username: string,
+  proxyUrl?: string | null
+): Promise<InstagramMetadataPatch> {
   const url = `https://www.instagram.com/${encodeURIComponent(username)}/`;
+  const proxyConfig = proxyUrlToAxiosConfig(proxyUrl || null);
+  if (proxyUrl && !proxyConfig) {
+    throw new Error('Unsupported proxy protocol for Instagram public HTML metadata request');
+  }
   const response = await axios.get(url, {
     timeout: 20_000,
     responseType: 'text',
@@ -145,6 +197,7 @@ async function scrapeMetadataViaPublicHtml(username: string): Promise<InstagramM
       'Accept-Language': 'en-US,en;q=0.9',
       Referer: 'https://www.instagram.com/',
     },
+    proxy: proxyConfig ?? false,
     validateStatus: () => true,
   });
 
@@ -200,32 +253,52 @@ function isProfileMetadataIncomplete(data: InstagramProfileData): boolean {
 /** Enrich profile data with best-effort sources when metadata is incomplete. Mutates and returns data. */
 async function enrichProfileMetadataIfNeeded(
   cleanHandle: string,
-  data: InstagramProfileData
+  data: InstagramProfileData,
+  deps: MetadataEnrichmentDeps = {
+    createGraphQLScraperFn: createGraphQLScraper,
+    scrapeMetadataViaPublicHtmlFn: scrapeMetadataViaPublicHtml,
+  },
+  options: MetadataEnrichmentOptions = {}
 ): Promise<InstagramProfileData> {
   if (!isProfileMetadataIncomplete(data)) return data;
 
   // First attempt: GraphQL profile stats (fast when session/cookie supports it).
-  try {
-    const graphqlScraper = createGraphQLScraper();
-    const profile = await graphqlScraper.scrapeProfile(cleanHandle);
-    applyMetadataPatch(data, {
-      follower_count: profile.follower_count,
-      following_count: profile.following_count,
-      bio: profile.biography,
-      is_verified: profile.is_verified,
-      is_private: profile.is_private,
-      profile_pic: profile.profile_pic_url,
-      total_posts: profile.edge_owner_to_timeline_media?.count,
-    });
-    console.log('[Instagram] ✓ Enriched with GraphQL profile stats');
-  } catch (err: any) {
-    console.warn('[Instagram] GraphQL enrichment failed:', err?.message);
+  const gateState = isInstagramGraphQLTemporarilyBlocked();
+  if (gateState.blocked) {
+    console.log(
+      `[Instagram] GraphQL enrichment skipped (temporary gate active, retry in ${Math.ceil(
+        gateState.retryInMs / 1000
+      )}s)`
+    );
+  } else {
+    try {
+      const graphqlScraper = deps.createGraphQLScraperFn({
+        useProxy: Boolean(options.proxyUrl),
+        proxyUrl: options.proxyUrl || undefined,
+      });
+      const profile = await graphqlScraper.scrapeProfile(cleanHandle);
+      applyMetadataPatch(data, {
+        follower_count: profile.follower_count,
+        following_count: profile.following_count,
+        bio: profile.biography,
+        is_verified: profile.is_verified,
+        is_private: profile.is_private,
+        profile_pic: profile.profile_pic_url,
+        total_posts: profile.edge_owner_to_timeline_media?.count,
+      });
+      console.log('[Instagram] ✓ Enriched with GraphQL profile stats');
+    } catch (err: any) {
+      console.warn('[Instagram] GraphQL enrichment failed:', err?.message);
+    }
   }
 
   // Second attempt: public profile HTML parsing (works without cookies in many cases).
   if (isProfileMetadataIncomplete(data)) {
     try {
-      const htmlPatch = await scrapeMetadataViaPublicHtml(cleanHandle);
+      const htmlPatch = await deps.scrapeMetadataViaPublicHtmlFn(
+        cleanHandle,
+        options.proxyUrl || undefined
+      );
       applyMetadataPatch(data, htmlPatch);
       if (!isProfileMetadataIncomplete(data)) {
         console.log('[Instagram] ✓ Enriched metadata from public profile HTML');
@@ -240,71 +313,171 @@ async function enrichProfileMetadataIfNeeded(
   return data;
 }
 
+export async function __enrichInstagramProfileMetadataForTest(
+  cleanHandle: string,
+  data: InstagramProfileData,
+  overrides: Partial<MetadataEnrichmentDeps> = {}
+): Promise<InstagramProfileData> {
+  return enrichProfileMetadataIfNeeded(cleanHandle, data, {
+    createGraphQLScraperFn: overrides.createGraphQLScraperFn || createGraphQLScraper,
+    scrapeMetadataViaPublicHtmlFn: overrides.scrapeMetadataViaPublicHtmlFn || scrapeMetadataViaPublicHtml,
+  });
+}
+
 // Web profile scraper using /api/v1/users/web_profile_info
-async function scrapeViaWebProfile(username: string, postsLimit: number): Promise<InstagramProfileData | null> {
-  const cookie = process.env.INSTAGRAM_SESSION_COOKIES || process.env.INSTAGRAM_SESSION_COOKIE;
-  if (!cookie) throw new Error('No Instagram session cookies configured');
-  const csrf = extractCsrf(cookie);
+async function scrapeViaWebProfile(
+  username: string,
+  postsLimit: number,
+  proxyUrl?: string | null
+): Promise<InstagramProfileData | null> {
+  const gateState = isInstagramGraphQLTemporarilyBlocked();
+  if (gateState.blocked) {
+    throw new Error(
+      `INSTAGRAM_LOGIN_GATE_ACTIVE: Instagram web profile temporarily blocked. Retry in ${Math.ceil(
+        gateState.retryInMs / 1000
+      )}s.`
+    );
+  }
 
-  const client = axios.create({
-    baseURL: 'https://www.instagram.com',
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': 'application/json',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'X-CSRFToken': csrf || '',
-      'Cookie': cookie,
-    },
-    withCredentials: true,
-    timeout: 30000,
-  });
+  const attemptedSessionIds = new Set<string>();
+  let attempt = 0;
 
-  const url = `/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`;
-  const res = await client.get(url);
-  const user = res.data?.data?.user;
-  if (!user) throw new Error('web_profile_info response missing user');
-
-  const edges = user.edge_owner_to_timeline_media?.edges || [];
-  const posts = edges.slice(0, postsLimit).map((e: any) => {
-    const n = e.node;
-    const isVideo = n.is_video;
-    const mediaUrls: string[] = [];
-    if (n.display_url) mediaUrls.push(n.display_url);
-    if (n.video_url) mediaUrls.push(n.video_url);
-    if (n.edge_sidecar_to_children?.edges) {
-      n.edge_sidecar_to_children.edges.forEach((c: any) => {
-        if (c.node.display_url) mediaUrls.push(c.node.display_url);
-        if (c.node.video_url) mediaUrls.push(c.node.video_url);
-      });
+  while (attempt <= WEB_PROFILE_MAX_AUTH_RETRIES) {
+    const session = acquireInstagramSession({ excludeSessionIds: attemptedSessionIds });
+    if (!session) {
+      throw new Error('No healthy Instagram session cookie available for web_profile_info.');
     }
-    return {
-      external_post_id: n.id,
-      post_url: `https://www.instagram.com/p/${n.shortcode}/`,
-      caption: n.edge_media_to_caption?.edges?.[0]?.node?.text || '',
-      likes: n.edge_media_preview_like?.count || 0,
-      comments: n.edge_media_to_comment?.count || 0,
-      timestamp: new Date(n.taken_at_timestamp * 1000).toISOString(),
-      media_url: n.display_url,
-      is_video: isVideo,
-      video_url: n.video_url || null,
-      typename: n.__typename || (isVideo ? 'GraphVideo' : 'GraphImage'),
-      media_urls: mediaUrls,
-    } as InstagramPost;
-  });
+    attemptedSessionIds.add(session.id);
+    const proxyConfig = proxyUrlToAxiosConfig(proxyUrl || null);
+    if (proxyUrl && !proxyConfig) {
+      throw new Error('Unsupported proxy protocol for Instagram web profile request');
+    }
 
-  const profileData: InstagramProfileData = {
-    handle: user.username,
-    follower_count: user.edge_followed_by?.count || 0,
-    following_count: user.edge_follow?.count || 0,
-    bio: user.biography || '',
-    profile_pic: user.profile_pic_url_hd || user.profile_pic_url || '',
-    is_verified: user.is_verified || false,
-    is_private: user.is_private || false,
-    total_posts: user.edge_owner_to_timeline_media?.count || posts.length,
-    posts,
-    discovered_competitors: []
-  };
-  return profileData;
+    const client = axios.create({
+      baseURL: 'https://www.instagram.com',
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        Accept: 'application/json',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'X-CSRFToken': session.csrf || extractCsrf(session.cookie) || '',
+        Cookie: session.cookie,
+      },
+      withCredentials: true,
+      timeout: 30000,
+      proxy: proxyConfig ?? false,
+      validateStatus: () => true,
+    });
+
+    const url = `/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`;
+    try {
+      const res = await client.get(url);
+      const status = Number(res.status || 0);
+      const responseData = res.data;
+      const user = responseData?.data?.user;
+
+      if (status >= 200 && status < 300 && user) {
+        recordInstagramSessionSuccess(session.id);
+
+        const edges = user.edge_owner_to_timeline_media?.edges || [];
+        const posts = edges.slice(0, postsLimit).map((e: any) => {
+          const n = e.node;
+          const isVideo = n.is_video;
+          const mediaUrls: string[] = [];
+          if (n.display_url) mediaUrls.push(n.display_url);
+          if (n.video_url) mediaUrls.push(n.video_url);
+          if (n.edge_sidecar_to_children?.edges) {
+            n.edge_sidecar_to_children.edges.forEach((c: any) => {
+              if (c.node.display_url) mediaUrls.push(c.node.display_url);
+              if (c.node.video_url) mediaUrls.push(c.node.video_url);
+            });
+          }
+          return {
+            external_post_id: n.id,
+            post_url: `https://www.instagram.com/p/${n.shortcode}/`,
+            caption: n.edge_media_to_caption?.edges?.[0]?.node?.text || '',
+            likes: n.edge_media_preview_like?.count || 0,
+            comments: n.edge_media_to_comment?.count || 0,
+            timestamp: new Date(n.taken_at_timestamp * 1000).toISOString(),
+            media_url: n.display_url,
+            is_video: isVideo,
+            video_url: n.video_url || null,
+            typename: n.__typename || (isVideo ? 'GraphVideo' : 'GraphImage'),
+            media_urls: mediaUrls,
+          } as InstagramPost;
+        });
+
+        const profileData: InstagramProfileData = {
+          handle: user.username,
+          follower_count: user.edge_followed_by?.count || 0,
+          following_count: user.edge_follow?.count || 0,
+          bio: user.biography || '',
+          profile_pic: user.profile_pic_url_hd || user.profile_pic_url || '',
+          is_verified: user.is_verified || false,
+          is_private: user.is_private || false,
+          total_posts: user.edge_owner_to_timeline_media?.count || posts.length,
+          posts,
+          discovered_competitors: [],
+        };
+        return profileData;
+      }
+
+      const isAuthStatus = status === 401 || status === 403 || status === 429;
+      if (isAuthStatus) {
+        const loginGate = isInstagramLoginGatePayload(responseData);
+        recordInstagramSessionFailure(
+          session.id,
+          loginGate ? 'LOGIN_GATE' : status === 429 ? 'RATE_429' : 'AUTH_401'
+        );
+
+        if (loginGate) {
+          const retryInMs = getInstagramGlobalGateRemainingMs();
+          throw new Error(
+            `INSTAGRAM_LOGIN_GATE_ACTIVE: Instagram web profile temporarily blocked. Retry in ${Math.ceil(
+              (retryInMs || 60_000) / 1000
+            )}s.`
+          );
+        }
+
+        if (attempt >= WEB_PROFILE_MAX_AUTH_RETRIES) {
+          throw new Error(`web_profile_info auth failed with status ${status}`);
+        }
+
+        attempt += 1;
+        continue;
+      }
+
+      throw new Error(
+        `web_profile_info returned status ${status}${user ? '' : ' and missing user payload'}`
+      );
+    } catch (error: any) {
+      if (axios.isAxiosError(error)) {
+        const status = error.response?.status;
+        if (status === 401 || status === 403 || status === 429) {
+          const loginGate = isInstagramLoginGatePayload(error.response?.data);
+          recordInstagramSessionFailure(
+            session.id,
+            loginGate ? 'LOGIN_GATE' : status === 429 ? 'RATE_429' : 'AUTH_401'
+          );
+          if (loginGate) {
+            const retryInMs = getInstagramGlobalGateRemainingMs();
+            throw new Error(
+              `INSTAGRAM_LOGIN_GATE_ACTIVE: Instagram web profile temporarily blocked. Retry in ${Math.ceil(
+                (retryInMs || 60_000) / 1000
+              )}s.`
+            );
+          }
+          if (attempt < WEB_PROFILE_MAX_AUTH_RETRIES) {
+            attempt += 1;
+            continue;
+          }
+        }
+      }
+      throw error;
+    }
+  }
+
+  throw new Error('web_profile_info auth retries exhausted');
 }
 
 /**
@@ -320,28 +493,62 @@ export async function scrapeInstagramProfile(
   proxyUrl?: string
 ): Promise<ScrapeResult> {
   const cleanHandle = handle.replace('@', '');
+  const explicitProxyUrl = String(proxyUrl || '').trim() || null;
+  const instagramAllowDirect = resolveAllowDirectForScope('instagram');
+
+  const enrichWithPolicy = async (data: InstagramProfileData): Promise<void> => {
+    try {
+      await runInstagramPolicyOperation(
+        async (selectedProxyUrl) => {
+          const effectiveProxy = explicitProxyUrl || selectedProxyUrl;
+          await enrichProfileMetadataIfNeeded(cleanHandle, data, undefined, {
+            proxyUrl: effectiveProxy,
+          });
+          return true;
+        },
+        { maxAttempts: INSTAGRAM_METADATA_ENRICH_ATTEMPTS }
+      );
+    } catch (error: any) {
+      if (isProxyPolicyError(error)) {
+        throw error;
+      }
+      console.warn(`[Instagram] Metadata enrichment degraded: ${error?.message || error}`);
+    }
+  };
 
   // Layer 0: Try Apify API first (most reliable, accurate metrics)
   try {
     console.log(`[Instagram] Attempting Apify scraper for @${cleanHandle}...`);
-    
+
     const { scrapeWithApify } = await import('./apify-instagram-scraper');
-    const result = await scrapeWithApify(cleanHandle, postsLimit);
-    
+    const result = await runInstagramPolicyOperation(
+      async (selectedProxyUrl) =>
+        scrapeWithApify(cleanHandle, postsLimit, {
+          proxyUrl: explicitProxyUrl || selectedProxyUrl,
+        }),
+      { maxAttempts: INSTAGRAM_APIFY_ATTEMPTS }
+    );
+
     // Check if we got meaningful data with posts
     if (result.success && result.data && result.data.posts && result.data.posts.length > 0) {
       console.log(`[Instagram] ✓ Apify scraper succeeded with ${result.data.posts.length} posts`);
-      await enrichProfileMetadataIfNeeded(cleanHandle, result.data);
+      await enrichWithPolicy(result.data as InstagramProfileData);
       return {
         success: true,
         data: result.data as any,
         scraper_used: 'apify',
       };
     }
-    
+
     // Apify succeeded but returned no posts - try next layer
     console.log('[Instagram] Apify returned no posts, trying Camoufox...');
   } catch (error: any) {
+    if (isProxyPolicyError(error)) {
+      return {
+        success: false,
+        error: error.message || 'Instagram fail-closed proxy policy blocked execution',
+      };
+    }
     console.log(`[Instagram] Apify scraper failed: ${error.message}, falling back to Camoufox...`);
   }
 
@@ -365,21 +572,31 @@ export async function scrapeInstagramProfile(
     const data = camResult as InstagramProfileData;
     if (data.posts && data.posts.length > 0) {
       console.log(`[Instagram] ✓ Camoufox scraper succeeded with ${data.posts.length} posts`);
-      await enrichProfileMetadataIfNeeded(cleanHandle, data);
+      await enrichWithPolicy(data);
       return { success: true, data, scraper_used: 'camoufox' };
     }
     console.log('[Instagram] Camoufox returned no posts, trying GraphQL...');
   } catch (camoufoxError: any) {
+    if (isProxyPolicyError(camoufoxError)) {
+      return {
+        success: false,
+        error: camoufoxError.message || 'Instagram fail-closed proxy policy blocked execution',
+      };
+    }
     console.log(`[Instagram] Camoufox scraper failed: ${camoufoxError.message}, falling back to GraphQL...`);
   }
 
   // Layer 2: Try GraphQL API (fast, but may have rate limits)
   try {
     console.log(`[Instagram] Attempting GraphQL/web-profile scraper for @${cleanHandle}...`);
-    const result = await scrapeViaWebProfile(cleanHandle, postsLimit);
+    const result = await runInstagramPolicyOperation(
+      async (selectedProxyUrl) =>
+        scrapeViaWebProfile(cleanHandle, postsLimit, explicitProxyUrl || selectedProxyUrl),
+      { maxAttempts: INSTAGRAM_WEB_PROFILE_ATTEMPTS }
+    );
     if (result && result.posts.length > 0) {
       console.log(`[Instagram] ✓ Web profile scraper succeeded with ${result.posts.length} posts`);
-      await enrichProfileMetadataIfNeeded(cleanHandle, result);
+      await enrichWithPolicy(result);
       return {
         success: true,
         data: result,
@@ -388,6 +605,12 @@ export async function scrapeInstagramProfile(
     }
     console.log('[Instagram] Web profile returned no posts, trying Python scraper...');
   } catch (error: any) {
+    if (isProxyPolicyError(error)) {
+      return {
+        success: false,
+        error: error.message || 'Instagram fail-closed proxy policy blocked execution',
+      };
+    }
     console.log(`[Instagram] Web/GraphQL scraper failed: ${error.message}, falling back to Python...`);
   }
 
@@ -395,17 +618,12 @@ export async function scrapeInstagramProfile(
   try {
     console.log(`[Instagram] Attempting Python scraper for @${cleanHandle} (Deep OASP Mode)...`);
     const args = [cleanHandle, postsLimit.toString()];
-    if (proxyUrl) {
-      args.push(proxyUrl);
+    if (explicitProxyUrl) {
+      args.push(explicitProxyUrl);
     }
-    const forcedProxyEnv = proxyUrl
+    const forcedProxyEnv = explicitProxyUrl
       ? {
-          SCRAPER_PROXY_URL: proxyUrl,
-          PROXY_URL: proxyUrl,
-          HTTP_PROXY: proxyUrl,
-          HTTPS_PROXY: proxyUrl,
-          http_proxy: proxyUrl,
-          https_proxy: proxyUrl,
+          SCRAPER_PROXY_URL: explicitProxyUrl,
         }
       : undefined;
 
@@ -440,7 +658,7 @@ export async function scrapeInstagramProfile(
     }
 
     console.log(`[Instagram] Python scraper succeeded: ${profileData.posts.length} posts scraped, ${profileData.discovered_competitors?.length || 0} competitors found.`);
-    await enrichProfileMetadataIfNeeded(cleanHandle, profileData);
+    await enrichWithPolicy(profileData);
 
     return {
       success: true,
@@ -448,6 +666,12 @@ export async function scrapeInstagramProfile(
       scraper_used: 'python',
     };
   } catch (pythonError: any) {
+    if (isProxyPolicyError(pythonError)) {
+      return {
+        success: false,
+        error: pythonError.message || 'Instagram fail-closed proxy policy blocked execution',
+      };
+    }
     console.error(`[Instagram] Python scraper failed: ${pythonError.message}`);
 
     // SAFETY CHECK: If rate limited, DO NOT FALLBACK. Stop immediately to protect account.
@@ -458,11 +682,18 @@ export async function scrapeInstagramProfile(
          };
     }
 
+    if (!instagramAllowDirect) {
+      return {
+        success: false,
+        error: `All fail-closed Instagram scraping paths failed without direct fallback: ${pythonError.message}`,
+      };
+    }
+
     // Layer 2: Fallback to Puppeteer
     try {
       console.log(`[Instagram] Attempting Puppeteer scraper as fallback...`);
       const puppeteerResult = await scrapeWithPuppeteer(cleanHandle, postsLimit);
-      await enrichProfileMetadataIfNeeded(cleanHandle, puppeteerResult);
+      await enrichWithPolicy(puppeteerResult);
 
       console.log(`[Instagram] Puppeteer scraper succeeded`);
 
@@ -472,6 +703,12 @@ export async function scrapeInstagramProfile(
         scraper_used: 'puppeteer',
       };
     } catch (puppeteerError: any) {
+      if (isProxyPolicyError(puppeteerError)) {
+        return {
+          success: false,
+          error: puppeteerError.message || 'Instagram fail-closed proxy policy blocked execution',
+        };
+      }
       console.error(`[Instagram] All scrapers failed for @${cleanHandle}`);
 
       return {

@@ -4,6 +4,12 @@ import { validateHandleDDG } from './duckduckgo-search';
 import { CollectedCandidate } from './competitor-collector';
 import { ConnectorHealthTracker } from './connector-health';
 import { WebsitePolicy } from './competitor-policy-engine';
+import {
+  createProxyPoolFromEnv,
+  executeWithProxyPolicy,
+  isRetryableNetworkError,
+  proxyUrlToAxiosConfig,
+} from '../network/proxy-rotation';
 
 export interface ResolvedCandidate extends CollectedCandidate {
   availabilityStatus: CompetitorAvailabilityStatus;
@@ -31,6 +37,36 @@ const VALIDATION_CONCURRENCY = Math.max(
   1,
   Number(process.env.COMPETITOR_VALIDATION_CONCURRENCY || 6)
 );
+const PROFILE_PROBE_TIMEOUT_MS = Math.max(
+  5000,
+  Number(process.env.COMPETITOR_PROFILE_PROBE_TIMEOUT_MS || 12000)
+);
+const PROFILE_PROBE_MAX_ATTEMPTS = Math.max(
+  1,
+  Number(process.env.COMPETITOR_PROFILE_PROBE_ATTEMPTS || 2)
+);
+
+const instagramResolverProxyPool = createProxyPoolFromEnv({
+  name: 'instagram-resolver-http',
+  envKeys: ['INSTAGRAM_SCRAPER_PROXY_URLS', 'SCRAPER_PROXY_URLS', 'PROXY_URLS', 'PROXY_URL'],
+  includeDirect: false,
+  maxFailuresBeforeCooldown: Number(process.env.SCRAPER_PROXY_MAX_FAILURES || 2),
+  maxFailuresEnvKey: 'SCRAPER_PROXY_MAX_FAILURES',
+  cooldownMs: Number(process.env.SCRAPER_PROXY_COOLDOWN_MS || 120_000),
+  cooldownEnvKey: 'SCRAPER_PROXY_COOLDOWN_MS',
+  fileEnvKey: 'PROXY_LIST_PATH',
+});
+
+const tiktokResolverProxyPool = createProxyPoolFromEnv({
+  name: 'tiktok-resolver-http',
+  envKeys: ['TIKTOK_SCRAPER_PROXY_URLS', 'SCRAPER_PROXY_URLS', 'PROXY_URLS', 'PROXY_URL'],
+  includeDirect: false,
+  maxFailuresBeforeCooldown: Number(process.env.SCRAPER_PROXY_MAX_FAILURES || 2),
+  maxFailuresEnvKey: 'SCRAPER_PROXY_MAX_FAILURES',
+  cooldownMs: Number(process.env.SCRAPER_PROXY_COOLDOWN_MS || 120_000),
+  cooldownEnvKey: 'SCRAPER_PROXY_COOLDOWN_MS',
+  fileEnvKey: 'PROXY_LIST_PATH',
+});
 
 const GENERIC_LOW_SIGNAL_HANDLES = new Set([
   'reel',
@@ -164,16 +200,32 @@ async function probeTikTokProfileViaHttp(handle: string): Promise<{
   }
 
   try {
-    const response = await axios.get(`https://www.tiktok.com/@${clean}`, {
-      timeout: 12000,
-      maxRedirects: 2,
-      validateStatus: () => true,
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      },
-    });
+    const response = (
+      await executeWithProxyPolicy({
+        scope: 'tiktok',
+        label: 'competitor-tiktok-profile-probe',
+        proxyPool: tiktokResolverProxyPool,
+        maxAttempts: PROFILE_PROBE_MAX_ATTEMPTS,
+        retryPredicate: isRetryableNetworkError,
+        operation: async ({ target }) => {
+          const proxyConfig = proxyUrlToAxiosConfig(target.proxyUrl || null);
+          if (target.proxyUrl && !proxyConfig) {
+            throw new Error('Unsupported proxy protocol for TikTok profile probe');
+          }
+          return axios.get(`https://www.tiktok.com/@${clean}`, {
+            timeout: PROFILE_PROBE_TIMEOUT_MS,
+            maxRedirects: 2,
+            validateStatus: () => true,
+            headers: {
+              'User-Agent':
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+              Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            },
+            proxy: proxyConfig ?? false,
+          });
+        },
+      })
+    ).value;
 
     const body = String(response.data || '').toLowerCase();
     const unavailableSignal =
@@ -252,16 +304,32 @@ async function probeInstagramProfileViaHttp(handle: string): Promise<{
   }
 
   try {
-    const response = await axios.get(`https://www.instagram.com/${clean}/`, {
-      timeout: 12000,
-      maxRedirects: 2,
-      validateStatus: () => true,
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      },
-    });
+    const response = (
+      await executeWithProxyPolicy({
+        scope: 'instagram',
+        label: 'competitor-instagram-profile-probe',
+        proxyPool: instagramResolverProxyPool,
+        maxAttempts: PROFILE_PROBE_MAX_ATTEMPTS,
+        retryPredicate: isRetryableNetworkError,
+        operation: async ({ target }) => {
+          const proxyConfig = proxyUrlToAxiosConfig(target.proxyUrl || null);
+          if (target.proxyUrl && !proxyConfig) {
+            throw new Error('Unsupported proxy protocol for Instagram profile probe');
+          }
+          return axios.get(`https://www.instagram.com/${clean}/`, {
+            timeout: PROFILE_PROBE_TIMEOUT_MS,
+            maxRedirects: 2,
+            validateStatus: () => true,
+            headers: {
+              'User-Agent':
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+              Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            },
+            proxy: proxyConfig ?? false,
+          });
+        },
+      })
+    ).value;
 
     const body = String(response.data || '').toLowerCase();
     const unavailableSignal =
@@ -359,6 +427,14 @@ async function resolveCandidate(
         if (probe.availabilityStatus === 'RATE_LIMITED' || probe.availabilityStatus === 'CONNECTOR_ERROR') {
           connectorHealth.markDegraded('instagram_resolver', probe.availabilityReason);
         }
+        if (probe.availabilityStatus === 'CONNECTOR_ERROR') {
+          return {
+            ...candidate,
+            availabilityStatus: 'CONNECTOR_ERROR',
+            availabilityReason: probe.availabilityReason,
+            resolverConfidence: clamp01(Math.max(probe.resolverConfidence, result.confidence || 0.15)),
+          };
+        }
         if (
           probe.availabilityStatus === 'PROFILE_UNAVAILABLE' ||
           probe.availabilityStatus === 'INVALID_HANDLE' ||
@@ -386,6 +462,14 @@ async function resolveCandidate(
         }
         if (probe.availabilityStatus === 'RATE_LIMITED' || probe.availabilityStatus === 'CONNECTOR_ERROR') {
           connectorHealth.markDegraded('tiktok_resolver', probe.availabilityReason);
+        }
+        if (probe.availabilityStatus === 'CONNECTOR_ERROR') {
+          return {
+            ...candidate,
+            availabilityStatus: 'CONNECTOR_ERROR',
+            availabilityReason: probe.availabilityReason,
+            resolverConfidence: clamp01(Math.max(probe.resolverConfidence, result.confidence || 0.15)),
+          };
         }
         if (
           probe.availabilityStatus === 'PROFILE_UNAVAILABLE' ||

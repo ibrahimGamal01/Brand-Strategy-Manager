@@ -6,6 +6,7 @@ import {
   createProxyPoolFromEnv,
   isRetryableNetworkError,
   proxyUrlToAxiosConfig,
+  redactProxyUrl,
   sleep,
 } from '../network/proxy-rotation';
 import { STORAGE_ROOT } from './storage-root';
@@ -43,6 +44,7 @@ const mediaDownloadProxyPool = createProxyPoolFromEnv({
 type DownloadAndSaveOptions = {
   contextLabel?: string;
   maxAttempts?: number;
+  proxyUrl?: string | null;
 };
 
 function normalizePositiveInt(value: number, fallback: number): number {
@@ -124,9 +126,19 @@ export const fileManager = {
     const contextLabel = options.contextLabel || 'media-download';
 
     let lastError: Error | null = null;
+    const explicitProxyProvided = typeof options.proxyUrl !== 'undefined';
+    const explicitProxyUrl = explicitProxyProvided ? options.proxyUrl || null : null;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const target = mediaDownloadProxyPool.acquire();
+      const target = explicitProxyProvided
+        ? {
+            id: explicitProxyUrl ? 'media-download:explicit-proxy' : 'media-download:explicit-direct',
+            proxyUrl: explicitProxyUrl,
+            label: explicitProxyUrl ? redactProxyUrl(explicitProxyUrl) : 'direct',
+            isDirect: !explicitProxyUrl,
+            cooldownHit: false,
+          }
+        : mediaDownloadProxyPool.acquire();
       const requestHeaders = {
         'User-Agent': headers['User-Agent'] || randomUserAgent(),
         'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
@@ -154,14 +166,18 @@ export const fileManager = {
         validateDownloadBuffer(url, contentType, buffer);
 
         await fs.promises.writeFile(resolvedSavePath, buffer);
-        mediaDownloadProxyPool.recordSuccess(target.id);
+        if (!explicitProxyProvided) {
+          mediaDownloadProxyPool.recordSuccess(target.id);
+        }
 
         console.log(
           `[FileManager] Saved (${contextLabel}): ${resolvedSavePath} (${buffer.length} bytes, Type: ${contentType || 'unknown'}, via ${target.label})`
         );
         return;
       } catch (error: any) {
-        mediaDownloadProxyPool.recordFailure(target.id);
+        if (!explicitProxyProvided) {
+          mediaDownloadProxyPool.recordFailure(target.id);
+        }
         const message = error?.message || 'Unknown download error';
         lastError = new Error(
           `Download failed for ${url} (attempt ${attempt}/${maxAttempts}, ${target.label}): ${message}`
@@ -258,6 +274,8 @@ export const fileManager = {
     if (isR2Configured()) {
       const result = await uploadUrlToR2(url, r2Key, headers, {
         contextLabel: options.contextLabel || r2Key,
+        proxyUrl: options.proxyUrl,
+        maxAttempts: options.maxAttempts,
       });
       return { storagePath: r2Key, sizeBytes: result.sizeBytes };
     }

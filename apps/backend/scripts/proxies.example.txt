@@ -1,0 +1,8 @@
+# Example proxy list for backend Python scripts.
+# Do not commit real credentials in proxy files.
+# Format:
+# http://username:password@ip:port
+# http://ip:port
+
+http://proxy-user:proxy-pass@127.0.0.1:8080
+http://127.0.0.1:8888

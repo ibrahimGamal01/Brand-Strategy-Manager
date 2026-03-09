@@ -19,6 +19,13 @@ import datetime
 from itertools import islice
 from typing import Dict, List, Optional
 import contextlib
+from proxy_manager import (
+    ProxyRotator,
+    compute_backoff_seconds,
+    get_retry_attempts,
+    is_retryable_proxy_error,
+    redact_proxy_url,
+)
 
 # --- CONFIGURATION (Safe Limits) ---
 MAX_REQUESTS_PER_HOUR = 150 # Safety buffer below 200
@@ -37,6 +44,55 @@ USER_AGENTS = [
 
 class RateLimitExceeded(Exception):
     pass
+
+
+def _env_true(name: str, fallback: bool = False) -> bool:
+    raw = str(os.environ.get(name, "")).strip().lower()
+    if not raw:
+        return fallback
+    return raw in {"1", "true", "yes", "y", "on"}
+
+
+def _normalize_proxy_url(proxy_url: Optional[str]) -> Optional[str]:
+    value = str(proxy_url or "").strip()
+    if not value:
+        return None
+    if "://" not in value:
+        return f"http://{value}"
+    return value
+
+
+def _build_proxy_rotator(preferred_proxy: Optional[str]) -> ProxyRotator:
+    base_rotator = ProxyRotator.from_env_and_file()
+    preferred = _normalize_proxy_url(preferred_proxy)
+    if not preferred:
+        return base_rotator
+    prioritized = [preferred] + [proxy for proxy in base_rotator.proxies if proxy != preferred]
+    return ProxyRotator(prioritized)
+
+
+def _clear_inherited_proxy_env() -> None:
+    for key in (
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+    ):
+        os.environ.pop(key, None)
+
+
+def _apply_instaloader_proxy(loader: instaloader.Instaloader, proxy_url: Optional[str]) -> None:
+    # Keep execution deterministic: we only want explicit SCRAPER_PROXY_URL/direct,
+    # never implicit process-level proxy envs.
+    loader.context._session.trust_env = False
+    normalized = _normalize_proxy_url(proxy_url)
+    if normalized:
+        loader.context._session.proxies = {'http': normalized, 'https': normalized}
+        print(f"[Proxy] Using proxy: {redact_proxy_url(normalized)}", file=sys.stderr)
+        return
+    loader.context._session.proxies = {}
 
 class RateLimiter:
     """Persistent Rate Limiter to protect the burner account"""
@@ -252,24 +308,71 @@ def scrape_profile(handle: str, posts_limit: int = 30, use_proxy: bool = False, 
         else:
             print("[Scraper] No credentials available. Running in anonymous mode.", file=sys.stderr)
     
-    if use_proxy and proxy_url:
-        L.context._session.proxies = {'http': proxy_url, 'https': proxy_url}
+    # 4. Configure Proxy Rotation (env-first, file fallback)
+    proxy_rotator = _build_proxy_rotator(proxy_url)
+    max_proxy_attempts = get_retry_attempts(default=4)
+    self_rotation_disabled = _env_true("SCRAPER_PROXY_DISABLE_SELF_ROTATION", False)
+    should_use_proxy = bool(use_proxy or proxy_rotator.has_proxies())
+    active_proxy = _normalize_proxy_url(proxy_url) if use_proxy and proxy_url else None
+    if should_use_proxy and not active_proxy:
+        active_proxy = proxy_rotator.get_next_proxy_url()
+    _apply_instaloader_proxy(L, active_proxy if should_use_proxy else None)
 
-    # 4. Get Profile
-    try:
-        profile = instaloader.Profile.from_username(L.context, handle)
-        print(f"[Scraper] Found profile: @{handle} ({profile.followers} followers)", file=sys.stderr)
-        print(f"[Scraper] Private: {profile.is_private}, Verified: {profile.is_verified}", file=sys.stderr)
-        limiter.increment(1) # Profile fetch cost
-    except instaloader.exceptions.ConnectionException as e:
-         # COOL DOWN LOGIC
-        if '429' in str(e) or '403' in str(e):
-             print(f"[Scraper] CRITICAL: 429/403 detected. Backing off.", file=sys.stderr)
-             # Signal Backend to Cool Down
-             raise Exception("INSTAGRAM_RATELIMIT_429")
-        raise e
+    def rotate_proxy(attempt_num: int, reason: str) -> bool:
+        nonlocal active_proxy
+        if not should_use_proxy:
+            return False
+        if self_rotation_disabled:
+            wait_s = compute_backoff_seconds(attempt_num)
+            label = redact_proxy_url(active_proxy) if active_proxy else "direct"
+            print(
+                f"[Proxy] {reason}. Retrying same target {label} in {wait_s:.2f}s",
+                file=sys.stderr,
+            )
+            time.sleep(wait_s)
+            return True
+        if active_proxy:
+            proxy_rotator.mark_failed(active_proxy)
+        next_proxy = proxy_rotator.get_next_proxy_url()
+        if not next_proxy:
+            return False
+        active_proxy = next_proxy
+        wait_s = compute_backoff_seconds(attempt_num)
+        print(
+            f"[Proxy] {reason}. Rotating to {redact_proxy_url(active_proxy)} in {wait_s:.2f}s",
+            file=sys.stderr,
+        )
+        _apply_instaloader_proxy(L, active_proxy)
+        time.sleep(wait_s)
+        return True
 
-    # 5. OASP Feature: Find Competitors (Similar Accounts)
+    # 5. Get Profile (proxy-aware retries)
+    profile_attempts = max_proxy_attempts if should_use_proxy and proxy_rotator.has_proxies() else 1
+    profile = None
+    for attempt in range(1, profile_attempts + 1):
+        try:
+            _apply_instaloader_proxy(L, active_proxy if should_use_proxy else None)
+            profile = instaloader.Profile.from_username(L.context, handle)
+            print(f"[Scraper] Found profile: @{handle} ({profile.followers} followers)", file=sys.stderr)
+            print(f"[Scraper] Private: {profile.is_private}, Verified: {profile.is_verified}", file=sys.stderr)
+            limiter.increment(1)  # Profile fetch cost
+            if active_proxy:
+                proxy_rotator.mark_success(active_proxy)
+            break
+        except instaloader.exceptions.ConnectionException as e:
+            # COOL DOWN LOGIC
+            if '429' in str(e) or '403' in str(e):
+                print(f"[Scraper] CRITICAL: 429/403 detected. Backing off.", file=sys.stderr)
+                # Signal Backend to Cool Down
+                raise Exception("INSTAGRAM_RATELIMIT_429")
+            if attempt < profile_attempts and is_retryable_proxy_error(e) and rotate_proxy(attempt, f"Profile fetch failed: {e}"):
+                continue
+            raise e
+
+    if profile is None:
+        raise Exception("INSTAGRAM_PROFILE_FETCH_FAILED")
+
+    # 6. OASP Feature: Find Competitors (Similar Accounts)
     competitors = []
     if is_logged_in:
         try:
@@ -292,92 +395,122 @@ def scrape_profile(handle: str, posts_limit: int = 30, use_proxy: bool = False, 
         except Exception as e:
             print(f"[Scraper] Competitor discovery warning: {e}", file=sys.stderr)
 
-    # 6. Scrape Posts & Top Comments
+    # 7. Scrape Posts & Top Comments
     posts = []
-    try:
-        current_count = 0
-        print(f"[Scraper] Starting post loop for @{handle}...", file=sys.stderr)
-        
-        post_iterator = profile.get_posts()
-        print(f"[Scraper] Iterator created. Fetching items...", file=sys.stderr)
-        
-        for post in post_iterator:
-            if current_count >= posts_limit:
+    seen_post_ids = set()
+    post_attempts = max_proxy_attempts if should_use_proxy and proxy_rotator.has_proxies() else 1
+    post_attempt = 1
+
+    while post_attempt <= post_attempts:
+        try:
+            if post_attempt > 1:
+                print(f"[Scraper] Post loop retry attempt {post_attempt}/{post_attempts}", file=sys.stderr)
+            print(f"[Scraper] Starting post loop for @{handle}...", file=sys.stderr)
+
+            _apply_instaloader_proxy(L, active_proxy if should_use_proxy else None)
+            post_iterator = profile.get_posts()
+            print(f"[Scraper] Iterator created. Fetching items...", file=sys.stderr)
+
+            for post in post_iterator:
+                if len(posts) >= posts_limit:
+                    break
+                if post.shortcode in seen_post_ids:
+                    continue
+
+                current_count = len(posts)
+                # Random pause every 5 posts to mimic reading
+                if current_count > 0 and current_count % 5 == 0:
+                    pause = random.uniform(10, 20)
+                    print(f"[Scraper] 'Reading' pause for {pause:.1f}s...", file=sys.stderr)
+                    time.sleep(pause)
+
+                # Extract comments (Top 5 only)
+                post_comments = []
+                if is_logged_in:
+                    try:
+                        for comment in islice(post.get_comments(), 5):
+                            post_comments.append({
+                                'text': comment.text,
+                                'owner': comment.owner.username,
+                                'likes': comment.likes_count
+                            })
+                    except Exception:
+                        pass  # Ignore comment errors
+
+                # Collect all media URLs (handles carousels/sidecars)
+                media_urls = []
+                try:
+                    if post.url:
+                        media_urls.append(post.url)
+                    if post.video_url:
+                        media_urls.append(post.video_url)
+                    # Sidecar children
+                    if post.typename == 'GraphSidecar':
+                        for node in post.get_sidecar_nodes():
+                            if node.is_video and node.video_url:
+                                media_urls.append(node.video_url)
+                            elif node.display_url:
+                                media_urls.append(node.display_url)
+                except Exception:
+                    pass
+
+                posts.append({
+                    'external_post_id': post.shortcode,
+                    'post_url': f'https://instagram.com/p/{post.shortcode}/',
+                    'caption': post.caption if post.caption else '',
+                    'likes': post.likes,
+                    'comments': post.comments,
+                    'timestamp': post.date_utc.isoformat(),
+                    'media_url': post.url,
+                    'is_video': post.is_video,
+                    'video_url': post.video_url if post.is_video else None,
+                    'typename': post.typename,
+                    'media_urls': media_urls,
+                    'top_comments': post_comments  # New OASP Field
+                })
+                seen_post_ids.add(post.shortcode)
+
+                fetched_count = len(posts)
+                limiter.increment(1)  # Post fetch cost
+                print(f"[Scraper] Scraped post {fetched_count}/{posts_limit} (ID: {post.shortcode})", file=sys.stderr)
+
+                # Standard delay
+                time.sleep(random.uniform(3, 7))
+
+            if active_proxy:
+                proxy_rotator.mark_success(active_proxy)
+
+            if len(posts) == 0:
+                print(
+                    f"[Scraper] WARNING: No posts were scraped! Profile posts count is {profile.mediacount}. Is Private? {profile.is_private}",
+                    file=sys.stderr,
+                )
+            break
+
+        except instaloader.exceptions.TooManyRequestsException:
+            print("[Scraper] Rate limit hit during posts!", file=sys.stderr)
+            # Don't crash, just return what we have
+            break
+        except Exception as e:
+            error_msg = str(e)
+            if any(code in error_msg for code in ['429', '403', '401', 'wait a few minutes']):
+                print(f"[Scraper] CRITICAL during posts: 401/403/429. Stopping.", file=sys.stderr)
+                # Signal backend? We return what we have.
                 break
 
-            # Random pause every 5 posts to mimic reading
-            if current_count > 0 and current_count % 5 == 0:
-                pause = random.uniform(10, 20)
-                print(f"[Scraper] 'Reading' pause for {pause:.1f}s...", file=sys.stderr)
-                time.sleep(pause)
+            should_retry_posts = (
+                post_attempt < post_attempts
+                and is_retryable_proxy_error(e)
+                and rotate_proxy(post_attempt, f"Post fetch failed: {error_msg}")
+            )
+            if should_retry_posts:
+                post_attempt += 1
+                continue
 
-            # Extract comments (Top 5 only)
-            post_comments = []
-            if is_logged_in:
-                try:
-                    for comment in islice(post.get_comments(), 5):
-                        post_comments.append({
-                            'text': comment.text,
-                            'owner': comment.owner.username,
-                            'likes': comment.likes_count
-                        })
-                except Exception:
-                    pass  # Ignore comment errors
-
-            # Collect all media URLs (handles carousels/sidecars)
-            media_urls = []
-            try:
-                if post.url:
-                    media_urls.append(post.url)
-                if post.video_url:
-                    media_urls.append(post.video_url)
-                # Sidecar children
-                if post.typename == 'GraphSidecar':
-                    for node in post.get_sidecar_nodes():
-                        if node.is_video and node.video_url:
-                            media_urls.append(node.video_url)
-                        elif node.display_url:
-                            media_urls.append(node.display_url)
-            except Exception:
-                pass
-
-            posts.append({
-                'external_post_id': post.shortcode,
-                'post_url': f'https://instagram.com/p/{post.shortcode}/',
-                'caption': post.caption if post.caption else '',
-                'likes': post.likes,
-                'comments': post.comments,
-                'timestamp': post.date_utc.isoformat(),
-                'media_url': post.url,
-                'is_video': post.is_video,
-                'video_url': post.video_url if post.is_video else None,
-                'typename': post.typename,
-                'media_urls': media_urls,
-                'top_comments': post_comments  # New OASP Field
-            })
-
-            current_count += 1
-            limiter.increment(1)  # Post fetch cost
-            print(f"[Scraper] Scraped post {current_count}/{posts_limit} (ID: {post.shortcode})", file=sys.stderr)
-
-            # Standard delay
-            time.sleep(random.uniform(3, 7))
-        
-        if current_count == 0:
-             print(f"[Scraper] WARNING: No posts were scraped! Profile posts count is {profile.mediacount}. Is Private? {profile.is_private}", file=sys.stderr)
-
-    except instaloader.exceptions.TooManyRequestsException:
-        print("[Scraper] Rate limit hit during posts!", file=sys.stderr)
-        # Don't crash, just return what we have
-    except Exception as e:
-        error_msg = str(e)
-        if any(code in error_msg for code in ['429', '403', '401', 'wait a few minutes']):
-             print(f"[Scraper] CRITICAL during posts: 401/403/429. Stopping.", file=sys.stderr)
-             # Signal backend? We return what we have.
-        else:
-             print(f"[Scraper] Error scraping posts: {error_msg}", file=sys.stderr)
-             import traceback
-             traceback.print_exc(file=sys.stderr)
+            print(f"[Scraper] Error scraping posts: {error_msg}", file=sys.stderr)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+            break
 
     result = {
         'handle': handle,
@@ -421,11 +554,19 @@ if __name__ == '__main__':
     
     handle = sys.argv[1].replace('@', '')
     posts_limit = int(sys.argv[2]) if len(sys.argv) > 2 else 30
+    force_direct = _env_true('SCRAPER_PROXY_FORCE_DIRECT', False)
+    disable_self_rotation = _env_true('SCRAPER_PROXY_DISABLE_SELF_ROTATION', False)
+    if force_direct or disable_self_rotation:
+        _clear_inherited_proxy_env()
     proxy_url = (
-        (sys.argv[3] if len(sys.argv) > 3 else None)
-        or os.environ.get('SCRAPER_PROXY_URL')
-        or os.environ.get('HTTPS_PROXY')
-        or os.environ.get('HTTP_PROXY')
+        None
+        if force_direct
+        else (
+            (sys.argv[3] if len(sys.argv) > 3 else None)
+            or os.environ.get('SCRAPER_PROXY_URL')
+            or (None if disable_self_rotation else os.environ.get('HTTPS_PROXY'))
+            or (None if disable_self_rotation else os.environ.get('HTTP_PROXY'))
+        )
     )
     
     try:

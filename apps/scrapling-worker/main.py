@@ -12,6 +12,12 @@ import requests
 from bs4 import BeautifulSoup
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
+from proxy_manager import (
+    ProxySelection,
+    build_rotate_proxy_rotator,
+    normalize_proxy_url,
+    resolve_proxy_selection,
+)
 
 try:
     from scrapling.fetchers import DynamicFetcher, Fetcher
@@ -20,6 +26,7 @@ except Exception:  # pragma: no cover - fallback mode when package unavailable
     Fetcher = None
 
 app = FastAPI(title="BAT Scrapling Worker", version="1.0.0")
+ROTATE_PROXY_ROTATOR = build_rotate_proxy_rotator()
 
 
 def _configure_fetchers_once() -> None:
@@ -73,6 +80,7 @@ class FetchRequest(BaseModel):
     sessionKey: Optional[str] = None
     timeoutMs: int = Field(default=20000, ge=1000, le=120000)
     proxyStrategy: str = Field(default="NONE")
+    proxyUrl: Optional[str] = None
     returnHtml: bool = True
     returnText: bool = True
     waitFor: Optional[WaitFor] = None
@@ -183,7 +191,8 @@ def _extract_text(response: Any, html: str) -> str:
     return ""
 
 
-def _basic_fetch(url: str, timeout_ms: int) -> FetchResult:
+def _basic_fetch(url: str, timeout_ms: int, proxy_url: Optional[str] = None) -> FetchResult:
+    proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
     response = requests.get(
         url,
         timeout=max(1, timeout_ms // 1000),
@@ -194,6 +203,7 @@ def _basic_fetch(url: str, timeout_ms: int) -> FetchResult:
             )
         },
         allow_redirects=True,
+        proxies=proxies,
     )
     html = response.text or ""
     return FetchResult(
@@ -207,7 +217,11 @@ def _basic_fetch(url: str, timeout_ms: int) -> FetchResult:
     )
 
 
-def _scrapling_fetch(url: str, mode: str, timeout_ms: int) -> FetchResult:
+def _scrapling_fetch(url: str, mode: str, timeout_ms: int, proxy_url: Optional[str] = None) -> FetchResult:
+    if proxy_url:
+        # Force proxy-capable requests path when proxy strategy requires a proxy.
+        return _basic_fetch(url, timeout_ms, proxy_url=proxy_url)
+
     if Fetcher is None:
         return _basic_fetch(url, timeout_ms)
 
@@ -325,8 +339,22 @@ def health() -> Dict[str, Any]:
 
 @app.post("/v1/fetch")
 def fetch(payload: FetchRequest) -> Dict[str, Any]:
+    explicit_proxy = normalize_proxy_url(payload.proxyUrl or "")
+    selection: ProxySelection = resolve_proxy_selection(
+        payload.proxyStrategy,
+        ROTATE_PROXY_ROTATOR,
+        explicit_proxy_url=explicit_proxy,
+    )
     try:
-        result = _scrapling_fetch(payload.url, payload.mode, payload.timeoutMs)
+        result = _scrapling_fetch(
+            payload.url,
+            payload.mode,
+            payload.timeoutMs,
+            proxy_url=selection.proxy_url,
+        )
+        if selection.resolved_strategy == "ROTATE":
+            ROTATE_PROXY_ROTATOR.mark_success(selection.proxy_url)
+
         return {
             "ok": result.ok,
             "finalUrl": result.final_url,
@@ -339,11 +367,17 @@ def fetch(payload: FetchRequest) -> Dict[str, Any]:
             "metadata": {
                 "sourceTransport": "SCRAPLING_WORKER",
                 "sessionKey": payload.sessionKey,
-                "proxyStrategy": payload.proxyStrategy,
+                "proxyStrategy": selection.resolved_strategy,
+                "requestedProxyStrategy": selection.requested_strategy,
+                "resolvedProxyStrategy": selection.resolved_strategy,
+                "proxyTarget": selection.proxy_target,
+                "proxyUrlProvided": bool(explicit_proxy),
                 "workerMode": _normalize_mode(payload.mode),
             },
         }
     except Exception as exc:  # pragma: no cover - runtime handling
+        if selection.resolved_strategy == "ROTATE":
+            ROTATE_PROXY_ROTATOR.mark_failed(selection.proxy_url)
         raise HTTPException(status_code=500, detail=f"fetch_failed: {exc}")
 
 

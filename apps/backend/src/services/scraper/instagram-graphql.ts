@@ -1,24 +1,22 @@
 /**
  * Instagram GraphQL API Scraper
- * 
+ *
  * Direct GraphQL queries to Instagram's API for reliable data retrieval.
  * Based on doc_ids extracted from Instaloader library.
- * 
- * Key advantages:
- * - Returns structured JSON with all metrics
- * - Faster than HTML parsing
- * - Most reliable for engagement data
  */
 
 import axios, { AxiosInstance } from 'axios';
-import * as fs from 'fs';
-import * as path from 'path';
 import { extractCsrf } from './instagram-cookie';
+import {
+  acquireInstagramSession,
+  getInstagramGlobalGateRemainingMs,
+  getInstagramSessionPool,
+  isInstagramLoginGatePayload,
+  recordInstagramSessionFailure,
+  recordInstagramSessionSuccess,
+} from './instagram-session-pool';
+import { proxyUrlToAxiosConfig } from '../network/proxy-rotation';
 
-/**
- * Instagram GraphQL Document IDs
- * These are extracted from Instaloader and may need periodic updates
- */
 const DOC_IDS = {
   POST_METADATA: '8845758582119845',
   USER_PROFILE_LOGGED_IN: '7898261790222653',
@@ -36,19 +34,6 @@ const GRAPHQL_RETRY_MAX_DELAY_MS = Math.max(
   GRAPHQL_RETRY_BASE_DELAY_MS,
   Number(process.env.INSTAGRAM_GRAPHQL_RETRY_MAX_DELAY_MS || 5000)
 );
-const GRAPHQL_REQUIRE_LOGIN_COOLDOWN_MS = Math.max(
-  30_000,
-  Number(process.env.INSTAGRAM_GRAPHQL_REQUIRE_LOGIN_COOLDOWN_MS || 180_000)
-);
-
-// Rotate multiple session cookies to spread rate limits
-function loadSessionPool(): string[] {
-  const raw = process.env.INSTAGRAM_SESSION_COOKIES || process.env.INSTAGRAM_SESSION_COOKIE || '';
-  return raw
-    .split(',')
-    .map(s => s.trim())
-    .filter(Boolean);
-}
 
 export interface InstagramGraphQLOptions {
   sessionCookie?: string;
@@ -88,90 +73,107 @@ export interface InstagramPost {
 export class InstagramGraphQLScraper {
   private client: AxiosInstance;
   private sessionCookie: string | null = null;
-  private sessionPool: string[] = [];
-  private poolIndex = 0;
-  private authCooldownUntil = 0;
+  private activeSessionId: string | null = null;
+  private readonly fixedSessionCookie: string | null = null;
 
   constructor(options: InstagramGraphQLOptions = {}) {
-    this.sessionPool = loadSessionPool();
-    this.sessionCookie = options.sessionCookie || this.pickSession();
-
-    const csrf = extractCsrf(this.sessionCookie);
+    this.fixedSessionCookie = options.sessionCookie?.trim() || null;
+    const csrf = extractCsrf(this.fixedSessionCookie);
+    const shouldUseProxy = Boolean(options.useProxy && options.proxyUrl);
+    const proxyConfig = shouldUseProxy ? proxyUrlToAxiosConfig(options.proxyUrl || null) : null;
+    if (shouldUseProxy && !proxyConfig) {
+      throw new Error('Unsupported proxy protocol for Instagram GraphQL client');
+    }
 
     this.client = axios.create({
       baseURL: INSTAGRAM_BASE_URL,
       headers: {
         'User-Agent': options.userAgent || this.getRandomUserAgent(),
-        'Accept': '*/*',
+        Accept: '*/*',
         'Accept-Language': 'en-US,en;q=0.9',
         'Accept-Encoding': 'gzip, deflate, br',
         'X-IG-App-ID': INSTAGRAM_APP_ID,
         'X-Requested-With': 'XMLHttpRequest',
-        'Referer': 'https://www.instagram.com/',
-        'Origin': 'https://www.instagram.com',
+        Referer: 'https://www.instagram.com/',
+        Origin: 'https://www.instagram.com',
         ...(csrf ? { 'X-CSRFToken': csrf } : {}),
-        ...(this.sessionCookie ? { 'Cookie': this.sessionCookie } : {}),
+        ...(this.fixedSessionCookie ? { Cookie: this.fixedSessionCookie } : {}),
       },
-      timeout: 30000,
+      timeout: 30_000,
+      proxy: proxyConfig ?? false,
     });
 
-    if (options.useProxy && options.proxyUrl) {
-      // TODO: Add proxy support when needed
-      console.log('[GraphQL] Proxy support not yet implemented');
+    if (this.fixedSessionCookie) {
+      this.applySessionCookie(this.fixedSessionCookie, null);
+    } else {
+      this.assignNextSession(new Set<string>());
     }
+
   }
 
-  /**
-   * Pick a session cookie from pool (round-robin)
-   */
-  private pickSession(): string | null {
-    if (this.sessionPool.length === 0) {
-      return process.env.INSTAGRAM_SESSION_COOKIE || null;
-    }
-    const cookie = this.sessionPool[this.poolIndex % this.sessionPool.length];
-    this.poolIndex++;
-    return cookie || null;
-  }
+  private applySessionCookie(cookie: string | null, sessionId: string | null): void {
+    this.sessionCookie = cookie;
+    this.activeSessionId = sessionId;
 
-  private rotateSession(): string | null {
-    if (this.sessionPool.length === 0) return null;
-    const previousSession = this.sessionCookie;
-    for (let tries = 0; tries < this.sessionPool.length; tries++) {
-      const nextSession = this.pickSession();
-      if (!nextSession || nextSession === previousSession) {
-        continue;
-      }
-      this.sessionCookie = nextSession;
-      this.client.defaults.headers.common['Cookie'] = this.sessionCookie;
-      const csrf = extractCsrf(this.sessionCookie);
+    if (cookie) {
+      this.client.defaults.headers.common.Cookie = cookie;
+      const csrf = extractCsrf(cookie);
       if (csrf) this.client.defaults.headers.common['X-CSRFToken'] = csrf;
-      return this.sessionCookie;
+      else delete this.client.defaults.headers.common['X-CSRFToken'];
+      return;
     }
-    return null;
+
+    delete this.client.defaults.headers.common.Cookie;
+    delete this.client.defaults.headers.common['X-CSRFToken'];
   }
 
-  private isLoginGatePayload(payload: any): boolean {
-    const message = String(payload?.message || '').toLowerCase();
-    return Boolean(
-      payload?.require_login === true ||
-        message.includes('please wait a few minutes') ||
-        message.includes('login required')
-    );
+  private assignNextSession(excludedSessionIds: Set<string>): boolean {
+    if (this.fixedSessionCookie) {
+      this.applySessionCookie(this.fixedSessionCookie, null);
+      return true;
+    }
+
+    const session = acquireInstagramSession({ excludeSessionIds: excludedSessionIds });
+    if (!session) {
+      this.applySessionCookie(null, null);
+      return false;
+    }
+
+    this.applySessionCookie(session.cookie, session.id);
+    return true;
+  }
+
+  private ensureInitialSession(): void {
+    if (this.fixedSessionCookie || this.sessionCookie) {
+      return;
+    }
+    this.assignNextSession(new Set<string>());
   }
 
   private getRetryDelayMs(attempt: number): number {
-    const exponential = Math.min(GRAPHQL_RETRY_BASE_DELAY_MS * Math.pow(2, Math.max(0, attempt - 1)), GRAPHQL_RETRY_MAX_DELAY_MS);
+    const exp = Math.min(
+      GRAPHQL_RETRY_BASE_DELAY_MS * Math.pow(2, Math.max(0, attempt - 1)),
+      GRAPHQL_RETRY_MAX_DELAY_MS
+    );
     const jitter = Math.floor(Math.random() * 200);
-    return exponential + jitter;
+    return exp + jitter;
   }
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  /**
-   * Get a random user agent to avoid detection
-   */
+  private makeLoginGateError(retryInMs: number): Error {
+    const err: any = new Error(
+      `INSTAGRAM_LOGIN_GATE_ACTIVE: Instagram GraphQL temporarily blocked. Retry in ${Math.ceil(
+        retryInMs / 1000
+      )}s.`
+    );
+    err.code = 'INSTAGRAM_LOGIN_GATE_ACTIVE';
+    err.retryInMs = retryInMs;
+    return err;
+  }
+
   private getRandomUserAgent(): string {
     const userAgents = [
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -181,22 +183,23 @@ export class InstagramGraphQLScraper {
     return userAgents[Math.floor(Math.random() * userAgents.length)];
   }
 
-  /**
-   * Execute a GraphQL query
-   */
   private async graphqlQuery(docId: string, variables: Record<string, any>): Promise<any> {
-    const cooldownRemainingMs = this.authCooldownUntil - Date.now();
-    if (cooldownRemainingMs > 0) {
-      const waitSeconds = Math.ceil(cooldownRemainingMs / 1000);
-      throw new Error(`Instagram GraphQL temporarily blocked by login/rate gate. Retry in ${waitSeconds}s.`);
+    const gateState = isInstagramGraphQLTemporarilyBlocked();
+    if (gateState.blocked) {
+      throw this.makeLoginGateError(gateState.retryInMs);
     }
 
+    const attemptedSessionIds = new Set<string>();
     let attempt = 0;
-    const attemptedSessions = new Set<string>();
 
     while (attempt <= GRAPHQL_MAX_AUTH_RETRIES) {
-      if (this.sessionCookie) {
-        attemptedSessions.add(this.sessionCookie);
+      if (this.activeSessionId) {
+        attemptedSessionIds.add(this.activeSessionId);
+      } else if (!this.fixedSessionCookie && getInstagramSessionPool().hasAnySessions()) {
+        const assigned = this.assignNextSession(attemptedSessionIds);
+        if (assigned && this.activeSessionId) {
+          attemptedSessionIds.add(this.activeSessionId);
+        }
       }
 
       try {
@@ -204,7 +207,6 @@ export class InstagramGraphQLScraper {
           doc_id: docId,
           variables: JSON.stringify(variables),
         });
-
         const response = await this.client.get(`/graphql/query?${params.toString()}`);
         const data = response.data;
 
@@ -213,10 +215,13 @@ export class InstagramGraphQLScraper {
         }
 
         if (data?.errors && data.errors.length > 0) {
-          const errorMsg = data.errors.map((e: any) => e.message).join(', ');
+          const errorMsg = data.errors.map((entry: any) => entry.message).join(', ');
           throw new Error(`GraphQL execution error: ${errorMsg}`);
         }
 
+        if (this.activeSessionId) {
+          recordInstagramSessionSuccess(this.activeSessionId);
+        }
         return data;
       } catch (error: any) {
         if (!axios.isAxiosError(error)) {
@@ -230,37 +235,38 @@ export class InstagramGraphQLScraper {
           console.error(`[GraphQL] Response body: ${JSON.stringify(responseBody).substring(0, 500)}`);
         }
 
-        const retryableStatus = status === 401 || status === 429;
-        if (!retryableStatus) {
+        const retryableAuthError = status === 401 || status === 403 || status === 429;
+        if (!retryableAuthError) {
           throw error;
         }
 
-        const hasLoginGateSignal = this.isLoginGatePayload(responseBody);
-        if (hasLoginGateSignal) {
-          this.authCooldownUntil = Date.now() + GRAPHQL_REQUIRE_LOGIN_COOLDOWN_MS;
+        const loginGate = isInstagramLoginGatePayload(responseBody);
+        if (this.activeSessionId) {
+          recordInstagramSessionFailure(
+            this.activeSessionId,
+            loginGate ? 'LOGIN_GATE' : status === 429 ? 'RATE_429' : 'AUTH_401'
+          );
+        }
+
+        if (loginGate) {
+          const retryInMs = getInstagramGlobalGateRemainingMs();
+          throw this.makeLoginGateError(retryInMs || 60_000);
         }
 
         if (attempt >= GRAPHQL_MAX_AUTH_RETRIES) {
-          const waitSeconds = Math.max(0, Math.ceil((this.authCooldownUntil - Date.now()) / 1000));
-          if (hasLoginGateSignal && waitSeconds > 0) {
-            throw new Error(`Instagram GraphQL temporarily blocked by login/rate gate. Retry in ${waitSeconds}s.`);
-          }
           throw new Error(`Instagram GraphQL request failed after ${attempt + 1} attempts (status ${status || 'unknown'}).`);
         }
 
-        const previousSession = this.sessionCookie;
-        const newSession = this.rotateSession();
-        const sessionChanged = Boolean(newSession && newSession !== previousSession && !attemptedSessions.has(newSession));
-
-        if (!sessionChanged) {
-          const waitSeconds = Math.max(0, Math.ceil((this.authCooldownUntil - Date.now()) / 1000));
-          if (hasLoginGateSignal && waitSeconds > 0) {
-            throw new Error(`Instagram GraphQL temporarily blocked by login/rate gate. Retry in ${waitSeconds}s.`);
-          }
-          throw new Error('Instagram GraphQL session expired or invalid. Please provide fresh session cookies.');
+        if (this.fixedSessionCookie) {
+          throw new Error(`Instagram GraphQL fixed session cookie failed with status ${status || 'unknown'}.`);
         }
 
         attempt += 1;
+        const rotated = this.assignNextSession(attemptedSessionIds);
+        if (!rotated || !this.activeSessionId) {
+          throw new Error('Instagram GraphQL session pool has no healthy sessions available.');
+        }
+
         const delayMs = this.getRetryDelayMs(attempt);
         console.warn(`[GraphQL] Rotating session cookie and retrying (${attempt}/${GRAPHQL_MAX_AUTH_RETRIES}) after ${delayMs}ms...`);
         await this.sleep(delayMs);
@@ -270,24 +276,17 @@ export class InstagramGraphQLScraper {
     throw new Error('Instagram GraphQL request failed unexpectedly.');
   }
 
-  /**
-   * Scrape user profile information
-   */
   async scrapeProfile(username: string): Promise<InstagramProfile> {
     console.log(`[GraphQL] Scraping profile: @${username}`);
+    this.ensureInitialSession();
 
-    const docId = this.sessionCookie 
-      ? DOC_IDS.USER_PROFILE_LOGGED_IN 
-      : DOC_IDS.USER_PROFILE_PUBLIC;
-
+    const docId = this.sessionCookie ? DOC_IDS.USER_PROFILE_LOGGED_IN : DOC_IDS.USER_PROFILE_PUBLIC;
     const variables = {
       username,
       render_surface: 'PROFILE',
     };
 
     const data = await this.graphqlQuery(docId, variables);
-    
-    // The response structure varies based on logged-in state
     const userData = data.data?.user || data.data?.xdt_api__v1__users__web_profile_info?.user;
 
     if (!userData) {
@@ -309,13 +308,8 @@ export class InstagramGraphQLScraper {
     };
   }
 
-  /**
-   * Scrape user timeline posts
-   */
   async scrapePosts(username: string, maxPosts: number = 12): Promise<InstagramPost[]> {
     console.log(`[GraphQL] Scraping posts for @${username}, max: ${maxPosts}`);
-
-    // First get the profile to access timeline
     const profile = await this.scrapeProfile(username);
 
     if (!profile.edge_owner_to_timeline_media) {
@@ -325,10 +319,8 @@ export class InstagramGraphQLScraper {
 
     const posts: InstagramPost[] = [];
     const edges = profile.edge_owner_to_timeline_media.edges || [];
-
     for (const edge of edges.slice(0, maxPosts)) {
       const node = edge.node;
-      
       posts.push({
         id: node.id,
         shortcode: node.shortcode,
@@ -346,9 +338,6 @@ export class InstagramGraphQLScraper {
     return posts;
   }
 
-  /**
-   * Extract caption from node structure
-   */
   private extractCaption(node: any): string {
     if (node.edge_media_to_caption?.edges?.length > 0) {
       return node.edge_media_to_caption.edges[0].node.text || '';
@@ -359,9 +348,6 @@ export class InstagramGraphQLScraper {
     return '';
   }
 
-  /**
-   * Full scrape: profile + posts
-   */
   async scrapeFullProfile(username: string, maxPosts: number = 30) {
     const profile = await this.scrapeProfile(username);
     const posts = await this.scrapePosts(username, maxPosts);
@@ -378,7 +364,7 @@ export class InstagramGraphQLScraper {
         is_private: profile.is_private || false,
         profile_pic: profile.profile_pic_url || '',
       },
-      posts: posts.map(post => ({
+      posts: posts.map((post) => ({
         external_post_id: post.id,
         post_url: `https://www.instagram.com/p/${post.shortcode}/`,
         caption: post.caption,
@@ -394,9 +380,14 @@ export class InstagramGraphQLScraper {
   }
 }
 
-/**
- * Factory function for creating scraper instance
- */
 export function createGraphQLScraper(options?: InstagramGraphQLOptions): InstagramGraphQLScraper {
   return new InstagramGraphQLScraper(options);
+}
+
+export function isInstagramGraphQLTemporarilyBlocked(): { blocked: boolean; retryInMs: number } {
+  const retryInMs = getInstagramGlobalGateRemainingMs();
+  return {
+    blocked: retryInMs > 0,
+    retryInMs,
+  };
 }

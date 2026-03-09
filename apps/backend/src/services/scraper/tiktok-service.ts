@@ -7,6 +7,7 @@
 
 import { PrismaClient } from '@prisma/client';
 import { createScraperProxyPool, runScriptJsonWithRetries } from './script-runner';
+import { isProxyPolicyError } from '../network/proxy-rotation';
 
 const prisma = new PrismaClient();
 
@@ -86,6 +87,9 @@ export async function scrapeTikTokProfile(
       return result;
     }
   } catch (e: any) {
+    if (isProxyPolicyError(e)) {
+      return { success: false, error: e?.message || 'TikTok fail-closed proxy policy blocked execution' };
+    }
     console.log(`[TikTok] Camoufox failed: ${e.message}, falling back to yt-dlp...`);
   }
 
@@ -107,6 +111,9 @@ export async function scrapeTikTokProfile(
     console.log(`[TikTok] Found ${result.total_videos || 0} videos for @${cleanHandle}`);
     return result;
   } catch (error: any) {
+    if (isProxyPolicyError(error)) {
+      return { success: false, error: error?.message || 'TikTok fail-closed proxy policy blocked execution' };
+    }
     console.error('[TikTok] Scrape failed:', error.message);
     return { success: false, error: error.message };
   }
@@ -134,6 +141,9 @@ export async function downloadTikTokVideo(
     });
     if (camoufox.parsed.success) return camoufox.parsed;
   } catch (e: any) {
+    if (isProxyPolicyError(e)) {
+      return { success: false, error: e?.message || 'TikTok fail-closed proxy policy blocked execution' };
+    }
     console.log(`[TikTok] Camoufox download failed: ${e.message}, falling back to Puppeteer...`);
   }
 
@@ -150,6 +160,9 @@ export async function downloadTikTokVideo(
     });
     return puppeteer.parsed;
   } catch (error: any) {
+    if (isProxyPolicyError(error)) {
+      return { success: false, error: error?.message || 'TikTok fail-closed proxy policy blocked execution' };
+    }
     return { success: false, error: error.message };
   }
 }
@@ -166,8 +179,9 @@ export async function scrapeTikTokAndSave(
   const result = await scrapeTikTokProfile(handle, maxVideos);
   
   if (!result.success || !result.profile) {
-    console.log(`[TikTok] Could not scrape @${handle} - may not have TikTok`);
-    return;
+    const reason = result.error || `TikTok scrape failed for @${handle}`;
+    console.warn(`[TikTok] Could not scrape @${handle}: ${reason}`);
+    throw new Error(reason);
   }
   
   // Save/Update Social Profile

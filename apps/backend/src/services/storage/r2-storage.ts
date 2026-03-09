@@ -3,10 +3,19 @@ import { Upload } from '@aws-sdk/lib-storage';
 import { Readable } from 'stream';
 import axios from 'axios';
 import { getR2Client, R2_BUCKET, R2_PUBLIC_URL } from './r2-client';
+import {
+  computeRetryBackoffMs,
+  isRetryableNetworkError,
+  proxyUrlToAxiosConfig,
+  redactProxyUrl,
+  sleep,
+} from '../network/proxy-rotation';
 
 type UploadFromUrlOptions = {
   contextLabel?: string;
   contentType?: string;
+  proxyUrl?: string | null;
+  maxAttempts?: number;
 };
 
 /**
@@ -21,53 +30,84 @@ export async function uploadUrlToR2(
   requestHeaders: Record<string, string> = {},
   options: UploadFromUrlOptions = {}
 ): Promise<{ r2Key: string; sizeBytes: number; contentType: string }> {
-  const response = await axios.get(url, {
-    responseType: 'arraybuffer',
-    timeout: Number(process.env.MEDIA_DOWNLOAD_TIMEOUT_MS || 60_000),
-    headers: {
-      'User-Agent':
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-      'Referer': 'https://www.instagram.com/',
-      ...requestHeaders,
-    },
-    validateStatus: (s) => s >= 200 && s < 300,
-  });
-
-  const buffer = Buffer.from(response.data);
-  const detectedContentType =
-    options.contentType ||
-    String(response.headers['content-type'] || '').split(';')[0].trim() ||
-    'application/octet-stream';
-
-  if (buffer.length === 0) {
-    throw new Error(`Empty response body downloading ${url}`);
-  }
-  if (buffer.length < 512) {
-    throw new Error(`Suspiciously small response (${buffer.length} bytes) for ${url}`);
+  const explicitProxyProvided = typeof options.proxyUrl !== 'undefined';
+  const explicitProxyUrl = explicitProxyProvided ? options.proxyUrl || null : null;
+  const proxyConfig = proxyUrlToAxiosConfig(explicitProxyUrl);
+  if (explicitProxyUrl && !proxyConfig) {
+    throw new Error('Unsupported proxy protocol for R2 URL upload fetch');
   }
 
-  const head = buffer.slice(0, 300).toString('utf-8').toLowerCase();
-  if (head.includes('<html') || head.includes('<!doctype')) {
-    throw new Error(`HTML response detected downloading ${url} - likely login wall`);
-  }
-
-  const upload = new Upload({
-    client: getR2Client(),
-    params: {
-      Bucket: R2_BUCKET,
-      Key: r2Key,
-      Body: buffer,
-      ContentType: detectedContentType,
-    },
-  });
-  await upload.done();
-
-  console.log(
-    `[R2Storage] Uploaded ${options.contextLabel || r2Key}: ${buffer.length} bytes → r2://${R2_BUCKET}/${r2Key}`
+  const maxAttempts = Math.max(
+    1,
+    Number(options.maxAttempts || process.env.MEDIA_DOWNLOAD_MAX_ATTEMPTS || 3)
   );
+  let lastError: unknown = null;
 
-  return { r2Key, sizeBytes: buffer.length, contentType: detectedContentType };
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const response = await axios.get(url, {
+        responseType: 'arraybuffer',
+        timeout: Number(process.env.MEDIA_DOWNLOAD_TIMEOUT_MS || 60_000),
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+          'Referer': 'https://www.instagram.com/',
+          ...requestHeaders,
+        },
+        proxy: explicitProxyProvided ? (proxyConfig ?? false) : false,
+        validateStatus: (s) => s >= 200 && s < 300,
+      });
+
+      const buffer = Buffer.from(response.data);
+      const detectedContentType =
+        options.contentType ||
+        String(response.headers['content-type'] || '').split(';')[0].trim() ||
+        'application/octet-stream';
+
+      if (buffer.length === 0) {
+        throw new Error(`Empty response body downloading ${url}`);
+      }
+      if (buffer.length < 512) {
+        throw new Error(`Suspiciously small response (${buffer.length} bytes) for ${url}`);
+      }
+
+      const head = buffer.slice(0, 300).toString('utf-8').toLowerCase();
+      if (head.includes('<html') || head.includes('<!doctype')) {
+        throw new Error(`HTML response detected downloading ${url} - likely login wall`);
+      }
+
+      const upload = new Upload({
+        client: getR2Client(),
+        params: {
+          Bucket: R2_BUCKET,
+          Key: r2Key,
+          Body: buffer,
+          ContentType: detectedContentType,
+        },
+      });
+      await upload.done();
+
+      const via = explicitProxyProvided
+        ? explicitProxyUrl
+          ? ` via ${redactProxyUrl(explicitProxyUrl)}`
+          : ' via direct'
+        : '';
+      console.log(
+        `[R2Storage] Uploaded ${options.contextLabel || r2Key}: ${buffer.length} bytes → r2://${R2_BUCKET}/${r2Key}${via}`
+      );
+
+      return { r2Key, sizeBytes: buffer.length, contentType: detectedContentType };
+    } catch (error) {
+      lastError = error;
+      if (attempt >= maxAttempts || !isRetryableNetworkError(error)) {
+        throw error;
+      }
+      await sleep(computeRetryBackoffMs(attempt));
+    }
+  }
+
+  throw (lastError as Error) || new Error(`Failed uploading URL to R2: ${url}`);
 }
 
 /**

@@ -6,6 +6,7 @@ export type ScraplingFetchRequest = {
   sessionKey?: string;
   timeoutMs?: number;
   proxyStrategy?: 'NONE' | 'ROTATE' | 'FIXED';
+  proxyUrl?: string;
   returnHtml?: boolean;
   returnText?: boolean;
   waitFor?: {

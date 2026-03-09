@@ -14,6 +14,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+from urllib.parse import unquote, urlparse
 
 try:
     import certifi
@@ -21,12 +22,46 @@ try:
 except ImportError:
     _SSL_CTX = ssl.create_default_context()
 
-PROXY_URL = (
-    os.environ.get("SCRAPER_PROXY_URL")
-    or os.environ.get("HTTPS_PROXY")
-    or os.environ.get("HTTP_PROXY")
-    or ""
-).strip()
+def _env_true(name: str, fallback: bool = False) -> bool:
+    raw = str(os.environ.get(name, "")).strip().lower()
+    if not raw:
+        return fallback
+    return raw in {"1", "true", "yes", "y", "on"}
+
+
+def _resolve_proxy_url() -> str:
+    if _env_true("SCRAPER_PROXY_FORCE_DIRECT", False):
+        return ""
+    return str(os.environ.get("SCRAPER_PROXY_URL", "")).strip()
+
+
+def _resolve_camoufox_proxy_config():
+    raw = _resolve_proxy_url()
+    if not raw:
+        return None
+    candidate = raw if "://" in raw else f"http://{raw}"
+    parsed = urlparse(candidate)
+    if not parsed.hostname:
+        raise ValueError("Invalid SCRAPER_PROXY_URL: missing hostname")
+
+    scheme = (parsed.scheme or "http").lower()
+    if scheme not in {"http", "https", "socks5", "socks4"}:
+        raise ValueError(f"Invalid SCRAPER_PROXY_URL: unsupported scheme '{scheme}'")
+
+    try:
+        port = parsed.port or (443 if scheme == "https" else 80)
+    except Exception as exc:
+        raise ValueError("Invalid SCRAPER_PROXY_URL: invalid port") from exc
+
+    proxy = {"server": f"{scheme}://{parsed.hostname}:{port}"}
+    if parsed.username:
+        proxy["username"] = unquote(parsed.username)
+    if parsed.password:
+        proxy["password"] = unquote(parsed.password)
+    return proxy
+
+
+PROXY_URL = _resolve_proxy_url()
 
 def with_proxy(cmd):
     if PROXY_URL and "--proxy" not in cmd:
@@ -181,7 +216,11 @@ def resolve_post(post_url: str, debug: bool = False) -> dict:
         Camoufox = _get_camoufox()
         if not Camoufox:
             return {"success": False, "mediaUrls": [], "error": "camoufox not installed. pip install camoufox[geoip]"}
-        with Camoufox(headless=True, humanize=True) as browser:
+        launch_options = {"headless": True, "humanize": True}
+        proxy_config = _resolve_camoufox_proxy_config()
+        if proxy_config:
+            launch_options["proxy"] = proxy_config
+        with Camoufox(**launch_options) as browser:
             page = browser.new_page()
             page.on("response", capture_media_response)
             page.goto(post_url, wait_until="domcontentloaded", timeout=60000)
