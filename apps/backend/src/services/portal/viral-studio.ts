@@ -171,13 +171,50 @@ export type PromptTemplate = {
   safetyConstraints: string[];
 };
 
+export type GenerationSection =
+  | 'hooks'
+  | 'scripts.short'
+  | 'scripts.medium'
+  | 'scripts.long'
+  | 'captions'
+  | 'ctas'
+  | 'angleRemixes';
+
+export type GenerationRefineMode = 'refine' | 'regenerate';
+export type GenerationFormatTarget = 'reel-30' | 'reel-60' | 'shorts' | 'story';
+
+export type GenerationPromptContext = {
+  template: {
+    id: string;
+    title: string;
+    intent: PromptTemplate['intent'];
+  };
+  formatTarget: GenerationFormatTarget;
+  objective: string;
+  audienceSnapshot: string;
+  brandSummary: string;
+  voiceProfile: string[];
+  requiredClaims: string[];
+  bannedPhrases: string[];
+  referenceNotes: Array<{
+    id: string;
+    rank: number;
+    platform: ViralStudioPlatform;
+    rationale: string;
+    cue: string;
+  }>;
+  composedPrompt: string;
+};
+
 export type GenerationPack = {
   id: string;
   workspaceId: string;
   status: 'completed';
   promptTemplateId: string;
+  formatTarget: GenerationFormatTarget;
   inputPrompt: string;
   selectedReferenceIds: string[];
+  promptContext: GenerationPromptContext;
   outputs: {
     hooks: string[];
     scripts: {
@@ -205,18 +242,13 @@ export type CreateGenerationPackInput = {
   templateId?: string;
   prompt?: string;
   selectedReferenceIds?: string[];
+  formatTarget?: GenerationFormatTarget;
 };
 
 export type RefineGenerationInput = {
-  section:
-    | 'hooks'
-    | 'scripts.short'
-    | 'scripts.medium'
-    | 'scripts.long'
-    | 'captions'
-    | 'ctas'
-    | 'angleRemixes';
-  instruction: string;
+  section: GenerationSection;
+  instruction?: string;
+  mode?: GenerationRefineMode;
 };
 
 export type StudioDocumentSection = {
@@ -1086,6 +1118,291 @@ function pickReferenceSelection(
   return [...mustUse, ...pinned, ...fallback].slice(0, 8);
 }
 
+function voiceProfileFromBrand(profile: BrandDNAProfile | null): string[] {
+  if (!profile) return ['balanced'];
+  const labels: string[] = [];
+  if (profile.voiceSliders.bold >= 60) labels.push('bold');
+  if (profile.voiceSliders.formal >= 60) labels.push('professional');
+  if (profile.voiceSliders.playful >= 60) labels.push('playful');
+  if (profile.voiceSliders.direct >= 60) labels.push('direct');
+  if (labels.length === 0) labels.push('balanced');
+  return labels;
+}
+
+function formatTargetLabel(target: GenerationFormatTarget): string {
+  if (target === 'reel-60') return '60s reel';
+  if (target === 'shorts') return 'YouTube Shorts';
+  if (target === 'story') return 'Story sequence';
+  return '30s reel';
+}
+
+function applyGuardrailsToLine(value: string, profile: BrandDNAProfile | null): string {
+  let next = cleanString(value);
+  for (const phrase of profile?.bannedPhrases || []) {
+    const normalized = cleanString(phrase);
+    if (!normalized) continue;
+    const escaped = normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    next = next.replace(new RegExp(escaped, 'gi'), '[blocked phrase]');
+  }
+  return next;
+}
+
+function buildGenerationPromptContext(input: {
+  template: PromptTemplate;
+  profile: BrandDNAProfile | null;
+  selectedReferences: ReferenceAsset[];
+  prompt: string;
+  formatTarget: GenerationFormatTarget;
+}): GenerationPromptContext {
+  const profile = input.profile;
+  const audienceSnapshot =
+    cleanString(profile?.audiencePersonas?.[0]) ||
+    cleanString(profile?.desires?.[0]) ||
+    cleanString(profile?.pains?.[0]) ||
+    'growth-focused audience';
+  const brandSummary =
+    cleanString(profile?.summary) ||
+    cleanString(profile?.mission) ||
+    cleanString(profile?.valueProposition) ||
+    'Brand-centered messaging with measurable outcomes.';
+  const referenceNotes = input.selectedReferences.slice(0, 6).map((reference) => ({
+    id: reference.id,
+    rank: reference.ranking.rank,
+    platform: reference.sourcePlatform,
+    rationale: reference.ranking.rationaleTitle,
+    cue: reference.explainability.topDrivers[0] || reference.ranking.rationaleBullets[0] || 'strong opening + clear CTA',
+  }));
+  const objective = cleanString(input.prompt) || input.template.description;
+  const voiceProfile = voiceProfileFromBrand(profile);
+  const composedPrompt = [
+    `Template: ${input.template.title} (${input.template.intent})`,
+    `Format target: ${formatTargetLabel(input.formatTarget)}`,
+    `Objective: ${objective}`,
+    `Audience: ${audienceSnapshot}`,
+    `Brand summary: ${brandSummary}`,
+    `Voice: ${voiceProfile.join(', ')}`,
+    `Required claims: ${(profile?.requiredClaims || []).join(' | ') || 'none'}`,
+    `Banned phrases: ${(profile?.bannedPhrases || []).join(' | ') || 'none'}`,
+    `Reference cues: ${
+      referenceNotes.map((entry) => `#${entry.rank} ${entry.platform} ${entry.rationale}`).join(' || ') || 'none'
+    }`,
+  ].join('\n');
+
+  return {
+    template: {
+      id: input.template.id,
+      title: input.template.title,
+      intent: input.template.intent,
+    },
+    formatTarget: input.formatTarget,
+    objective,
+    audienceSnapshot,
+    brandSummary,
+    voiceProfile,
+    requiredClaims: [...(profile?.requiredClaims || [])],
+    bannedPhrases: [...(profile?.bannedPhrases || [])],
+    referenceNotes,
+    composedPrompt,
+  };
+}
+
+function buildHooksFromContext(
+  context: GenerationPromptContext,
+  selectedReferences: ReferenceAsset[],
+  profile: BrandDNAProfile | null,
+  instruction?: string
+): string[] {
+  const lines: string[] = [];
+  const claim = context.requiredClaims[0];
+  const instructionSuffix = cleanString(instruction);
+  const source = selectedReferences.length > 0 ? selectedReferences : [];
+  for (let index = 0; index < Math.max(5, source.length); index += 1) {
+    const reference = source[index];
+    const cue = reference?.ranking?.rationaleTitle || `angle ${index + 1}`;
+    const base = `Hook ${index + 1}: ${context.audienceSnapshot} still battling ${profile?.pains?.[0] || 'inconsistent performance'}? Use ${cue.toLowerCase()} to move toward ${profile?.desires?.[0] || 'predictable growth'} in a ${formatTargetLabel(context.formatTarget)}.`;
+    const withClaim = claim ? `${base} ${claim}.` : base;
+    lines.push(applyGuardrailsToLine(instructionSuffix ? `${withClaim} Focus: ${instructionSuffix}.` : withClaim, profile));
+    if (lines.length >= 5) break;
+  }
+  while (lines.length < 5) {
+    lines.push(
+      applyGuardrailsToLine(
+        `Hook ${lines.length + 1}: Name one bottleneck, show a practical shift, and close with one next step for ${context.audienceSnapshot}.`,
+        profile
+      )
+    );
+  }
+  return lines;
+}
+
+function buildScriptsFromContext(
+  context: GenerationPromptContext,
+  profile: BrandDNAProfile | null,
+  instruction?: string
+): GenerationPack['outputs']['scripts'] {
+  const requiredClaim = context.requiredClaims[0];
+  const instructionLine = cleanString(instruction) ? `\nRefinement direction: ${cleanString(instruction)}.` : '';
+  const short = applyGuardrailsToLine(
+    [
+      `Open with the pain: ${profile?.pains?.[0] || 'inconsistent lead quality'}.`,
+      `Bridge to transformation: ${context.brandSummary}.`,
+      `Deliver a direct CTA for ${context.audienceSnapshot}.`,
+      requiredClaim ? `Required claim: ${requiredClaim}.` : '',
+    ]
+      .filter(Boolean)
+      .join(' '),
+    profile
+  );
+  const medium = applyGuardrailsToLine(
+    [
+      `Beat 1 (0-4s): pattern interrupt tailored for ${context.audienceSnapshot}.`,
+      `Beat 2 (5-12s): prove the shift with one concrete mechanism from reference cues.`,
+      `Beat 3 (13-22s): clarify offer and who it is for.`,
+      `Beat 4 (23-30s): CTA aligned to ${context.objective}.`,
+      requiredClaim ? `Claim constraint: ${requiredClaim}.` : '',
+      `Tone: ${context.voiceProfile.join(', ')}.`,
+    ]
+      .filter(Boolean)
+      .join('\n') + instructionLine,
+    profile
+  );
+  const long = applyGuardrailsToLine(
+    [
+      `Scene map for ${formatTargetLabel(context.formatTarget)}:`,
+      `1) Hook with urgency tied to ${profile?.pains?.[0] || 'performance drag'}.`,
+      `2) Show a before/after narrative anchored in reference rationale.`,
+      `3) Explain operating principle behind the result.`,
+      `4) Present offer boundaries and credibility markers.`,
+      `5) Close with one measurable action CTA.`,
+      requiredClaim ? `Required claim to include verbatim: ${requiredClaim}.` : 'No mandatory claim configured.',
+      `Voice profile: ${context.voiceProfile.join(', ')}.`,
+    ].join('\n') + instructionLine,
+    profile
+  );
+
+  return { short, medium, long };
+}
+
+function buildCaptionsFromContext(
+  context: GenerationPromptContext,
+  profile: BrandDNAProfile | null,
+  instruction?: string
+): string[] {
+  const directive = cleanString(instruction);
+  const lines = [
+    `If ${context.audienceSnapshot} wants momentum, this is the framework: ${context.brandSummary}.`,
+    `Winning creative is a repeatable system. Start with the hook, prove the shift, and close with a direct ask.`,
+    `Built from high-performing references, remixed for your brand voice: ${context.voiceProfile.join(', ')}.`,
+  ];
+  if (directive) {
+    lines[0] = `${lines[0]} Direction: ${directive}.`;
+  }
+  return lines.map((line) => applyGuardrailsToLine(line, profile));
+}
+
+function buildCtasFromContext(
+  context: GenerationPromptContext,
+  profile: BrandDNAProfile | null,
+  instruction?: string
+): string[] {
+  const directive = cleanString(instruction);
+  const primary = directive || context.objective;
+  return [
+    applyGuardrailsToLine(`Comment "PLAYBOOK" and we will send the exact ${formatTargetLabel(context.formatTarget)} framework.`, profile),
+    applyGuardrailsToLine(`Save this and execute one step in the next 24 hours, then track the response delta.`, profile),
+    applyGuardrailsToLine(`DM "SYSTEM" for a tailored action plan around ${primary.toLowerCase()}.`, profile),
+  ];
+}
+
+function buildAngleRemixesFromContext(
+  context: GenerationPromptContext,
+  profile: BrandDNAProfile | null,
+  instruction?: string
+): string[] {
+  const directive = cleanString(instruction);
+  const base = [
+    'Contrarian remix: debunk the common tactic, then reveal the working system.',
+    'Case remix: show one compressed before/after arc in under 30 seconds.',
+    'Checklist remix: 3 avoidable mistakes and one correction that compounds.',
+  ];
+  if (directive) {
+    base[0] = `${base[0]} Priority: ${directive}.`;
+  }
+  return base.map((line) => applyGuardrailsToLine(line, profile));
+}
+
+function buildOutputsFromPromptContext(input: {
+  context: GenerationPromptContext;
+  selectedReferences: ReferenceAsset[];
+  profile: BrandDNAProfile | null;
+  instruction?: string;
+}): GenerationPack['outputs'] {
+  return {
+    hooks: buildHooksFromContext(input.context, input.selectedReferences, input.profile, input.instruction),
+    scripts: buildScriptsFromContext(input.context, input.profile, input.instruction),
+    captions: buildCaptionsFromContext(input.context, input.profile, input.instruction),
+    ctas: buildCtasFromContext(input.context, input.profile, input.instruction),
+    angleRemixes: buildAngleRemixesFromContext(input.context, input.profile, input.instruction),
+  };
+}
+
+function updateSingleGenerationSection(input: {
+  section: GenerationSection;
+  mode: GenerationRefineMode;
+  outputs: GenerationPack['outputs'];
+  regenerated: GenerationPack['outputs'];
+  instruction: string;
+}): GenerationPack['outputs'] {
+  const next = clone(input.outputs);
+  if (input.section === 'hooks') {
+    next.hooks =
+      input.mode === 'regenerate'
+        ? input.regenerated.hooks
+        : next.hooks.map((line, index) => (index === 0 ? `${line} Refinement: ${input.instruction}` : line));
+    return next;
+  }
+  if (input.section === 'scripts.short') {
+    next.scripts.short =
+      input.mode === 'regenerate'
+        ? input.regenerated.scripts.short
+        : `${next.scripts.short}\n\nRefinement: ${input.instruction}`;
+    return next;
+  }
+  if (input.section === 'scripts.medium') {
+    next.scripts.medium =
+      input.mode === 'regenerate'
+        ? input.regenerated.scripts.medium
+        : `${next.scripts.medium}\n\nRefinement: ${input.instruction}`;
+    return next;
+  }
+  if (input.section === 'scripts.long') {
+    next.scripts.long =
+      input.mode === 'regenerate'
+        ? input.regenerated.scripts.long
+        : `${next.scripts.long}\n\nRefinement: ${input.instruction}`;
+    return next;
+  }
+  if (input.section === 'captions') {
+    next.captions =
+      input.mode === 'regenerate'
+        ? input.regenerated.captions
+        : next.captions.map((line, index) => (index === 0 ? `${line} (${input.instruction})` : line));
+    return next;
+  }
+  if (input.section === 'ctas') {
+    next.ctas =
+      input.mode === 'regenerate'
+        ? input.regenerated.ctas
+        : next.ctas.map((line, index) => (index === 0 ? `${line} (${input.instruction})` : line));
+    return next;
+  }
+  next.angleRemixes =
+    input.mode === 'regenerate'
+      ? input.regenerated.angleRemixes
+      : next.angleRemixes.map((line, index) => (index === 0 ? `${line} (${input.instruction})` : line));
+  return next;
+}
+
 function refreshIngestionRun(
   run: IngestionRun,
   patch: Partial<Omit<IngestionRun, 'id' | 'workspaceId' | 'sourcePlatform' | 'sourceUrl' | 'createdAt'>>
@@ -1499,42 +1816,22 @@ export function createGenerationPack(workspaceId: string, input: CreateGeneratio
   const profile = store.brandDna;
   const selectedReferences = pickReferenceSelection(workspaceId, store, input.selectedReferenceIds);
   const selectedReferenceIds = selectedReferences.map((item) => item.id);
-  const summary = cleanString(profile?.summary || profile?.mission || 'Brand-centered campaign output');
-
-  const topReferences = selectedReferences.slice(0, 5);
-  const hooks = topReferences.map((reference, index) => {
-    return `Hook ${index + 1}: ${summary} for ${reference.sourcePlatform} - lead with "${reference.ranking.rationaleTitle.toLowerCase()}".`;
+  const formatTarget: GenerationFormatTarget =
+    input.formatTarget === 'reel-60' || input.formatTarget === 'shorts' || input.formatTarget === 'story'
+      ? input.formatTarget
+      : 'reel-30';
+  const promptContext = buildGenerationPromptContext({
+    template,
+    profile,
+    selectedReferences,
+    prompt: cleanString(input.prompt) || template.description,
+    formatTarget,
   });
-
-  while (hooks.length < 5) {
-    hooks.push(`Hook ${hooks.length + 1}: Call out the pain fast, promise a specific win, and close with one clear action.`);
-  }
-
-  const scripts = {
-    short: `Open with the strongest pain in 1 sentence. Pivot to the transformation your brand delivers. Close with one action. Brand lens: ${summary}.`,
-    medium: `Start with a pattern interrupt built from reference winners. Name the exact audience pain, present your offer with one proof point, and show the first step.\n\nBrand DNA guardrails: required claims -> ${(profile?.requiredClaims || ['No required claims set']).join(', ')}.`,
-    long: `Scene 1 (0-5s): sharp hook from viral references.\nScene 2 (6-20s): demonstrate before/after shift with one measurable signal.\nScene 3 (21-35s): explain your approach using your brand voice.\nScene 4 (36-45s): direct CTA aligned to campaign objective.\n\nBrand summary: ${summary}.`,
-  };
-
-  const captions = [
-    `If you're stuck with inconsistent results, this is your next move. ${summary}.`,
-    `Top creators repeat systems, not random ideas. Here is our structured angle for this week.`,
-    `Built from real winning patterns, remixed for your brand voice and offer clarity.`,
-  ];
-  const ctas = ['Comment "PLAN" for the full playbook.', 'Save this and apply one angle today.', 'DM us "GROWTH" to get a tailored version.'];
-  const angleRemixes = [
-    'Myth-busting angle: challenge the common assumption first, then reveal your method.',
-    'Case angle: show one mini transformation narrative in under 30 seconds.',
-    'Checklist angle: 3 mistakes to avoid + the exact corrective step.',
-  ];
-
-  const outputs: GenerationPack['outputs'] = {
-    hooks,
-    scripts,
-    captions,
-    ctas,
-    angleRemixes,
-  };
+  const outputs = buildOutputsFromPromptContext({
+    context: promptContext,
+    selectedReferences,
+    profile,
+  });
   const qualityCheck = runQualityGate(outputs, profile);
 
   const now = toIsoNow();
@@ -1543,8 +1840,10 @@ export function createGenerationPack(workspaceId: string, input: CreateGeneratio
     workspaceId,
     status: 'completed',
     promptTemplateId: template.id,
+    formatTarget,
     inputPrompt: cleanString(input.prompt) || template.description,
     selectedReferenceIds,
+    promptContext,
     outputs,
     qualityCheck,
     revision: 1,
@@ -1570,32 +1869,27 @@ export function refineGenerationPack(
   const store = ensureWorkspaceStore(workspaceId);
   const existing = store.generations.get(cleanString(generationId));
   if (!existing) return null;
-  const instruction = cleanString(input.instruction) || 'Tighten clarity and sharpen conversion intent.';
+  const mode: GenerationRefineMode = input.mode === 'regenerate' ? 'regenerate' : 'refine';
+  const instruction =
+    cleanString(input.instruction) ||
+    (mode === 'regenerate'
+      ? 'Rebuild this section with a fresh angle while preserving Brand DNA constraints.'
+      : 'Tighten clarity and sharpen conversion intent.');
   const next: GenerationPack = clone(existing);
-
-  if (input.section === 'hooks') {
-    next.outputs.hooks = next.outputs.hooks.map((value, index) =>
-      index === 0 ? `${value} Refinement: ${instruction}` : value
-    );
-  } else if (input.section === 'scripts.short') {
-    next.outputs.scripts.short = `${next.outputs.scripts.short}\n\nRefinement: ${instruction}`;
-  } else if (input.section === 'scripts.medium') {
-    next.outputs.scripts.medium = `${next.outputs.scripts.medium}\n\nRefinement: ${instruction}`;
-  } else if (input.section === 'scripts.long') {
-    next.outputs.scripts.long = `${next.outputs.scripts.long}\n\nRefinement: ${instruction}`;
-  } else if (input.section === 'captions') {
-    next.outputs.captions = next.outputs.captions.map((line, index) =>
-      index === 0 ? `${line} (${instruction})` : line
-    );
-  } else if (input.section === 'ctas') {
-    next.outputs.ctas = next.outputs.ctas.map((line, index) =>
-      index === 0 ? `${line} (${instruction})` : line
-    );
-  } else if (input.section === 'angleRemixes') {
-    next.outputs.angleRemixes = next.outputs.angleRemixes.map((line, index) =>
-      index === 0 ? `${line} (${instruction})` : line
-    );
-  }
+  const selectedReferences = pickReferenceSelection(workspaceId, store, existing.selectedReferenceIds);
+  const regeneratedOutputs = buildOutputsFromPromptContext({
+    context: existing.promptContext,
+    selectedReferences,
+    profile: store.brandDna,
+    instruction,
+  });
+  next.outputs = updateSingleGenerationSection({
+    section: input.section,
+    mode,
+    outputs: existing.outputs,
+    regenerated: regeneratedOutputs,
+    instruction,
+  });
 
   next.qualityCheck = runQualityGate(next.outputs, store.brandDna);
   next.revision += 1;

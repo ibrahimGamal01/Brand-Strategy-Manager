@@ -617,6 +617,122 @@ a {
   background: color-mix(in srgb, var(--vbs-sand) 64%, white);
 }
 
+.vbs-prompt-studio {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.vbs-prompt-two-pane {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.95fr) minmax(0, 1.3fr);
+  gap: 0.8rem;
+}
+
+.vbs-prompt-controls,
+.vbs-prompt-output {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 16%, var(--bat-border));
+  border-radius: 0.8rem;
+  background: color-mix(in srgb, white 93%, var(--vbs-sand));
+  padding: 0.75rem;
+}
+
+.vbs-prompt-output {
+  display: grid;
+  gap: 0.65rem;
+  max-height: 820px;
+  overflow: auto;
+}
+
+.vbs-pack-card {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 14%, var(--bat-border));
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, white 97%, var(--vbs-sand));
+  padding: 0.65rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.vbs-pack-card.is-active {
+  border-color: color-mix(in srgb, var(--vbs-teal) 36%, var(--bat-border));
+  box-shadow: 0 8px 20px rgba(11, 19, 43, 0.08);
+}
+
+.vbs-pack-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem;
+}
+
+.vbs-pack-card-head h3 {
+  margin: 0;
+  font-family: var(--vbs-display-font);
+  font-size: 0.92rem;
+  color: var(--vbs-ink);
+}
+
+.vbs-pack-card-head span {
+  font-size: 0.7rem;
+  color: color-mix(in srgb, var(--vbs-ink) 62%, #6f7488);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.vbs-pack-card-body ul {
+  margin: 0;
+  padding-left: 1rem;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.vbs-pack-card-body li,
+.vbs-pack-card-body pre {
+  font-size: 0.81rem;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--vbs-ink) 80%, #5f6374);
+}
+
+.vbs-pack-card-body pre {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.vbs-pack-instruction {
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  color: color-mix(in srgb, var(--vbs-ink) 68%, #6f7488);
+}
+
+.vbs-pack-instruction input {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 20%, var(--bat-border));
+  border-radius: 0.62rem;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.8rem;
+  background: color-mix(in srgb, white 92%, var(--vbs-sand));
+}
+
+.vbs-quality-report {
+  margin-top: 0.65rem;
+  border: 1px dashed color-mix(in srgb, var(--vbs-cobalt) 28%, var(--bat-border));
+  border-radius: 0.72rem;
+  padding: 0.58rem 0.65rem;
+  background: color-mix(in srgb, white 95%, var(--vbs-sand));
+}
+
+.vbs-quality-report ul {
+  margin: 0.25rem 0 0;
+  padding-left: 1rem;
+  display: grid;
+  gap: 0.24rem;
+}
+
+.vbs-quality-report li {
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--vbs-ink) 82%, #5f6374);
+}
+
 .vbs-output {
   margin-top: 0.8rem;
   border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 18%, var(--bat-border));
@@ -724,6 +840,10 @@ a {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .vbs-prompt-two-pane {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .vbs-kpi-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -752,6 +872,11 @@ a {
 
   .vbs-panel {
     padding: 0.85rem;
+  }
+
+  .vbs-prompt-controls,
+  .vbs-prompt-output {
+    padding: 0.6rem;
   }
 
   .vbs-kpi-grid {

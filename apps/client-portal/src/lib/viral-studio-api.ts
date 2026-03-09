@@ -3,7 +3,10 @@ import {
   ViralStudioContractSnapshot,
   ViralStudioDocument,
   ViralStudioDocumentVersion,
+  ViralStudioGenerationFormatTarget,
   ViralStudioGenerationPack,
+  ViralStudioGenerationRefineMode,
+  ViralStudioGenerationSection,
   ViralStudioIngestionRun,
   ViralStudioPlatform,
   ViralStudioPromptTemplate,
@@ -208,6 +211,7 @@ export async function createViralStudioGeneration(
     templateId?: string;
     prompt?: string;
     selectedReferenceIds?: string[];
+    formatTarget?: ViralStudioGenerationFormatTarget;
   }
 ) {
   const response = await fetch(`/api/portal/workspaces/${workspaceId}/viral-studio/generations`, {
@@ -235,15 +239,9 @@ export async function refineViralStudioGeneration(
   workspaceId: string,
   generationId: string,
   payload: {
-    section:
-      | "hooks"
-      | "scripts.short"
-      | "scripts.medium"
-      | "scripts.long"
-      | "captions"
-      | "ctas"
-      | "angleRemixes";
-    instruction: string;
+    section: ViralStudioGenerationSection;
+    instruction?: string;
+    mode?: ViralStudioGenerationRefineMode;
   }
 ) {
   const response = await fetch(`/api/portal/workspaces/${workspaceId}/viral-studio/generations/${generationId}/refine`, {

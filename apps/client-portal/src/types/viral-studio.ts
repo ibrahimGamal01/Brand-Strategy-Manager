@@ -115,8 +115,31 @@ export type ViralStudioGenerationPack = {
   workspaceId: string;
   status: "completed";
   promptTemplateId: string;
+  formatTarget: "reel-30" | "reel-60" | "shorts" | "story";
   inputPrompt: string;
   selectedReferenceIds: string[];
+  promptContext: {
+    template: {
+      id: string;
+      title: string;
+      intent: "hook-script" | "full-script" | "caption" | "cta" | "angle-remix";
+    };
+    formatTarget: "reel-30" | "reel-60" | "shorts" | "story";
+    objective: string;
+    audienceSnapshot: string;
+    brandSummary: string;
+    voiceProfile: string[];
+    requiredClaims: string[];
+    bannedPhrases: string[];
+    referenceNotes: Array<{
+      id: string;
+      rank: number;
+      platform: ViralStudioPlatform;
+      rationale: string;
+      cue: string;
+    }>;
+    composedPrompt: string;
+  };
   outputs: {
     hooks: string[];
     scripts: {
@@ -139,6 +162,18 @@ export type ViralStudioGenerationPack = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type ViralStudioGenerationSection =
+  | "hooks"
+  | "scripts.short"
+  | "scripts.medium"
+  | "scripts.long"
+  | "captions"
+  | "ctas"
+  | "angleRemixes";
+
+export type ViralStudioGenerationRefineMode = "refine" | "regenerate";
+export type ViralStudioGenerationFormatTarget = "reel-30" | "reel-60" | "shorts" | "story";
 
 export type ViralStudioDocumentSection = {
   id: string;

@@ -6,6 +6,8 @@ import {
   createIngestionRun,
   createStudioDocument,
   createStudioDocumentVersion,
+  GenerationFormatTarget,
+  GenerationRefineMode,
   ExportStudioDocumentFormat,
   exportStudioDocument,
   getBrandDNAProfile,
@@ -68,6 +70,18 @@ function parseIngestionPreset(value: unknown): 'balanced' | 'quick-scan' | 'deep
 function parseExportFormat(value: unknown): ExportStudioDocumentFormat {
   const normalized = safeString(value).toLowerCase();
   return normalized === 'json' ? 'json' : 'markdown';
+}
+
+function parseGenerationFormatTarget(value: unknown): GenerationFormatTarget {
+  const normalized = safeString(value).toLowerCase();
+  if (normalized === 'reel-60') return 'reel-60';
+  if (normalized === 'shorts') return 'shorts';
+  if (normalized === 'story') return 'story';
+  return 'reel-30';
+}
+
+function parseGenerationMode(value: unknown): GenerationRefineMode {
+  return safeString(value).toLowerCase() === 'regenerate' ? 'regenerate' : 'refine';
 }
 
 function parseVoiceSliders(value: unknown): Partial<{ bold: number; formal: number; playful: number; direct: number }> | undefined {
@@ -399,6 +413,7 @@ router.post('/viral-studio/generations', async (req, res) => {
       templateId: safeString(payload.templateId),
       prompt: safeString(payload.prompt),
       selectedReferenceIds: parseStringArray(payload.selectedReferenceIds, 12),
+      formatTarget: parseGenerationFormatTarget(payload.formatTarget),
     });
     return res.status(201).json({
       ok: true,
@@ -440,6 +455,7 @@ router.post('/viral-studio/generations/:generationId/refine', (req, res) => {
       req.body && typeof req.body === 'object' && !Array.isArray(req.body)
         ? (req.body as Record<string, unknown>)
         : {};
+    const mode = parseGenerationMode(payload.mode);
     const section = safeString(payload.section) as
       | 'hooks'
       | 'scripts.short'
@@ -460,14 +476,14 @@ router.post('/viral-studio/generations/:generationId/refine', (req, res) => {
     ) {
       return res.status(400).json({ error: 'Invalid section for refine action' });
     }
-    if (!instruction) {
+    if (mode === 'refine' && !instruction) {
       return res.status(400).json({ error: 'instruction is required' });
     }
 
     if (!getGenerationPack(workspaceId, generationId)) {
       return res.status(404).json({ error: 'Generation not found' });
     }
-    const updated = refineGenerationPack(workspaceId, generationId, { section, instruction });
+    const updated = refineGenerationPack(workspaceId, generationId, { section, instruction, mode });
     if (!updated) {
       return res.status(404).json({ error: 'Generation not found' });
     }

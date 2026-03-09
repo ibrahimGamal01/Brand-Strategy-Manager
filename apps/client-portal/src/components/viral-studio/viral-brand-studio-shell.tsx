@@ -30,9 +30,12 @@ import {
   ViralStudioContractSnapshot,
   ViralStudioDocument,
   ViralStudioDocumentVersion,
+  ViralStudioGenerationFormatTarget,
   ViralStudioGenerationPack,
+  ViralStudioGenerationSection,
   ViralStudioIngestionRun,
   ViralStudioPlatform,
+  ViralStudioPromptTemplate,
   ViralStudioReferenceAsset,
 } from "@/types/viral-studio";
 
@@ -71,6 +74,22 @@ type ViralStudioChatBridgePayload = {
 
 type IngestionPreset = "balanced" | "quick-scan" | "deep-scan";
 type ReferenceShortlistAction = "pin" | "exclude" | "must-use" | "clear";
+
+type PromptStudioSectionMeta = {
+  id: ViralStudioGenerationSection;
+  title: string;
+  kind: "list" | "text";
+};
+
+const PROMPT_STUDIO_SECTIONS: PromptStudioSectionMeta[] = [
+  { id: "hooks", title: "Hooks", kind: "list" },
+  { id: "scripts.short", title: "Short Script", kind: "text" },
+  { id: "scripts.medium", title: "Medium Script", kind: "text" },
+  { id: "scripts.long", title: "Long Script", kind: "text" },
+  { id: "captions", title: "Captions", kind: "list" },
+  { id: "ctas", title: "CTA Variants", kind: "list" },
+  { id: "angleRemixes", title: "Angle Remixes", kind: "list" },
+];
 
 const DEFAULT_FORM_STATE: BrandFormState = {
   mission: "",
@@ -170,6 +189,38 @@ function toPresetLabel(preset: IngestionPreset): string {
   if (preset === "quick-scan") return "Quick scan";
   if (preset === "deep-scan") return "Deep scan";
   return "Balanced";
+}
+
+function toGenerationFormatLabel(target: ViralStudioGenerationFormatTarget): string {
+  if (target === "reel-60") return "60s Reel";
+  if (target === "shorts") return "YouTube Shorts";
+  if (target === "story") return "Story Sequence";
+  return "30s Reel";
+}
+
+function defaultSectionInstructions(): Record<ViralStudioGenerationSection, string> {
+  return {
+    hooks: "Sharpen the promise and make the first 2 seconds impossible to ignore.",
+    "scripts.short": "Tighten pacing and make the CTA immediate.",
+    "scripts.medium": "Increase clarity and add one concrete proof element.",
+    "scripts.long": "Improve narrative flow while preserving direct tone.",
+    captions: "Make the first line scroll-stopping and outcome-led.",
+    ctas: "Increase action clarity with one measurable next step.",
+    angleRemixes: "Push for fresher positioning against common market assumptions.",
+  };
+}
+
+function readGenerationSectionContent(
+  generation: ViralStudioGenerationPack,
+  section: ViralStudioGenerationSection
+): string[] {
+  if (section === "hooks") return generation.outputs.hooks;
+  if (section === "scripts.short") return [generation.outputs.scripts.short];
+  if (section === "scripts.medium") return [generation.outputs.scripts.medium];
+  if (section === "scripts.long") return [generation.outputs.scripts.long];
+  if (section === "captions") return generation.outputs.captions;
+  if (section === "ctas") return generation.outputs.ctas;
+  return generation.outputs.angleRemixes;
 }
 
 function presetDefaults(preset: IngestionPreset): { maxVideos: number; lookbackDays: number } {
@@ -332,6 +383,10 @@ function buildGenerationChatBridgePayload(
     content: [
       "Use this Viral Studio generation pack as high-priority execution context.",
       "",
+      `Format target: ${toGenerationFormatLabel(generation.formatTarget)}`,
+      `Objective: ${generation.promptContext.objective}`,
+      `Voice profile: ${generation.promptContext.voiceProfile.join(", ")}`,
+      "",
       "Hooks:",
       ...(hookLines.length ? hookLines : ["- none"]),
       "",
@@ -353,7 +408,7 @@ function buildGenerationChatBridgePayload(
       type: "viral_studio_context",
       contextKind: "generation_pack",
       objective: "Transform generation outputs into a tactical launch plan grounded in selected references.",
-      summary: `Generation revision ${generation.revision} with ${generation.outputs.hooks.length} hooks, ${generation.outputs.captions.length} captions, and ${generation.outputs.ctas.length} CTAs.`,
+      summary: `Generation revision ${generation.revision} (${toGenerationFormatLabel(generation.formatTarget)}) with ${generation.outputs.hooks.length} hooks, ${generation.outputs.captions.length} captions, and ${generation.outputs.ctas.length} CTAs.`,
       cards: source.slice(0, 6).map((item, index) => ({
         id: item.id,
         title: compactText(item.ranking.rationaleTitle, 130) || `Reference ${index + 1}`,
@@ -389,6 +444,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   const [isBusy, setIsBusy] = useState(false);
 
   const [contracts, setContracts] = useState<ViralStudioContractSnapshot | null>(null);
+  const [promptTemplates, setPromptTemplates] = useState<ViralStudioPromptTemplate[]>([]);
   const [brandProfile, setBrandProfile] = useState<BrandDNAProfile | null>(null);
   const [brandForm, setBrandForm] = useState<BrandFormState>({ ...DEFAULT_FORM_STATE });
   const [onboardingStep, setOnboardingStep] = useState<1 | 2 | 3 | 4>(1);
@@ -409,7 +465,17 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   const [maxVideos, setMaxVideos] = useState(50);
   const [lookbackDays, setLookbackDays] = useState(180);
   const [showExtractionModal, setShowExtractionModal] = useState(false);
-  const [promptText, setPromptText] = useState("Generate a multi-pack with bold hooks and direct CTAs.");
+  const [promptText, setPromptText] = useState(
+    "Generate a campaign-ready multi-pack with aggressive hooks, proof-backed scripts, and direct CTAs."
+  );
+  const [selectedTemplateId, setSelectedTemplateId] = useState("full-script");
+  const [generationFormatTarget, setGenerationFormatTarget] =
+    useState<ViralStudioGenerationFormatTarget>("reel-30");
+  const [sectionInstructions, setSectionInstructions] =
+    useState<Record<ViralStudioGenerationSection, string>>(defaultSectionInstructions);
+  const [activePromptSection, setActivePromptSection] =
+    useState<ViralStudioGenerationSection>("hooks");
+  const [promptActionSection, setPromptActionSection] = useState<ViralStudioGenerationSection | null>(null);
   const [referenceViewMode, setReferenceViewMode] = useState<"grid" | "list">("grid");
   const [referenceFilter, setReferenceFilter] = useState<"all" | "prioritized" | "must-use" | "pin" | "exclude">("all");
   const [referencePlatformFilter, setReferencePlatformFilter] = useState<"all" | ViralStudioPlatform>("all");
@@ -434,6 +500,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       setBrandProfile(brandPayload.profile);
       setBrandForm(toFormState(brandPayload.profile));
       setContracts(contractPayload.contract);
+      setPromptTemplates(contractPayload.promptTemplates || []);
       setIngestions(ingestionPayload.runs);
       setActiveIngestion(ingestionPayload.runs[0] || null);
       setReferences(referencePayload.items);
@@ -450,6 +517,12 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   useEffect(() => {
     void bootstrap();
   }, [bootstrap]);
+
+  useEffect(() => {
+    if (!promptTemplates.length) return;
+    if (promptTemplates.some((template) => template.id === selectedTemplateId)) return;
+    setSelectedTemplateId(promptTemplates[0].id);
+  }, [promptTemplates, selectedTemplateId]);
 
   useEffect(() => {
     if (!activeIngestion) return;
@@ -611,6 +684,32 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       postedAgeDays: daysSinceIso(selectedReference.metrics.postedAt),
     };
   }, [selectedReference, filteredReferences, references]);
+
+  const selectedTemplate = useMemo(() => {
+    return promptTemplates.find((template) => template.id === selectedTemplateId) || promptTemplates[0] || null;
+  }, [promptTemplates, selectedTemplateId]);
+
+  const prioritizedReferenceCount = useMemo(() => {
+    return references.filter((item) => item.shortlistState === "must-use" || item.shortlistState === "pin").length;
+  }, [references]);
+
+  const qualitySignals = useMemo(() => {
+    if (!generation) return [];
+    const signals: string[] = [];
+    if (generation.qualityCheck.bannedTermHits.length > 0) {
+      signals.push(`Banned terms: ${generation.qualityCheck.bannedTermHits.join(", ")}`);
+    }
+    if (generation.qualityCheck.toneMismatch) {
+      signals.push("Tone mismatch detected against high-formality voice settings.");
+    }
+    if (generation.qualityCheck.duplicates.length > 0) {
+      signals.push(`Duplicate variants: ${generation.qualityCheck.duplicates.length}`);
+    }
+    if (generation.qualityCheck.lengthWarnings.length > 0) {
+      signals.push(...generation.qualityCheck.lengthWarnings);
+    }
+    return signals;
+  }, [generation]);
 
   const saveBrandDna = useCallback(
     async (mode: "draft" | "final") => {
@@ -809,34 +908,51 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     setError(null);
     try {
       const payload = await createViralStudioGeneration(workspaceId, {
-        templateId: "full-script",
+        templateId: selectedTemplateId,
         prompt: promptText,
         selectedReferenceIds,
+        formatTarget: generationFormatTarget,
       });
       setGeneration(payload.generation);
+      setActivePromptSection("hooks");
     } catch (generationError: unknown) {
       setError(String((generationError as Error)?.message || "Failed to generate pack"));
     } finally {
       setIsBusy(false);
     }
-  }, [workspaceId, selectedReferenceIds, promptText, brandReady]);
+  }, [workspaceId, selectedReferenceIds, promptText, brandReady, selectedTemplateId, generationFormatTarget]);
 
-  const refineHooks = useCallback(async () => {
-    if (!generation) return;
-    setIsBusy(true);
-    setError(null);
-    try {
-      const payload = await refineViralStudioGeneration(workspaceId, generation.id, {
-        section: "hooks",
-        instruction: "Make hooks sharper and more outcome-specific.",
-      });
-      setGeneration(payload.generation);
-    } catch (refineError: unknown) {
-      setError(String((refineError as Error)?.message || "Failed to refine generation"));
-    } finally {
-      setIsBusy(false);
-    }
-  }, [workspaceId, generation]);
+  const runPromptSectionAction = useCallback(
+    async (section: ViralStudioGenerationSection, mode: "refine" | "regenerate") => {
+      if (!generation) return;
+      setIsBusy(true);
+      setError(null);
+      setPromptActionSection(section);
+      try {
+        const instruction = sectionInstructions[section]?.trim();
+        const payload = await refineViralStudioGeneration(workspaceId, generation.id, {
+          section,
+          mode,
+          ...(instruction ? { instruction } : {}),
+        });
+        setGeneration(payload.generation);
+        setActivePromptSection(section);
+      } catch (refineError: unknown) {
+        setError(String((refineError as Error)?.message || "Failed to refine generation section"));
+      } finally {
+        setPromptActionSection(null);
+        setIsBusy(false);
+      }
+    },
+    [workspaceId, generation, sectionInstructions]
+  );
+
+  const updateSectionInstruction = useCallback(
+    (section: ViralStudioGenerationSection, value: string) => {
+      setSectionInstructions((previous) => ({ ...previous, [section]: value }));
+    },
+    []
+  );
 
   const createDocumentFromGeneration = useCallback(async () => {
     if (!generation) return;
@@ -845,7 +961,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     try {
       const payload = await createViralStudioDocument(workspaceId, {
         generationId: generation.id,
-        title: "Campaign Pack - Plan 2",
+        title: "Campaign Pack - Plan 5",
       });
       setDocument(payload.document);
       const documentPayload = await fetchViralStudioDocument(workspaceId, payload.document.id);
@@ -863,8 +979,8 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     setError(null);
     try {
       const payload = await createViralStudioDocumentVersion(workspaceId, document.id, {
-        author: "viral-studio-plan2",
-        summary: "Published after onboarding refinement",
+        author: "viral-studio-plan5",
+        summary: "Published after section-level prompt refinements",
       });
       setDocument(payload.document);
       setVersions((previous) => [...previous, payload.version]);
@@ -1391,25 +1507,136 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
           </div>
 
           <div className="vbs-grid">
-            <article className="vbs-panel">
+            <article className="vbs-panel vbs-prompt-studio">
               <h2 className="vbs-panel-title">Prompt Studio</h2>
-              <p className="vbs-panel-subtitle">Generate multi-pack content using Brand DNA + shortlisted references.</p>
-              <label>Prompt direction
-                <textarea value={promptText} rows={4} onChange={(e) => setPromptText(e.target.value)} />
-              </label>
-              <div className="vbs-actions">
-                <button type="button" disabled={isBusy} onClick={() => void generatePack()}>Generate Multi-Pack</button>
-                <button type="button" disabled={isBusy || !generation} onClick={() => void refineHooks()}>Refine Hooks</button>
-                <button type="button" disabled={isBusy || !generation} onClick={() => void sendGenerationToChat()}>
-                  Send Pack To Chat
-                </button>
-              </div>
-              {generation ? (
-                <div className="vbs-output">
-                  <p className="vbs-meta">Revision {generation.revision} • Quality: {generation.qualityCheck.passed ? "pass" : "review"}</p>
-                  <ul>{generation.outputs.hooks.map((hook) => <li key={hook}>{hook}</li>)}</ul>
+              <p className="vbs-panel-subtitle">
+                Two-pane pack builder using Brand DNA + shortlisted references with section-level refine and regenerate controls.
+              </p>
+              <div className="vbs-prompt-two-pane">
+                <div className="vbs-prompt-controls">
+                  <div className="vbs-form-grid">
+                    <label>
+                      Template
+                      <select value={selectedTemplateId} onChange={(event) => setSelectedTemplateId(event.target.value)}>
+                        {promptTemplates.map((template) => (
+                          <option key={template.id} value={template.id}>
+                            {template.title}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Format Target
+                      <select
+                        value={generationFormatTarget}
+                        onChange={(event) => setGenerationFormatTarget(event.target.value as ViralStudioGenerationFormatTarget)}
+                      >
+                        <option value="reel-30">30s Reel</option>
+                        <option value="reel-60">60s Reel</option>
+                        <option value="shorts">YouTube Shorts</option>
+                        <option value="story">Story Sequence</option>
+                      </select>
+                    </label>
+                  </div>
+                  <label>
+                    Prompt direction
+                    <textarea value={promptText} rows={4} onChange={(e) => setPromptText(e.target.value)} />
+                  </label>
+                  <p className="vbs-meta">
+                    Active template: {selectedTemplate?.title || "n/a"} • Prioritized references: {prioritizedReferenceCount} •
+                    Format: {toGenerationFormatLabel(generationFormatTarget)}
+                  </p>
+                  <div className="vbs-actions">
+                    <button type="button" disabled={isBusy} onClick={() => void generatePack()}>
+                      Generate Multi-Pack
+                    </button>
+                    <button type="button" disabled={isBusy || !generation} onClick={() => void sendGenerationToChat()}>
+                      Send Pack To Chat
+                    </button>
+                  </div>
+                  {generation ? (
+                    <div className="vbs-quality-report">
+                      <p className="vbs-meta">
+                        Revision {generation.revision} • Quality: {generation.qualityCheck.passed ? "pass" : "review"}
+                      </p>
+                      {qualitySignals.length > 0 ? (
+                        <ul>
+                          {qualitySignals.map((line) => (
+                            <li key={line}>{line}</li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="vbs-meta">Quality gate clear: no banned terms, tone violations, or length warnings.</p>
+                      )}
+                      <p className="vbs-meta">
+                        Composer prompt: {compactText(generation.promptContext.composedPrompt, 340)}
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="vbs-meta">No generation yet.</p>
+                  )}
                 </div>
-              ) : <p className="vbs-meta">No generation yet.</p>}
+                <div className="vbs-prompt-output">
+                  {generation ? (
+                    PROMPT_STUDIO_SECTIONS.map((sectionMeta) => {
+                      const sectionLines = readGenerationSectionContent(generation, sectionMeta.id);
+                      const sectionInstruction = sectionInstructions[sectionMeta.id] || "";
+                      const isSectionPending = promptActionSection === sectionMeta.id;
+                      return (
+                        <article
+                          key={sectionMeta.id}
+                          className={`vbs-pack-card ${activePromptSection === sectionMeta.id ? "is-active" : ""}`}
+                          onClick={() => setActivePromptSection(sectionMeta.id)}
+                        >
+                          <header className="vbs-pack-card-head">
+                            <h3>{sectionMeta.title}</h3>
+                            <span>{sectionMeta.kind === "list" ? `${sectionLines.length} variants` : "1 block"}</span>
+                          </header>
+                          <div className="vbs-pack-card-body">
+                            {sectionMeta.kind === "list" ? (
+                              <ul>
+                                {sectionLines.map((line, index) => (
+                                  <li key={`${sectionMeta.id}-${index}`}>{line}</li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <pre>{sectionLines[0] || ""}</pre>
+                            )}
+                          </div>
+                          <label className="vbs-pack-instruction">
+                            Section instruction
+                            <input
+                              value={sectionInstruction}
+                              onChange={(event) => updateSectionInstruction(sectionMeta.id, event.target.value)}
+                              placeholder="How should this section change?"
+                            />
+                          </label>
+                          <div className="vbs-mini-actions">
+                            <button
+                              type="button"
+                              disabled={isBusy}
+                              onClick={() => void runPromptSectionAction(sectionMeta.id, "refine")}
+                            >
+                              {isSectionPending ? "Working…" : "Refine Section"}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isBusy}
+                              onClick={() => void runPromptSectionAction(sectionMeta.id, "regenerate")}
+                            >
+                              {isSectionPending ? "Working…" : "Regenerate Only"}
+                            </button>
+                          </div>
+                        </article>
+                      );
+                    })
+                  ) : (
+                    <div className="vbs-output">
+                      <p className="vbs-meta">Run Generate Multi-Pack to populate section cards.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
             </article>
 
             <article className="vbs-panel">

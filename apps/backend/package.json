@@ -52,6 +52,7 @@
         "test:intake-competitor-links": "tsx src/scripts/test-intake-competitor-links-suggest.ts",
         "test:competitor-pipeline-fixes": "tsx src/scripts/test-competitor-pipeline-fixes.ts",
         "test:viral-studio-plan34": "tsx src/scripts/test-viral-studio-plan34.ts",
+        "test:viral-studio-plan5": "tsx src/scripts/test-viral-studio-plan5.ts",
         "test:instagram-session-pool": "tsx src/scripts/test-instagram-session-pool.ts",
         "test:instagram-graphql-retry-guard": "tsx src/scripts/test-instagram-graphql-retry-guard.ts",
         "test:instagram-service-graphql-cooldown": "tsx src/scripts/test-instagram-service-graphql-cooldown.ts",
