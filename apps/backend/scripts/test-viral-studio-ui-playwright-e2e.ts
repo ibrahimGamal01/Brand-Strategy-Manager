@@ -91,8 +91,15 @@ async function completeAuthAndResolveWorkspace(page: Page, baseUrl: string): Pro
   await page.getByRole('button', { name: /^(Sign in|Log in)$/i }).first().click();
 
   await page.waitForURL((url) => url.pathname === '/app', { timeout: 60_000 });
-  await page.locator('a[href^="/app/w/"]').first().click();
-  await page.waitForURL((url) => /^\/app\/w\/[^/]+/.test(url.pathname), { timeout: 60_000 });
+  const openViralStudioLink = page.getByRole('link', { name: 'Open Viral Studio' }).first();
+  const hasViralStudioLink = (await openViralStudioLink.count().catch(() => 0)) > 0;
+  if (hasViralStudioLink) {
+    await openViralStudioLink.click();
+    await page.waitForURL((url) => /^\/app\/w\/[^/]+\/viral-studio/.test(url.pathname), { timeout: 60_000 });
+  } else {
+    await page.locator('a[href^="/app/w/"]').first().click();
+    await page.waitForURL((url) => /^\/app\/w\/[^/]+/.test(url.pathname), { timeout: 60_000 });
+  }
 
   const workspaceMatch = page.url().match(/\/app\/w\/([^/?#]+)/);
   if (!workspaceMatch?.[1]) {
