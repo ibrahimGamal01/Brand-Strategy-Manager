@@ -2,7 +2,9 @@ import {
   BrandDNAProfile,
   ViralStudioContractSnapshot,
   ViralStudioDocument,
+  ViralStudioDocumentSection,
   ViralStudioDocumentVersion,
+  ViralStudioDocumentVersionComparison,
   ViralStudioGenerationFormatTarget,
   ViralStudioGenerationPack,
   ViralStudioGenerationRefineMode,
@@ -282,6 +284,34 @@ export async function fetchViralStudioDocument(
   }>(response);
 }
 
+export async function patchViralStudioDocument(
+  workspaceId: string,
+  documentId: string,
+  payload: {
+    title?: string;
+    sections?: Array<{
+      id: string;
+      title?: string;
+      kind?: ViralStudioDocumentSection["kind"];
+      content?: string | string[];
+    }>;
+    orderedSectionIds?: string[];
+    autosave?: boolean;
+  }
+) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/viral-studio/documents/${documentId}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseJson<{
+    ok: boolean;
+    document: ViralStudioDocument;
+    autosavedAt?: string;
+  }>(response);
+}
+
 export async function createViralStudioDocumentVersion(
   workspaceId: string,
   documentId: string,
@@ -297,6 +327,52 @@ export async function createViralStudioDocumentVersion(
     ok: boolean;
     document: ViralStudioDocument;
     version: ViralStudioDocumentVersion;
+  }>(response);
+}
+
+export async function promoteViralStudioDocumentVersion(
+  workspaceId: string,
+  documentId: string,
+  versionId: string,
+  payload?: { author?: string; summary?: string }
+) {
+  const response = await fetch(
+    `/api/portal/workspaces/${workspaceId}/viral-studio/documents/${documentId}/versions/${versionId}/promote`,
+    {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload || {}),
+    }
+  );
+  return parseJson<{
+    ok: boolean;
+    document: ViralStudioDocument;
+    version: ViralStudioDocumentVersion;
+    promotedFromVersionId: string;
+  }>(response);
+}
+
+export async function compareViralStudioDocumentVersions(
+  workspaceId: string,
+  documentId: string,
+  leftVersionId: string,
+  rightVersionId: string
+) {
+  const params = new URLSearchParams();
+  params.set("leftVersionId", leftVersionId);
+  params.set("rightVersionId", rightVersionId);
+  const response = await fetch(
+    `/api/portal/workspaces/${workspaceId}/viral-studio/documents/${documentId}/compare?${params.toString()}`,
+    {
+      method: "GET",
+      credentials: "include",
+      cache: "no-store",
+    }
+  );
+  return parseJson<{
+    ok: boolean;
+    comparison: ViralStudioDocumentVersionComparison;
   }>(response);
 }
 

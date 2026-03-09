@@ -1,6 +1,7 @@
 import { Request, Router } from 'express';
 import {
   applyReferenceShortlistAction,
+  compareStudioDocumentVersions,
   createBrandDnaSummary,
   createGenerationPack,
   createIngestionRun,
@@ -18,9 +19,12 @@ import {
   listIngestionRuns,
   listPromptTemplates,
   listReferenceAssets,
+  promoteStudioDocumentVersion,
   retryIngestionRun,
   refineGenerationPack,
   ShortlistAction,
+  StudioDocumentSection,
+  updateStudioDocument,
   upsertBrandDNAProfile,
   ViralStudioPlatform,
 } from '../services/portal/viral-studio';
@@ -82,6 +86,38 @@ function parseGenerationFormatTarget(value: unknown): GenerationFormatTarget {
 
 function parseGenerationMode(value: unknown): GenerationRefineMode {
   return safeString(value).toLowerCase() === 'regenerate' ? 'regenerate' : 'refine';
+}
+
+function parseDocumentSectionKind(value: unknown): StudioDocumentSection['kind'] | undefined {
+  const normalized = safeString(value).toLowerCase();
+  if (normalized === 'hooks' || normalized === 'script' || normalized === 'captions' || normalized === 'ctas' || normalized === 'angles') {
+    return normalized;
+  }
+  return undefined;
+}
+
+function parseDocumentSections(
+  value: unknown
+): Array<{ id: string; title?: string; kind?: StudioDocumentSection['kind']; content?: string | string[] }> | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const parsed: Array<{ id: string; title?: string; kind?: StudioDocumentSection['kind']; content?: string | string[] }> = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const record = entry as Record<string, unknown>;
+    const id = safeString(record.id);
+    if (!id) continue;
+    const section: { id: string; title?: string; kind?: StudioDocumentSection['kind']; content?: string | string[] } = { id };
+    if (typeof record.title === 'string') section.title = safeString(record.title);
+    const kind = parseDocumentSectionKind(record.kind);
+    if (kind) section.kind = kind;
+    if (typeof record.content === 'string') {
+      section.content = record.content;
+    } else if (Array.isArray(record.content)) {
+      section.content = record.content.map((line) => String(line || '').trim());
+    }
+    parsed.push(section);
+  }
+  return parsed;
 }
 
 function parseVoiceSliders(value: unknown): Partial<{ bold: number; formal: number; playful: number; direct: number }> | undefined {
@@ -544,6 +580,38 @@ router.get('/viral-studio/documents/:documentId', (req, res) => {
   }
 });
 
+router.patch('/viral-studio/documents/:documentId', (req, res) => {
+  try {
+    const workspaceId = parseWorkspaceId(req);
+    const documentId = safeString(req.params.documentId);
+    if (!workspaceId || !documentId) {
+      return res.status(400).json({ error: 'workspaceId and documentId are required' });
+    }
+    const payload =
+      req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+        ? (req.body as Record<string, unknown>)
+        : {};
+    const sections = parseDocumentSections(payload.sections);
+    const orderedSectionIds = parseStringArray(payload.orderedSectionIds, 128);
+    const document = updateStudioDocument(workspaceId, documentId, {
+      ...(typeof payload.title === 'string' ? { title: safeString(payload.title) } : {}),
+      ...(sections ? { sections } : {}),
+      ...(orderedSectionIds.length > 0 ? { orderedSectionIds } : {}),
+      ...(typeof payload.autosave === 'boolean' ? { autosave: payload.autosave } : {}),
+    });
+    if (!document) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    return res.json({
+      ok: true,
+      document,
+      autosavedAt: typeof payload.autosave === 'boolean' && payload.autosave ? new Date().toISOString() : undefined,
+    });
+  } catch (error: any) {
+    return res.status(500).json({ ok: false, error: 'DOCUMENT_PATCH_FAILED', details: error?.message || String(error) });
+  }
+});
+
 router.post('/viral-studio/documents/:documentId/versions', (req, res) => {
   try {
     const workspaceId = parseWorkspaceId(req);
@@ -568,6 +636,56 @@ router.post('/viral-studio/documents/:documentId/versions', (req, res) => {
     });
   } catch (error: any) {
     return res.status(500).json({ ok: false, error: 'DOCUMENT_VERSION_CREATE_FAILED', details: error?.message || String(error) });
+  }
+});
+
+router.post('/viral-studio/documents/:documentId/versions/:versionId/promote', (req, res) => {
+  try {
+    const workspaceId = parseWorkspaceId(req);
+    const documentId = safeString(req.params.documentId);
+    const versionId = safeString(req.params.versionId);
+    if (!workspaceId || !documentId || !versionId) {
+      return res.status(400).json({ error: 'workspaceId, documentId, and versionId are required' });
+    }
+    const payload =
+      req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+        ? (req.body as Record<string, unknown>)
+        : {};
+    const promoted = promoteStudioDocumentVersion(workspaceId, documentId, versionId, {
+      author: safeString(payload.author),
+      summary: safeString(payload.summary),
+    });
+    if (!promoted) {
+      return res.status(404).json({ error: 'Document or version not found' });
+    }
+    return res.status(201).json({
+      ok: true,
+      ...promoted,
+    });
+  } catch (error: any) {
+    return res.status(500).json({ ok: false, error: 'DOCUMENT_VERSION_PROMOTE_FAILED', details: error?.message || String(error) });
+  }
+});
+
+router.get('/viral-studio/documents/:documentId/compare', (req, res) => {
+  try {
+    const workspaceId = parseWorkspaceId(req);
+    const documentId = safeString(req.params.documentId);
+    if (!workspaceId || !documentId) {
+      return res.status(400).json({ error: 'workspaceId and documentId are required' });
+    }
+    const leftVersionId = safeString(Array.isArray(req.query.leftVersionId) ? req.query.leftVersionId[0] : req.query.leftVersionId) || 'current';
+    const rightVersionId = safeString(Array.isArray(req.query.rightVersionId) ? req.query.rightVersionId[0] : req.query.rightVersionId) || 'current';
+    const comparison = compareStudioDocumentVersions(workspaceId, documentId, leftVersionId, rightVersionId);
+    if (!comparison) {
+      return res.status(404).json({ error: 'Document or versions not found' });
+    }
+    return res.json({
+      ok: true,
+      comparison,
+    });
+  } catch (error: any) {
+    return res.status(500).json({ ok: false, error: 'DOCUMENT_COMPARE_FAILED', details: error?.message || String(error) });
   }
 });
 

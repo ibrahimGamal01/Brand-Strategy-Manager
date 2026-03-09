@@ -733,6 +733,104 @@ a {
   color: color-mix(in srgb, var(--vbs-ink) 82%, #5f6374);
 }
 
+.vbs-document-workspace {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.vbs-doc-editor {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 14%, var(--bat-border));
+  border-radius: 0.85rem;
+  background: color-mix(in srgb, white 94%, var(--vbs-sand));
+  padding: 0.7rem;
+  display: grid;
+  gap: 0.7rem;
+}
+
+.vbs-doc-title-input {
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  color: color-mix(in srgb, var(--vbs-ink) 70%, #6f7488);
+}
+
+.vbs-doc-title-input input,
+.vbs-doc-section-head input,
+.vbs-doc-section-card textarea {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 20%, var(--bat-border));
+  border-radius: 0.62rem;
+  padding: 0.48rem 0.58rem;
+  font-size: 0.82rem;
+  background: color-mix(in srgb, white 94%, var(--vbs-sand));
+}
+
+.vbs-doc-sections {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.vbs-doc-section-card {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 14%, var(--bat-border));
+  border-radius: 0.72rem;
+  background: color-mix(in srgb, white 98%, var(--vbs-sand));
+  padding: 0.6rem;
+  display: grid;
+  gap: 0.46rem;
+}
+
+.vbs-doc-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem;
+}
+
+.vbs-doc-section-head input {
+  flex: 1;
+  min-width: 0;
+}
+
+.vbs-doc-section-card textarea {
+  min-height: 130px;
+  line-height: 1.45;
+}
+
+.vbs-doc-version-tools {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.vbs-doc-compare-controls,
+.vbs-doc-timeline {
+  border: 1px dashed color-mix(in srgb, var(--vbs-cobalt) 28%, var(--bat-border));
+  border-radius: 0.72rem;
+  padding: 0.6rem;
+  background: color-mix(in srgb, white 95%, var(--vbs-sand));
+}
+
+.vbs-doc-compare-controls h3,
+.vbs-doc-timeline h3 {
+  margin: 0;
+  font-family: var(--vbs-display-font);
+  font-size: 0.88rem;
+  color: var(--vbs-ink);
+}
+
+.vbs-doc-compare-results ul,
+.vbs-doc-timeline ul {
+  margin: 0.45rem 0 0;
+  padding-left: 1rem;
+  display: grid;
+  gap: 0.22rem;
+}
+
+.vbs-doc-compare-results li,
+.vbs-doc-timeline li {
+  font-size: 0.76rem;
+  color: color-mix(in srgb, var(--vbs-ink) 82%, #5f6374);
+}
+
 .vbs-output {
   margin-top: 0.8rem;
   border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 18%, var(--bat-border));
@@ -863,6 +961,10 @@ a {
   .vbs-analysis-kpi-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .vbs-doc-version-tools {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 700px) {
@@ -877,6 +979,11 @@ a {
   .vbs-prompt-controls,
   .vbs-prompt-output {
     padding: 0.6rem;
+  }
+
+  .vbs-doc-section-head {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .vbs-kpi-grid {

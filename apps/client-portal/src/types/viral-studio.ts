@@ -199,8 +199,23 @@ export type ViralStudioDocumentVersion = {
   documentId: string;
   author: string;
   summary: string;
+  basedOnVersionId?: string;
   snapshotSections: ViralStudioDocumentSection[];
   createdAt: string;
+};
+
+export type ViralStudioDocumentVersionComparison = {
+  leftVersionId: string;
+  rightVersionId: string;
+  totalSections: number;
+  changedSections: number;
+  sectionDiffs: Array<{
+    sectionKey: string;
+    title: string;
+    changed: boolean;
+    leftPreview: string;
+    rightPreview: string;
+  }>;
 };
 
 export type ViralStudioPromptTemplate = {

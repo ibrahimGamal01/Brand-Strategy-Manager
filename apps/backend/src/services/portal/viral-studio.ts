@@ -275,6 +275,7 @@ export type StudioDocumentVersion = {
   documentId: string;
   author: string;
   summary: string;
+  basedOnVersionId?: string;
   snapshotSections: StudioDocumentSection[];
   createdAt: string;
 };
@@ -287,6 +288,43 @@ export type CreateStudioDocumentInput = {
 export type CreateStudioDocumentVersionInput = {
   author?: string;
   summary?: string;
+};
+
+export type UpdateStudioDocumentInput = {
+  title?: string;
+  sections?: Array<{
+    id: string;
+    title?: string;
+    kind?: StudioDocumentSection['kind'];
+    content?: string | string[];
+  }>;
+  orderedSectionIds?: string[];
+  autosave?: boolean;
+};
+
+export type PromoteStudioDocumentVersionInput = {
+  author?: string;
+  summary?: string;
+};
+
+export type PromoteStudioDocumentVersionResult = {
+  document: StudioDocument;
+  version: StudioDocumentVersion;
+  promotedFromVersionId: string;
+};
+
+export type StudioDocumentVersionComparison = {
+  leftVersionId: string;
+  rightVersionId: string;
+  totalSections: number;
+  changedSections: number;
+  sectionDiffs: Array<{
+    sectionKey: string;
+    title: string;
+    changed: boolean;
+    leftPreview: string;
+    rightPreview: string;
+  }>;
 };
 
 export type ExportStudioDocumentFormat = 'markdown' | 'json';
@@ -1083,12 +1121,65 @@ function buildMarkdownDocument(document: StudioDocument, versions: StudioDocumen
   if (versions.length > 0) {
     lines.push('## Version Timeline');
     for (const version of versions) {
-      lines.push(`- ${version.createdAt} • ${version.author} • ${version.summary} • ${version.id}`);
+      const basedOn = cleanString(version.basedOnVersionId);
+      lines.push(
+        `- ${version.createdAt} • ${version.author} • ${version.summary} • ${version.id}${basedOn ? ` • based on ${basedOn}` : ''}`
+      );
     }
     lines.push('');
   }
 
   return lines.join('\n');
+}
+
+function normalizeDocumentSectionContent(
+  kind: StudioDocumentSection['kind'],
+  value: unknown,
+  fallback: string | string[]
+): string | string[] {
+  if (Array.isArray(value)) {
+    const cleaned = value.map((entry) => cleanString(entry)).filter(Boolean);
+    if (kind === 'script') {
+      return cleaned.join('\n').trim();
+    }
+    return cleaned;
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim();
+    if (kind === 'script') {
+      return normalized;
+    }
+    if (!normalized) return [];
+    return normalized
+      .split(/\n+/)
+      .map((line) => cleanString(line))
+      .filter(Boolean);
+  }
+  return clone(fallback);
+}
+
+function serializeSectionContent(content: string | string[]): string {
+  if (Array.isArray(content)) return content.map((line) => cleanString(line)).filter(Boolean).join('\n');
+  return cleanString(content);
+}
+
+function previewSectionContent(content: string | string[], maxChars = 180): string {
+  const normalized = serializeSectionContent(content).replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
+}
+
+function resolveDocumentVersionSections(
+  document: StudioDocument,
+  versions: StudioDocumentVersion[],
+  versionId: string
+): StudioDocumentSection[] | null {
+  const normalized = cleanString(versionId);
+  if (!normalized || normalized === 'current') return clone(document.sections);
+  const version = versions.find((item) => item.id === normalized);
+  if (!version) return null;
+  return clone(version.snapshotSections);
 }
 
 function updateStoredReferencesWithSortedOrder(store: WorkspaceViralStudioStore, references: ReferenceAsset[]) {
@@ -1920,6 +2011,81 @@ export function createStudioDocument(workspaceId: string, input: CreateStudioDoc
   return clone(document);
 }
 
+function reorderDocumentSections(
+  sections: StudioDocumentSection[],
+  orderedSectionIds?: string[]
+): StudioDocumentSection[] {
+  const requested = Array.isArray(orderedSectionIds)
+    ? orderedSectionIds.map((id) => cleanString(id)).filter(Boolean)
+    : [];
+  if (requested.length === 0) return clone(sections);
+  const byId = new Map(sections.map((section) => [section.id, section]));
+  const consumed = new Set<string>();
+  const ordered: StudioDocumentSection[] = [];
+  for (const id of requested) {
+    const section = byId.get(id);
+    if (!section || consumed.has(id)) continue;
+    ordered.push(section);
+    consumed.add(id);
+  }
+  for (const section of sections) {
+    if (consumed.has(section.id)) continue;
+    ordered.push(section);
+  }
+  return clone(ordered);
+}
+
+export function updateStudioDocument(
+  workspaceId: string,
+  documentId: string,
+  input: UpdateStudioDocumentInput
+): StudioDocument | null {
+  const store = ensureWorkspaceStore(workspaceId);
+  const existing = store.documents.get(cleanString(documentId));
+  if (!existing) return null;
+  const next: StudioDocument = clone(existing);
+
+  if (typeof input.title === 'string') {
+    const title = cleanString(input.title);
+    if (title) {
+      next.title = title;
+    }
+  }
+
+  if (Array.isArray(input.sections)) {
+    const mutable = clone(next.sections);
+    const indexById = new Map(mutable.map((section, index) => [section.id, index]));
+    for (const patch of input.sections) {
+      const patchId = cleanString(patch.id);
+      const targetIndex = indexById.get(patchId);
+      if (targetIndex === undefined) continue;
+      const current = mutable[targetIndex];
+      const kind = patch.kind || current.kind;
+      const title =
+        typeof patch.title === 'string' ? cleanString(patch.title) || current.title : current.title;
+      const content =
+        Object.prototype.hasOwnProperty.call(patch, 'content')
+          ? normalizeDocumentSectionContent(kind, patch.content, current.content)
+          : current.content;
+      mutable[targetIndex] = {
+        ...current,
+        kind,
+        title,
+        content,
+      };
+    }
+    next.sections = mutable;
+  }
+
+  if (Array.isArray(input.orderedSectionIds) && input.orderedSectionIds.length > 0) {
+    next.sections = reorderDocumentSections(next.sections, input.orderedSectionIds);
+  }
+
+  next.updatedAt = toIsoNow();
+  store.documents.set(next.id, next);
+  return clone(next);
+}
+
 export function getStudioDocumentWithVersions(
   workspaceId: string,
   documentId: string
@@ -1967,6 +2133,100 @@ export function createStudioDocumentVersion(
   return clone({
     document: updatedDocument,
     version,
+  });
+}
+
+export function promoteStudioDocumentVersion(
+  workspaceId: string,
+  documentId: string,
+  versionId: string,
+  input: PromoteStudioDocumentVersionInput
+): PromoteStudioDocumentVersionResult | null {
+  const store = ensureWorkspaceStore(workspaceId);
+  const document = store.documents.get(cleanString(documentId));
+  if (!document) return null;
+  const versions = store.documentVersions.get(document.id) || [];
+  const target = versions.find((entry) => entry.id === cleanString(versionId));
+  if (!target) return null;
+
+  const now = toIsoNow();
+  const promotedSections = clone(target.snapshotSections);
+  const promotedVersion: StudioDocumentVersion = {
+    id: crypto.randomUUID(),
+    workspaceId,
+    documentId: document.id,
+    author: cleanString(input.author) || 'workspace-user',
+    summary:
+      cleanString(input.summary) ||
+      `Promoted version ${target.id.slice(0, 8)} as active snapshot`,
+    basedOnVersionId: target.id,
+    snapshotSections: clone(promotedSections),
+    createdAt: now,
+  };
+  const nextVersions = [...versions, promotedVersion];
+  const updatedDocument: StudioDocument = {
+    ...document,
+    sections: promotedSections,
+    currentVersionId: promotedVersion.id,
+    updatedAt: now,
+  };
+
+  store.documentVersions.set(document.id, nextVersions);
+  store.documents.set(document.id, updatedDocument);
+  return clone({
+    document: updatedDocument,
+    version: promotedVersion,
+    promotedFromVersionId: target.id,
+  });
+}
+
+export function compareStudioDocumentVersions(
+  workspaceId: string,
+  documentId: string,
+  leftVersionId: string,
+  rightVersionId: string
+): StudioDocumentVersionComparison | null {
+  const payload = getStudioDocumentWithVersions(workspaceId, documentId);
+  if (!payload) return null;
+  const { document, versions } = payload;
+  const leftSections = resolveDocumentVersionSections(document, versions, leftVersionId);
+  const rightSections = resolveDocumentVersionSections(document, versions, rightVersionId);
+  if (!leftSections || !rightSections) return null;
+
+  const toSectionKey = (section: StudioDocumentSection): string => {
+    const titleKey = cleanString(section.title).toLowerCase();
+    return titleKey || section.id;
+  };
+  const leftMap = new Map(leftSections.map((section) => [toSectionKey(section), section]));
+  const rightMap = new Map(rightSections.map((section) => [toSectionKey(section), section]));
+  const orderedKeys: string[] = [];
+  for (const key of leftMap.keys()) orderedKeys.push(key);
+  for (const key of rightMap.keys()) {
+    if (!orderedKeys.includes(key)) orderedKeys.push(key);
+  }
+
+  const sectionDiffs = orderedKeys.map((key) => {
+    const left = leftMap.get(key);
+    const right = rightMap.get(key);
+    const leftPreview = left ? previewSectionContent(left.content, 220) : '';
+    const rightPreview = right ? previewSectionContent(right.content, 220) : '';
+    const changed = leftPreview !== rightPreview;
+    return {
+      sectionKey: key,
+      title: left?.title || right?.title || 'Untitled section',
+      changed,
+      leftPreview,
+      rightPreview,
+    };
+  });
+
+  const changedSections = sectionDiffs.filter((entry) => entry.changed).length;
+  return clone({
+    leftVersionId: cleanString(leftVersionId) || 'current',
+    rightVersionId: cleanString(rightVersionId) || 'current',
+    totalSections: sectionDiffs.length,
+    changedSections,
+    sectionDiffs,
   });
 }
 

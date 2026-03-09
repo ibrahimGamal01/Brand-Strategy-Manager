@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  compareViralStudioDocumentVersions,
   createViralStudioDocument,
   createViralStudioDocumentVersion,
   createViralStudioGeneration,
@@ -15,7 +16,9 @@ import {
   generateWorkspaceBrandDnaSummary,
   listViralStudioIngestions,
   listViralStudioReferences,
+  patchViralStudioDocument,
   patchWorkspaceBrandDna,
+  promoteViralStudioDocumentVersion,
   refineViralStudioGeneration,
   retryViralStudioIngestion,
   updateViralStudioReferenceShortlist,
@@ -29,6 +32,8 @@ import {
   BrandDNAProfile,
   ViralStudioContractSnapshot,
   ViralStudioDocument,
+  ViralStudioDocumentSection,
+  ViralStudioDocumentVersionComparison,
   ViralStudioDocumentVersion,
   ViralStudioGenerationFormatTarget,
   ViralStudioGenerationPack,
@@ -221,6 +226,39 @@ function readGenerationSectionContent(
   if (section === "captions") return generation.outputs.captions;
   if (section === "ctas") return generation.outputs.ctas;
   return generation.outputs.angleRemixes;
+}
+
+function toSectionText(section: ViralStudioDocumentSection): string {
+  if (Array.isArray(section.content)) return section.content.join("\n");
+  return section.content;
+}
+
+function parseSectionText(
+  kind: ViralStudioDocumentSection["kind"],
+  value: string
+): string | string[] {
+  const normalized = value.trim();
+  if (kind === "script") return normalized;
+  if (!normalized) return [];
+  return normalized
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function moveDocumentSection(
+  sections: ViralStudioDocumentSection[],
+  sectionId: string,
+  direction: "up" | "down"
+): ViralStudioDocumentSection[] {
+  const index = sections.findIndex((section) => section.id === sectionId);
+  if (index < 0) return sections;
+  const target = direction === "up" ? index - 1 : index + 1;
+  if (target < 0 || target >= sections.length) return sections;
+  const next = [...sections];
+  const [moved] = next.splice(index, 1);
+  next.splice(target, 0, moved);
+  return next;
 }
 
 function presetDefaults(preset: IngestionPreset): { maxVideos: number; lookbackDays: number } {
@@ -455,7 +493,15 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   const [references, setReferences] = useState<ViralStudioReferenceAsset[]>([]);
   const [generation, setGeneration] = useState<ViralStudioGenerationPack | null>(null);
   const [document, setDocument] = useState<ViralStudioDocument | null>(null);
+  const [documentDraft, setDocumentDraft] = useState<ViralStudioDocument | null>(null);
+  const [documentDirty, setDocumentDirty] = useState(false);
+  const [autosaveState, setAutosaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [versions, setVersions] = useState<ViralStudioDocumentVersion[]>([]);
+  const [compareLeftVersionId, setCompareLeftVersionId] = useState<string>("current");
+  const [compareRightVersionId, setCompareRightVersionId] = useState<string>("current");
+  const [comparison, setComparison] = useState<ViralStudioDocumentVersionComparison | null>(null);
+  const [compareLoading, setCompareLoading] = useState(false);
+  const [promoteVersionId, setPromoteVersionId] = useState<string>("");
   const [lastExport, setLastExport] = useState<{ format: string; content: string } | null>(null);
   const [chatBridgeStatus, setChatBridgeStatus] = useState<string | null>(null);
 
@@ -711,6 +757,17 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     return signals;
   }, [generation]);
 
+  const versionOptions = useMemo(() => {
+    const base = [{ id: "current", label: "Current Draft" }];
+    const timeline = [...versions]
+      .reverse()
+      .map((version) => ({
+        id: version.id,
+        label: `${version.summary || "Snapshot"} • ${new Date(version.createdAt).toLocaleString()}`,
+      }));
+    return [...base, ...timeline];
+  }, [versions]);
+
   const saveBrandDna = useCallback(
     async (mode: "draft" | "final") => {
       setIsBusy(true);
@@ -954,6 +1011,35 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     []
   );
 
+  const toDocumentPatchPayload = useCallback((draft: ViralStudioDocument) => {
+    return {
+      title: draft.title,
+      sections: draft.sections.map((section) => ({
+        id: section.id,
+        title: section.title,
+        kind: section.kind,
+        content: section.content,
+      })),
+      orderedSectionIds: draft.sections.map((section) => section.id),
+    };
+  }, []);
+
+  const persistDocumentDraft = useCallback(
+    async (autosave: boolean) => {
+      if (!documentDraft) return null;
+      const payload = await patchViralStudioDocument(workspaceId, documentDraft.id, {
+        ...toDocumentPatchPayload(documentDraft),
+        autosave,
+      });
+      setDocument(payload.document);
+      setDocumentDraft(payload.document);
+      setDocumentDirty(false);
+      setAutosaveState("saved");
+      return payload.document;
+    },
+    [workspaceId, documentDraft, toDocumentPatchPayload]
+  );
+
   const createDocumentFromGeneration = useCallback(async () => {
     if (!generation) return;
     setIsBusy(true);
@@ -961,11 +1047,18 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     try {
       const payload = await createViralStudioDocument(workspaceId, {
         generationId: generation.id,
-        title: "Campaign Pack - Plan 5",
+        title: "Campaign Pack - Plan 6",
       });
-      setDocument(payload.document);
       const documentPayload = await fetchViralStudioDocument(workspaceId, payload.document.id);
+      setDocument(documentPayload.document);
+      setDocumentDraft(documentPayload.document);
+      setDocumentDirty(false);
+      setAutosaveState("saved");
       setVersions(documentPayload.versions);
+      setComparison(null);
+      setCompareLeftVersionId("current");
+      setCompareRightVersionId("current");
+      setPromoteVersionId(documentPayload.versions[documentPayload.versions.length - 1]?.id || "");
     } catch (documentError: unknown) {
       setError(String((documentError as Error)?.message || "Failed to create document"));
     } finally {
@@ -978,18 +1071,139 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     setIsBusy(true);
     setError(null);
     try {
+      if (documentDraft && documentDirty) {
+        await persistDocumentDraft(false);
+      }
       const payload = await createViralStudioDocumentVersion(workspaceId, document.id, {
-        author: "viral-studio-plan5",
-        summary: "Published after section-level prompt refinements",
+        author: "viral-studio-plan6",
+        summary: "Published after document workspace edits",
       });
       setDocument(payload.document);
-      setVersions((previous) => [...previous, payload.version]);
+      setDocumentDraft(payload.document);
+      setDocumentDirty(false);
+      setAutosaveState("saved");
+      setVersions((previous) => {
+        if (previous.some((version) => version.id === payload.version.id)) return previous;
+        return [...previous, payload.version];
+      });
+      setPromoteVersionId(payload.version.id);
     } catch (versionError: unknown) {
       setError(String((versionError as Error)?.message || "Failed to create document version"));
     } finally {
       setIsBusy(false);
     }
-  }, [workspaceId, document]);
+  }, [workspaceId, document, documentDraft, documentDirty, persistDocumentDraft]);
+
+  const saveDocumentNow = useCallback(async () => {
+    if (!documentDraft || !documentDirty) return;
+    setIsBusy(true);
+    setError(null);
+    try {
+      await persistDocumentDraft(false);
+    } catch (saveError: unknown) {
+      setAutosaveState("error");
+      setError(String((saveError as Error)?.message || "Failed to save document"));
+    } finally {
+      setIsBusy(false);
+    }
+  }, [documentDraft, documentDirty, persistDocumentDraft]);
+
+  const promoteVersion = useCallback(async () => {
+    if (!document || !promoteVersionId) return;
+    setIsBusy(true);
+    setError(null);
+    try {
+      if (documentDraft && documentDirty) {
+        await persistDocumentDraft(false);
+      }
+      const payload = await promoteViralStudioDocumentVersion(workspaceId, document.id, promoteVersionId, {
+        author: "viral-studio-plan6",
+        summary: "Promoted from version timeline",
+      });
+      setDocument(payload.document);
+      setDocumentDraft(payload.document);
+      setDocumentDirty(false);
+      setAutosaveState("saved");
+      setVersions((previous) => {
+        if (previous.some((version) => version.id === payload.version.id)) return previous;
+        return [...previous, payload.version];
+      });
+      setCompareLeftVersionId(payload.promotedFromVersionId);
+      setCompareRightVersionId(payload.version.id);
+    } catch (promoteError: unknown) {
+      setError(String((promoteError as Error)?.message || "Failed to promote document version"));
+    } finally {
+      setIsBusy(false);
+    }
+  }, [workspaceId, document, promoteVersionId, documentDraft, documentDirty, persistDocumentDraft]);
+
+  const runVersionCompare = useCallback(async () => {
+    if (!document) return;
+    setCompareLoading(true);
+    setError(null);
+    try {
+      const payload = await compareViralStudioDocumentVersions(
+        workspaceId,
+        document.id,
+        compareLeftVersionId,
+        compareRightVersionId
+      );
+      setComparison(payload.comparison);
+    } catch (compareError: unknown) {
+      setError(String((compareError as Error)?.message || "Failed to compare versions"));
+    } finally {
+      setCompareLoading(false);
+    }
+  }, [workspaceId, document, compareLeftVersionId, compareRightVersionId]);
+
+  const updateDocumentTitle = useCallback((title: string) => {
+    setDocumentDraft((previous) => (previous ? { ...previous, title } : previous));
+    setDocumentDirty(true);
+    setAutosaveState("idle");
+  }, []);
+
+  const updateDocumentSectionTitle = useCallback((sectionId: string, title: string) => {
+    setDocumentDraft((previous) => {
+      if (!previous) return previous;
+      return {
+        ...previous,
+        sections: previous.sections.map((section) => (section.id === sectionId ? { ...section, title } : section)),
+      };
+    });
+    setDocumentDirty(true);
+    setAutosaveState("idle");
+  }, []);
+
+  const updateDocumentSectionContent = useCallback((sectionId: string, value: string) => {
+    setDocumentDraft((previous) => {
+      if (!previous) return previous;
+      return {
+        ...previous,
+        sections: previous.sections.map((section) =>
+          section.id === sectionId
+            ? {
+                ...section,
+                content: parseSectionText(section.kind, value),
+              }
+            : section
+        ),
+      };
+    });
+    setDocumentDirty(true);
+    setAutosaveState("idle");
+  }, []);
+
+  const reorderDocumentSection = useCallback((sectionId: string, direction: "up" | "down") => {
+    setDocumentDraft((previous) => {
+      if (!previous) return previous;
+      return {
+        ...previous,
+        sections: moveDocumentSection(previous.sections, sectionId, direction),
+      };
+    });
+    setDocumentDirty(true);
+    setAutosaveState("idle");
+  }, []);
 
   const exportDocument = useCallback(
     async (format: "markdown" | "json") => {
@@ -997,6 +1211,9 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       setIsBusy(true);
       setError(null);
       try {
+        if (documentDraft && documentDirty) {
+          await persistDocumentDraft(false);
+        }
         const payload = await exportViralStudioDocument(workspaceId, document.id, format);
         setLastExport({ format: payload.export.format, content: payload.export.content.slice(0, 800) });
       } catch (exportError: unknown) {
@@ -1005,8 +1222,25 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         setIsBusy(false);
       }
     },
-    [workspaceId, document]
+    [workspaceId, document, documentDraft, documentDirty, persistDocumentDraft]
   );
+
+  useEffect(() => {
+    if (!documentDraft || !documentDirty) return;
+    const timer = window.setInterval(() => {
+      void (async () => {
+        setAutosaveState("saving");
+        try {
+          await persistDocumentDraft(true);
+        } catch {
+          setAutosaveState("error");
+        }
+      })();
+    }, 10_000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [documentDraft, documentDirty, persistDocumentDraft]);
 
   const resolveChatBranch = useCallback(async () => {
     const threads = await listRuntimeThreads(workspaceId);
@@ -1639,16 +1873,178 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
               </div>
             </article>
 
-            <article className="vbs-panel">
+            <article className="vbs-panel vbs-document-workspace">
               <h2 className="vbs-panel-title">Document Workspace</h2>
-              <p className="vbs-panel-subtitle">Persist outputs, snapshot versions, export markdown/json.</p>
+              <p className="vbs-panel-subtitle">
+                Editable campaign artifact with autosave every 10s, version timeline, compare view, and promote/rollback workflow.
+              </p>
               <div className="vbs-actions">
-                <button type="button" disabled={isBusy || !generation} onClick={() => void createDocumentFromGeneration()}>Create Document</button>
-                <button type="button" disabled={isBusy || !document} onClick={() => void snapshotVersion()}>Create Version</button>
-                <button type="button" disabled={isBusy || !document} onClick={() => void exportDocument("markdown")}>Export MD</button>
-                <button type="button" disabled={isBusy || !document} onClick={() => void exportDocument("json")}>Export JSON</button>
+                <button type="button" disabled={isBusy || !generation} onClick={() => void createDocumentFromGeneration()}>
+                  Create Document
+                </button>
+                <button type="button" disabled={isBusy || !documentDraft || !documentDirty} onClick={() => void saveDocumentNow()}>
+                  Save Draft
+                </button>
+                <button type="button" disabled={isBusy || !document} onClick={() => void snapshotVersion()}>
+                  Create Version
+                </button>
+                <button type="button" disabled={isBusy || !document} onClick={() => void exportDocument("markdown")}>
+                  Export MD
+                </button>
+                <button type="button" disabled={isBusy || !document} onClick={() => void exportDocument("json")}>
+                  Export JSON
+                </button>
               </div>
-              <p className="vbs-meta">Document: {document ? document.title : "none"} • Versions: {versions.length}</p>
+              <p className="vbs-meta">
+                Document: {document ? document.title : "none"} • Versions: {versions.length} • Autosave:{" "}
+                {autosaveState === "saving"
+                  ? "saving..."
+                  : autosaveState === "saved"
+                    ? "saved"
+                    : autosaveState === "error"
+                      ? "error"
+                      : documentDirty
+                        ? "pending edits"
+                        : "idle"}
+              </p>
+              {documentDraft ? (
+                <div className="vbs-doc-editor">
+                  <label className="vbs-doc-title-input">
+                    Document title
+                    <input
+                      value={documentDraft.title}
+                      onChange={(event) => updateDocumentTitle(event.target.value)}
+                    />
+                  </label>
+
+                  <div className="vbs-doc-sections">
+                    {documentDraft.sections.map((section, index) => (
+                      <article key={section.id} className="vbs-doc-section-card">
+                        <div className="vbs-doc-section-head">
+                          <input
+                            value={section.title}
+                            onChange={(event) => updateDocumentSectionTitle(section.id, event.target.value)}
+                            aria-label={`Section ${index + 1} title`}
+                          />
+                          <div className="vbs-mini-actions">
+                            <button
+                              type="button"
+                              disabled={isBusy || index === 0}
+                              onClick={() => reorderDocumentSection(section.id, "up")}
+                            >
+                              Move Up
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isBusy || index === documentDraft.sections.length - 1}
+                              onClick={() => reorderDocumentSection(section.id, "down")}
+                            >
+                              Move Down
+                            </button>
+                          </div>
+                        </div>
+                        <textarea
+                          rows={Array.isArray(section.content) ? Math.max(4, section.content.length + 1) : 8}
+                          value={toSectionText(section)}
+                          onChange={(event) => updateDocumentSectionContent(section.id, event.target.value)}
+                        />
+                        <p className="vbs-meta">{section.kind} section</p>
+                      </article>
+                    ))}
+                  </div>
+
+                  <div className="vbs-doc-version-tools">
+                    <div className="vbs-doc-compare-controls">
+                      <h3>Version Compare</h3>
+                      <div className="vbs-form-grid">
+                        <label>
+                          Left
+                          <select
+                            value={compareLeftVersionId}
+                            onChange={(event) => setCompareLeftVersionId(event.target.value)}
+                          >
+                            {versionOptions.map((option) => (
+                              <option key={`left-${option.id}`} value={option.id}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          Right
+                          <select
+                            value={compareRightVersionId}
+                            onChange={(event) => setCompareRightVersionId(event.target.value)}
+                          >
+                            {versionOptions.map((option) => (
+                              <option key={`right-${option.id}`} value={option.id}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                      <div className="vbs-actions">
+                        <button type="button" disabled={compareLoading || !document} onClick={() => void runVersionCompare()}>
+                          {compareLoading ? "Comparing..." : "Compare Versions"}
+                        </button>
+                      </div>
+                      {comparison ? (
+                        <div className="vbs-doc-compare-results">
+                          <p className="vbs-meta">
+                            {comparison.changedSections} changed sections out of {comparison.totalSections}
+                          </p>
+                          <ul>
+                            {comparison.sectionDiffs.slice(0, 12).map((diff) => (
+                              <li key={diff.sectionKey}>
+                                <strong>{diff.title}</strong> • {diff.changed ? "changed" : "unchanged"}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="vbs-doc-timeline">
+                      <h3>Version Timeline</h3>
+                      <div className="vbs-form-grid">
+                        <label>
+                          Promote version
+                          <select value={promoteVersionId} onChange={(event) => setPromoteVersionId(event.target.value)}>
+                            <option value="">Select version</option>
+                            {versions
+                              .slice()
+                              .reverse()
+                              .map((version) => (
+                                <option key={version.id} value={version.id}>
+                                  {version.summary || "Snapshot"} • {new Date(version.createdAt).toLocaleString()}
+                                </option>
+                              ))}
+                          </select>
+                        </label>
+                      </div>
+                      <div className="vbs-actions">
+                        <button type="button" disabled={isBusy || !promoteVersionId} onClick={() => void promoteVersion()}>
+                          Promote Version
+                        </button>
+                      </div>
+                      <ul>
+                        {versions
+                          .slice()
+                          .reverse()
+                          .map((version) => (
+                            <li key={version.id}>
+                              <strong>{version.summary}</strong> • {version.author} • {formatTimestamp(version.createdAt)}
+                              {version.basedOnVersionId ? ` • based on ${version.basedOnVersionId}` : ""}
+                            </li>
+                          ))}
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <p className="vbs-meta">No document created yet. Generate a pack and create a document to start editing.</p>
+              )}
               {lastExport ? (
                 <div className="vbs-export-preview">
                   <p className="vbs-meta">Last export ({lastExport.format})</p>
