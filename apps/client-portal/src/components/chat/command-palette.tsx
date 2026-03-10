@@ -21,6 +21,7 @@ const commands = [
   "Viral Studio: Preview autofill",
   "Viral Studio: Apply autofill",
   "Viral Studio: Start data-max extraction",
+  "Viral Studio: Run next step",
   "Add constraint",
   "Switch workspace"
 ];

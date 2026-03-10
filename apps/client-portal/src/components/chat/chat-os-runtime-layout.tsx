@@ -112,6 +112,87 @@ function formatViralWorkflowStage(stage?: ViralStudioWorkflowStatus["workflowSta
   return "Not started";
 }
 
+const VIRAL_WORKFLOW_ORDER: Array<ViralStudioWorkflowStatus["workflowStage"]> = [
+  "intake_pending",
+  "intake_complete",
+  "studio_autofill_review",
+  "extraction",
+  "curation",
+  "generation",
+  "chat_execution",
+];
+
+type ViralBridgePrimaryAction =
+  | "open_intake"
+  | "autofill_finalize"
+  | "start_extraction"
+  | "curate_in_studio"
+  | "generate_in_studio"
+  | "execute_in_chat";
+
+function viralWorkflowStageIndex(stage?: ViralStudioWorkflowStatus["workflowStage"] | null): number {
+  const index = VIRAL_WORKFLOW_ORDER.indexOf(
+    (stage || "intake_pending") as ViralStudioWorkflowStatus["workflowStage"]
+  );
+  return index >= 0 ? index : 0;
+}
+
+function resolveViralBridgePrimaryAction(
+  workflow: ViralStudioWorkflowStatus
+): {
+  action: ViralBridgePrimaryAction;
+  title: string;
+  body: string;
+  cta: string;
+} {
+  if (workflow.workflowStage === "intake_pending") {
+    return {
+      action: "open_intake",
+      title: "Complete Intake Context",
+      body: "Capture website and social context first so Viral Studio can autofill Brand DNA with evidence-backed fields.",
+      cta: "Open Intake",
+    };
+  }
+  if (workflow.workflowStage === "intake_complete" || workflow.workflowStage === "studio_autofill_review") {
+    return {
+      action: "autofill_finalize",
+      title: "Autofill + Finalize Brand DNA",
+      body: "Apply smart suggestions and finalize DNA to unlock extraction and downstream generation quality.",
+      cta: "Run Autofill",
+    };
+  }
+  if (workflow.workflowStage === "extraction") {
+    return {
+      action: "start_extraction",
+      title: "Start Data-Max Extraction",
+      body: "Launch the highest-depth extraction from the best suggested source to seed curation with richer references.",
+      cta: "Start Extraction",
+    };
+  }
+  if (workflow.workflowStage === "curation") {
+    return {
+      action: "curate_in_studio",
+      title: "Curate Winning References",
+      body: "Pin and mark must-use references in Viral Studio to shape the generation pack with explainable winners.",
+      cta: "Open Curation Board",
+    };
+  }
+  if (workflow.workflowStage === "generation") {
+    return {
+      action: "generate_in_studio",
+      title: "Generate Multi-Pack",
+      body: "Create hooks, scripts, captions, and CTA variants from curated references and Brand DNA constraints.",
+      cta: "Open Generation Studio",
+    };
+  }
+  return {
+    action: "execute_in_chat",
+    title: "Execute In Core Chat",
+    body: "Use Viral Studio context directly in chat to produce operational plans and client-ready actions.",
+    cta: "Draft With Context",
+  };
+}
+
 function mapParserStatusToUploadChipStatus(
   status: string | null | undefined
 ): UploadedDocumentChip["status"] {
@@ -234,6 +315,36 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
         .filter((item) => item.collection === "deliverables" || item.collection === "web" || item.collection === "social")
         .slice(0, 6),
     [libraryItems]
+  );
+
+  const viralStageIndex = viralWorkflowStageIndex(viralWorkflow?.workflowStage || "intake_pending");
+  const viralProgressPct = Math.round(((viralStageIndex + 1) / VIRAL_WORKFLOW_ORDER.length) * 100);
+  const viralStageRail = useMemo(() => {
+    if (!viralWorkflow) return [] as Array<{
+      stage: ViralStudioWorkflowStatus["workflowStage"];
+      label: string;
+      state: "done" | "active" | "upcoming";
+    }>;
+    const flow: Array<ViralStudioWorkflowStatus["workflowStage"]> = [
+      "intake_pending",
+      ...(viralWorkflow.flow || []),
+    ];
+    const deduped = Array.from(new Set(flow));
+    const currentIndex = deduped.indexOf(viralWorkflow.workflowStage);
+    return deduped.map((stage, index) => ({
+      stage,
+      label: formatViralWorkflowStage(stage),
+      state:
+        index < currentIndex
+          ? ("done" as const)
+          : index === currentIndex
+            ? ("active" as const)
+            : ("upcoming" as const),
+    }));
+  }, [viralWorkflow]);
+  const viralPrimaryAction = useMemo(
+    () => (viralWorkflow ? resolveViralBridgePrimaryAction(viralWorkflow) : null),
+    [viralWorkflow]
   );
 
   useEffect(() => {
@@ -528,6 +639,42 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
           setViralBridgeBusy(false);
         }
       })()
+    );
+  };
+
+  const runViralBridgePrimaryAction = () => {
+    if (!viralWorkflow || !viralPrimaryAction) return;
+    if (viralPrimaryAction.action === "open_intake") {
+      router.push(`/app/w/${workspaceId}/intake`);
+      return;
+    }
+    if (viralPrimaryAction.action === "autofill_finalize") {
+      applyViralAutofill();
+      return;
+    }
+    if (viralPrimaryAction.action === "start_extraction") {
+      launchViralExtractionFromSuggestion();
+      return;
+    }
+    if (viralPrimaryAction.action === "curate_in_studio") {
+      router.push(`/app/w/${workspaceId}/viral-studio`);
+      injectComposerText(
+        "Open the Viral Studio curation board and finalize must-use + pin shortlist decisions, then summarize the top 3 strategic angles here.",
+        "replace"
+      );
+      return;
+    }
+    if (viralPrimaryAction.action === "generate_in_studio") {
+      router.push(`/app/w/${workspaceId}/viral-studio`);
+      injectComposerText(
+        "Generate the Viral Studio multi-pack (hooks/scripts/captions/CTAs), then return with execution sequencing for this workspace.",
+        "replace"
+      );
+      return;
+    }
+    injectComposerText(
+      "Use Viral Studio context from this workspace (brand DNA, prioritized references, and latest generation/doc refs) and produce the next execution actions.",
+      "replace"
     );
   };
 
@@ -1004,6 +1151,10 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
       launchViralExtractionFromSuggestion();
       return;
     }
+    if (command === "Viral Studio: Run next step") {
+      runViralBridgePrimaryAction();
+      return;
+    }
     if (command === "Run V3 competitor finder (standard)") {
       injectComposerText(
         "Run the V3 competitor finder in standard mode and summarize direct plus adjacent competitors with evidence.",
@@ -1308,22 +1459,107 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
             >
               <div className="flex min-h-0 flex-col border-zinc-200 xl:border-r">
                 {viralWorkflow ? (
-                  <div className="mx-4 mt-3 rounded-xl border border-sky-200 bg-sky-50/60 p-3 sm:mx-6 xl:mx-8">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-sky-700">
-                        Viral Studio Bridge
-                      </p>
-                      <p className="text-xs text-sky-700">
-                        Stage: <strong>{formatViralWorkflowStage(viralWorkflow.workflowStage)}</strong>
-                      </p>
+                  <div className="mx-4 mt-3 rounded-2xl border border-sky-200 bg-gradient-to-br from-sky-50 via-cyan-50 to-white p-3 sm:mx-6 xl:mx-8">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-sky-700">
+                          Viral Studio Workflow Bridge
+                        </p>
+                        <p className="mt-1 text-xs text-zinc-700">
+                          Intake {viralWorkflow.intakeCompleted ? "complete" : "pending"} • Brand DNA{" "}
+                          {viralWorkflow.brandDnaReady ? "ready" : "not ready"} • Prioritized refs{" "}
+                          {viralWorkflow.counts.prioritizedReferences}
+                        </p>
+                        <p className="mt-1 text-xs text-zinc-700">
+                          Stage: <strong>{formatViralWorkflowStage(viralWorkflow.workflowStage)}</strong>
+                        </p>
+                      </div>
+                      <div className="rounded-lg border border-sky-200 bg-white px-2.5 py-1.5 text-right">
+                        <p className="text-[10px] uppercase tracking-[0.08em] text-sky-700">Progress</p>
+                        <strong className="text-sm text-sky-800">{viralProgressPct}%</strong>
+                      </div>
                     </div>
-                    <p className="mt-1 text-xs text-zinc-700">
-                      Intake {viralWorkflow.intakeCompleted ? "complete" : "pending"} • Brand DNA{" "}
-                      {viralWorkflow.brandDnaReady ? "ready" : "not ready"} • Prioritized refs{" "}
-                      {viralWorkflow.counts.prioritizedReferences}
-                    </p>
+                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-sky-100">
+                      <span
+                        className="block h-full rounded-full bg-gradient-to-r from-blue-500 to-teal-500 transition-all"
+                        style={{ width: `${viralProgressPct}%` }}
+                      />
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-1 sm:grid-cols-4 xl:grid-cols-7">
+                      {(viralStageRail.length
+                        ? viralStageRail
+                        : VIRAL_WORKFLOW_ORDER.map((stage, index) => ({
+                            stage,
+                            label: formatViralWorkflowStage(stage),
+                            state:
+                              index < viralStageIndex
+                                ? ("done" as const)
+                                : index === viralStageIndex
+                                  ? ("active" as const)
+                                  : ("upcoming" as const),
+                          }))
+                      ).map((entry) => (
+                        <div
+                          key={entry.stage}
+                          className={`rounded-md border px-2 py-1 ${
+                            entry.state === "active"
+                              ? "border-blue-300 bg-blue-50"
+                              : entry.state === "done"
+                                ? "border-teal-200 bg-teal-50"
+                                : "border-sky-100 bg-white"
+                          }`}
+                        >
+                          <p className="truncate text-[10px] font-semibold uppercase tracking-[0.06em] text-zinc-600">
+                            {entry.label}
+                          </p>
+                          <span className="text-[10px] text-zinc-500">
+                            {entry.state === "done" ? "Done" : entry.state === "active" ? "Now" : "Queued"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {viralPrimaryAction ? (
+                      <div className="mt-3 rounded-xl border border-sky-200 bg-white/90 p-2.5">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-sky-700">
+                          Recommended Next Step
+                        </p>
+                        <p className="mt-1 text-sm font-semibold text-zinc-900">{viralPrimaryAction.title}</p>
+                        <p className="mt-1 text-xs text-zinc-700">{viralPrimaryAction.body}</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={runViralBridgePrimaryAction}
+                            disabled={viralBridgeBusy}
+                            className="rounded-md border border-sky-200 bg-sky-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-sky-700 disabled:opacity-60"
+                          >
+                            {viralBridgeBusy ? "Working..." : viralPrimaryAction.cta}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => router.push(`/app/w/${workspaceId}/viral-studio`)}
+                            className="rounded-md border border-sky-200 bg-white px-2.5 py-1 text-xs text-sky-700 hover:bg-sky-100"
+                          >
+                            Open Viral Studio
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              injectComposerText(
+                                "Use Viral Studio context from this workspace (brand DNA, prioritized references, and latest generation/doc refs) and produce the next execution actions.",
+                                "replace"
+                              )
+                            }
+                            className="rounded-md border border-sky-200 bg-white px-2.5 py-1 text-xs text-sky-700 hover:bg-sky-100"
+                          >
+                            Draft with context
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+
                     {viralAutofillPreview ? (
-                      <p className="mt-1 text-xs text-zinc-600">
+                      <p className="mt-2 text-xs text-zinc-600">
                         Autofill preview: {viralAutofillPreview.coverage.suggestedCount} field(s) • Confidence{" "}
                         {Math.round((viralAutofillPreview.suggestionConfidence || 0) * 100)}%
                       </p>
@@ -1343,7 +1579,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                         disabled={viralBridgeBusy}
                         className="rounded-md border border-sky-200 bg-white px-2.5 py-1 text-xs text-sky-700 hover:bg-sky-100 disabled:opacity-60"
                       >
-                        Preview autofill
+                        Manual: Preview autofill
                       </button>
                       <button
                         type="button"
@@ -1351,7 +1587,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                         disabled={viralBridgeBusy}
                         className="rounded-md border border-sky-200 bg-white px-2.5 py-1 text-xs text-sky-700 hover:bg-sky-100 disabled:opacity-60"
                       >
-                        Apply autofill
+                        Manual: Apply autofill
                       </button>
                       <button
                         type="button"
@@ -1359,19 +1595,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                         disabled={viralBridgeBusy || !viralWorkflow.brandDnaReady || viralSuggestedSources.length === 0}
                         className="rounded-md border border-sky-200 bg-white px-2.5 py-1 text-xs text-sky-700 hover:bg-sky-100 disabled:opacity-60"
                       >
-                        Start data-max extraction
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          injectComposerText(
-                            "Use Viral Studio context from this workspace (brand DNA, prioritized references, and latest generation/doc refs) and produce the next execution actions.",
-                            "replace"
-                          )
-                        }
-                        className="rounded-md border border-sky-200 bg-white px-2.5 py-1 text-xs text-sky-700 hover:bg-sky-100"
-                      >
-                        Draft with context
+                        Manual: Start data-max extraction
                       </button>
                     </div>
                   </div>
