@@ -929,8 +929,38 @@ export type RuntimeWorkspaceDocumentDto = {
     docFamily?: string;
     coverageScore?: number;
     coverageBand?: string;
+    qualityScore?: number;
+    qualityNotes?: string[];
+    dimensionScores?: {
+      grounding: number;
+      specificity: number;
+      usefulness: number;
+      redundancy: number;
+      tone: number;
+      visual: number;
+    };
+    editorialPassCount?: number;
+    renderTheme?: string;
     partial?: boolean;
     partialReasons?: string[];
+  };
+  qualityReference?: {
+    family?: string;
+    coverageScore?: number;
+    coverageBand?: string;
+    qualityScore?: number;
+    qualityNotes?: string[];
+    dimensionScores?: {
+      grounding: number;
+      specificity: number;
+      usefulness: number;
+      redundancy: number;
+      tone: number;
+      visual: number;
+    };
+    renderTheme?: string;
+    editorialPassCount?: number;
+    at?: string;
   };
 };
 

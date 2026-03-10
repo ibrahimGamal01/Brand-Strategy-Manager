@@ -1,10 +1,22 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FileText, Library, Menu, PanelRight, MessageSquarePlus, RefreshCcw, Search, X } from "lucide-react";
+import {
+  Command,
+  FileText,
+  Library,
+  Menu,
+  MessageSquarePlus,
+  MoreHorizontal,
+  PanelRight,
+  RefreshCcw,
+  Search,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRuntimeWorkspace } from "@/hooks/use-runtime-workspace";
-import { LibraryCollection, ProcessFeedItem, SessionPreferences } from "@/types/chat";
+import { ComposerBranchContext, LibraryCollection, ProcessFeedItem, SessionPreferences } from "@/types/chat";
 import {
   applyRuntimeDocumentEdit,
   exportRuntimeDocument,
@@ -202,6 +214,139 @@ function mapParserStatusToUploadChipStatus(
   return "parsing";
 }
 
+function compactContextText(value: string, maxChars = 220): string {
+  const normalized = String(value || "").replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
+}
+
+function quoteBlock(value?: string | null): string {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "";
+  return normalized
+    .split(/\r?\n/g)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => `> ${line}`)
+    .join("\n");
+}
+
+function buildScopedComposerMessage(content: string, context?: ComposerBranchContext | null): string {
+  const trimmed = content.trim();
+  if (!context) return trimmed;
+
+  const versionLabel =
+    typeof context.versionNumber === "number" && context.versionNumber > 0 ? `v${context.versionNumber}` : "latest";
+  const quoted = quoteBlock(context.quotedText);
+
+  if (context.kind === "document_edit") {
+    const instruction = trimmed || "Tighten this excerpt for clarity, strategic sharpness, and flow.";
+    return [
+      `Document edit branch: ${context.title} (${versionLabel}).`,
+      context.subtitle ? `Context: ${context.subtitle}` : "",
+      quoted ? `Quoted excerpt:\n${quoted}` : "",
+      `Edit request: ${instruction}`,
+      "Return revised wording first, then a brief explanation of what changed. Preserve meaning unless asked to change it.",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  if (context.kind === "document_quote") {
+    const instruction =
+      trimmed || "Use this selected excerpt as a source in your response and keep the wording grounded in it.";
+    return [
+      `Document quote branch: ${context.title} (${versionLabel}).`,
+      context.subtitle ? `Context: ${context.subtitle}` : "",
+      quoted ? `Selected excerpt:\n${quoted}` : "",
+      `Request: ${instruction}`,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  return [
+    context.title,
+    context.subtitle || "",
+    trimmed,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+type RecentDocumentBranchActivity = {
+  id: string;
+  kind: "request" | "proposal" | "applied" | "export" | "artifact" | "ready";
+  title: string;
+  detail?: string;
+  createdAt: string;
+};
+
+function RightRailPulse({
+  runsCount,
+  activeRunLabel,
+  feedCount,
+  docsCount,
+  decisionsCount,
+  mode,
+  hasDocs,
+  onSelectMode,
+}: {
+  runsCount: number;
+  activeRunLabel: string;
+  feedCount: number;
+  docsCount: number;
+  decisionsCount: number;
+  mode: "activity" | "docs";
+  hasDocs: boolean;
+  onSelectMode: (mode: "activity" | "docs") => void;
+}) {
+  return (
+    <div className="border-b border-zinc-200 bg-[linear-gradient(180deg,#ffffff_0%,#f7f8f9_100%)] px-3 py-3">
+      <div className="grid grid-cols-3 gap-2">
+        <div className="rounded-2xl border border-zinc-200 bg-white px-3 py-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Live</p>
+          <p className="mt-1 text-sm font-semibold text-zinc-900">{runsCount ? `${runsCount} run${runsCount === 1 ? "" : "s"}` : "Idle"}</p>
+          <p className="mt-0.5 line-clamp-2 text-[11px] text-zinc-500">{activeRunLabel || "No active process right now."}</p>
+        </div>
+        <div className="rounded-2xl border border-zinc-200 bg-white px-3 py-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Feed</p>
+          <p className="mt-1 text-sm font-semibold text-zinc-900">{feedCount}</p>
+          <p className="mt-0.5 text-[11px] text-zinc-500">{decisionsCount ? `${decisionsCount} decision${decisionsCount === 1 ? "" : "s"} waiting` : "No open approvals"}</p>
+        </div>
+        <div className="rounded-2xl border border-zinc-200 bg-white px-3 py-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Docs</p>
+          <p className="mt-1 text-sm font-semibold text-zinc-900">{docsCount}</p>
+          <p className="mt-0.5 text-[11px] text-zinc-500">{hasDocs ? "Ready to inspect and edit" : "No runtime docs yet"}</p>
+        </div>
+      </div>
+      <div className="mt-3 inline-flex w-full items-center rounded-full border border-zinc-200 bg-white p-1">
+        <button
+          type="button"
+          onClick={() => onSelectMode("activity")}
+          className={`flex-1 rounded-full px-3 py-1.5 text-xs font-medium transition ${
+            mode === "activity" ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"
+          }`}
+        >
+          Live Activity
+        </button>
+        {hasDocs ? (
+          <button
+            type="button"
+            onClick={() => onSelectMode("docs")}
+            className={`flex-1 rounded-full px-3 py-1.5 text-xs font-medium transition ${
+              mode === "docs" ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"
+            }`}
+          >
+            Documents
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   const [rightRailMode, setRightRailMode] = useState<"activity" | "docs">(() => {
     if (typeof window === "undefined") return "activity";
@@ -217,8 +362,11 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   const [activeLibraryCollection, setActiveLibraryCollection] = useState<LibraryCollection | "all">("all");
   const [actionError, setActionError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarToolsOpen, setSidebarToolsOpen] = useState(false);
+  const [commandPaletteOpenSignal, setCommandPaletteOpenSignal] = useState(0);
   const [activityOpen, setActivityOpen] = useState(false);
   const [composerDraft, setComposerDraft] = useState("");
+  const [composerBranchContext, setComposerBranchContext] = useState<ComposerBranchContext | null>(null);
   const [composerFocusSignal, setComposerFocusSignal] = useState(0);
   const [evidenceDrawerOpen, setEvidenceDrawerOpen] = useState(false);
   const [evidenceDrawerLoading, setEvidenceDrawerLoading] = useState(false);
@@ -248,6 +396,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   const seenGeneratedDocumentIdsRef = useRef<Set<string>>(new Set());
   const generatedDocumentsSeededRef = useRef(false);
   const pendingGeneratedDocumentIdRef = useRef<string | null>(null);
+  const sidebarToolsRef = useRef<HTMLDivElement | null>(null);
   const router = useRouter();
 
   const {
@@ -358,6 +507,28 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   }, [sidebarOpen, activityOpen]);
 
   useEffect(() => {
+    if (!sidebarToolsOpen) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!(event.target instanceof Node)) return;
+      if (sidebarToolsRef.current?.contains(event.target)) return;
+      setSidebarToolsOpen(false);
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSidebarToolsOpen(false);
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [sidebarToolsOpen]);
+
+  useEffect(() => {
+    setComposerBranchContext(null);
+  }, [activeBranchId, activeThreadId]);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
     const storageKey = `bat.runtime.rightRailCollapsed.${workspaceId}`;
     window.localStorage.setItem(storageKey, rightRailCollapsed ? "1" : "0");
@@ -394,6 +565,95 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     }
     return runtimeDocuments[0].id;
   }, [runtimeDocuments, selectedRuntimeDocumentId]);
+  const selectedRuntimeDocument = useMemo(
+    () => runtimeDocuments.find((document) => document.id === resolvedSelectedRuntimeDocumentId) || null,
+    [resolvedSelectedRuntimeDocumentId, runtimeDocuments]
+  );
+  const activeDocumentContextId = composerBranchContext?.documentId || selectedRuntimeDocument?.id || null;
+  const recentDocumentBranchActivity = useMemo<RecentDocumentBranchActivity[]>(() => {
+    if (!activeDocumentContextId) return [];
+
+    const items: RecentDocumentBranchActivity[] = [];
+    for (const message of [...messages].reverse()) {
+      if (message.role === "user" && message.documentIds?.includes(activeDocumentContextId)) {
+        const summary = compactContextText(message.content, 140);
+        items.push({
+          id: `${message.id}-request`,
+          kind: "request",
+          title: "Branch request",
+          ...(summary ? { detail: summary } : {}),
+          createdAt: message.createdAt,
+        });
+      }
+
+      for (const block of message.blocks || []) {
+        if (
+          block.type === "document_edit_proposal" &&
+          block.documentId === activeDocumentContextId
+        ) {
+          const proposalDetail = String(block.changeSummary || block.instruction || "").trim();
+          items.push({
+            id: `${message.id}-${block.baseVersionId}-proposal`,
+            kind: "proposal",
+            title: "Edit proposal ready",
+            ...(proposalDetail ? { detail: compactContextText(proposalDetail, 140) } : {}),
+            createdAt: message.createdAt,
+          });
+        }
+        if (
+          block.type === "document_edit_applied" &&
+          block.documentId === activeDocumentContextId
+        ) {
+          const appliedDetail = String(block.changeSummary || "").trim();
+          items.push({
+            id: `${message.id}-${block.versionId}-applied`,
+            kind: "applied",
+            title: `Version ${block.versionNumber} saved`,
+            ...(appliedDetail ? { detail: compactContextText(appliedDetail, 140) } : {}),
+            createdAt: message.createdAt,
+          });
+        }
+        if (
+          block.type === "document_export_result" &&
+          block.documentId === activeDocumentContextId
+        ) {
+          items.push({
+            id: `${message.id}-${block.exportId}-export`,
+            kind: "export",
+            title: `${block.format} export ready`,
+            createdAt: message.createdAt,
+          });
+        }
+        if (
+          block.type === "document_artifact" &&
+          block.documentId === activeDocumentContextId
+        ) {
+          const artifactTitle = String(block.title || "Document artifact").trim() || "Document artifact";
+          items.push({
+            id: `${message.id}-${block.versionId || artifactTitle}-artifact`,
+            kind: "artifact",
+            title: artifactTitle,
+            ...(typeof block.versionNumber === "number" ? { detail: `Version ${block.versionNumber}` } : {}),
+            createdAt: message.createdAt,
+          });
+        }
+        if (
+          (block.type === "document_ready" || block.type === "document_parse_needs_review") &&
+          block.documentId === activeDocumentContextId
+        ) {
+          const readyTitle = String(block.title || "").trim();
+          items.push({
+            id: `${message.id}-${block.documentId}-ready`,
+            kind: "ready",
+            title: block.type === "document_ready" ? "Document ready" : "Needs review",
+            ...(readyTitle ? { detail: compactContextText(readyTitle, 120) } : {}),
+            createdAt: message.createdAt,
+          });
+        }
+      }
+    }
+    return items.slice(0, 6);
+  }, [activeDocumentContextId, composerBranchContext?.documentId, messages, selectedRuntimeDocument?.id]);
 
   const hasDocsContext = runtimeDocuments.length > 0;
   const resolvedRightRailMode: "activity" | "docs" =
@@ -490,7 +750,20 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     mode: "send" | "queue" | "interrupt",
     options?: { attachmentIds?: string[]; documentIds?: string[] }
   ) => {
-    runAsync(sendMessage(content, mode, options));
+    const scopedContent = buildScopedComposerMessage(content, composerBranchContext);
+    const scopedDocumentIds = Array.from(
+      new Set([
+        ...(Array.isArray(options?.documentIds) ? options?.documentIds.filter(Boolean) : []),
+        ...(composerBranchContext?.documentId ? [composerBranchContext.documentId] : []),
+      ])
+    );
+    runAsync(
+      sendMessage(scopedContent, mode, {
+        ...(Array.isArray(options?.attachmentIds) ? { attachmentIds: options.attachmentIds } : {}),
+        ...(scopedDocumentIds.length ? { documentIds: scopedDocumentIds } : {}),
+      })
+    );
+    setComposerBranchContext(null);
   };
 
   const runPriorityCommand = (command: string, options?: { attachmentIds?: string[]; documentIds?: string[] }) => {
@@ -557,6 +830,12 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
       const separator = current.endsWith("\n") ? "" : "\n";
       return `${current}${separator}${next}`;
     });
+    setComposerFocusSignal((previous) => previous + 1);
+  };
+
+  const openComposerBranch = (context: ComposerBranchContext, nextDraft = "") => {
+    setComposerBranchContext(context);
+    setComposerDraft(nextDraft);
     setComposerFocusSignal((previous) => previous + 1);
   };
 
@@ -759,41 +1038,50 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     openRightRailMode("docs");
   };
 
+  useEffect(() => {
+    const documentId = composerBranchContext?.documentId;
+    if (!documentId) return;
+    if (selectedRuntimeDocumentId !== documentId) {
+      setSelectedRuntimeDocumentId(documentId);
+    }
+    if (resolvedRightRailMode !== "docs" || rightRailCollapsed) {
+      openRightRailMode("docs");
+    }
+  }, [composerBranchContext?.documentId, resolvedRightRailMode, rightRailCollapsed, selectedRuntimeDocumentId]);
+
   const onQuoteDocumentInChat = (input: { document: RuntimeWorkspaceDocumentDto; quotedText: string }) => {
-    const quoteLines = input.quotedText
-      .split(/\r?\n/g)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => `> ${line}`)
-      .join("\n");
-    if (!quoteLines) return;
     const sourceTitle = input.document.title || input.document.originalFileName || "Document";
-    const versionLabel =
-      typeof input.document.latestVersion?.versionNumber === "number" && input.document.latestVersion.versionNumber > 0
-        ? `v${input.document.latestVersion.versionNumber}`
-        : "latest";
-    injectComposerText(
-      `${quoteLines}\n\nSource: ${sourceTitle} (${versionLabel})`,
-      "append"
+    const versionNumber =
+      typeof input.document.latestVersion?.versionNumber === "number" ? input.document.latestVersion.versionNumber : undefined;
+    openComposerBranch(
+      {
+        kind: "document_quote",
+        title: sourceTitle,
+        subtitle: "Scoped to the selected document excerpt",
+        documentId: input.document.id,
+        ...(typeof versionNumber === "number" ? { versionNumber } : {}),
+        quotedText: compactContextText(input.quotedText, 320),
+        commandHint: "/quote-doc",
+      },
+      ""
     );
   };
 
   const onAskAiEditFromDocumentReader = (input: { document: RuntimeWorkspaceDocumentDto; quotedText: string }) => {
     const sourceTitle = input.document.title || input.document.originalFileName || "Document";
-    const versionLabel =
-      typeof input.document.latestVersion?.versionNumber === "number" && input.document.latestVersion.versionNumber > 0
-        ? `v${input.document.latestVersion.versionNumber}`
-        : "latest";
-    const quoteLines = input.quotedText
-      .split(/\r?\n/g)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => `> ${line}`)
-      .join("\n");
-    if (!quoteLines) return;
-    injectComposerText(
-      `Please propose an edit to improve clarity and strategic quality for this excerpt from ${sourceTitle} (${versionLabel}):\n\n${quoteLines}\n\nKeep the original meaning intact.`,
-      "append"
+    const versionNumber =
+      typeof input.document.latestVersion?.versionNumber === "number" ? input.document.latestVersion.versionNumber : undefined;
+    openComposerBranch(
+      {
+        kind: "document_edit",
+        title: sourceTitle,
+        subtitle: "Reply with the change you want and BAT will draft the edit for this excerpt.",
+        documentId: input.document.id,
+        ...(typeof versionNumber === "number" ? { versionNumber } : {}),
+        quotedText: compactContextText(input.quotedText, 320),
+        commandHint: "/edit-doc",
+      },
+      ""
     );
   };
 
@@ -803,15 +1091,18 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     documentId?: string;
     versionNumber?: number;
   }) => {
-    const quoteLines = input.quotedText
-      .split(/\r?\n/g)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => `> ${line}`)
-      .join("\n");
-    if (!quoteLines) return;
-    const versionLabel = typeof input.versionNumber === "number" && input.versionNumber > 0 ? `v${input.versionNumber}` : "latest";
-    injectComposerText(`${quoteLines}\n\nSource: ${input.title} (${versionLabel})`, "append");
+    openComposerBranch(
+      {
+        kind: "document_quote",
+        title: input.title,
+        subtitle: "Scoped to the selected excerpt from the document preview",
+        ...(input.documentId ? { documentId: input.documentId } : {}),
+        ...(typeof input.versionNumber === "number" ? { versionNumber: input.versionNumber } : {}),
+        quotedText: compactContextText(input.quotedText, 320),
+        commandHint: "/quote-doc",
+      },
+      ""
+    );
   };
 
   const onAskEditFromArtifact = (input: {
@@ -820,21 +1111,20 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     documentId?: string;
     versionNumber?: number;
   }) => {
-    const quoteLines = input.quotedText
-      .split(/\r?\n/g)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => `> ${line}`)
-      .join("\n");
-    if (!quoteLines) return;
     if (input.documentId) {
       openDocsRail(input.documentId);
     }
-    injectComposerText(
-      `Please propose an edit to improve clarity and strategic impact for this excerpt from "${input.title}"${
-        typeof input.versionNumber === "number" && input.versionNumber > 0 ? ` (v${input.versionNumber})` : ""
-      }:\n\n${quoteLines}\n\nKeep the meaning intact and provide the revised wording.`,
-      "append"
+    openComposerBranch(
+      {
+        kind: "document_edit",
+        title: input.title,
+        subtitle: "Reply with the specific change and BAT will treat it like a scoped document branch.",
+        ...(input.documentId ? { documentId: input.documentId } : {}),
+        ...(typeof input.versionNumber === "number" ? { versionNumber: input.versionNumber } : {}),
+        quotedText: compactContextText(input.quotedText, 320),
+        commandHint: "/edit-doc",
+      },
+      ""
     );
   };
 
@@ -1128,6 +1418,130 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   };
 
   const onCommand = (command: string) => {
+    if (command === "/go-deeper") {
+      onSteer("Go deeper");
+      return;
+    }
+    if (command === "/make-pdf" || command === "/export-pdf") {
+      injectComposerText("Generate a deep business strategy PDF deliverable from this workspace evidence.", "replace");
+      return;
+    }
+    if (command === "/show-sources") {
+      injectComposerText("Show the evidence sources and links used for your latest answer.", "replace");
+      return;
+    }
+    if (command === "/focus-web") {
+      onSteer("Focus on Web evidence");
+      return;
+    }
+    if (command === "/focus-social") {
+      onSteer("Focus on TikTok");
+      return;
+    }
+    if (command === "/mode-fast") {
+      setPreference("responseMode", "fast");
+      return;
+    }
+    if (command === "/mode-balanced") {
+      setPreference("responseMode", "balanced");
+      return;
+    }
+    if (command === "/mode-deep") {
+      setPreference("responseMode", "deep");
+      return;
+    }
+    if (command === "/mode-pro") {
+      setPreference("responseMode", "pro");
+      return;
+    }
+    if (command === "/new-branch") {
+      onForkBranch();
+      return;
+    }
+    if (command === "/edit-doc" || command === "/rewrite-selection") {
+      const target =
+        composerBranchContext?.documentId || selectedRuntimeDocument?.id
+          ? {
+              id: composerBranchContext?.documentId || selectedRuntimeDocument?.id || "",
+              title: composerBranchContext?.title || selectedRuntimeDocument?.title || selectedRuntimeDocument?.originalFileName || "Document",
+              versionNumber:
+                composerBranchContext?.versionNumber ||
+                selectedRuntimeDocument?.latestVersion?.versionNumber ||
+                undefined,
+              quotedText: composerBranchContext?.quotedText,
+            }
+          : null;
+      if (target) {
+        openComposerBranch(
+          {
+            kind: "document_edit",
+            title: target.title,
+            subtitle: "Reply with the edit request for this document branch.",
+            documentId: target.id,
+            ...(typeof target.versionNumber === "number" ? { versionNumber: target.versionNumber } : {}),
+            ...(target.quotedText ? { quotedText: target.quotedText } : {}),
+            commandHint: command === "/rewrite-selection" ? "/rewrite-selection" : "/edit-doc",
+          },
+          command === "/rewrite-selection"
+            ? "Rewrite this selection to be clearer, tighter, and more executive-ready without changing the meaning."
+            : ""
+        );
+        return;
+      }
+      openDocsRail();
+      setActionError("Select or open a document first, then run /edit-doc.");
+      return;
+    }
+    if (command === "/quote-doc") {
+      if (composerBranchContext?.documentId) {
+        openComposerBranch(
+          {
+            ...composerBranchContext,
+            kind: "document_quote",
+            commandHint: "/quote-doc",
+          },
+          ""
+        );
+        return;
+      }
+      if (selectedRuntimeDocument) {
+        openComposerBranch(
+          {
+            kind: "document_quote",
+            title: selectedRuntimeDocument.title || selectedRuntimeDocument.originalFileName || "Document",
+            subtitle: "Use the current document as scoped context in chat.",
+            documentId: selectedRuntimeDocument.id,
+            ...(typeof selectedRuntimeDocument.latestVersion?.versionNumber === "number"
+              ? { versionNumber: selectedRuntimeDocument.latestVersion.versionNumber }
+              : {}),
+            commandHint: "/quote-doc",
+          },
+          ""
+        );
+        return;
+      }
+      openDocsRail();
+      return;
+    }
+    if (command === "/export-pdf") {
+      injectComposerText("Generate a deep business strategy PDF deliverable from this workspace evidence.", "replace");
+      return;
+    }
+    if (command === "/show-sources") {
+      injectComposerText("Show the evidence sources and links used for your latest answer.", "replace");
+      return;
+    }
+    if (command === "/web") {
+      injectComposerText("Search the web for additional evidence relevant to this workspace and summarize top findings.", "replace");
+      return;
+    }
+    if (command === "/competitor-v3") {
+      injectComposerText(
+        "Run the V3 competitor finder in deep mode with enrichment and return a ranked shortlist backed by evidence.",
+        "replace"
+      );
+      return;
+    }
     if (command === "Open Viral Studio") {
       router.push(`/app/w/${workspaceId}/viral-studio`);
       return;
@@ -1242,8 +1656,8 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
         </div>
       ) : null}
 
-      <div className="relative h-full overflow-hidden bg-white">
-        <div className="grid h-[calc(100dvh-5.5rem)] min-h-[34rem] w-full grid-cols-1 lg:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[19rem_minmax(0,1fr)]">
+      <div className="relative h-full overflow-hidden bg-[#f6f7f8]">
+        <div className="grid h-[calc(100dvh-5rem)] min-h-[34rem] w-full grid-cols-1 lg:grid-cols-[16.5rem_minmax(0,1fr)] xl:grid-cols-[17.25rem_minmax(0,1fr)]">
           <aside
             className={`${
               sidebarOpen ? "absolute inset-y-0 left-0 z-30 flex w-11/12 max-w-sm" : "hidden"
@@ -1336,39 +1750,68 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  className="rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800"
-                  onClick={() => runAsync(refreshNow())}
+                  onClick={() => {
+                    setActiveLibraryCollection("all");
+                    setLibraryOpen(true);
+                  }}
+                  className="inline-flex flex-1 items-center justify-center gap-1 rounded-full border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:bg-zinc-800"
                 >
-                  <span className="inline-flex items-center gap-1">
-                    <RefreshCcw className="h-3.5 w-3.5" /> Refresh
-                  </span>
+                  <Library className="h-3.5 w-3.5" />
+                  Library
                 </button>
-                <CommandPalette onSelect={onCommand} />
+                <div ref={sidebarToolsRef} className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setSidebarToolsOpen((previous) => !previous)}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-zinc-700 text-zinc-200 hover:bg-zinc-800"
+                    aria-label="Workspace tools"
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </button>
+                  {sidebarToolsOpen ? (
+                    <div className="absolute right-0 z-20 mt-2 w-56 rounded-2xl border border-zinc-700 bg-[#1d1d1d] p-1.5 shadow-2xl">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSidebarToolsOpen(false);
+                          runAsync(refreshNow());
+                        }}
+                        className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs text-zinc-200 hover:bg-zinc-800"
+                      >
+                        <RefreshCcw className="h-3.5 w-3.5" />
+                        Refresh workspace
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSidebarToolsOpen(false);
+                          setCommandPaletteOpenSignal((previous) => previous + 1);
+                        }}
+                        className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs text-zinc-200 hover:bg-zinc-800"
+                      >
+                        <Command className="h-3.5 w-3.5" />
+                        Command menu
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSidebarToolsOpen(false);
+                          router.push(`/app/w/${workspaceId}/viral-studio`);
+                        }}
+                        className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs text-zinc-200 hover:bg-zinc-800"
+                      >
+                        <Sparkles className="h-3.5 w-3.5" />
+                        Open Viral Studio
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
               </div>
 
               <div>
-                <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveLibraryCollection("all");
-                      setLibraryOpen(true);
-                    }}
-                    className="inline-flex items-center gap-1 rounded-md border border-zinc-700 px-2.5 py-1 text-xs text-zinc-200 hover:bg-zinc-800"
-                  >
-                    <Library className="h-3.5 w-3.5" />
-                    Open library
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      router.push(`/app/w/${workspaceId}/viral-studio`);
-                    }}
-                    className="inline-flex items-center gap-1 rounded-md border border-zinc-700 px-2.5 py-1 text-xs text-zinc-200 hover:bg-zinc-800"
-                  >
-                    <FileText className="h-3.5 w-3.5" />
-                    Viral Studio
-                  </button>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <p className="text-xs uppercase tracking-[0.08em] text-zinc-400">Pinned context</p>
+                  <span className="text-[11px] text-zinc-500">Cmd/Ctrl+K</span>
                 </div>
                 <div className="space-y-1.5">
                   {quickLibraryItems.map((item) => (
@@ -1387,10 +1830,10 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
             </div>
           </aside>
 
-          <section className="relative flex min-h-0 flex-col overflow-hidden bg-white">
-            <header className="flex items-center justify-between gap-2 border-b border-zinc-200 px-3 py-2 sm:px-4 xl:px-6">
+          <section className="relative flex min-h-0 flex-col overflow-hidden bg-[#fbfbfc]">
+            <header className="flex items-center justify-between gap-3 border-b border-zinc-200/90 bg-white/90 px-3 py-2.5 backdrop-blur sm:px-4 xl:px-5">
               <div className="min-w-0">
-                <div className="mb-0.5 flex items-center gap-2">
+                <div className="mb-1 flex items-center gap-2">
                   <button
                     type="button"
                     className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-200 text-zinc-700 lg:hidden"
@@ -1400,56 +1843,47 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                   </button>
                   <h1 className="truncate text-sm font-semibold text-zinc-900">{activeThread?.title || "New chat"}</h1>
                 </div>
-                <p className="text-xs text-zinc-500">
-                  {syncing ? "Syncing..." : activeBranch ? `Branch: ${activeBranch.name}` : "Main branch"}
-                  {" • "}
-                  {isStreaming ? formatPhaseLabel(activeRun?.phase) : "Idle"}
-                </p>
+                <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
+                  <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5">
+                    {syncing ? "Syncing..." : activeBranch ? `Branch: ${activeBranch.name}` : "Main branch"}
+                  </span>
+                  <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5">
+                    {isStreaming ? formatPhaseLabel(activeRun?.phase) : "Idle"}
+                  </span>
+                  {streamingInsight ? (
+                    <span className="max-w-[28rem] truncate rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5">
+                      {streamingInsight}
+                    </span>
+                  ) : null}
+                </div>
               </div>
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
-                  onClick={() => toggleRightRailMode("activity")}
-                  className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 xl:hidden"
+                  onClick={() => {
+                    setRightRailMode(resolvedRightRailMode);
+                    setActivityOpen((previous) => !previous);
+                  }}
+                  className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 xl:hidden"
                 >
                   <PanelRight className="h-3.5 w-3.5" />
-                  Activity
+                  Inspector
                 </button>
-                {hasDocsContext ? (
-                  <button
-                    type="button"
-                    onClick={() => toggleRightRailMode("docs")}
-                    className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 xl:hidden"
-                  >
-                    <FileText className="h-3.5 w-3.5" />
-                    Docs
-                  </button>
-                ) : null}
                 <button
                   type="button"
-                  onClick={() => toggleRightRailMode("activity")}
-                  className="hidden items-center gap-1 rounded-md border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 xl:inline-flex"
+                  onClick={() => setRightRailCollapsed((previous) => !previous)}
+                  className="hidden items-center gap-1 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 xl:inline-flex"
                 >
                   <PanelRight className="h-3.5 w-3.5" />
-                  {rightRailCollapsed ? "Activity" : resolvedRightRailMode === "activity" ? "Hide activity" : "Activity"}
+                  {rightRailCollapsed ? "Open inspector" : "Hide inspector"}
                 </button>
-                {hasDocsContext ? (
-                  <button
-                    type="button"
-                    onClick={() => toggleRightRailMode("docs")}
-                    className="hidden items-center gap-1 rounded-md border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 xl:inline-flex"
-                  >
-                    <FileText className="h-3.5 w-3.5" />
-                    {rightRailCollapsed ? "Docs" : resolvedRightRailMode === "docs" ? "Hide docs" : "Docs"}
-                  </button>
-                ) : null}
                 <button
                   type="button"
                   onClick={() => router.push(`/app/w/${workspaceId}/viral-studio`)}
-                  className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+                  className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
                 >
-                  <FileText className="h-3.5 w-3.5" />
-                  Viral Studio
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Studio
                 </button>
               </div>
             </header>
@@ -1458,12 +1892,12 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
               className={`grid min-h-0 flex-1 grid-cols-1 overflow-hidden ${
                 rightRailCollapsed
                   ? "xl:grid-cols-1"
-                  : "xl:grid-cols-[minmax(0,1fr)_27rem] 2xl:grid-cols-[minmax(0,1fr)_31rem]"
+                  : "xl:grid-cols-[minmax(0,1fr)_25rem] 2xl:grid-cols-[minmax(0,1fr)_28rem]"
               }`}
             >
-              <div className="flex min-h-0 flex-col border-zinc-200 xl:border-r">
+              <div className="flex min-h-0 flex-col border-zinc-200 xl:border-r xl:border-zinc-200/80">
                 {viralWorkflow ? (
-                  <div className="mx-4 mt-3 rounded-2xl border border-sky-200 bg-gradient-to-br from-sky-50 via-cyan-50 to-white p-3 sm:mx-6 xl:mx-8">
+                  <div className="mx-3 mt-3 rounded-[1.5rem] border border-sky-200 bg-gradient-to-br from-sky-50 via-cyan-50 to-white p-3 shadow-[0_20px_45px_-35px_rgba(14,165,233,0.55)] sm:mx-4 xl:mx-5">
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div>
                         <p className="text-xs font-semibold uppercase tracking-[0.08em] text-sky-700">
@@ -1648,7 +2082,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                   />
 
                 {!activeBranchId ? (
-                  <div className="mx-4 mb-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 sm:mx-6 xl:mx-8">
+                  <div className="mx-3 mb-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 sm:mx-4 xl:mx-5">
                     Open/select a branch to attach files.
                   </div>
                 ) : null}
@@ -1680,12 +2114,25 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                   onReorderQueue={(from, to) => runAsync(reorderQueue(from, to))}
                   onDeleteQueued={(id) => runAsync(removeQueued(id))}
                   onSteer={onSteer}
+                  onCommandSelect={onCommand}
+                  branchContext={composerBranchContext}
+                  onClearBranchContext={() => setComposerBranchContext(null)}
                   contentWidthClassName="max-w-none"
                 />
               </div>
 
               {!rightRailCollapsed ? (
                 <div className="hidden min-h-0 border-l border-zinc-200 bg-white xl:flex xl:flex-col">
+                  <RightRailPulse
+                    runsCount={processRuns.filter((run) => run.status === "running" || run.status === "waiting_input").length}
+                    activeRunLabel={activeRun ? `${activeRun.label} • ${formatPhaseLabel(activeRun.phase)}` : visibleFeed[0]?.message || ""}
+                    feedCount={feedItems.length}
+                    docsCount={runtimeDocuments.length}
+                    decisionsCount={decisions.length}
+                    mode={resolvedRightRailMode}
+                    hasDocs={hasDocsContext}
+                    onSelectMode={openRightRailMode}
+                  />
                   <div className="min-h-0 flex-1 overflow-hidden">
                     {resolvedRightRailMode === "activity" ? (
                       <LiveActivityPanel
@@ -1703,6 +2150,8 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                         branchId={activeBranchId}
                         documents={runtimeDocuments}
                         selectedDocumentId={resolvedSelectedRuntimeDocumentId}
+                        branchContext={composerBranchContext}
+                        recentBranchActivity={recentDocumentBranchActivity}
                         onSelectDocument={setSelectedRuntimeDocumentId}
                         onQuoteInChat={onQuoteDocumentInChat}
                         onAskAiEdit={onAskAiEditFromDocumentReader}
@@ -1742,17 +2191,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
             <div className="flex h-full w-11/12 max-w-lg flex-col border-l border-zinc-200 bg-white shadow-2xl">
               <div className="flex items-center justify-between border-b border-zinc-200 px-3 py-2">
                 <div className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-[0.08em] text-zinc-500">
-                  {resolvedRightRailMode === "activity" ? (
-                    <>
-                      <PanelRight className="h-3.5 w-3.5" />
-                      Activity
-                    </>
-                  ) : (
-                    <>
-                      <FileText className="h-3.5 w-3.5" />
-                      Docs
-                    </>
-                  )}
+                  Inspector
                 </div>
                 <button
                   type="button"
@@ -1762,6 +2201,16 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                   <X className="h-4 w-4" />
                 </button>
               </div>
+              <RightRailPulse
+                runsCount={processRuns.filter((run) => run.status === "running" || run.status === "waiting_input").length}
+                activeRunLabel={activeRun ? `${activeRun.label} • ${formatPhaseLabel(activeRun.phase)}` : visibleFeed[0]?.message || ""}
+                feedCount={feedItems.length}
+                docsCount={runtimeDocuments.length}
+                decisionsCount={decisions.length}
+                mode={resolvedRightRailMode}
+                hasDocs={hasDocsContext}
+                onSelectMode={setRightRailMode}
+              />
               <div className="min-h-0 flex-1 overflow-hidden">
                 {resolvedRightRailMode === "activity" ? (
                   <LiveActivityPanel
@@ -1779,6 +2228,8 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                     branchId={activeBranchId}
                     documents={runtimeDocuments}
                     selectedDocumentId={resolvedSelectedRuntimeDocumentId}
+                    branchContext={composerBranchContext}
+                    recentBranchActivity={recentDocumentBranchActivity}
                     onSelectDocument={setSelectedRuntimeDocumentId}
                     onQuoteInChat={onQuoteDocumentInChat}
                     onAskAiEdit={onAskAiEditFromDocumentReader}
@@ -1797,6 +2248,8 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
           </div>
         ) : null}
       </div>
+
+      <CommandPalette onSelect={onCommand} showTrigger={false} openSignal={commandPaletteOpenSignal} />
 
       <LibraryDrawer
         open={libraryOpen}

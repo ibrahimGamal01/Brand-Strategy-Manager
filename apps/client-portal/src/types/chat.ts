@@ -128,6 +128,17 @@ export type ChatMessageBlock =
       versionNumber?: number;
       previewModeDefault?: "pdf" | "markdown";
       coverageScore?: number;
+      qualityScore?: number;
+      qualityNotes?: string[];
+      dimensionScores?: {
+        grounding: number;
+        specificity: number;
+        usefulness: number;
+        redundancy: number;
+        tone: number;
+        visual: number;
+      };
+      renderTheme?: string;
       partial?: boolean;
       partialReasons?: string[];
       actions?: ChatMessageAction[];
@@ -193,6 +204,16 @@ export interface UploadedDocumentChip {
   attachmentId?: string;
   errorCode?: string;
   errorMessage?: string;
+}
+
+export interface ComposerBranchContext {
+  kind: "document_edit" | "document_quote" | "message_reply";
+  title: string;
+  subtitle?: string;
+  documentId?: string;
+  versionNumber?: number;
+  quotedText?: string;
+  commandHint?: string;
 }
 
 export interface ChatInputSourceScope {
@@ -279,8 +300,19 @@ export interface ProcessFeedItem {
   loopIndex?: number;
   loopMax?: number;
   coverageScore?: number;
+  qualityScore?: number;
+  qualityNotes?: string[];
+  dimensionScores?: {
+    grounding: number;
+    specificity: number;
+    usefulness: number;
+    redundancy: number;
+    tone: number;
+    visual: number;
+  };
   coverageDelta?: number;
   docFamily?: string;
+  renderTheme?: string;
   sectionId?: string;
   sectionTitle?: string;
   methodFamily?: string;

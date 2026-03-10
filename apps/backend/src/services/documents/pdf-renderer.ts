@@ -150,11 +150,12 @@ export async function renderPdfFromHtml(html: string): Promise<Buffer> {
     const pdf = await page.pdf({
       format: 'Letter',
       printBackground: true,
+      preferCSSPageSize: true,
       margin: {
-        top: '0.6in',
-        right: '0.6in',
-        bottom: '0.6in',
-        left: '0.6in',
+        top: '0in',
+        right: '0in',
+        bottom: '0in',
+        left: '0in',
       },
     });
     return Buffer.from(pdf);

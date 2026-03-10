@@ -6,8 +6,10 @@ import { Document, Packer, Paragraph, TextRun } from 'docx';
 import { prisma } from '../../lib/prisma';
 import { STORAGE_ROOT } from '../storage/storage-root';
 import { createFileAttachment } from '../chat/file-attachments';
+import { readWorkspaceMemoryContext } from '../chat/runtime/workspace-memory';
 import { markdownToRichHtml } from './markdown-renderer';
 import { renderPdfFromHtml } from './pdf-renderer';
+import { renderPremiumMarkdownExportHtml } from './premium-renderer';
 import { ingestWorkspaceDocument, emitWorkspaceDocumentRuntimeEvent } from './ingestion/ingestion-orchestrator';
 import { buildDocumentChunks } from './ingestion/chunker';
 
@@ -111,6 +113,72 @@ function toStorageHref(storagePath: string): string {
   if (normalized.startsWith('/storage/')) return normalized;
   if (normalized.startsWith('storage/')) return `/${normalized}`;
   return `/storage/${normalized.replace(/^\/+/, '')}`;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function parseGeneratedMeta(meta: unknown) {
+  const source = asRecord(meta);
+  const dimensionSource = asRecord(source.dimensionScores);
+  return {
+    docFamily: String(source.docFamily || '').trim() || undefined,
+    coverageScore: Number(source.coverageScore || 0) || undefined,
+    coverageBand: String(source.coverageBand || '').trim() || undefined,
+    qualityScore: Number(source.qualityScore || 0) || undefined,
+    qualityNotes: Array.isArray(source.qualityNotes)
+      ? (source.qualityNotes as unknown[]).map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 12)
+      : undefined,
+    dimensionScores:
+      Object.keys(dimensionSource).length > 0
+        ? {
+            grounding: Number(dimensionSource.grounding || 0) || 0,
+            specificity: Number(dimensionSource.specificity || 0) || 0,
+            usefulness: Number(dimensionSource.usefulness || 0) || 0,
+            redundancy: Number(dimensionSource.redundancy || 0) || 0,
+            tone: Number(dimensionSource.tone || 0) || 0,
+            visual: Number(dimensionSource.visual || 0) || 0,
+          }
+        : undefined,
+    editorialPassCount: Number(source.editorialPassCount || 0) || undefined,
+    renderTheme: String(source.renderTheme || '').trim() || undefined,
+    partial: typeof source.partial === 'boolean' ? source.partial : undefined,
+    partialReasons: Array.isArray(source.partialReasons)
+      ? (source.partialReasons as unknown[]).map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 12)
+      : undefined,
+  };
+}
+
+function parseQualityReference(memory: Record<string, unknown>) {
+  const lastGood = asRecord(memory.last_good_document_workflow);
+  if (!Object.keys(lastGood).length) return undefined;
+  const dimensions = asRecord(lastGood.dimensionScores);
+  return {
+    family: String(lastGood.family || '').trim() || undefined,
+    coverageScore: Number(lastGood.coverageScore || 0) || undefined,
+    coverageBand: String(lastGood.coverageBand || '').trim() || undefined,
+    qualityScore: Number(lastGood.qualityScore || 0) || undefined,
+    qualityNotes: Array.isArray(lastGood.qualityNotes)
+      ? (lastGood.qualityNotes as unknown[]).map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 8)
+      : undefined,
+    dimensionScores:
+      Object.keys(dimensions).length > 0
+        ? {
+            grounding: Number(dimensions.grounding || 0) || 0,
+            specificity: Number(dimensions.specificity || 0) || 0,
+            usefulness: Number(dimensions.usefulness || 0) || 0,
+            redundancy: Number(dimensions.redundancy || 0) || 0,
+            tone: Number(dimensions.tone || 0) || 0,
+            visual: Number(dimensions.visual || 0) || 0,
+          }
+        : undefined,
+    renderTheme: String(lastGood.renderTheme || '').trim() || undefined,
+    editorialPassCount: Number(lastGood.editorialPassCount || 0) || undefined,
+    at: String(lastGood.at || '').trim() || undefined,
+  };
 }
 
 function allowedMime(mimeType: string, fileName: string): boolean {
@@ -614,6 +682,18 @@ export async function upsertGeneratedRuntimeDocument(input: {
     docFamily?: string;
     coverageScore?: number;
     coverageBand?: string;
+    qualityScore?: number;
+    qualityNotes?: string[];
+    dimensionScores?: {
+      grounding: number;
+      specificity: number;
+      usefulness: number;
+      redundancy: number;
+      tone: number;
+      visual: number;
+    };
+    editorialPassCount?: number;
+    renderTheme?: string;
     partial?: boolean;
     partialReasons?: string[];
   };
@@ -676,6 +756,30 @@ export async function upsertGeneratedRuntimeDocument(input: {
                 ? Number(input.generatedMeta?.coverageScore)
                 : undefined,
               coverageBand: String(input.generatedMeta?.coverageBand || '').trim() || undefined,
+              qualityScore: Number.isFinite(Number(input.generatedMeta?.qualityScore))
+                ? Number(input.generatedMeta?.qualityScore)
+                : undefined,
+              qualityNotes: Array.isArray(input.generatedMeta?.qualityNotes)
+                ? input.generatedMeta?.qualityNotes
+                    ?.map((entry) => String(entry || '').trim())
+                    .filter(Boolean)
+                    .slice(0, 12)
+                : undefined,
+              dimensionScores:
+                input.generatedMeta?.dimensionScores && typeof input.generatedMeta.dimensionScores === 'object'
+                  ? {
+                      grounding: Number(input.generatedMeta.dimensionScores.grounding || 0) || 0,
+                      specificity: Number(input.generatedMeta.dimensionScores.specificity || 0) || 0,
+                      usefulness: Number(input.generatedMeta.dimensionScores.usefulness || 0) || 0,
+                      redundancy: Number(input.generatedMeta.dimensionScores.redundancy || 0) || 0,
+                      tone: Number(input.generatedMeta.dimensionScores.tone || 0) || 0,
+                      visual: Number(input.generatedMeta.dimensionScores.visual || 0) || 0,
+                    }
+                  : undefined,
+              editorialPassCount: Number.isFinite(Number(input.generatedMeta?.editorialPassCount))
+                ? Number(input.generatedMeta?.editorialPassCount)
+                : undefined,
+              renderTheme: String(input.generatedMeta?.renderTheme || '').trim() || undefined,
               partial: typeof input.generatedMeta?.partial === 'boolean' ? input.generatedMeta.partial : undefined,
               partialReasons: Array.isArray(input.generatedMeta?.partialReasons)
                 ? input.generatedMeta?.partialReasons
@@ -762,6 +866,30 @@ export async function upsertGeneratedRuntimeDocument(input: {
             ? Number(input.generatedMeta?.coverageScore)
             : undefined,
           coverageBand: String(input.generatedMeta?.coverageBand || '').trim() || undefined,
+          qualityScore: Number.isFinite(Number(input.generatedMeta?.qualityScore))
+            ? Number(input.generatedMeta?.qualityScore)
+            : undefined,
+          qualityNotes: Array.isArray(input.generatedMeta?.qualityNotes)
+            ? input.generatedMeta?.qualityNotes
+                ?.map((entry) => String(entry || '').trim())
+                .filter(Boolean)
+                .slice(0, 12)
+            : undefined,
+          dimensionScores:
+            input.generatedMeta?.dimensionScores && typeof input.generatedMeta.dimensionScores === 'object'
+              ? {
+                  grounding: Number(input.generatedMeta.dimensionScores.grounding || 0) || 0,
+                  specificity: Number(input.generatedMeta.dimensionScores.specificity || 0) || 0,
+                  usefulness: Number(input.generatedMeta.dimensionScores.usefulness || 0) || 0,
+                  redundancy: Number(input.generatedMeta.dimensionScores.redundancy || 0) || 0,
+                  tone: Number(input.generatedMeta.dimensionScores.tone || 0) || 0,
+                  visual: Number(input.generatedMeta.dimensionScores.visual || 0) || 0,
+                }
+              : undefined,
+          editorialPassCount: Number.isFinite(Number(input.generatedMeta?.editorialPassCount))
+            ? Number(input.generatedMeta?.editorialPassCount)
+            : undefined,
+          renderTheme: String(input.generatedMeta?.renderTheme || '').trim() || undefined,
           partial: typeof input.generatedMeta?.partial === 'boolean' ? input.generatedMeta.partial : undefined,
           partialReasons: Array.isArray(input.generatedMeta?.partialReasons)
             ? input.generatedMeta?.partialReasons
@@ -808,6 +936,12 @@ export async function listRuntimeDocuments(input: {
   limit?: number;
 }) {
   const limit = Math.max(1, Math.min(120, Number(input.limit || 40)));
+  const memoryContext = await readWorkspaceMemoryContext({
+    researchJobId: input.researchJobId,
+    branchId: input.branchId,
+    limitPerScope: 8,
+  });
+  const qualityReference = parseQualityReference(memoryContext.byScope.quality_history);
   const docs = await prisma.workspaceDocument.findMany({
     where: { researchJobId: input.researchJobId },
     include: {
@@ -832,23 +966,10 @@ export async function listRuntimeDocuments(input: {
   return docs.map((doc) => ({
     ...(typeof doc.parserMetaJson === 'object' && doc.parserMetaJson !== null
       ? {
-          generatedMeta: {
-            docFamily: String((doc.parserMetaJson as Record<string, unknown>).docFamily || '').trim() || undefined,
-            coverageScore: Number((doc.parserMetaJson as Record<string, unknown>).coverageScore || 0) || undefined,
-            coverageBand: String((doc.parserMetaJson as Record<string, unknown>).coverageBand || '').trim() || undefined,
-            partial:
-              typeof (doc.parserMetaJson as Record<string, unknown>).partial === 'boolean'
-                ? Boolean((doc.parserMetaJson as Record<string, unknown>).partial)
-                : undefined,
-            partialReasons: Array.isArray((doc.parserMetaJson as Record<string, unknown>).partialReasons)
-              ? ((doc.parserMetaJson as Record<string, unknown>).partialReasons as unknown[])
-                  .map((entry) => String(entry || '').trim())
-                  .filter(Boolean)
-                  .slice(0, 12)
-              : undefined,
-          },
+          generatedMeta: parseGeneratedMeta(doc.parserMetaJson),
         }
       : {}),
+    ...(qualityReference ? { qualityReference } : {}),
     id: doc.id,
     title: doc.title,
     originalFileName: doc.originalFileName,
@@ -895,6 +1016,12 @@ export async function getRuntimeDocumentDetail(input: {
   branchId: string;
   documentId: string;
 }) {
+  const memoryContext = await readWorkspaceMemoryContext({
+    researchJobId: input.researchJobId,
+    branchId: input.branchId,
+    limitPerScope: 8,
+  });
+  const qualityReference = parseQualityReference(memoryContext.byScope.quality_history);
   const doc = await prisma.workspaceDocument.findFirst({
     where: {
       id: input.documentId,
@@ -922,23 +1049,10 @@ export async function getRuntimeDocumentDetail(input: {
   return {
     ...(typeof doc.parserMetaJson === 'object' && doc.parserMetaJson !== null
       ? {
-          generatedMeta: {
-            docFamily: String((doc.parserMetaJson as Record<string, unknown>).docFamily || '').trim() || undefined,
-            coverageScore: Number((doc.parserMetaJson as Record<string, unknown>).coverageScore || 0) || undefined,
-            coverageBand: String((doc.parserMetaJson as Record<string, unknown>).coverageBand || '').trim() || undefined,
-            partial:
-              typeof (doc.parserMetaJson as Record<string, unknown>).partial === 'boolean'
-                ? Boolean((doc.parserMetaJson as Record<string, unknown>).partial)
-                : undefined,
-            partialReasons: Array.isArray((doc.parserMetaJson as Record<string, unknown>).partialReasons)
-              ? ((doc.parserMetaJson as Record<string, unknown>).partialReasons as unknown[])
-                  .map((entry) => String(entry || '').trim())
-                  .filter(Boolean)
-                  .slice(0, 12)
-              : undefined,
-          },
+          generatedMeta: parseGeneratedMeta(doc.parserMetaJson),
         }
       : {}),
+    ...(qualityReference ? { qualityReference } : {}),
     id: doc.id,
     title: doc.title,
     originalFileName: doc.originalFileName,
@@ -1285,7 +1399,19 @@ export async function exportRuntimeDocumentVersion(input: {
   } else if (format === WorkspaceDocumentExportFormat.DOCX) {
     buffer = await markdownToDocxBuffer(version.contentMd);
   } else {
-    const html = markdownToRichHtml(version.contentMd, { title: detail.title });
+    const html =
+      detail.generatedMeta?.renderTheme || typeof detail.generatedMeta?.qualityScore === 'number'
+        ? renderPremiumMarkdownExportHtml({
+            title: detail.title,
+            markdown: version.contentMd,
+            generatedAt: version.createdAt,
+            family: detail.generatedMeta?.docFamily,
+            coverageScore: detail.generatedMeta?.coverageScore,
+            qualityScore: detail.generatedMeta?.qualityScore,
+            qualityNotes: detail.generatedMeta?.qualityNotes,
+            renderTheme: detail.generatedMeta?.renderTheme,
+          })
+        : markdownToRichHtml(version.contentMd, { title: detail.title });
     buffer = await renderPdfFromHtml(html);
   }
 

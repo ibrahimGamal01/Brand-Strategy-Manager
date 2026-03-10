@@ -174,6 +174,17 @@ type WriterQualityResult = {
   notes?: string[];
 };
 
+type WriterEditorResult = {
+  response: string;
+  issues: string[];
+  model: {
+    requested: string;
+    used: string;
+    fallbackUsed: boolean;
+    fallbackFrom?: string;
+  };
+};
+
 const MAX_WRITER_ACTIONS = 8;
 const WRITER_ACTIONS_REQUIRING_DOCUMENT_ID = new Set([
   'document.read',
@@ -187,6 +198,55 @@ const WRITER_ACTION_ALIASES: Record<string, string> = {
   'document.download_file': 'document.download',
   'document.download_result': 'document.download',
 };
+
+function isDocumentAdjacentRequest(input: { userMessage: string; plan: RuntimePlan }): boolean {
+  const normalized = `${String(input.userMessage || '')} ${input.plan.toolCalls.map((call) => call.tool).join(' ')}`.toLowerCase();
+  return /\b(document|pdf|deliverable|brief|playbook|audit|swot|gtm|calendar)\b/.test(normalized);
+}
+
+function buildWriterEditorSystemPrompt(input: {
+  responseMode: RunPolicy['responseMode'];
+  targetLength: RunPolicy['targetLength'];
+  conciseRequested: boolean;
+}): string {
+  return [
+    'You are BAT Writer Editor.',
+    'Return strict JSON only.',
+    `Response mode: ${input.responseMode}.`,
+    `Target length: ${input.targetLength}.`,
+    `Concise mode: ${input.conciseRequested ? 'true' : 'false'}.`,
+    'Rewrite the draft into a premium, client-facing response.',
+    'Preserve factual grounding and evidence fidelity.',
+    'Improve narrative flow, transitions, implications, tradeoffs, and recommendation sharpness.',
+    'Remove generic filler, self-referential phrasing, and tool-log language.',
+    'Do not invent facts or new evidence.',
+    'If the draft is already strong, lightly polish it instead of rewriting for the sake of rewriting.',
+    'For deep/pro, preserve these headings exactly when present or required:',
+    '## What I searched',
+    '## What I found',
+    '## Synthesis',
+    '## Scenarios and tradeoffs',
+    '## Recommendations',
+    '## Next loop / next actions',
+    'JSON schema:',
+    '{',
+    '  "response": "string",',
+    '  "issues": ["string"]',
+    '}',
+  ].join('\n');
+}
+
+export function resolveWriterTaskForInput(input: {
+  userMessage: string;
+  plan: RuntimePlan;
+  policy: Pick<RunPolicy, 'responseMode'>;
+}): 'workspace_chat_writer' | 'analysis_quality' {
+  return input.policy.responseMode === 'deep' ||
+    input.policy.responseMode === 'pro' ||
+    isDocumentAdjacentRequest({ userMessage: input.userMessage, plan: input.plan })
+    ? 'analysis_quality'
+    : 'workspace_chat_writer';
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -1081,6 +1141,23 @@ export function applyWriterQualityGate(input: {
       };
     }
 
+    if (raw) {
+      return {
+        response: raw,
+        quality: {
+          intent: 'general',
+          passed: false,
+          notes: [
+            ...(missingHeaders.length ? [`Missing deep/pro sections: ${missingHeaders.join(', ')}.`] : []),
+            ...(evidenceRefCount < minEvidenceRefs
+              ? [`Evidence density is below target (${evidenceRefCount}/${minEvidenceRefs}).`]
+              : []),
+            'Response was preserved for editorial repair instead of being flattened into boilerplate.',
+          ],
+        },
+      };
+    }
+
     const highlights = input.toolResults
       .map((result) => String(result.summary || '').trim())
       .filter(Boolean)
@@ -1173,7 +1250,7 @@ export function applyWriterQualityGate(input: {
           ...(evidenceRefCount < minEvidenceRefs
             ? [`Raised evidence density from ${evidenceRefCount} to required floor ${minEvidenceRefs}.`]
             : []),
-          'Rewritten low-signal response to improve clarity and usefulness.',
+          'Rebuilt an empty low-signal response into a minimally useful fallback.',
         ],
       },
     };
@@ -2306,6 +2383,12 @@ export async function buildEvidenceLedger(input: EvidenceLedgerInput): Promise<E
 export async function writeClientResponse(input: WriterInput): Promise<WriterOutput> {
   const fallback = fallbackWriter(input);
   const conciseRequested = prefersConciseOutput(input.userMessage);
+  const writerTask = resolveWriterTaskForInput({
+    userMessage: input.userMessage,
+    plan: input.plan,
+    policy: input.policy,
+  });
+  const premiumWriter = writerTask === 'analysis_quality';
 
   const systemPrompt = [
     'You are BAT Writer (client-facing communicator).',
@@ -2375,10 +2458,10 @@ export async function writeClientResponse(input: WriterInput): Promise<WriterOut
   };
 
   try {
-    const writerRequest = await requestJson('workspace_chat_writer', [
+    const writerRequest = await requestJson(writerTask, [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: JSON.stringify(writerPayload) },
-    ], 2200);
+    ], premiumWriter ? 3200 : 2200);
     const parsed = writerRequest.parsed;
 
     if (!parsed) return fallback;
@@ -2402,10 +2485,69 @@ export async function writeClientResponse(input: WriterInput): Promise<WriterOut
       .slice(0, 20);
 
     const actions = sanitizeWriterActions(parsed.actions, MAX_WRITER_ACTIONS);
+    const editorFallbackResponse = String(parsed.response || fallback.response);
+    let editorResult: WriterEditorResult = {
+      response: editorFallbackResponse,
+      issues: [],
+      model: buildModelTelemetry(writerRequest.requestedModel, writerRequest.usedModel),
+    };
+
+    try {
+      const editorTask = premiumWriter ? 'analysis_quality' : 'workspace_chat_writer';
+      const editorRequest = await requestJson(
+        editorTask,
+        [
+          {
+            role: 'system',
+            content: buildWriterEditorSystemPrompt({
+              responseMode: input.policy.responseMode,
+              targetLength: input.policy.targetLength,
+              conciseRequested,
+            }),
+          },
+          {
+            role: 'user',
+            content: JSON.stringify({
+              userMessage: input.userMessage,
+              policy: {
+                responseMode: input.policy.responseMode,
+                targetLength: input.policy.targetLength,
+                strictValidation: input.policy.strictValidation,
+              },
+              runtimeContext: input.runtimeContext || {},
+              evidenceLedger: input.evidenceLedger || null,
+              toolDigest: input.toolDigest,
+              draft: {
+                response: editorFallbackResponse,
+                plan: normalizeStringArray(reasoningRaw.plan, 12),
+                tools: normalizeStringArray(reasoningRaw.tools, 12),
+                assumptions: normalizeStringArray(reasoningRaw.assumptions, 10),
+                nextSteps: normalizeStringArray(reasoningRaw.nextSteps, 10),
+                evidence,
+              },
+            }),
+          },
+        ],
+        premiumWriter ? 2800 : 1800,
+      );
+      const editorParsed = editorRequest.parsed;
+      if (editorParsed) {
+        const editedResponse = String(editorParsed.response || '').trim();
+        if (editedResponse) {
+          editorResult = {
+            response: editedResponse,
+            issues: normalizeStringArray(editorParsed.issues, 8),
+            model: buildModelTelemetry(editorRequest.requestedModel, editorRequest.usedModel),
+          };
+        }
+      }
+    } catch (error) {
+      console.warn('[Runtime PromptSuite] Writer editor failed, keeping draft:', (error as Error).message);
+    }
 
     const qualityGate = applyWriterQualityGate({
       userMessage: input.userMessage,
-      response: String(parsed.response || fallback.response),
+      response: editorResult.response,
       toolResults: input.toolResults,
       runtimeContext: isRecord(input.runtimeContext) ? input.runtimeContext : {},
       responseMode: input.policy.responseMode,
@@ -2414,14 +2556,17 @@ export async function writeClientResponse(input: WriterInput): Promise<WriterOut
 
     return {
       response: qualityGate.response,
-      model: buildModelTelemetry(writerRequest.requestedModel, writerRequest.usedModel),
+      model: editorResult.model,
       reasoning: {
         plan: normalizeStringArray(reasoningRaw.plan, 12),
         tools: normalizeStringArray(reasoningRaw.tools, 12),
         assumptions: normalizeStringArray(reasoningRaw.assumptions, 10),
         nextSteps: normalizeStringArray(reasoningRaw.nextSteps, 10),
         evidence,
-        quality: qualityGate.quality,
+        quality: {
+          ...qualityGate.quality,
+          notes: [...(qualityGate.quality.notes || []), ...editorResult.issues].slice(0, 10),
+        },
       },
       actions,
       decisions: normalizeDecisions(parsed.decisions, 8),

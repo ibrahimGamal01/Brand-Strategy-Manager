@@ -25,6 +25,38 @@ function compactText(value: string, max = 96) {
   return `${normalized.slice(0, Math.max(0, max - 1)).trimEnd()}...`;
 }
 
+function scoreTone(score?: number): string {
+  if (typeof score !== "number" || !Number.isFinite(score)) return "border-zinc-200 bg-zinc-50 text-zinc-700";
+  if (score >= 85) return "border-emerald-200 bg-emerald-50 text-emerald-800";
+  if (score >= 72) return "border-amber-200 bg-amber-50 text-amber-800";
+  return "border-rose-200 bg-rose-50 text-rose-800";
+}
+
+function qualityDimensions(
+  value?:
+    | {
+        grounding: number;
+        specificity: number;
+        usefulness: number;
+        redundancy: number;
+        tone: number;
+        visual: number;
+      }
+    | null
+) {
+  if (!value) return [];
+  return [
+    ["Grounding", value.grounding],
+    ["Specificity", value.specificity],
+    ["Usefulness", value.usefulness],
+    ["Redundancy", value.redundancy],
+    ["Tone", value.tone],
+    ["Visual", value.visual],
+  ]
+    .filter((entry) => Number.isFinite(entry[1]))
+    .sort((a, b) => Number(b[1]) - Number(a[1]));
+}
+
 function StatusIcon({ status }: { status: ProcessRun["status"] }) {
   if (status === "running") return <Loader2 className="h-4 w-4 animate-spin text-zinc-600" />;
   if (status === "waiting_input") return <PauseCircle className="h-4 w-4 text-amber-600" />;
@@ -165,12 +197,42 @@ export function LiveActivityPanel({
               </div>
             </div>
             <p className="mt-1 text-sm text-zinc-800">{item.message}</p>
-            {item.docFamily || typeof item.coverageScore === "number" ? (
+            {item.docFamily || typeof item.coverageScore === "number" || typeof item.qualityScore === "number" || item.renderTheme ? (
               <p className="mt-1 text-[11px] text-zinc-500">
-                {[item.docFamily ? item.docFamily.replace(/_/g, " ") : "", typeof item.coverageScore === "number" ? `Coverage ${item.coverageScore}/100` : ""]
+                {[
+                  item.docFamily ? item.docFamily.replace(/_/g, " ") : "",
+                  typeof item.coverageScore === "number" ? `Coverage ${item.coverageScore}/100` : "",
+                  typeof item.qualityScore === "number" ? `Quality ${item.qualityScore}/100` : "",
+                  item.renderTheme ? `Theme ${item.renderTheme.replace(/_/g, " ")}` : "",
+                ]
                   .filter(Boolean)
                   .join(" • ")}
               </p>
+            ) : null}
+            {typeof item.qualityScore === "number" || item.dimensionScores || item.qualityNotes?.length ? (
+              <div className="mt-2 rounded-xl border border-zinc-200 bg-zinc-50/80 p-2">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {typeof item.qualityScore === "number" ? (
+                    <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${scoreTone(item.qualityScore)}`}>
+                      Quality {item.qualityScore}/100
+                    </span>
+                  ) : null}
+                  {qualityDimensions(item.dimensionScores || null)
+                    .slice(0, 3)
+                    .map(([label, score]) => (
+                      <span key={`${item.id}-${label}`} className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] text-zinc-600">
+                        {label} {Math.round(Number(score))}
+                      </span>
+                    ))}
+                </div>
+                {item.qualityNotes?.length ? (
+                  <ul className="mt-2 space-y-1 text-[11px] text-zinc-600">
+                    {item.qualityNotes.slice(0, 2).map((note) => (
+                      <li key={`${item.id}-${note}`}>• {note}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
             ) : null}
             {item.methodFamily || item.lane || item.queryVariant || typeof item.newEvidenceRefs === "number" ? (
               <p className="mt-1 text-[11px] text-zinc-500">

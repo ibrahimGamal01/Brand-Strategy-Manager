@@ -4,6 +4,7 @@ import { renderDocumentMarkdown } from './document-render';
 import { saveDocumentBuffer } from './document-storage';
 import { markdownToRichHtml } from './markdown-renderer';
 import { renderPdfFromHtml } from './pdf-renderer';
+import { renderPremiumDocumentHtml } from './premium-renderer';
 import type {
   DocFamily,
   DocType,
@@ -18,9 +19,19 @@ import { emitWorkspaceDocumentRuntimeEvent } from './ingestion/ingestion-orchest
 import { upsertGeneratedRuntimeDocument } from './workspace-document-service';
 import { buildDocumentSpecV1 } from './spec-builder';
 import { draftDocumentSections } from './section-drafter';
+import { buildPremiumDocumentPipeline, evaluatePremiumDocumentQuality } from './premium-document-pipeline';
+import { renderBusinessStrategyV1 } from './renderers/business-strategy-v1';
+import { renderCompetitorAuditV1 } from './renderers/competitor-audit-v1';
+import { renderContentCalendarV1 } from './renderers/content-calendar-v1';
+import { renderGoToMarketV1 } from './renderers/go-to-market-v1';
+import { renderPlaybookV1 } from './renderers/playbook-v1';
+import { renderSwotStandardV1 } from './renderers/swot-standard-v1';
 import { persistDocumentQualityMemory } from '../chat/runtime/workspace-memory';
 import { buildDocSpecBuilderSystemPrompt } from '../chat/runtime/prompts/doc-spec-builder';
 import { buildSectionDrafterSystemPrompt } from '../chat/runtime/prompts/section-drafter';
+import { readWorkspaceMemoryContext } from '../chat/runtime/workspace-memory';
+import { buildDocumentEditorSystemPrompt } from '../chat/runtime/prompts/document-editor';
+import { buildDocumentFactCheckerSystemPrompt } from '../chat/runtime/prompts/document-fact-checker';
 
 type DepthConfig = {
   competitorsTake: number;
@@ -1248,15 +1259,50 @@ export async function generateDocumentForResearchJob(
     businessArchetype: specBuild.spec.businessArchetype,
     depth: specBuild.spec.depth,
   });
-  const sectionPromptGuide = buildSectionDrafterSystemPrompt();
-  const sectionDrafting = draftDocumentSections({
-    spec: specBuild.spec,
-    payload,
-  });
-
   const branchId = String(options?.branchId || '').trim();
   const runtimeUserId = String(options?.userId || '').trim() || 'runtime-tool';
   const runtimeRunId = String(options?.runId || '').trim() || undefined;
+  const memoryContext = await readWorkspaceMemoryContext({
+    researchJobId,
+    branchId: branchId || null,
+    limitPerScope: 8,
+  }).catch(() => ({
+    entries: [],
+    byScope: {
+      workspace_profile: {},
+      deliverable_preferences: {},
+      approved_decisions: {},
+      family_defaults: {},
+      quality_history: {},
+    },
+  }));
+  const sectionPromptGuide = buildSectionDrafterSystemPrompt({
+    docFamily,
+    audience: specBuild.spec.audience,
+    depth: specBuild.spec.depth,
+  });
+  const editorPromptGuide = buildDocumentEditorSystemPrompt({
+    docFamily,
+    audience: specBuild.spec.audience,
+    depth: specBuild.spec.depth,
+  });
+  const factCheckPromptGuide = buildDocumentFactCheckerSystemPrompt({
+    docFamily,
+    audience: specBuild.spec.audience,
+  });
+  const premiumPipeline = await buildPremiumDocumentPipeline({
+    spec: specBuild.spec,
+    payload,
+    memoryContext: memoryContext.byScope.deliverable_preferences,
+    qualityHistory: memoryContext.byScope.quality_history,
+  });
+  const editorialPassCount = 2;
+  const sectionDrafting = {
+    sections: premiumPipeline.sections,
+    partialReasons: premiumPipeline.sections
+      .map((section) => section.partialReason)
+      .filter((reason): reason is string => Boolean(reason)),
+  };
 
   await persistWorkLedgerVersionSafe({
     researchJobId,
@@ -1348,6 +1394,37 @@ export async function generateDocumentForResearchJob(
     await emitWorkspaceDocumentRuntimeEvent({
       branchId,
       processType: ProcessEventType.PROCESS_LOG,
+      eventName: 'document.editorial_completed',
+      message: 'Editorial rewrite completed.',
+      payload: {
+        stage: 'editorial',
+        docFamily,
+        promptModule: 'document-editor',
+        promptPreview: editorPromptGuide.slice(0, 240),
+        issues: premiumPipeline.editorialReview.issues,
+      },
+      toolName: 'document.generate',
+    });
+
+    await emitWorkspaceDocumentRuntimeEvent({
+      branchId,
+      processType: ProcessEventType.PROCESS_LOG,
+      eventName: 'document.fact_check_completed',
+      message: premiumPipeline.factCheck.pass ? 'Fact-check completed.' : 'Fact-check completed with issues.',
+      payload: {
+        stage: 'fact_check',
+        docFamily,
+        promptModule: 'document-fact-checker',
+        promptPreview: factCheckPromptGuide.slice(0, 240),
+        pass: premiumPipeline.factCheck.pass,
+        issues: premiumPipeline.factCheck.issues,
+      },
+      toolName: 'document.generate',
+    });
+
+    await emitWorkspaceDocumentRuntimeEvent({
+      branchId,
+      processType: ProcessEventType.PROCESS_LOG,
       eventName: 'document.preflight',
       message: `Document preflight complete (${payload.coverage.score}/100, ${payload.coverage.band}).`,
       payload: {
@@ -1372,13 +1449,71 @@ export async function generateDocumentForResearchJob(
     });
   }
 
-  const markdown = renderDocumentMarkdown(plan, payload, title);
-  const structureReasons = STRUCTURE_QUALITY_GATE_ENABLED ? evaluateStructureThresholds(plan, payload, markdown) : [];
-  if (structureReasons.length) {
-    const partialReasons = Array.from(new Set([...payload.coverage.partialReasons, ...structureReasons]));
-    const allReasons = Array.from(new Set([...payload.coverage.blockingReasons, ...partialReasons]));
-    const penalty = Math.min(20, structureReasons.length * 7);
-    const adjustedOverall = clampScore(payload.coverage.overallScore - penalty);
+  const markdown =
+    specBuild.spec.docFamily === 'SWOT'
+      ? renderSwotStandardV1({
+          spec: specBuild.spec,
+          payload,
+          sections: premiumPipeline.sections,
+        })
+      : specBuild.spec.docFamily === 'PLAYBOOK'
+        ? renderPlaybookV1({
+            spec: specBuild.spec,
+            payload,
+            sections: premiumPipeline.sections,
+          })
+        : specBuild.spec.docFamily === 'COMPETITOR_AUDIT'
+          ? renderCompetitorAuditV1({
+              spec: specBuild.spec,
+              payload,
+              sections: premiumPipeline.sections,
+            })
+          : specBuild.spec.docFamily === 'CONTENT_CALENDAR'
+            ? renderContentCalendarV1({
+                spec: specBuild.spec,
+                payload,
+                sections: premiumPipeline.sections,
+              })
+            : specBuild.spec.docFamily === 'GO_TO_MARKET'
+              ? renderGoToMarketV1({
+                  spec: specBuild.spec,
+                  payload,
+                  sections: premiumPipeline.sections,
+                })
+              : renderBusinessStrategyV1({
+                  spec: specBuild.spec,
+                  payload,
+                  sections: premiumPipeline.sections,
+                });
+  const html = renderPremiumDocumentHtml({
+    spec: specBuild.spec,
+    payload,
+    sections: premiumPipeline.sections,
+    factCheck: premiumPipeline.factCheck,
+    qualityScore: 0,
+    qualityNotes: [],
+    theme: premiumPipeline.theme,
+  });
+  const premiumQuality = evaluatePremiumDocumentQuality({
+    payload,
+    sections: premiumPipeline.sections,
+    factCheck: premiumPipeline.factCheck,
+    html,
+  });
+  premiumPipeline.quality = premiumQuality;
+  const finalHtml = renderPremiumDocumentHtml({
+    spec: specBuild.spec,
+    payload,
+    sections: premiumPipeline.sections,
+    factCheck: premiumPipeline.factCheck,
+    qualityScore: premiumQuality.score,
+    qualityNotes: premiumQuality.notes,
+    theme: premiumPipeline.theme,
+  });
+  if (STRUCTURE_QUALITY_GATE_ENABLED && premiumQuality.score < 78) {
+    const qualityReasons = Array.from(new Set([...payload.coverage.partialReasons, ...premiumQuality.notes]));
+    const allReasons = Array.from(new Set([...payload.coverage.blockingReasons, ...qualityReasons]));
+    const adjustedOverall = clampScore(Math.round((payload.coverage.overallScore * 0.45) + (premiumQuality.score * 0.55)));
     const adjustedBand: DocumentCoverage['band'] =
       adjustedOverall >= 80 ? 'strong' : adjustedOverall >= 55 ? 'moderate' : 'thin';
     payload.coverage = {
@@ -1387,12 +1522,42 @@ export async function generateDocumentForResearchJob(
       overallScore: adjustedOverall,
       band: adjustedBand,
       partial: true,
-      partialReasons,
+      partialReasons: qualityReasons,
       reasons: allReasons,
     };
   }
 
   if (branchId) {
+    await emitWorkspaceDocumentRuntimeEvent({
+      branchId,
+      processType: ProcessEventType.PROCESS_RESULT,
+      eventName: 'document.quality_scored',
+      message: `Premium quality scored at ${premiumQuality.score}/100.`,
+      payload: {
+        stage: 'quality',
+        docFamily,
+        qualityScore: premiumQuality.score,
+        qualityNotes: premiumQuality.notes,
+        dimensionScores: premiumQuality.dimensionScores,
+      },
+      toolName: 'document.generate',
+    });
+
+    await emitWorkspaceDocumentRuntimeEvent({
+      branchId,
+      processType: ProcessEventType.PROCESS_RESULT,
+      eventName: 'document.render_theme_applied',
+      message: `Render theme applied: ${premiumPipeline.theme.name}.`,
+      payload: {
+        stage: 'render',
+        docFamily,
+        renderTheme: premiumPipeline.theme.id,
+        renderThemeLabel: premiumPipeline.theme.name,
+        qualityScore: premiumQuality.score,
+      },
+      toolName: 'document.generate',
+    });
+
     await emitWorkspaceDocumentRuntimeEvent({
       branchId,
       processType: ProcessEventType.PROCESS_RESULT,
@@ -1406,12 +1571,14 @@ export async function generateDocumentForResearchJob(
         partialReasons: payload.coverage.partialReasons,
         blockingReasons: payload.coverage.blockingReasons,
         coverageScore: payload.coverage.score,
+        qualityScore: premiumQuality.score,
+        qualityNotes: premiumQuality.notes,
+        dimensionScores: premiumQuality.dimensionScores,
       },
       toolName: 'document.generate',
     });
   }
-  const html = markdownToRichHtml(markdown, { title });
-  const pdfBuffer = await renderPdfFromHtml(html);
+  const pdfBuffer = await renderPdfFromHtml(finalHtml);
   const stored = await saveDocumentBuffer(researchJobId, title, pdfBuffer);
 
   const clientDocument = await prisma.clientDocument.create({
@@ -1445,6 +1612,11 @@ export async function generateDocumentForResearchJob(
         docFamily,
         coverageScore: payload.coverage.score,
         coverageBand: payload.coverage.band,
+        qualityScore: premiumQuality.score,
+        qualityNotes: premiumQuality.notes,
+        dimensionScores: premiumQuality.dimensionScores,
+        editorialPassCount,
+        renderTheme: premiumPipeline.theme.id,
         partial: payload.coverage.partial,
         partialReasons: payload.coverage.partialReasons,
       },
@@ -1470,6 +1642,9 @@ export async function generateDocumentForResearchJob(
         coverageScore: payload.coverage.score,
         overallScore: payload.coverage.overallScore,
         coverageBand: payload.coverage.band,
+        qualityScore: premiumQuality.score,
+        qualityNotes: premiumQuality.notes,
+        renderTheme: premiumPipeline.theme.id,
         partial: payload.coverage.partial,
         partialReasons: payload.coverage.partialReasons,
         documentId: runtimeDocumentId || null,
@@ -1512,6 +1687,9 @@ export async function generateDocumentForResearchJob(
         storagePath: stored.storagePath,
         sizeBytes: stored.sizeBytes,
         mimeType: 'application/pdf',
+        qualityScore: premiumQuality.score,
+        qualityNotes: premiumQuality.notes,
+        renderTheme: premiumPipeline.theme.id,
         documentId: runtimeDocumentId || null,
         versionId: runtimeVersionId || null,
       },
@@ -1526,8 +1704,13 @@ export async function generateDocumentForResearchJob(
     docFamily,
     coverageScore: payload.coverage.score,
     coverageBand: payload.coverage.band,
+    qualityScore: premiumQuality.score,
+    qualityNotes: premiumQuality.notes,
+    renderTheme: premiumPipeline.theme.id,
     partial: payload.coverage.partial,
     partialReasons: payload.coverage.partialReasons,
+    dimensionScores: premiumQuality.dimensionScores,
+    editorialPassCount,
   }).catch(() => {
     // Memory persistence is best-effort; do not block document delivery.
   });
@@ -1549,6 +1732,11 @@ export async function generateDocumentForResearchJob(
     coverageBand: payload.coverage.band,
     overallScore: payload.coverage.overallScore,
     enrichmentPerformed: payload.coverage.enriched,
+    qualityScore: premiumQuality.score,
+    qualityNotes: premiumQuality.notes,
+    dimensionScores: premiumQuality.dimensionScores,
+    editorialPassCount,
+    renderTheme: premiumPipeline.theme.id,
     partial: payload.coverage.partial,
     partialReasons: payload.coverage.partialReasons,
     iterationsUsed: 1,

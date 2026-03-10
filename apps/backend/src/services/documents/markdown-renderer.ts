@@ -65,7 +65,7 @@ function renderTable(lines: string[]): string {
   return `<table><thead><tr>${headHtml}</tr></thead><tbody>${bodyHtml}</tbody></table>`;
 }
 
-export function markdownToRichHtml(markdown: string, options?: MarkdownHtmlOptions): string {
+export function renderMarkdownFragment(markdown: string): string {
   const lines = String(markdown || '').replace(/\r\n/g, '\n').split('\n');
   const body: string[] = [];
   let index = 0;
@@ -199,6 +199,12 @@ export function markdownToRichHtml(markdown: string, options?: MarkdownHtmlOptio
 
   flushAll();
 
+  return body.join('\n');
+}
+
+export function markdownToRichHtml(markdown: string, options?: MarkdownHtmlOptions): string {
+  const body = renderMarkdownFragment(markdown);
+
   const safeTitle = escapeHtml(String(options?.title || 'Document').slice(0, 180));
   return `<!doctype html>
 <html>
@@ -280,7 +286,7 @@ export function markdownToRichHtml(markdown: string, options?: MarkdownHtmlOptio
   </style>
 </head>
 <body>
-${body.join('\n')}
+${body}
 </body>
 </html>`;
 }

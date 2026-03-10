@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import type { DocumentDataPayload, DocumentPlan } from '../services/documents/document-spec';
 import { renderDocumentMarkdown } from '../services/documents/document-render';
 import { markdownToRichHtml } from '../services/documents/markdown-renderer';
+import { buildDocumentSpecV1 } from '../services/documents/spec-builder';
+import { draftDocumentSections } from '../services/documents/section-drafter';
+import { evaluatePremiumDocumentQuality } from '../services/documents/premium-document-pipeline';
+import { renderPremiumDocumentHtml } from '../services/documents/premium-renderer';
 
 type PayloadOverrides = Partial<Omit<DocumentDataPayload, 'coverage'>> & {
   coverage?: Partial<DocumentDataPayload['coverage']>;
@@ -348,6 +352,62 @@ function runSixFamilyFormatAssertions(): void {
   assertContainsAll(goToMarket, ['## ICP Definition', '## Launch Phases', '## Budget And KPI Tree']);
 }
 
+function runPremiumRenderingAssertions(): void {
+  const payload = samplePayload();
+  const plan: DocumentPlan = {
+    docType: 'BUSINESS_STRATEGY',
+    depth: 'deep',
+    includeEvidenceLinks: true,
+    includeCompetitors: true,
+    audience: 'Marketing team',
+  };
+  const spec = buildDocumentSpecV1({ plan, payload, title: 'ELUUMIS Strategy Brief' }).spec;
+  const drafted = draftDocumentSections({ spec, payload });
+  const sections = drafted.sections.map((section) => ({
+    ...section,
+    source: 'fallback' as const,
+    qualityNotes: [],
+    claimBullets: [],
+  }));
+  const factCheck = {
+    pass: true,
+    issues: [],
+    sections: sections.map((section) => ({
+      id: section.id,
+      status: section.status === 'grounded' ? ('pass' as const) : ('softened' as const),
+      contentMd: section.contentMd,
+      notes: section.partialReason ? [section.partialReason] : [],
+      confidence: section.status === 'grounded' ? 0.84 : 0.68,
+    })),
+  };
+  const html = renderPremiumDocumentHtml({
+    spec,
+    payload,
+    sections,
+    factCheck,
+    qualityScore: 87,
+    qualityNotes: ['Document passed the premium quality rubric with strong grounding, usefulness, and presentation.'],
+    theme: {
+      id: 'premium_agency_v1',
+      name: 'Premium Agency Delivery',
+      accent: '#3558d6',
+      accentSoft: '#edf2ff',
+      accentStrong: '#2138a4',
+    },
+  });
+  assert.ok(html.includes('class=\"cover\"'), 'Premium renderer should include a cover page.');
+  assert.ok(html.includes('class=\"doc-section'), 'Premium renderer should use semantic section wrappers.');
+  assert.ok(html.includes('Quality score 87/100'), 'Premium renderer should surface quality metadata.');
+
+  const quality = evaluatePremiumDocumentQuality({
+    payload,
+    sections,
+    factCheck,
+    html,
+  });
+  assert.ok(quality.score >= 70, `Premium quality rubric should score strong sample above floor. Received ${quality.score}.`);
+}
+
 async function runServiceHardeningAssertions(): Promise<void> {
   const moduleRef = (await import('../services/documents/document-service')) as Record<string, unknown>;
   const internals =
@@ -406,6 +466,7 @@ async function main(): Promise<void> {
   runSwotFormatAssertions();
   runPartialDraftAssertions();
   runSixFamilyFormatAssertions();
+  runPremiumRenderingAssertions();
   await runServiceHardeningAssertions();
   console.log('[Document Generation Quality] Passed.');
 }

@@ -217,6 +217,18 @@ export type GeneratedDocument = {
   coverageBand?: 'thin' | 'moderate' | 'strong';
   overallScore?: number;
   enrichmentPerformed?: boolean;
+  qualityScore?: number;
+  qualityNotes?: string[];
+  dimensionScores?: {
+    grounding: number;
+    specificity: number;
+    usefulness: number;
+    redundancy: number;
+    tone: number;
+    visual: number;
+  };
+  editorialPassCount?: number;
+  renderTheme?: string;
   partial?: boolean;
   partialReasons?: string[];
   resumeDocumentId?: string;

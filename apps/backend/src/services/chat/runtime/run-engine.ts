@@ -2700,6 +2700,7 @@ function extractDocumentRuntimeTarget(toolResults: RuntimeToolResult[]): {
   title?: string;
   docType?: string;
   coverageScore?: number;
+  qualityScore?: number;
 } {
   for (let index = toolResults.length - 1; index >= 0; index -= 1) {
     const raw = isRecord(toolResults[index].raw) ? (toolResults[index].raw as Record<string, unknown>) : null;
@@ -2709,12 +2710,14 @@ function extractDocumentRuntimeTarget(toolResults: RuntimeToolResult[]): {
     const title = String(raw.title || '').trim();
     const docType = String(raw.docType || raw.documentType || '').trim().toUpperCase();
     const coverageScore = Number(raw.coverageScore);
+    const qualityScore = Number(raw.qualityScore);
     return {
       ...(runtimeDocumentId ? { runtimeDocumentId } : {}),
       ...(storagePath ? { storagePath } : {}),
       ...(title ? { title } : {}),
       ...(docType ? { docType } : {}),
       ...(Number.isFinite(coverageScore) ? { coverageScore } : {}),
+      ...(Number.isFinite(qualityScore) ? { qualityScore } : {}),
     };
   }
   return {};
@@ -2748,7 +2751,7 @@ function extractDocumentArtifact(toolResults: RuntimeToolResult[]): Record<strin
     const formatRaw = String(raw.format || 'PDF').trim().toUpperCase();
     const format = formatRaw === 'DOCX' || formatRaw === 'MD' ? formatRaw : 'PDF';
     const previewModeDefaultRaw = String(raw.previewModeDefault || '').trim().toLowerCase();
-    const previewModeDefault = previewModeDefaultRaw === 'markdown' ? 'markdown' : 'pdf';
+    const previewModeDefault = previewModeDefaultRaw === 'pdf' ? 'pdf' : 'markdown';
     const downloadHref = normalizeStorageHref(
       String(raw.downloadHref || raw.storageHref || raw.href || raw.url || storagePath || '').trim()
     );
@@ -2757,6 +2760,25 @@ function extractDocumentArtifact(toolResults: RuntimeToolResult[]): Record<strin
       ? raw.partialReasons.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 6)
       : [];
     const coverageScore = Number(raw.coverageScore);
+    const qualityScore = Number(raw.qualityScore);
+    const qualityNotes = Array.isArray(raw.qualityNotes)
+      ? raw.qualityNotes.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 6)
+      : [];
+    const dimensionScoresRaw =
+      raw.dimensionScores && typeof raw.dimensionScores === 'object' && !Array.isArray(raw.dimensionScores)
+        ? (raw.dimensionScores as Record<string, unknown>)
+        : null;
+    const dimensionScores = dimensionScoresRaw
+      ? {
+          grounding: Number(dimensionScoresRaw.grounding || 0),
+          specificity: Number(dimensionScoresRaw.specificity || 0),
+          usefulness: Number(dimensionScoresRaw.usefulness || 0),
+          redundancy: Number(dimensionScoresRaw.redundancy || 0),
+          tone: Number(dimensionScoresRaw.tone || 0),
+          visual: Number(dimensionScoresRaw.visual || 0),
+        }
+      : null;
+    const renderTheme = String(raw.renderTheme || '').trim();
 
     return {
       type: 'document_artifact',
@@ -2772,6 +2794,13 @@ function extractDocumentArtifact(toolResults: RuntimeToolResult[]): Record<strin
       ...(Number.isFinite(versionNumber) ? { versionNumber: Math.max(1, Math.floor(versionNumber)) } : {}),
       previewModeDefault,
       ...(Number.isFinite(coverageScore) ? { coverageScore } : {}),
+      ...(Number.isFinite(qualityScore) ? { qualityScore } : {}),
+      ...(qualityNotes.length ? { qualityNotes } : {}),
+      ...(dimensionScores &&
+      Object.values(dimensionScores).every((value) => Number.isFinite(value))
+        ? { dimensionScores }
+        : {}),
+      ...(renderTheme ? { renderTheme } : {}),
       ...(typeof raw.partial === 'boolean' ? { partial: raw.partial } : {}),
       ...(partialReasons.length ? { partialReasons } : {}),
     };

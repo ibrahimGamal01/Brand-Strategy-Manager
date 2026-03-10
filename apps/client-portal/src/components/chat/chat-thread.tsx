@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronUp, Download, ExternalLink, FileText, Quote, Sparkles, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Download, ExternalLink, FileText, MoreHorizontal, Quote, Sparkles, X } from "lucide-react";
 import { ChatMessage, ChatMessageBlock } from "@/types/chat";
 import { ChatMarkdown } from "./chat-markdown";
 
@@ -27,6 +27,69 @@ function formatMessageContentForDisplay(content: string): string {
     .replace(/@library\[([^\]|]+)\|([^\]]+)\]/g, (_match, _id, title: string) => `[Library source: ${title}]`);
 }
 
+type ParsedScopedMessage =
+  | {
+      kind: "document_edit" | "document_quote";
+      title: string;
+      versionLabel?: string;
+      subtitle?: string;
+      quote?: string;
+      request: string;
+    }
+  | null;
+
+function parseScopedMessage(content: string): ParsedScopedMessage {
+  const raw = String(content || "").trim();
+  if (!raw) return null;
+
+  const editMatch = raw.match(/^Document edit branch:\s+(.+?)\s+\(([^)]+)\)\.\s*/i);
+  const quoteMatch = raw.match(/^Document quote branch:\s+(.+?)\s+\(([^)]+)\)\.\s*/i);
+  const match = editMatch || quoteMatch;
+  if (!match) return null;
+
+  const kind = editMatch ? "document_edit" : "document_quote";
+  const title = String(match[1] || "").trim();
+  const versionLabel = String(match[2] || "").trim();
+  const remainder = raw.slice(match[0].length).trim();
+
+  const subtitleMatch = remainder.match(/^Context:\s+(.+)$/im);
+  const editRequestMatch = remainder.match(/^Edit request:\s+([\s\S]+?)(?:\n\nReturn revised wording first[\s\S]*|$)/i);
+  const requestMatch = remainder.match(/^Request:\s+([\s\S]+)$/im);
+  const quoteBlockMatch = remainder.match(/(?:Quoted excerpt|Selected excerpt):\s*\n([\s\S]+?)(?:\n\n(?:Edit request|Request):|\n\nReturn revised wording first|$)/i);
+
+  const cleanedQuote = String(quoteBlockMatch?.[1] || "")
+    .split(/\r?\n/g)
+    .map((line) => line.replace(/^>\s?/, "").trim())
+    .filter(Boolean)
+    .join(" ");
+  const request = String(editRequestMatch?.[1] || requestMatch?.[1] || "")
+    .replace(/\n+/g, " ")
+    .trim();
+
+  if (!request) return null;
+
+  return {
+    kind,
+    title,
+    ...(versionLabel ? { versionLabel } : {}),
+    ...(subtitleMatch?.[1] ? { subtitle: subtitleMatch[1].trim() } : {}),
+    ...(cleanedQuote ? { quote: cleanedQuote } : {}),
+    request,
+  };
+}
+
+function isDocumentWorkflowAssistantMessage(message: ChatMessage): boolean {
+  if (message.role !== "assistant") return false;
+  return (message.blocks || []).some((block) =>
+    block.type === "document_edit_proposal" ||
+    block.type === "document_edit_applied" ||
+    block.type === "document_export_result" ||
+    block.type === "document_artifact" ||
+    block.type === "document_ready" ||
+    block.type === "document_parse_needs_review"
+  );
+}
+
 function formatDocTypeLabel(value?: string): string {
   const normalized = String(value || "").trim();
   if (!normalized) return "Document";
@@ -47,6 +110,36 @@ function normalizeArtifactHref(value: string): string {
   return normalized;
 }
 
+function scoreTone(score?: number): string {
+  if (typeof score !== "number" || !Number.isFinite(score)) return "border-zinc-200 bg-zinc-50 text-zinc-700";
+  if (score >= 85) return "border-emerald-200 bg-emerald-50 text-emerald-800";
+  if (score >= 72) return "border-amber-200 bg-amber-50 text-amber-800";
+  return "border-rose-200 bg-rose-50 text-rose-800";
+}
+
+function qualityDimensions(
+  value?:
+    | {
+        grounding: number;
+        specificity: number;
+        usefulness: number;
+        redundancy: number;
+        tone: number;
+        visual: number;
+      }
+    | null
+) {
+  if (!value) return [];
+  return [
+    ["Grounding", value.grounding],
+    ["Specificity", value.specificity],
+    ["Usefulness", value.usefulness],
+    ["Redundancy", value.redundancy],
+    ["Tone", value.tone],
+    ["Visual", value.visual],
+  ].filter((entry) => Number.isFinite(entry[1]));
+}
+
 type ArtifactPreviewInput = {
   title: string;
   href: string;
@@ -64,6 +157,85 @@ type ArtifactQuoteInput = {
   family?: string;
   versionNumber?: number;
 };
+
+type OverflowAction =
+  | {
+      key: string;
+      label: string;
+      href: string;
+    }
+  | {
+      key: string;
+      label: string;
+      onSelect: () => void;
+    };
+
+function OverflowActionsMenu({ actions }: { actions: OverflowAction[] }) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!(event.target instanceof Node)) return;
+      if (menuRef.current?.contains(event.target)) return;
+      setOpen(false);
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [open]);
+
+  if (!actions.length) return null;
+
+  return (
+    <div ref={menuRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((previous) => !previous)}
+        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-100"
+        aria-label="More actions"
+      >
+        <MoreHorizontal className="h-4 w-4" />
+      </button>
+      {open ? (
+        <div className="absolute right-0 z-20 mt-2 w-52 rounded-xl border border-zinc-200 bg-white p-1.5 shadow-xl">
+          {actions.map((action) =>
+            "href" in action ? (
+              <a
+                key={action.key}
+                href={action.href}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs text-zinc-700 hover:bg-zinc-100"
+              >
+                {action.label}
+              </a>
+            ) : (
+              <button
+                key={action.key}
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  action.onSelect();
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-zinc-700 hover:bg-zinc-100"
+              >
+                {action.label}
+              </button>
+            )
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function compactQuote(value: string, maxChars = 1400): string {
   const normalized = String(value || "").replace(/\s+/g, " ").trim();
@@ -172,13 +344,18 @@ function ArtifactPreviewDialog({
   onAskEdit?: (input: ArtifactQuoteInput) => void;
   onOpenInDocs?: (documentId: string) => void;
 }) {
-  const [activeView, setActiveView] = useState<"pdf" | "markdown">(
-    preview.previewModeDefault === "markdown" || !preview.href ? "markdown" : "pdf"
-  );
+  const [activeView, setActiveView] = useState<"pdf" | "markdown">(preview.previewModeDefault || "markdown");
   const [selectedQuote, setSelectedQuote] = useState("");
   const [selectionToolbar, setSelectionToolbar] = useState<{ x: number; y: number } | null>(null);
+  const [actionsOpen, setActionsOpen] = useState(false);
   const markdownRef = useRef<HTMLDivElement | null>(null);
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const actionsRef = useRef<HTMLDivElement | null>(null);
   const hasPdf = Boolean(preview.href);
+
+  useEffect(() => {
+    setActiveView(preview.previewModeDefault || "markdown");
+  }, [preview.documentId, preview.href, preview.previewModeDefault]);
 
   useEffect(() => {
     let frame = 0;
@@ -247,64 +424,119 @@ function ArtifactPreviewDialog({
     };
   }, [selectionToolbar]);
 
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        if (actionsOpen) {
+          setActionsOpen(false);
+          return;
+        }
+        onClose();
+      }
+    };
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!(event.target instanceof Node)) return;
+      if (actionsRef.current?.contains(event.target)) return;
+      setActionsOpen(false);
+    };
+    document.addEventListener("keydown", handleEscape);
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleEscape);
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [actionsOpen, onClose]);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3">
-      <div className="flex h-[90vh] w-full max-w-6xl flex-col overflow-hidden border border-zinc-200 bg-white">
+    <div className="fixed inset-0 z-50 bg-black/60 p-3" onClick={onClose}>
+      <div
+        ref={shellRef}
+        className="mx-auto flex h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-[1.25rem] border border-zinc-200 bg-white shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
+      >
         <div className="flex items-center justify-between border-b border-zinc-200 px-3 py-2">
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold text-zinc-900">{preview.title}</p>
-            <p className="text-xs text-zinc-500">Document preview</p>
+            <p className="text-xs text-zinc-500">Markdown-first preview with optional rendered PDF</p>
           </div>
           <div className="flex items-center gap-1.5">
-            {hasPdf ? (
+            <div className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 p-0.5">
               <button
                 type="button"
-                onClick={() => setActiveView("pdf")}
-                className={`rounded-md border px-2 py-1 text-xs ${
-                  activeView === "pdf"
-                    ? "border-zinc-900 bg-zinc-900 text-white"
-                    : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-100"
+                onClick={() => setActiveView("markdown")}
+                className={`rounded-full px-3 py-1 text-xs ${
+                  activeView === "markdown" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-600 hover:text-zinc-900"
                 }`}
               >
-                PDF
+                Read
               </button>
-            ) : null}
-            <button
-              type="button"
-              onClick={() => setActiveView("markdown")}
-              className={`rounded-md border px-2 py-1 text-xs ${
-                activeView === "markdown"
-                  ? "border-zinc-900 bg-zinc-900 text-white"
-                  : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-100"
-              }`}
-            >
-              Markdown
-            </button>
-            {preview.documentId && onOpenInDocs ? (
+              {hasPdf ? (
+                <button
+                  type="button"
+                  onClick={() => setActiveView("pdf")}
+                  className={`rounded-full px-3 py-1 text-xs ${
+                    activeView === "pdf" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-600 hover:text-zinc-900"
+                  }`}
+                >
+                  PDF
+                </button>
+              ) : null}
+            </div>
+            <div ref={actionsRef} className="relative">
               <button
                 type="button"
-                onClick={() => onOpenInDocs(preview.documentId as string)}
-                className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+                onClick={() => setActionsOpen((previous) => !previous)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-200 text-zinc-600 hover:bg-zinc-100"
+                aria-label="Preview actions"
               >
-                <FileText className="h-3.5 w-3.5" />
-                Open in Docs
+                <MoreHorizontal className="h-4 w-4" />
               </button>
-            ) : null}
-            {preview.href ? (
-              <a
-                href={preview.href}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
-              >
-                <ExternalLink className="h-3.5 w-3.5" />
-                Open
-              </a>
-            ) : null}
+              {actionsOpen ? (
+                <div className="absolute right-0 z-20 mt-2 w-52 rounded-xl border border-zinc-200 bg-white p-1.5 shadow-xl">
+                  {preview.documentId && onOpenInDocs ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActionsOpen(false);
+                        onOpenInDocs(preview.documentId as string);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-zinc-700 hover:bg-zinc-100"
+                    >
+                      <FileText className="h-3.5 w-3.5" />
+                      Open in Docs
+                    </button>
+                  ) : null}
+                  {preview.href ? (
+                    <a
+                      href={preview.href}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs text-zinc-700 hover:bg-zinc-100"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                      Open source file
+                    </a>
+                  ) : null}
+                  {preview.href ? (
+                    <a
+                      href={preview.href}
+                      download
+                      className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs text-zinc-700 hover:bg-zinc-100"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      Download file
+                    </a>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
             <button
               type="button"
               onClick={onClose}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-200 text-zinc-600 hover:bg-zinc-100"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-200 text-zinc-600 hover:bg-zinc-100"
               aria-label="Close preview"
             >
               <X className="h-4 w-4" />
@@ -315,11 +547,11 @@ function ArtifactPreviewDialog({
           <iframe src={preview.href} title={preview.title} className="h-full w-full border-0 bg-zinc-100" />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">
-            <div className="flex items-center justify-between border-b border-zinc-200 px-3 py-2">
+            <div className="flex items-center justify-between border-b border-zinc-200 bg-zinc-50/80 px-3 py-2">
               <p className="text-xs text-zinc-500">
                 {preview.family || formatDocTypeLabel(preview.docType)} {typeof preview.versionNumber === "number" ? `• v${preview.versionNumber}` : ""}
               </p>
-              <p className="text-[11px] text-zinc-500">Highlight text to quote or edit</p>
+              <p className="text-[11px] text-zinc-500">Select text to branch a quote or scoped edit</p>
             </div>
             <div
               ref={markdownRef}
@@ -331,7 +563,7 @@ function ArtifactPreviewDialog({
                 const selection = typeof window !== "undefined" ? window.getSelection() : null;
                 setSelectedQuote(compactQuote(selection?.toString() || ""));
               }}
-              className="bat-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-3"
+              className="bat-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-4"
             >
               {markdownLoading ? (
                 <p className="text-sm text-zinc-500">Loading document markdown...</p>
@@ -339,6 +571,17 @@ function ArtifactPreviewDialog({
                 <p className="text-sm text-red-700">{markdownError}</p>
               ) : markdown.trim() ? (
                 <ChatMarkdown content={markdown} compact />
+              ) : hasPdf ? (
+                <div className="flex h-full min-h-[12rem] flex-col items-center justify-center gap-3 text-center">
+                  <p className="max-w-md text-sm text-zinc-500">Markdown content is not available for this document yet. You can still open the rendered PDF view.</p>
+                  <button
+                    type="button"
+                    onClick={() => setActiveView("pdf")}
+                    className="rounded-full border border-zinc-200 bg-white px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100"
+                  >
+                    Open PDF view
+                  </button>
+                </div>
               ) : (
                 <p className="text-sm text-zinc-500">No markdown content available for this document.</p>
               )}
@@ -380,7 +623,7 @@ function ArtifactPreviewDialog({
                   className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
                 >
                   <Sparkles className="h-3.5 w-3.5" />
-                  Ask AI to edit
+                  Edit in branch
                 </button>
               </div>
             ) : null}
@@ -767,6 +1010,44 @@ function MessageBlocks({
         if (isDocumentArtifactBlock(block)) {
           const previewHref = normalizeArtifactHref(String(block.previewHref || block.downloadHref || block.storagePath || "").trim());
           const downloadHref = normalizeArtifactHref(String(block.downloadHref || block.storagePath || "").trim());
+          const dimensions = qualityDimensions(block.dimensionScores || null);
+          const previewInput = {
+            title: block.title,
+            href: previewHref,
+            ...(block.documentId ? { documentId: block.documentId } : {}),
+            ...(block.docType ? { docType: block.docType } : {}),
+            ...(block.family ? { family: block.family } : {}),
+            ...(typeof block.versionNumber === "number" ? { versionNumber: block.versionNumber } : {}),
+            ...(block.previewModeDefault ? { previewModeDefault: block.previewModeDefault } : {}),
+          };
+          const overflowActions: OverflowAction[] = [
+            ...(downloadHref
+              ? [
+                  {
+                    key: `${message.id}-download`,
+                    label: "Download file",
+                    href: downloadHref,
+                  } satisfies OverflowAction,
+                ]
+              : []),
+            ...(block.documentId
+              ? [
+                  {
+                    key: `${message.id}-docs`,
+                    label: "Open in docs",
+                    onSelect: () =>
+                      onRunAction?.("Open in docs", "document.read", {
+                        documentId: block.documentId,
+                      }),
+                  } satisfies OverflowAction,
+                ]
+              : []),
+            ...((block.actions || []).map((action) => ({
+              key: `${message.id}-${action.action}-${action.label}`,
+              label: action.label,
+              onSelect: () => onRunAction?.(action.label, action.action, action.payload),
+            })) satisfies OverflowAction[]),
+          ];
           return (
             <div key={`${message.id}-doc-artifact-${index}`} className="border border-zinc-200 bg-white p-2.5">
               <div className="flex items-start gap-2.5">
@@ -781,6 +1062,7 @@ function MessageBlocks({
                       block.format,
                       typeof block.versionNumber === "number" ? `v${block.versionNumber}` : "",
                       typeof block.coverageScore === "number" ? `coverage ${Math.round(block.coverageScore)}/100` : "",
+                      typeof block.qualityScore === "number" ? `quality ${Math.round(block.qualityScore)}/100` : "",
                     ]
                       .filter(Boolean)
                       .join(" • ")}
@@ -797,61 +1079,52 @@ function MessageBlocks({
                   ))}
                 </ul>
               ) : null}
-              <div className="mt-2 flex flex-wrap gap-1.5">
+              {typeof block.qualityScore === "number" || dimensions.length || block.qualityNotes?.length ? (
+                <div className="mt-2 rounded-xl border border-zinc-200 bg-zinc-50/80 p-2">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {typeof block.qualityScore === "number" ? (
+                      <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${scoreTone(block.qualityScore)}`}>
+                        Quality {Math.round(block.qualityScore)}/100
+                      </span>
+                    ) : null}
+                    {block.renderTheme ? (
+                      <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] text-zinc-600">
+                        {block.renderTheme.replace(/_/g, " ")}
+                      </span>
+                    ) : null}
+                  </div>
+                  {dimensions.length ? (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {dimensions.slice(0, 4).map(([label, score]) => (
+                        <span key={`${message.id}-${label}`} className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] text-zinc-600">
+                          {label} {Math.round(Number(score))}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                  {block.qualityNotes?.length ? (
+                    <ul className="mt-2 space-y-1 text-[11px] text-zinc-600">
+                      {block.qualityNotes.slice(0, 2).map((note) => (
+                        <li key={`${message.id}-${note}`}>• {note}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              ) : null}
+              <div className="mt-2 flex items-center justify-between gap-2">
                 {previewHref || block.documentId ? (
                   <button
                     type="button"
-                    onClick={() =>
-                      onOpenPreview?.({
-                        title: block.title,
-                        href: previewHref,
-                        ...(block.documentId ? { documentId: block.documentId } : {}),
-                        ...(block.docType ? { docType: block.docType } : {}),
-                        ...(block.family ? { family: block.family } : {}),
-                        ...(typeof block.versionNumber === "number" ? { versionNumber: block.versionNumber } : {}),
-                        ...(block.previewModeDefault ? { previewModeDefault: block.previewModeDefault } : {}),
-                      })
-                    }
-                    className="inline-flex items-center gap-1 border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+                    onClick={() => onOpenPreview?.(previewInput)}
+                    className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-zinc-900 px-3 py-1.5 text-xs text-white hover:bg-zinc-800"
                   >
                     <ExternalLink className="h-3.5 w-3.5" />
-                    Preview
+                    Open
                   </button>
-                ) : null}
-                {downloadHref ? (
-                  <a
-                    href={downloadHref}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                    Download
-                  </a>
-                ) : null}
-                {block.documentId ? (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onRunAction?.("Open in docs", "document.read", {
-                        documentId: block.documentId,
-                      })
-                    }
-                    className="border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
-                  >
-                    Open in docs
-                  </button>
-                ) : null}
-                {block.actions?.map((action) => (
-                  <button
-                    key={`${message.id}-${action.action}-${action.label}`}
-                    type="button"
-                    onClick={() => onRunAction?.(action.label, action.action, action.payload)}
-                    className="border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
-                  >
-                    {action.label}
-                  </button>
-                ))}
+                ) : (
+                  <span />
+                )}
+                <OverflowActionsMenu actions={overflowActions} />
               </div>
             </div>
           );
@@ -946,7 +1219,7 @@ export function ChatThread({
 
   if (!visibleMessages.length) {
     return (
-      <section className="flex min-h-0 flex-1 items-center justify-center bg-white p-3 text-center sm:p-4">
+      <section className="flex min-h-0 flex-1 items-center justify-center bg-transparent p-2 text-center sm:p-3">
         <div className="mx-auto w-full max-w-4xl">
           <p className="text-2xl font-semibold tracking-tight text-zinc-900 sm:text-3xl">How can I help with this workspace?</p>
           <p className="mt-1.5 text-sm text-zinc-500 sm:text-base">
@@ -999,9 +1272,18 @@ export function ChatThread({
 
   return (
       <section ref={scrollRef} className="bat-scrollbar min-h-0 flex-1 overflow-y-auto bg-white">
-      <div className={`mx-auto w-full ${contentWidthClassName} px-3 pb-6 pt-3 sm:px-4 xl:px-6`}>
-        {visibleMessages.map((message) => {
+      <div className={`mx-auto w-full ${contentWidthClassName} px-2 pb-4 pt-2 sm:px-3 xl:px-4`}>
+        {visibleMessages.map((message, index) => {
           const isUser = message.role === "user";
+          const scopedMessage = isUser ? parseScopedMessage(message.content) : null;
+          const previousMessage = index > 0 ? visibleMessages[index - 1] : null;
+          const inheritedScopedMessage =
+            !isUser && previousMessage?.role === "user" ? parseScopedMessage(previousMessage.content) : null;
+          const assistantIsScopedReply = Boolean(
+            !isUser &&
+              inheritedScopedMessage &&
+              (isDocumentWorkflowAssistantMessage(message) || index === visibleMessages.length - 1 || visibleMessages[index + 1]?.role === "user")
+          );
           const qualityNotes = message.reasoning?.quality?.notes || [];
           const qualityRewriteApplied =
             message.reasoning?.quality?.intent === "competitor_brief" &&
@@ -1012,12 +1294,87 @@ export function ChatThread({
                 <div
                   className={
                     isUser
-                      ? "max-w-[93%] rounded-2xl bg-[#2f2f32] px-3 py-2 text-white sm:max-w-[84%] 2xl:max-w-[78%]"
-                      : "max-w-[98%] px-0 py-0 text-zinc-900 sm:max-w-[94%] 2xl:max-w-[90%]"
+                      ? "max-w-[93%] rounded-[1.35rem] bg-[#2f2f32] px-3 py-2.5 text-white shadow-[0_16px_30px_-24px_rgba(0,0,0,0.45)] sm:max-w-[84%] 2xl:max-w-[78%]"
+                      : assistantIsScopedReply
+                        ? "max-w-[98%] rounded-[1.35rem] border border-zinc-200 bg-[linear-gradient(180deg,#ffffff_0%,#f8f9fa_100%)] px-3 py-2.5 text-zinc-900 shadow-[0_18px_34px_-30px_rgba(15,23,42,0.28)] sm:max-w-[94%] 2xl:max-w-[90%]"
+                        : "max-w-[98%] px-0 py-0 text-zinc-900 sm:max-w-[94%] 2xl:max-w-[90%]"
                   }
                 >
+                  {assistantIsScopedReply && inheritedScopedMessage ? (
+                    <div className="mb-2 rounded-2xl border border-zinc-200 bg-zinc-50/85 p-2.5">
+                      <div className="flex items-start gap-2.5">
+                        <div className="flex shrink-0 flex-col items-center">
+                          <span className="mt-1 h-2.5 w-2.5 rounded-full bg-zinc-900" />
+                          <span className="mt-1 h-8 w-px bg-zinc-300" />
+                        </div>
+                        <div className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-zinc-700">
+                          {inheritedScopedMessage.kind === "document_edit" ? (
+                            <Sparkles className="h-4 w-4" />
+                          ) : (
+                            <Quote className="h-4 w-4" />
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-medium text-zinc-700">
+                              {inheritedScopedMessage.kind === "document_edit" ? "Document Branch Reply" : "Document Context Reply"}
+                            </span>
+                            {inheritedScopedMessage.versionLabel ? (
+                              <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] text-zinc-500">
+                                {inheritedScopedMessage.versionLabel}
+                              </span>
+                            ) : null}
+                          </div>
+                          <p className="mt-1 text-sm font-semibold text-zinc-900">{inheritedScopedMessage.title}</p>
+                          <p className="text-xs text-zinc-500">
+                            {inheritedScopedMessage.kind === "document_edit"
+                              ? "BAT is drafting against the scoped document edit request."
+                              : "BAT is replying inside the scoped document context."}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                  {scopedMessage ? (
+                    <div className="mb-2 rounded-2xl border border-white/15 bg-white/8 p-2.5">
+                      <div className="flex items-start gap-2.5">
+                        <div className="flex shrink-0 flex-col items-center">
+                          <span className="mt-1 h-2.5 w-2.5 rounded-full bg-white/90" />
+                          <span className="mt-1 h-8 w-px bg-white/20" />
+                        </div>
+                        <div className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl border border-white/15 bg-white/10 text-white">
+                          {scopedMessage.kind === "document_edit" ? (
+                            <Sparkles className="h-4 w-4" />
+                          ) : (
+                            <Quote className="h-4 w-4" />
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="rounded-full border border-white/15 bg-white/10 px-2 py-0.5 text-[11px] font-medium text-white/90">
+                              {scopedMessage.kind === "document_edit" ? "Document Edit Branch" : "Document Reply Branch"}
+                            </span>
+                            {scopedMessage.versionLabel ? (
+                              <span className="rounded-full border border-white/15 bg-white/10 px-2 py-0.5 text-[11px] text-white/70">
+                                {scopedMessage.versionLabel}
+                              </span>
+                            ) : null}
+                          </div>
+                          <p className="mt-1 text-sm font-semibold text-white">{scopedMessage.title}</p>
+                          {scopedMessage.subtitle ? (
+                            <p className="text-xs text-white/70">{scopedMessage.subtitle}</p>
+                          ) : null}
+                          {scopedMessage.quote ? (
+                            <p className="mt-1 line-clamp-2 border-l-2 border-white/20 pl-2 text-xs text-white/75">
+                              {scopedMessage.quote}
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                   <ChatMarkdown
-                    content={formatMessageContentForDisplay(message.content)}
+                    content={formatMessageContentForDisplay(scopedMessage?.request || message.content)}
                     className={isUser ? "[&_*]:!text-white [&_a]:!text-white/95 [&_code]:!bg-zinc-700 [&_blockquote]:!border-zinc-400" : ""}
                   />
                   {!isUser && message.reasoning?.model?.used ? (
@@ -1089,15 +1446,17 @@ export function ChatThread({
                 </div>
               ) : null}
 
-              <MessageBlocks
-                message={message}
-                onResolveDecision={onResolveDecision}
-                onRunAction={onRunAction}
-                onOpenPreview={(input) => {
-                  setArtifactMarkdownError(null);
-                  setArtifactPreview(input);
-                }}
-              />
+              <div className={assistantIsScopedReply ? "ml-4 border-l border-zinc-200 pl-4 sm:ml-6 sm:pl-5" : ""}>
+                <MessageBlocks
+                  message={message}
+                  onResolveDecision={onResolveDecision}
+                  onRunAction={onRunAction}
+                  onOpenPreview={(input) => {
+                    setArtifactMarkdownError(null);
+                    setArtifactPreview(input);
+                  }}
+                />
+              </div>
               {showInlineReasoning && message.role === "assistant" ? <ReasoningPanel message={message} /> : null}
             </article>
           );

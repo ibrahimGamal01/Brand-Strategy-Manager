@@ -5,6 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 
 interface CommandPaletteProps {
   onSelect: (command: string) => void;
+  showTrigger?: boolean;
+  openSignal?: number;
 }
 
 const commands = [
@@ -27,7 +29,7 @@ const commands = [
   "Switch workspace"
 ];
 
-export function CommandPalette({ onSelect }: CommandPaletteProps) {
+export function CommandPalette({ onSelect, showTrigger = true, openSignal }: CommandPaletteProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
 
@@ -46,6 +48,11 @@ export function CommandPalette({ onSelect }: CommandPaletteProps) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  useEffect(() => {
+    if (typeof openSignal !== "number") return;
+    setOpen(true);
+  }, [openSignal]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return commands.filter((command) => !q || command.toLowerCase().includes(q));
@@ -53,16 +60,18 @@ export function CommandPalette({ onSelect }: CommandPaletteProps) {
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="rounded-full border px-3 py-1.5 text-sm"
-        style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}
-      >
-        <span className="inline-flex items-center gap-2">
-          <Command className="h-4 w-4" /> Command
-        </span>
-      </button>
+      {showTrigger ? (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="rounded-full border px-3 py-1.5 text-sm"
+          style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}
+        >
+          <span className="inline-flex items-center gap-2">
+            <Command className="h-4 w-4" /> Command
+          </span>
+        </button>
+      ) : null}
 
       {open ? (
         <div className="fixed inset-0 z-50 grid place-items-start bg-black/30 pt-[15vh]">

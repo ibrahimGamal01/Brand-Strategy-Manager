@@ -117,6 +117,30 @@ function toIso(input: unknown): string {
   return value || new Date().toISOString();
 }
 
+function parseQualityDimensions(
+  value: unknown
+):
+  | {
+      grounding: number;
+      specificity: number;
+      usefulness: number;
+      redundancy: number;
+      tone: number;
+      visual: number;
+    }
+  | undefined {
+  if (!isRecord(value)) return undefined;
+  const parsed = {
+    grounding: Number(value.grounding),
+    specificity: Number(value.specificity),
+    usefulness: Number(value.usefulness),
+    redundancy: Number(value.redundancy),
+    tone: Number(value.tone),
+    visual: Number(value.visual),
+  };
+  return Object.values(parsed).every((score) => Number.isFinite(score)) ? parsed : undefined;
+}
+
 function toChatRole(role: string): "user" | "assistant" | "system" {
   const normalized = role.trim().toUpperCase();
   if (normalized === "USER") return "user";
@@ -630,6 +654,12 @@ function normalizeMessageBlocks(value: unknown): ChatMessageBlock[] {
         : undefined;
     if (!title || (!storagePath && !documentId)) return [];
     const coverageScore = Number(block.coverageScore);
+    const qualityScore = Number(block.qualityScore);
+    const qualityNotes = Array.isArray(block.qualityNotes)
+      ? block.qualityNotes.map((entry) => String(entry || "").trim()).filter(Boolean).slice(0, 8)
+      : [];
+    const dimensionScores = parseQualityDimensions(block.dimensionScores);
+    const renderTheme = String(block.renderTheme || "").trim();
     const partialReasons = Array.isArray(block.partialReasons)
       ? block.partialReasons.map((entry) => String(entry || "").trim()).filter(Boolean).slice(0, 8)
       : [];
@@ -654,6 +684,10 @@ function normalizeMessageBlocks(value: unknown): ChatMessageBlock[] {
           ? { versionId: block.versionId.trim() }
           : {}),
         ...(Number.isFinite(coverageScore) ? { coverageScore } : {}),
+        ...(Number.isFinite(qualityScore) ? { qualityScore } : {}),
+        ...(qualityNotes.length ? { qualityNotes } : {}),
+        ...(dimensionScores ? { dimensionScores } : {}),
+        ...(renderTheme ? { renderTheme } : {}),
         ...(typeof block.partial === "boolean" ? { partial: block.partial } : {}),
         ...(partialReasons.length ? { partialReasons } : {}),
         ...(parseActions().length ? { actions: parseActions() } : {}),
@@ -828,7 +862,7 @@ function ensureDocumentArtifactBlock(blocks: ChatMessageBlock[], content: string
           ...(normalizedHref ? { storagePath: normalizedHref, previewHref: normalizedHref, downloadHref: normalizedHref } : {}),
           ...(exportBlock.documentId ? { documentId: exportBlock.documentId } : {}),
           ...(exportBlock.versionId ? { versionId: exportBlock.versionId } : {}),
-          previewModeDefault: "pdf",
+          previewModeDefault: "markdown",
         },
         ...blocks,
       ];
@@ -892,7 +926,7 @@ function ensureDocumentArtifactBlock(blocks: ChatMessageBlock[], content: string
     ...(storagePath ? { storagePath } : {}),
     ...(storagePath ? { previewHref: storagePath, downloadHref: storagePath } : {}),
     ...(documentId ? { documentId } : {}),
-    previewModeDefault: "pdf",
+    previewModeDefault: "markdown",
     ...(docType ? { docType } : {}),
     ...(artifactActions.length ? { actions: artifactActions.slice(0, 4) } : {}),
   };
@@ -1219,6 +1253,10 @@ function deriveWorkLedgerStage(event: NormalizedRuntimeEvent): string | undefine
     "document.spec_built": "doc_spec",
     "document.section_draft_started": "section_drafts",
     "document.section_draft_completed": "section_drafts",
+    "document.editorial_completed": "editorial",
+    "document.fact_check_completed": "fact_check",
+    "document.quality_scored": "quality",
+    "document.render_theme_applied": "render",
     "document.validation_completed": "validation",
     "document.artifact_rendered": "artifact",
     "document.preflight": "preflight",
@@ -1249,6 +1287,20 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
         message = event.message || "Section drafting started.";
       } else if (event.event === "document.section_draft_completed") {
         message = event.message || "Section drafting completed.";
+      } else if (event.event === "document.editorial_completed") {
+        message = event.message || "Editorial rewrite completed.";
+      } else if (event.event === "document.fact_check_completed") {
+        message = event.message || "Fact-check completed.";
+      } else if (event.event === "document.quality_scored") {
+        const score = Number(event.payload?.qualityScore || 0);
+        if (Number.isFinite(score) && score > 0) {
+          message = `Premium quality scored at ${Math.round(score)}/100.`;
+        } else {
+          message = event.message || "Premium quality scored.";
+        }
+      } else if (event.event === "document.render_theme_applied") {
+        const themeLabel = String(event.payload?.renderThemeLabel || event.payload?.renderTheme || "").trim();
+        message = themeLabel ? `Render theme applied: ${themeLabel}.` : event.message || "Render theme applied.";
       } else if (event.event === "document.validation_completed") {
         message = event.message || "Validation completed.";
       } else if (event.event === "document.artifact_rendered") {
@@ -1382,10 +1434,16 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
     const loopIndex = Number(event.payload?.loopIndex || 0);
     const loopMax = Number(event.payload?.loopMax || 0);
     const coverageScore = Number(event.payload?.coverageScore);
+    const qualityScore = Number(event.payload?.qualityScore);
     const coverageDelta = Number(event.payload?.coverageDelta);
     const sectionId = String(event.payload?.sectionId || "").trim();
     const sectionTitle = String(event.payload?.sectionTitle || "").trim();
     const docFamily = String(event.payload?.docFamily || "").trim();
+    const renderTheme = String(event.payload?.renderTheme || "").trim();
+    const dimensionScores = parseQualityDimensions(event.payload?.dimensionScores);
+    const qualityNotes = Array.isArray(event.payload?.qualityNotes)
+      ? event.payload.qualityNotes.map((entry) => String(entry || "").trim()).filter(Boolean).slice(0, 3)
+      : [];
     const methodFamilyRaw = event.payload?.methodFamily;
     const methodFamily = Array.isArray(methodFamilyRaw)
       ? methodFamilyRaw.map((entry) => String(entry || "").trim()).filter(Boolean).join(", ")
@@ -1393,6 +1451,16 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
     const lane = String(event.payload?.lane || "").trim();
     const queryVariant = String(event.payload?.queryVariant || "").trim();
     const newEvidenceRefs = Number(event.payload?.newEvidenceRefs);
+    const qualityDetailLines = dimensionScores
+      ? Object.entries(dimensionScores)
+          .sort((a, b) => Number(b[1]) - Number(a[1]))
+          .slice(0, 3)
+          .map(
+            ([key, score]) =>
+              `${key.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase())}: ${Math.round(Number(score))}/100`
+          )
+      : [];
+    const mergedDetails = [...(details || []), ...qualityDetailLines, ...qualityNotes.map((note) => `Note: ${note}`)].slice(0, 6);
 
     return {
       id: event.id,
@@ -1405,15 +1473,19 @@ function mapFeedItems(events: Array<Record<string, unknown>>): ProcessFeedItem[]
       ...(Number.isFinite(loopIndex) && loopIndex > 0 ? { loopIndex: Math.floor(loopIndex) } : {}),
       ...(Number.isFinite(loopMax) && loopMax > 0 ? { loopMax: Math.floor(loopMax) } : {}),
       ...(Number.isFinite(coverageScore) ? { coverageScore: Math.round(coverageScore) } : {}),
+      ...(Number.isFinite(qualityScore) ? { qualityScore: Math.round(qualityScore) } : {}),
+      ...(qualityNotes.length ? { qualityNotes } : {}),
+      ...(dimensionScores ? { dimensionScores } : {}),
       ...(Number.isFinite(coverageDelta) ? { coverageDelta: Number(coverageDelta.toFixed(1)) } : {}),
       ...(docFamily ? { docFamily } : {}),
+      ...(renderTheme ? { renderTheme } : {}),
       ...(sectionId ? { sectionId } : {}),
       ...(sectionTitle ? { sectionTitle } : {}),
       ...(methodFamily ? { methodFamily } : {}),
       ...(lane ? { lane } : {}),
       ...(queryVariant ? { queryVariant } : {}),
       ...(Number.isFinite(newEvidenceRefs) ? { newEvidenceRefs: Math.max(0, Math.floor(newEvidenceRefs)) } : {}),
-      ...(details?.length ? { details } : {}),
+      ...(mergedDetails.length ? { details: mergedDetails } : {}),
       phase: event.phase,
       level: event.level,
     };

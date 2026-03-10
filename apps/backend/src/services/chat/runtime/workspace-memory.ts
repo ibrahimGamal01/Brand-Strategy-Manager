@@ -170,16 +170,58 @@ export async function persistDocumentQualityMemory(input: {
   docFamily: string;
   coverageScore: number;
   coverageBand: string;
+  qualityScore?: number;
+  qualityNotes?: string[];
+  dimensionScores?: {
+    grounding: number;
+    specificity: number;
+    usefulness: number;
+    redundancy: number;
+    tone: number;
+    visual: number;
+  };
+  renderTheme?: string;
+  editorialPassCount?: number;
   partial: boolean;
   partialReasons: string[];
 }) {
   const family = String(input.docFamily || '').trim().toUpperCase() || 'BUSINESS_STRATEGY';
   const coverageScore = Number.isFinite(Number(input.coverageScore)) ? Math.max(0, Math.min(100, Number(input.coverageScore))) : 0;
+  const qualityScore = Number.isFinite(Number(input.qualityScore)) ? Math.max(0, Math.min(100, Number(input.qualityScore))) : undefined;
+  const editorialPassCount = Number.isFinite(Number(input.editorialPassCount))
+    ? Math.max(0, Math.floor(Number(input.editorialPassCount)))
+    : undefined;
+  const qualityNotes = Array.isArray(input.qualityNotes)
+    ? input.qualityNotes.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 8)
+    : [];
+  const dimensionScores =
+    input.dimensionScores && typeof input.dimensionScores === 'object'
+      ? {
+          grounding: Number.isFinite(Number(input.dimensionScores.grounding))
+            ? Math.max(0, Math.min(100, Number(input.dimensionScores.grounding)))
+            : undefined,
+          specificity: Number.isFinite(Number(input.dimensionScores.specificity))
+            ? Math.max(0, Math.min(100, Number(input.dimensionScores.specificity)))
+            : undefined,
+          usefulness: Number.isFinite(Number(input.dimensionScores.usefulness))
+            ? Math.max(0, Math.min(100, Number(input.dimensionScores.usefulness)))
+            : undefined,
+          redundancy: Number.isFinite(Number(input.dimensionScores.redundancy))
+            ? Math.max(0, Math.min(100, Number(input.dimensionScores.redundancy)))
+            : undefined,
+          tone: Number.isFinite(Number(input.dimensionScores.tone))
+            ? Math.max(0, Math.min(100, Number(input.dimensionScores.tone)))
+            : undefined,
+          visual: Number.isFinite(Number(input.dimensionScores.visual))
+            ? Math.max(0, Math.min(100, Number(input.dimensionScores.visual)))
+            : undefined,
+        }
+      : undefined;
   const partialReasons = Array.isArray(input.partialReasons)
     ? input.partialReasons.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 8)
     : [];
 
-  await Promise.all([
+  const tasks = [
     upsertWorkspaceMemorySnapshot({
       researchJobId: input.researchJobId,
       branchId: input.branchId,
@@ -201,6 +243,11 @@ export async function persistDocumentQualityMemory(input: {
         family,
         coverageScore,
         coverageBand: String(input.coverageBand || '').trim().toLowerCase() || 'unknown',
+        qualityScore,
+        qualityNotes,
+        dimensionScores,
+        renderTheme: String(input.renderTheme || '').trim() || undefined,
+        editorialPassCount,
         partial: Boolean(input.partial),
         partialReasons,
         at: new Date().toISOString(),
@@ -217,6 +264,11 @@ export async function persistDocumentQualityMemory(input: {
         family,
         coverageScore,
         coverageBand: String(input.coverageBand || '').trim().toLowerCase() || 'unknown',
+        qualityScore,
+        qualityNotes,
+        dimensionScores,
+        renderTheme: String(input.renderTheme || '').trim() || undefined,
+        editorialPassCount,
         partial: Boolean(input.partial),
         partialReasons,
         at: new Date().toISOString(),
@@ -224,7 +276,34 @@ export async function persistDocumentQualityMemory(input: {
       confidence: 0.8,
       sourceRunId: input.sourceRunId || null,
     }),
-  ]);
+  ];
+
+  if (!input.partial && typeof qualityScore === 'number' && qualityScore >= 84) {
+    tasks.push(
+      upsertWorkspaceMemorySnapshot({
+        researchJobId: input.researchJobId,
+        branchId: input.branchId,
+        scope: 'quality_history',
+        key: 'last_good_document_workflow',
+        valueJson: {
+          family,
+          coverageScore,
+          coverageBand: String(input.coverageBand || '').trim().toLowerCase() || 'unknown',
+          qualityScore,
+          qualityNotes,
+          dimensionScores,
+          renderTheme: String(input.renderTheme || '').trim() || undefined,
+          editorialPassCount,
+          partial: false,
+          at: new Date().toISOString(),
+        },
+        confidence: 0.9,
+        sourceRunId: input.sourceRunId || null,
+      }),
+    );
+  }
+
+  await Promise.all(tasks);
 }
 
 export function flattenMemoryForRuntimeContext(input: {
@@ -246,5 +325,6 @@ export function flattenMemoryForRuntimeContext(input: {
     },
     lastDocFamily: String(asRecord(deliverablePreferences.last_doc_family).family || '').trim() || undefined,
     lastDocumentQuality: qualityHistory.last_document_quality,
+    lastGoodDocumentWorkflow: qualityHistory.last_good_document_workflow,
   };
 }

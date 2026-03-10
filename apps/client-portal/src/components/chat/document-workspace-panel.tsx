@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, ExternalLink, Files, Quote, RefreshCcw, Search, Sparkles, X } from "lucide-react";
+import { Clock3, Download, ExternalLink, Files, GitBranch, MoreHorizontal, Quote, Search, Sparkles, X } from "lucide-react";
+import { ComposerBranchContext } from "@/types/chat";
 import { getRuntimeDocument, RuntimeWorkspaceDocumentDto } from "@/lib/runtime-api";
 import { ChatMarkdown } from "./chat-markdown";
 
@@ -44,11 +45,43 @@ function familyLabel(value?: string | null): string {
   return raw.replace(/_/g, " ");
 }
 
+function scoreTone(score?: number | null): string {
+  if (typeof score !== "number" || !Number.isFinite(score)) return "bg-zinc-100 text-zinc-700 border-zinc-200";
+  if (score >= 85) return "bg-emerald-50 text-emerald-800 border-emerald-200";
+  if (score >= 72) return "bg-amber-50 text-amber-800 border-amber-200";
+  return "bg-rose-50 text-rose-800 border-rose-200";
+}
+
+function qualityDimensionEntries(
+  value?:
+    | {
+        grounding: number;
+        specificity: number;
+        usefulness: number;
+        redundancy: number;
+        tone: number;
+        visual: number;
+      }
+    | null
+) {
+  if (!value) return [];
+  return [
+    { key: "grounding", label: "Grounding", score: value.grounding },
+    { key: "specificity", label: "Specificity", score: value.specificity },
+    { key: "usefulness", label: "Usefulness", score: value.usefulness },
+    { key: "redundancy", label: "Redundancy", score: value.redundancy },
+    { key: "tone", label: "Tone", score: value.tone },
+    { key: "visual", label: "Visual", score: value.visual },
+  ];
+}
+
 export function DocumentWorkspacePanel({
   workspaceId,
   branchId,
   documents,
   selectedDocumentId,
+  branchContext,
+  recentBranchActivity,
   onSelectDocument,
   onQuoteInChat,
   onAskAiEdit,
@@ -59,6 +92,14 @@ export function DocumentWorkspacePanel({
   branchId: string | null;
   documents: RuntimeWorkspaceDocumentDto[];
   selectedDocumentId: string | null;
+  branchContext?: ComposerBranchContext | null;
+  recentBranchActivity?: Array<{
+    id: string;
+    kind: "request" | "proposal" | "applied" | "export" | "artifact" | "ready";
+    title: string;
+    detail?: string;
+    createdAt: string;
+  }>;
   onSelectDocument: (documentId: string) => void;
   onQuoteInChat: (input: { document: RuntimeWorkspaceDocumentDto; quotedText: string }) => void;
   onAskAiEdit?: (input: { document: RuntimeWorkspaceDocumentDto; quotedText: string }) => void;
@@ -162,6 +203,12 @@ export function DocumentWorkspacePanel({
 
   const selectedDocFamily = familyLabel(selectedDocument?.generatedMeta?.docFamily);
   const selectedCoverage = selectedDocument?.generatedMeta?.coverageScore;
+  const selectedQuality = selectedDocument?.generatedMeta?.qualityScore;
+  const selectedQualityNotes = selectedDocument?.generatedMeta?.qualityNotes || [];
+  const selectedDimensionScores = selectedDocument?.generatedMeta?.dimensionScores;
+  const selectedRenderTheme = selectedDocument?.generatedMeta?.renderTheme;
+  const selectedEditorialPassCount = selectedDocument?.generatedMeta?.editorialPassCount;
+  const selectedQualityReference = selectedDocument?.qualityReference;
   const selectedVersion = selectedDocument?.latestVersion?.versionNumber || 0;
   const selectedStorageHref = useMemo(
     () => normalizeStorageHref(selectedDocument?.storageHref || selectedDocument?.storagePath),
@@ -177,6 +224,19 @@ export function DocumentWorkspacePanel({
         .filter((item) => Boolean(item.href))
         .sort((a, b) => Date.parse(String(b.createdAt || "")) - Date.parse(String(a.createdAt || ""))),
     [selectedDocument?.exports]
+  );
+  const qualityDimensions = useMemo(
+    () => qualityDimensionEntries(selectedDimensionScores || null),
+    [selectedDimensionScores]
+  );
+  const referenceDimensions = useMemo(
+    () => qualityDimensionEntries(selectedQualityReference?.dimensionScores || null),
+    [selectedQualityReference?.dimensionScores]
+  );
+  const branchIsFocusedOnSelectedDocument = Boolean(
+    branchContext?.documentId &&
+      selectedDocument?.id &&
+      branchContext.documentId === selectedDocument.id
   );
 
   const updateSelection = useCallback(() => {
@@ -375,23 +435,13 @@ export function DocumentWorkspacePanel({
                   setActionMenuOpen(false);
                   setIsPickerOpen((previous) => !previous);
                 }}
-                className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+                className="inline-flex items-center gap-1 rounded-full border border-zinc-200 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
               >
                 <Files className="h-3.5 w-3.5" />
-                Documents
+                Browse
               </button>
             ) : null}
-            <button
-              type="button"
-              onClick={() => {
-                void Promise.all([onRefreshDocuments(), onRefreshRuntime()]);
-              }}
-              className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
-            >
-              <RefreshCcw className="h-3.5 w-3.5" />
-              Refresh
-            </button>
-            {selectedDocument ? (
+            {branchId ? (
               <div ref={actionMenuRef} className="relative">
                 <button
                   type="button"
@@ -399,20 +449,31 @@ export function DocumentWorkspacePanel({
                     setIsPickerOpen(false);
                     setActionMenuOpen((previous) => !previous);
                   }}
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-200 text-zinc-600 hover:bg-zinc-100"
-                  title="Document downloads"
-                  aria-label="Document downloads"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-200 text-zinc-600 hover:bg-zinc-100"
+                  title="Document actions"
+                  aria-label="Document actions"
                 >
-                  <Download className="h-3.5 w-3.5" />
+                  <MoreHorizontal className="h-4 w-4" />
                 </button>
                 {actionMenuOpen ? (
-                  <div className="absolute right-0 z-30 mt-1 w-52 rounded-md border border-zinc-200 bg-white p-1 shadow-md">
+                  <div className="absolute right-0 z-30 mt-2 w-56 rounded-xl border border-zinc-200 bg-white p-1.5 shadow-xl">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActionMenuOpen(false);
+                        void Promise.all([onRefreshDocuments(), onRefreshRuntime()]);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-zinc-700 hover:bg-zinc-100"
+                    >
+                      <Files className="h-3.5 w-3.5" />
+                      Refresh docs
+                    </button>
                     {selectedStorageHref ? (
                       <a
                         href={selectedStorageHref}
                         target="_blank"
                         rel="noreferrer"
-                        className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
+                        className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs text-zinc-700 hover:bg-zinc-100"
                       >
                         <ExternalLink className="h-3.5 w-3.5" />
                         Open source file
@@ -424,15 +485,18 @@ export function DocumentWorkspacePanel({
                         href={item.href}
                         target="_blank"
                         rel="noreferrer"
-                        className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
+                        className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs text-zinc-700 hover:bg-zinc-100"
                       >
                         <Download className="h-3.5 w-3.5" />
                         Download {item.format}
                         {index === 0 ? " (latest)" : ""}
                       </a>
                     ))}
-                    {!selectedStorageHref && !selectedExports.length ? (
-                      <p className="px-2 py-1.5 text-xs text-zinc-500">No download links yet.</p>
+                    {!selectedDocument ? (
+                      <p className="px-2.5 py-2 text-xs text-zinc-500">Browse a document to open or download exports.</p>
+                    ) : null}
+                    {selectedDocument && !selectedStorageHref && !selectedExports.length ? (
+                      <p className="px-2.5 py-2 text-xs text-zinc-500">No document links available yet.</p>
                     ) : null}
                   </div>
                 ) : null}
@@ -452,6 +516,65 @@ export function DocumentWorkspacePanel({
         ) : null}
       </div>
 
+      {branchIsFocusedOnSelectedDocument || (recentBranchActivity && recentBranchActivity.length > 0) ? (
+        <section className="border-b border-zinc-200 bg-[linear-gradient(180deg,#fafafa_0%,#f4f5f6_100%)] px-3 py-3">
+          <div className="rounded-2xl border border-zinc-200 bg-white p-3 shadow-[0_14px_32px_-28px_rgba(15,23,42,0.35)]">
+            <div className="flex items-start gap-2.5">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-zinc-200 bg-zinc-50 text-zinc-700">
+                {branchContext?.kind === "document_edit" ? <Sparkles className="h-4 w-4" /> : <GitBranch className="h-4 w-4" />}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="rounded-full border border-zinc-200 bg-zinc-900 px-2 py-0.5 text-[11px] font-medium text-white">
+                    {branchContext?.kind === "document_edit" ? "Active Edit Session" : "Active Document Session"}
+                  </span>
+                  {branchContext?.commandHint ? (
+                    <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-600">
+                      {branchContext.commandHint}
+                    </span>
+                  ) : null}
+                </div>
+                <p className="mt-1 text-sm font-semibold text-zinc-900">
+                  {branchIsFocusedOnSelectedDocument
+                    ? branchContext?.title || selectedDocument?.title || selectedDocument?.originalFileName
+                    : selectedDocument?.title || selectedDocument?.originalFileName || "Document activity"}
+                </p>
+                <p className="mt-0.5 text-xs text-zinc-500">
+                  {branchIsFocusedOnSelectedDocument
+                    ? branchContext?.subtitle || "The chat composer is currently scoped to this document."
+                    : "Recent document branch actions from this chat."}
+                </p>
+                {branchIsFocusedOnSelectedDocument && branchContext?.quotedText ? (
+                  <p className="mt-2 line-clamp-2 border-l-2 border-zinc-300 pl-2 text-xs text-zinc-600">
+                    {branchContext.quotedText}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+
+            {recentBranchActivity?.length ? (
+              <div className="mt-3 border-t border-zinc-200 pt-3">
+                <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                  <Clock3 className="h-3.5 w-3.5" />
+                  Recent Branch Activity
+                </div>
+                <div className="space-y-2">
+                  {recentBranchActivity.slice(0, 4).map((item) => (
+                    <div key={item.id} className="rounded-xl border border-zinc-200 bg-zinc-50/80 px-2.5 py-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-medium text-zinc-800">{item.title}</p>
+                        <span className="text-[11px] text-zinc-500">{formatFreshness(item.createdAt)}</span>
+                      </div>
+                      {item.detail ? <p className="mt-1 text-[11px] text-zinc-600">{item.detail}</p> : null}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+
       {!branchId ? (
         <div className="px-3 py-3 text-sm text-zinc-600">Open a branch to access runtime documents.</div>
       ) : null}
@@ -470,6 +593,100 @@ export function DocumentWorkspacePanel({
                   className="bat-scrollbar h-full min-h-0 overflow-y-auto bg-white px-3 py-2 text-[13px] leading-6 text-zinc-800 select-text"
                   style={{ userSelect: "text" }}
                 >
+                  {typeof selectedQuality === "number" || selectedRenderTheme || selectedEditorialPassCount || qualityDimensions.length ? (
+                    <section className="mb-3 rounded-xl border border-zinc-200 bg-[linear-gradient(180deg,#fcfcfd_0%,#f6f7f9_100%)] p-3 text-[11px] text-zinc-700 shadow-[0_1px_0_rgba(255,255,255,0.85)_inset]">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Quality Review</p>
+                          <p className="mt-0.5 text-xs text-zinc-600">
+                            Premium rubric and delivery metadata for this document version.
+                          </p>
+                        </div>
+                        {typeof selectedQuality === "number" ? (
+                          <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${scoreTone(selectedQuality)}`}>
+                            {Math.round(selectedQuality)}/100
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {typeof selectedCoverage === "number" ? (
+                          <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[11px] text-zinc-700">
+                            Coverage {Math.round(selectedCoverage)}/100
+                          </span>
+                        ) : null}
+                        {selectedRenderTheme ? (
+                          <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[11px] text-zinc-700">
+                            Theme {selectedRenderTheme.replace(/_/g, " ")}
+                          </span>
+                        ) : null}
+                        {typeof selectedEditorialPassCount === "number" ? (
+                          <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[11px] text-zinc-700">
+                            {selectedEditorialPassCount} editorial passes
+                          </span>
+                        ) : null}
+                      </div>
+
+                      {qualityDimensions.length ? (
+                        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          {qualityDimensions.map((item) => (
+                            <div key={item.key} className="rounded-lg border border-zinc-200 bg-white px-2.5 py-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[11px] font-medium text-zinc-700">{item.label}</span>
+                                <span className="text-[11px] text-zinc-500">{Math.round(item.score)}/100</span>
+                              </div>
+                              <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-zinc-100">
+                                <div
+                                  className={`h-full rounded-full ${
+                                    item.score >= 85 ? "bg-emerald-500" : item.score >= 72 ? "bg-amber-500" : "bg-rose-500"
+                                  }`}
+                                  style={{ width: `${Math.max(6, Math.min(100, item.score))}%` }}
+                                />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {selectedQualityNotes.length ? (
+                        <div className="mt-3 rounded-lg border border-zinc-200 bg-white px-2.5 py-2 text-[11px] text-zinc-600">
+                          <p className="mb-1 font-medium text-zinc-700">Quality notes</p>
+                          <ul className="space-y-1">
+                            {selectedQualityNotes.slice(0, 4).map((note) => (
+                              <li key={note}>• {note}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+
+                      {selectedQualityReference ? (
+                        <div className="mt-3 rounded-lg border border-zinc-900/10 bg-zinc-900 px-2.5 py-2 text-[11px] text-zinc-100">
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                            <span className="font-semibold">Benchmark</span>
+                            {selectedQualityReference.family ? (
+                              <span className="text-zinc-300">{familyLabel(selectedQualityReference.family)}</span>
+                            ) : null}
+                            {typeof selectedQualityReference.qualityScore === "number" ? (
+                              <span className="text-zinc-300">Best recent quality {Math.round(selectedQualityReference.qualityScore)}/100</span>
+                            ) : null}
+                            {selectedQualityReference.at ? (
+                              <span className="text-zinc-400">{formatFreshness(selectedQualityReference.at)}</span>
+                            ) : null}
+                          </div>
+                          {referenceDimensions.length ? (
+                            <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-[10px] text-zinc-300">
+                              {referenceDimensions.map((item) => (
+                                <div key={`reference-${item.key}`} className="flex items-center justify-between gap-2">
+                                  <span>{item.label}</span>
+                                  <span>{Math.round(item.score)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </section>
+                  ) : null}
                   {selectedDocument.generatedMeta?.partial ? (
                     <div className="mb-2 border-l-2 border-amber-300 pl-2 text-[11px] text-amber-800">
                       <button
@@ -558,7 +775,7 @@ export function DocumentWorkspacePanel({
             className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
           >
             <Sparkles className="h-3.5 w-3.5" />
-            Ask AI to edit
+            Edit in branch
           </button>
         </div>
       ) : null}

@@ -1,26 +1,190 @@
 "use client";
 
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, FileText, ListOrdered, Paperclip, SendHorizontal, Sparkles, Square, X } from "lucide-react";
-import { ChatInputOptions, ChatInputSourceScope, QueuedMessage, UploadedDocumentChip } from "@/types/chat";
-
-const steerChipSet = [
-  "Run V3 finder",
-  "Go deeper",
-  "Show sources",
-  "Make it a PDF",
-  "Focus on TikTok",
-  "Focus on Web evidence",
-  "Ask me questions first",
-];
+import {
+  ArrowDown,
+  ArrowUp,
+  Command,
+  FileText,
+  GitBranch,
+  ListOrdered,
+  Paperclip,
+  SendHorizontal,
+  SlidersHorizontal,
+  Sparkles,
+  Square,
+  X,
+} from "lucide-react";
+import {
+  ChatInputOptions,
+  ChatInputSourceScope,
+  ComposerBranchContext,
+  QueuedMessage,
+  UploadedDocumentChip,
+} from "@/types/chat";
 
 const sourceScopeOptions: Array<{ key: keyof ChatInputSourceScope; label: string }> = [
-  { key: "workspaceData", label: "Workspace data" },
-  { key: "libraryPinned", label: "Library pinned" },
-  { key: "uploadedDocs", label: "Uploaded docs" },
-  { key: "webSearch", label: "Web search" },
-  { key: "liveWebsiteCrawl", label: "Live website crawl" },
-  { key: "socialIntel", label: "Social intelligence" },
+  { key: "workspaceData", label: "Workspace" },
+  { key: "libraryPinned", label: "Pinned" },
+  { key: "uploadedDocs", label: "Docs" },
+  { key: "webSearch", label: "Web" },
+  { key: "liveWebsiteCrawl", label: "Crawl" },
+  { key: "socialIntel", label: "Social" },
+];
+
+type SlashCommandItem = {
+  id: string;
+  label: string;
+  description: string;
+  insertText?: string;
+  category: "Document" | "Research" | "Workspace" | "Mode" | "Focus";
+  badge?: string;
+  aliases?: string[];
+  pill?: boolean;
+  requiresDocument?: boolean;
+};
+
+const slashCommands: SlashCommandItem[] = [
+  {
+    id: "/go-deeper",
+    label: "Go deeper",
+    description: "Push the current task into a more comprehensive and higher-depth response.",
+    category: "Mode",
+    badge: "Deep",
+    aliases: ["deep", "detailed", "expand"],
+    pill: true,
+  },
+  {
+    id: "/show-sources",
+    label: "Show sources",
+    description: "Reveal direct evidence and links behind the latest answer.",
+    insertText: "Show the evidence sources and links used for your latest answer.",
+    category: "Research",
+    badge: "Evidence",
+    aliases: ["sources", "citations", "evidence"],
+    pill: true,
+  },
+  {
+    id: "/make-pdf",
+    label: "Make it a PDF",
+    description: "Generate a premium PDF deliverable from the current workspace evidence.",
+    insertText: "Generate a deep business strategy PDF deliverable from this workspace evidence.",
+    category: "Workspace",
+    badge: "Deliverable",
+    aliases: ["pdf", "export", "document"],
+    pill: true,
+  },
+  {
+    id: "/focus-web",
+    label: "Focus on Web evidence",
+    description: "Bias the next answer toward web evidence and live site citations.",
+    category: "Focus",
+    badge: "Web",
+    aliases: ["web", "crawl", "site"],
+    pill: true,
+  },
+  {
+    id: "/edit-doc",
+    label: "Edit Document",
+    description: "Open document-edit mode for the selected excerpt or active doc.",
+    category: "Document",
+    badge: "Doc",
+    aliases: ["edit", "doc"],
+    requiresDocument: true,
+  },
+  {
+    id: "/rewrite-selection",
+    label: "Rewrite Selection",
+    description: "Tighten, elevate, or simplify the quoted passage without changing intent.",
+    category: "Document",
+    badge: "Doc",
+    aliases: ["rewrite", "selection"],
+    requiresDocument: true,
+  },
+  {
+    id: "/quote-doc",
+    label: "Use Selection In Chat",
+    description: "Bring the selected passage into the conversation as a scoped reference.",
+    category: "Document",
+    badge: "Doc",
+    aliases: ["quote", "reference"],
+    requiresDocument: true,
+  },
+  {
+    id: "/export-pdf",
+    label: "Generate PDF",
+    description: "Create a premium PDF deliverable from the current workspace evidence.",
+    insertText: "Generate a deep business strategy PDF deliverable from this workspace evidence.",
+    category: "Workspace",
+    badge: "Deliverable",
+    aliases: ["pdf", "export"],
+  },
+  {
+    id: "/mode-fast",
+    label: "Mode: Fast",
+    description: "Switch to a quick response mode with shorter output.",
+    category: "Mode",
+    badge: "Fast",
+    aliases: ["fast", "quick"],
+  },
+  {
+    id: "/mode-balanced",
+    label: "Mode: Balanced",
+    description: "Switch to the middle-ground response mode.",
+    category: "Mode",
+    badge: "Balanced",
+    aliases: ["balanced", "normal"],
+  },
+  {
+    id: "/mode-deep",
+    label: "Mode: Deep",
+    description: "Switch to a thorough, longer-form answer mode.",
+    category: "Mode",
+    badge: "Deep",
+    aliases: ["deep", "thorough"],
+  },
+  {
+    id: "/mode-pro",
+    label: "Mode: Pro",
+    description: "Use the highest validation and most demanding response mode.",
+    category: "Mode",
+    badge: "Pro",
+    aliases: ["pro", "strict"],
+  },
+  {
+    id: "/web",
+    label: "Search Web",
+    description: "Pull in fresh web evidence for the current problem.",
+    insertText: "Search the web for additional evidence relevant to this workspace and summarize top findings.",
+    category: "Research",
+    badge: "Research",
+    aliases: ["web", "search"],
+  },
+  {
+    id: "/competitor-v3",
+    label: "Run Competitor V3",
+    description: "Run the V3 competitor finder with evidence-backed synthesis.",
+    insertText: "Run the V3 competitor finder in deep mode with enrichment and return a ranked shortlist backed by evidence.",
+    category: "Research",
+    badge: "Research",
+    aliases: ["competitor", "v3"],
+  },
+  {
+    id: "/focus-social",
+    label: "Focus on TikTok",
+    description: "Bias the next answer toward social intelligence and TikTok evidence.",
+    category: "Focus",
+    badge: "Social",
+    aliases: ["tiktok", "social"],
+  },
+  {
+    id: "/new-branch",
+    label: "New Branch",
+    description: "Fork a what-if branch from this conversation.",
+    category: "Workspace",
+    badge: "Branch",
+    aliases: ["branch", "fork"],
+  },
 ];
 
 interface ChatComposerProps {
@@ -44,16 +208,22 @@ interface ChatComposerProps {
   attachDisabledReason?: string;
   uploadAccept?: string;
   onSteerRun: (note: string) => void;
-  onSteerQueued: (id: string, input: {
-    content?: string;
-    inputOptions?: ChatInputOptions;
-    steerNote?: string;
-    runNow?: boolean;
-  }) => void;
+  onSteerQueued: (
+    id: string,
+    input: {
+      content?: string;
+      inputOptions?: ChatInputOptions;
+      steerNote?: string;
+      runNow?: boolean;
+    }
+  ) => void;
   onStop: () => void;
   onReorderQueue: (from: number, to: number) => void;
   onDeleteQueued: (id: string) => void;
   onSteer: (chip: string) => void;
+  onCommandSelect?: (commandId: string) => void;
+  branchContext?: ComposerBranchContext | null;
+  onClearBranchContext?: () => void;
   contentWidthClassName?: string;
 }
 
@@ -65,13 +235,58 @@ function defaultTargetLengthForMode(mode: "fast" | "balanced" | "deep" | "pro"):
 
 function compactScopeBadges(scope: ChatInputSourceScope): string[] {
   const labels: string[] = [];
-  if (scope.webSearch) labels.push("Web");
-  if (scope.liveWebsiteCrawl) labels.push("Crawl");
-  if (scope.socialIntel) labels.push("Social");
-  if (scope.uploadedDocs) labels.push("Docs");
-  if (scope.libraryPinned) labels.push("Pinned");
   if (scope.workspaceData) labels.push("Workspace");
+  if (scope.uploadedDocs) labels.push("Docs");
+  if (scope.webSearch) labels.push("Web");
+  if (scope.socialIntel) labels.push("Social");
+  if (scope.liveWebsiteCrawl) labels.push("Crawl");
+  if (scope.libraryPinned) labels.push("Pinned");
   return labels.slice(0, 4);
+}
+
+function summarizeScope(scope: ChatInputSourceScope): string {
+  const badges = compactScopeBadges(scope);
+  if (!badges.length) return "Scope";
+  if (badges.length === 1) return badges[0];
+  return `${badges[0]} +${badges.length - 1}`;
+}
+
+function resolveComposerPlaceholder(context?: ComposerBranchContext | null): string {
+  if (context?.kind === "document_edit") {
+    return "Describe how you want this passage or document changed...";
+  }
+  if (context?.kind === "document_quote") {
+    return "Ask BAT to use, rewrite, or build on this selection...";
+  }
+  if (context?.kind === "message_reply") {
+    return "Continue this branch...";
+  }
+  return "Message BAT... Type / for commands";
+}
+
+function branchKindLabel(context?: ComposerBranchContext | null): string {
+  if (context?.kind === "document_edit") return "Editing document branch";
+  if (context?.kind === "document_quote") return "Replying to document excerpt";
+  if (context?.kind === "message_reply") return "Reply branch";
+  return "Conversation";
+}
+
+function branchQuickActions(context?: ComposerBranchContext | null): Array<{ label: string; value: string }> {
+  if (context?.kind === "document_edit") {
+    return [
+      { label: "Tighten", value: "Tighten this excerpt and remove filler while keeping the meaning intact." },
+      { label: "Executive", value: "Rewrite this excerpt to sound more executive, decisive, and client-ready." },
+      { label: "Sharper", value: "Make this excerpt more strategic, specific, and commercially useful." },
+    ];
+  }
+  if (context?.kind === "document_quote") {
+    return [
+      { label: "Use in reply", value: "Use this excerpt directly in the answer and build on it." },
+      { label: "Summarize", value: "Summarize the point of this excerpt in sharper language." },
+      { label: "Challenge", value: "Challenge the assumptions in this excerpt and suggest a stronger angle." },
+    ];
+  }
+  return [];
 }
 
 export function ChatComposer({
@@ -96,9 +311,14 @@ export function ChatComposer({
   onReorderQueue,
   onDeleteQueued,
   onSteer,
+  onCommandSelect,
+  branchContext,
+  onClearBranchContext,
   contentWidthClassName = "max-w-3xl",
 }: ChatComposerProps) {
-  const [showAdvancedControls, setShowAdvancedControls] = useState(false);
+  const [showControls, setShowControls] = useState(false);
+  const [showQueue, setShowQueue] = useState(false);
+  const [activeSlashIndex, setActiveSlashIndex] = useState(0);
   const [expandedSteerId, setExpandedSteerId] = useState<string | null>(null);
   const [steerEdits, setSteerEdits] = useState<Record<string, string>>({});
   const [uploadedDocs, setUploadedDocs] = useState<UploadedDocumentChip[]>([]);
@@ -117,6 +337,33 @@ export function ChatComposer({
     [responseMode, sourceScope]
   );
 
+  const slashQuery = useMemo(() => {
+    const trimmedStart = draft.trimStart();
+    if (!trimmedStart.startsWith("/")) return null;
+    return trimmedStart.split(/\s+/)[0].toLowerCase();
+  }, [draft]);
+
+  const slashMatches = useMemo(() => {
+    if (!slashQuery) return [];
+    const normalizedQuery = slashQuery.replace(/^\//, "");
+    return slashCommands.filter((command) => {
+      if (command.requiresDocument && !branchContext?.documentId) return false;
+      return (
+        !normalizedQuery ||
+        command.id.includes(slashQuery) ||
+        command.label.toLowerCase().includes(normalizedQuery) ||
+        command.description.toLowerCase().includes(normalizedQuery) ||
+        (command.aliases || []).some((alias) => alias.toLowerCase().includes(normalizedQuery))
+      );
+    });
+  }, [branchContext?.documentId, slashQuery]);
+
+  const slashPills = useMemo(() => slashCommands.filter((command) => command.pill), []);
+
+  useEffect(() => {
+    setActiveSlashIndex(0);
+  }, [slashQuery]);
+
   useEffect(() => {
     if (typeof focusSignal !== "number") return;
     const textarea = textareaRef.current;
@@ -128,13 +375,16 @@ export function ChatComposer({
 
   const dispatchMessage = (modeOverride?: "send" | "queue" | "interrupt") => {
     const content = draft.trim();
-    if (!content && uploadedDocs.length === 0) {
+    if (!content && uploadedDocs.length === 0 && !branchContext) {
       return false;
     }
 
     onSend(content, modeOverride || (isStreaming ? "queue" : "send"), {
       attachmentIds: uploadedDocs.map((item) => item.attachmentId).filter((value): value is string => Boolean(value)),
-      documentIds: uploadedDocs.map((item) => item.id).filter(Boolean),
+      documentIds: [
+        ...uploadedDocs.map((item) => item.id).filter(Boolean),
+        ...(branchContext?.documentId ? [branchContext.documentId] : []),
+      ],
     });
     onDraftChange("");
     setUploadedDocs([]);
@@ -146,9 +396,35 @@ export function ChatComposer({
     dispatchMessage();
   };
 
+  const applySlashCommand = (command: SlashCommandItem) => {
+    onCommandSelect?.(command.id);
+    if (command.insertText) {
+      onDraftChange(command.insertText);
+      textareaRef.current?.focus();
+      return;
+    }
+    onDraftChange("");
+    textareaRef.current?.focus();
+  };
+
   const onComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (slashMatches.length && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+      event.preventDefault();
+      setActiveSlashIndex((current) => {
+        if (!slashMatches.length) return 0;
+        if (event.key === "ArrowDown") return (current + 1) % slashMatches.length;
+        return (current - 1 + slashMatches.length) % slashMatches.length;
+      });
+      return;
+    }
     if (event.key !== "Enter") return;
     if (event.shiftKey || event.nativeEvent.isComposing) return;
+    if (slashMatches.length && draft.trimStart().startsWith("/")) {
+      event.preventDefault();
+      const selected = slashMatches[Math.max(0, Math.min(activeSlashIndex, slashMatches.length - 1))] || slashMatches[0];
+      if (selected) applySlashCommand(selected);
+      return;
+    }
     event.preventDefault();
 
     if (event.metaKey || event.ctrlKey) {
@@ -236,97 +512,97 @@ export function ChatComposer({
     return item.steer?.note || "";
   };
 
+  const scopeSummary = summarizeScope(sourceScope);
+  const branchActions = branchQuickActions(branchContext);
+
   return (
-    <section className="sticky bottom-0 z-20 border-t border-zinc-200 bg-white/98 px-0 pb-1.5 pt-1.5 backdrop-blur">
-      <div className={`mx-auto w-full ${contentWidthClassName} px-3 sm:px-4 xl:px-6`}>
-        {showAdvancedControls ? (
-          <div className="mb-1.5 space-y-1.5">
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-            <div className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-1 py-1">
-              {(["fast", "balanced", "deep", "pro"] as const).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => onResponseModeChange(mode)}
-                  className={`rounded-full px-2.5 py-1 capitalize ${
-                    responseMode === mode ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"
-                  }`}
-                >
-                  {mode}
-                </button>
-              ))}
-            </div>
-
-            <div className="bat-scrollbar inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-full border border-zinc-200 bg-white px-1 py-1">
-              {sourceScopeOptions.map((option) => {
-                const active = sourceScope[option.key];
-                return (
-                  <button
-                    key={option.key}
-                    type="button"
-                    onClick={() => onSourceScopeChange(option.key, !active)}
-                    className={`whitespace-nowrap rounded-full px-2.5 py-1 ${
-                      active ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                );
-              })}
-            </div>
-            </div>
-            <div className="bat-scrollbar flex gap-1.5 overflow-x-auto pb-1">
-              {steerChipSet.map((chip) => (
-                <button
-                  key={chip}
-                  type="button"
-                  onClick={() => onSteer(chip)}
-                  className="whitespace-nowrap rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
-                >
-                  {chip}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        <div className="mb-1 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-xs text-zinc-500">
-            <span className={`rounded-md px-2 py-0.5 ${isStreaming ? "bg-emerald-50 text-emerald-700" : "bg-zinc-100 text-zinc-600"}`}>
+    <section className="sticky bottom-0 z-20 border-t border-zinc-200/80 bg-white/96 px-0 pb-2 pt-2 backdrop-blur-xl">
+      <div className={`mx-auto w-full ${contentWidthClassName} px-2 sm:px-3 xl:px-4`}>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className={`rounded-full border px-2.5 py-1 ${isStreaming ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-zinc-200 bg-zinc-50 text-zinc-600"}`}>
               {isStreaming ? "Generating" : "Ready"}
             </span>
-            {queuedMessages.length > 0 ? (
-              <span className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2 py-0.5 text-zinc-600">
-                <ListOrdered className="h-3.5 w-3.5" />
-                Queue {queuedMessages.length}
-              </span>
-            ) : null}
-            {isStreaming ? (
-              <span className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-700">
-                Active run: Enter queues, Cmd/Ctrl+Enter interrupts + sends
-              </span>
-            ) : null}
+            <button
+              type="button"
+              onClick={() => setShowQueue((previous) => !previous)}
+              className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 ${queuedMessages.length ? "border-zinc-300 bg-white text-zinc-700" : "border-zinc-200 bg-zinc-50 text-zinc-500"}`}
+            >
+              <ListOrdered className="h-3.5 w-3.5" />
+              Queue {queuedMessages.length}
+            </button>
+            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-zinc-600">
+              {responseMode}
+            </span>
+            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-zinc-500">
+              {scopeSummary}
+            </span>
+            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-zinc-500">
+              <Command className="mr-1 inline h-3.5 w-3.5" />
+              / commands
+            </span>
           </div>
           <button
             type="button"
-            onClick={() => setShowAdvancedControls((prev) => !prev)}
-            className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
+            onClick={() => setShowControls((previous) => !previous)}
+            className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-zinc-600 hover:bg-zinc-100"
           >
-            <Sparkles className="h-3.5 w-3.5" />
-            {showAdvancedControls ? "Hide controls" : "Controls"}
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+            {showControls ? "Hide" : "Tune"}
           </button>
         </div>
 
-        {showAdvancedControls && queuedMessages.length > 0 ? (
-          <div className="mb-1.5 rounded-md border border-zinc-200 bg-zinc-50/90 p-2">
+        {showControls ? (
+          <div className="mb-2 rounded-2xl border border-zinc-200 bg-[linear-gradient(180deg,#ffffff_0%,#f6f7f8_100%)] p-3 shadow-[0_1px_0_rgba(255,255,255,0.9)_inset]">
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <div className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white p-1">
+                {(["fast", "balanced", "deep", "pro"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => onResponseModeChange(mode)}
+                    className={`rounded-full px-3 py-1 capitalize transition ${
+                      responseMode === mode ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"
+                    }`}
+                  >
+                    {mode}
+                  </button>
+                ))}
+              </div>
+              <div className="bat-scrollbar inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-full border border-zinc-200 bg-white p-1">
+                {sourceScopeOptions.map((option) => {
+                  const active = sourceScope[option.key];
+                  return (
+                    <button
+                      key={option.key}
+                      type="button"
+                      onClick={() => onSourceScopeChange(option.key, !active)}
+                      className={`whitespace-nowrap rounded-full px-3 py-1 transition ${
+                        active ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <p className="mt-3 text-[11px] text-zinc-500">
+              Quick actions like deeper mode, sources, PDF generation, and evidence focus now live in `/` commands.
+            </p>
+          </div>
+        ) : null}
+
+        {showQueue && queuedMessages.length > 0 ? (
+          <div className="mb-2 rounded-2xl border border-zinc-200 bg-zinc-50/85 p-2.5">
             <div className="bat-scrollbar max-h-56 space-y-1.5 overflow-y-auto pr-1">
               {queuedMessages.map((item, index) => {
                 const options = item.inputOptions || currentInputOptions;
-                const scopeBadges = compactScopeBadges(options.sourceScope);
+                const badges = compactScopeBadges(options.sourceScope);
                 const steerDraft = readSteerDraft(item);
                 const showSteerEditor = expandedSteerId === item.id;
                 return (
-                  <div key={item.id} className="rounded-md border border-zinc-200 bg-white p-2">
+                  <div key={item.id} className="rounded-xl border border-zinc-200 bg-white p-2.5">
                     <div className="flex items-start gap-2">
                       <div className="flex-1">
                         <p className="mb-1 text-[11px] uppercase tracking-wide text-zinc-400">Queued {item.position || index + 1}</p>
@@ -348,7 +624,7 @@ export function ChatComposer({
                               Files {item.attachmentIds.length}
                             </span>
                           ) : null}
-                          {scopeBadges.map((badge) => (
+                          {badges.map((badge) => (
                             <span key={`${item.id}-${badge}`} className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-600">
                               {badge}
                             </span>
@@ -401,7 +677,7 @@ export function ChatComposer({
                     </div>
 
                     {showSteerEditor ? (
-                      <div className="mt-2 rounded-md border border-zinc-200 bg-zinc-50 p-2">
+                      <div className="mt-2 rounded-xl border border-zinc-200 bg-zinc-50 p-2">
                         <textarea
                           value={steerDraft}
                           onChange={(event) =>
@@ -411,7 +687,7 @@ export function ChatComposer({
                             }))
                           }
                           placeholder="Add steer note for this queued message"
-                          className="min-h-16 w-full resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800 outline-none focus:border-zinc-400 focus:ring-2 focus:ring-zinc-200"
+                          className="min-h-16 w-full resize-y rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800 outline-none focus:border-zinc-400 focus:ring-2 focus:ring-zinc-200"
                         />
                         <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
                           <button
@@ -422,7 +698,7 @@ export function ChatComposer({
                                 inputOptions: options,
                               })
                             }
-                            className="rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
+                            className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
                           >
                             Save steer
                           </button>
@@ -435,7 +711,7 @@ export function ChatComposer({
                                 runNow: true,
                               })
                             }
-                            className="rounded-md bg-zinc-900 px-2.5 py-1.5 text-xs text-white hover:bg-zinc-800"
+                            className="rounded-full bg-zinc-900 px-3 py-1.5 text-xs text-white hover:bg-zinc-800"
                           >
                             Steer + run now
                           </button>
@@ -471,104 +747,226 @@ export function ChatComposer({
               event.currentTarget.value = "";
             }}
           />
-          <textarea
-            ref={textareaRef}
-            value={draft}
-            onChange={(event) => onDraftChange(event.target.value)}
-            onKeyDown={onComposerKeyDown}
-            onPaste={(event) => {
-              const pastedFiles = Array.from(event.clipboardData?.files || []);
-              if (pastedFiles.length > 0) {
-                event.preventDefault();
-                void uploadFiles(pastedFiles);
-              }
-            }}
-            placeholder="Message BAT..."
-            className="min-h-20 w-full resize-none rounded-md border border-zinc-300 bg-white px-3.5 pb-12 pt-2.5 text-[15px] text-zinc-900 outline-none transition focus:border-zinc-400 focus:ring-1 focus:ring-zinc-200 sm:min-h-24"
-          />
 
-          {uploadedDocs.length > 0 ? (
-              <div className="pointer-events-auto absolute left-3.5 right-3.5 top-3 flex flex-wrap gap-2">
-              {uploadedDocs.map((doc) => (
-                <span
-                  key={doc.id}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-700"
-                >
-                  <FileText className="h-3.5 w-3.5 text-zinc-500" />
-                  <span className="max-w-[180px] truncate">{doc.fileName}</span>
-                  <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-zinc-500">
-                    {doc.status === "needs_review" ? "review" : doc.status}
-                  </span>
+          <div className="overflow-hidden rounded-[1.5rem] border border-zinc-200 bg-[linear-gradient(180deg,#ffffff_0%,#fafafa_100%)] shadow-[0_18px_42px_-28px_rgba(15,23,42,0.45)]">
+            {branchContext ? (
+              <div className="border-b border-zinc-200/90 bg-[linear-gradient(180deg,#fafafa_0%,#f4f5f6_100%)] px-3 py-2.5">
+                <div className="flex items-start gap-2.5">
+                  <div className="flex shrink-0 flex-col items-center">
+                    <span className="mt-1 h-2.5 w-2.5 rounded-full bg-zinc-900" />
+                    <span className="mt-1 h-8 w-px bg-zinc-300" />
+                  </div>
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-zinc-700 shadow-sm">
+                    {branchContext.kind === "document_edit" ? <Sparkles className="h-4 w-4" /> : <GitBranch className="h-4 w-4" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full border border-zinc-200 bg-zinc-900 px-2.5 py-1 text-[11px] font-medium text-white">
+                        {branchKindLabel(branchContext)}
+                      </span>
+                      <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-medium text-zinc-700">
+                        {branchContext.commandHint || (branchContext.kind === "document_edit" ? "/edit-doc" : "/quote-doc")}
+                      </span>
+                      {typeof branchContext.versionNumber === "number" && branchContext.versionNumber > 0 ? (
+                        <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[11px] text-zinc-500">
+                          v{branchContext.versionNumber}
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="mt-1 text-sm font-semibold text-zinc-900">{branchContext.title}</p>
+                    {branchContext.subtitle ? <p className="text-xs text-zinc-500">{branchContext.subtitle}</p> : null}
+                    {branchContext.quotedText ? (
+                      <p className="mt-1 line-clamp-2 border-l-2 border-zinc-300 pl-2 text-xs text-zinc-600">
+                        {branchContext.quotedText}
+                      </p>
+                    ) : null}
+                    {branchActions.length ? (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {branchActions.map((action) => (
+                          <button
+                            key={action.label}
+                            type="button"
+                            onClick={() => onDraftChange(action.value)}
+                            className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[11px] text-zinc-600 hover:bg-zinc-100"
+                          >
+                            {action.label}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
                   <button
                     type="button"
-                    onClick={() =>
-                      setUploadedDocs((previous) => previous.filter((item) => item.id !== doc.id))
-                    }
-                    className="rounded-full p-0.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
-                    aria-label="Remove attached document"
+                    onClick={onClearBranchContext}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-500 hover:bg-zinc-100"
+                    aria-label="Clear scoped document context"
                   >
-                    <X className="h-3 w-3" />
+                    <X className="h-4 w-4" />
                   </button>
-                </span>
-              ))}
-            </div>
-          ) : null}
+                </div>
+              </div>
+            ) : null}
 
-          <p className="pointer-events-none absolute bottom-3 left-3.5 text-[11px] text-zinc-400">
-            Enter to send/queue, Shift+Enter for newline, Cmd/Ctrl+Enter to interrupt + send
-          </p>
+            <div className="relative">
+              <textarea
+                ref={textareaRef}
+                value={draft}
+                onChange={(event) => onDraftChange(event.target.value)}
+                onKeyDown={onComposerKeyDown}
+                onPaste={(event) => {
+                  const pastedFiles = Array.from(event.clipboardData?.files || []);
+                  if (pastedFiles.length > 0) {
+                    event.preventDefault();
+                    void uploadFiles(pastedFiles);
+                  }
+                }}
+                placeholder={resolveComposerPlaceholder(branchContext)}
+                className="min-h-[7.2rem] w-full resize-none border-0 bg-transparent px-4 pb-16 pt-3.5 text-[15px] leading-6 text-zinc-900 outline-none placeholder:text-zinc-400 sm:min-h-[8.2rem]"
+              />
+
+              {uploadedDocs.length > 0 ? (
+                <div className="pointer-events-auto absolute left-4 right-4 top-3 flex flex-wrap gap-2">
+                  {uploadedDocs.map((doc) => (
+                    <span
+                      key={doc.id}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-700 shadow-sm"
+                    >
+                      <FileText className="h-3.5 w-3.5 text-zinc-500" />
+                      <span className="max-w-[180px] truncate">{doc.fileName}</span>
+                      <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-zinc-500">
+                        {doc.status === "needs_review" ? "review" : doc.status}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setUploadedDocs((previous) => previous.filter((item) => item.id !== doc.id))}
+                        className="rounded-full p-0.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
+                        aria-label="Remove attached document"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+
+              {slashMatches.length ? (
+                <div className="absolute bottom-[4.6rem] left-3 right-3 z-10 rounded-2xl border border-zinc-200 bg-white/98 p-2 shadow-2xl backdrop-blur">
+                  <div className="mb-2 flex items-center justify-between px-1">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Slash Commands</p>
+                    <p className="text-[11px] text-zinc-400">ChatGPT-style quick actions</p>
+                  </div>
+                  <div className="bat-scrollbar mb-2 flex gap-2 overflow-x-auto px-1 pb-1">
+                    {slashPills.map((command) => (
+                      <button
+                        key={command.id}
+                        type="button"
+                        onClick={() => applySlashCommand(command)}
+                        className="whitespace-nowrap rounded-full border border-zinc-200 bg-zinc-50 px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100"
+                      >
+                        {command.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mb-2 flex items-center justify-between px-1">
+                    <p className="text-[11px] text-zinc-500">Modes, focus presets, document actions, and deliverables.</p>
+                    <p className="text-[11px] text-zinc-400">Enter to run</p>
+                  </div>
+                  <div className="space-y-1">
+                    {slashMatches.slice(0, 10).map((command, index) => (
+                      <button
+                        key={command.id}
+                        type="button"
+                        onClick={() => applySlashCommand(command)}
+                        className={`flex w-full items-start justify-between gap-3 rounded-xl px-3 py-2 text-left ${
+                          index === activeSlashIndex ? "bg-zinc-100" : "hover:bg-zinc-50"
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-600">
+                              {command.id}
+                            </span>
+                            <span className="text-xs font-medium text-zinc-900">{command.label}</span>
+                          </div>
+                          <p className="mt-1 text-xs text-zinc-500">{command.description}</p>
+                        </div>
+                        <div className="flex shrink-0 flex-col items-end gap-1">
+                          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-zinc-500">
+                            {command.category}
+                          </span>
+                          {command.badge ? (
+                            <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[10px] text-zinc-500">
+                              {command.badge}
+                            </span>
+                          ) : null}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="pointer-events-none absolute bottom-12 left-4 right-32 flex items-center justify-between gap-2 text-[11px] text-zinc-400">
+                <span>{branchContext ? "Scoped branch active" : "Enter to send, Shift+Enter for newline"}</span>
+                <span>{isStreaming ? "Cmd/Ctrl+Enter interrupts + sends" : "Type / for quick actions"}</span>
+              </div>
+
+              <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={openFilePicker}
+                    disabled={uploading || !canAttach}
+                    className="inline-flex h-10 items-center gap-1 rounded-full border border-zinc-200 bg-white px-3 text-xs text-zinc-600 shadow-sm hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
+                    title="Attach documents"
+                  >
+                    <Paperclip className="h-3.5 w-3.5" />
+                    {uploading ? "Uploading..." : "Attach"}
+                  </button>
+                  {isStreaming ? (
+                    <button
+                      type="button"
+                      onClick={onStop}
+                      className="inline-flex h-10 items-center gap-1 rounded-full border border-zinc-200 bg-white px-3 text-xs text-zinc-600 shadow-sm hover:bg-zinc-100"
+                    >
+                      <Square className="h-3.5 w-3.5" />
+                      Stop
+                    </button>
+                  ) : null}
+                  {isStreaming && draft.trim() ? (
+                    <button
+                      type="button"
+                      onClick={steerRunNow}
+                      className="inline-flex h-10 items-center gap-1 rounded-full border border-zinc-200 bg-white px-3 text-xs text-zinc-600 shadow-sm hover:bg-zinc-100"
+                    >
+                      <Sparkles className="h-3.5 w-3.5" />
+                      Steer
+                    </button>
+                  ) : null}
+                </div>
+                <button
+                  type="submit"
+                  disabled={!draft.trim() && uploadedDocs.length === 0 && !branchContext}
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-zinc-900 text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                  aria-label={isStreaming ? "Queue message" : "Send message"}
+                  title={isStreaming ? "Queue message" : "Send message"}
+                >
+                  <SendHorizontal className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+
           {!canAttach && attachDisabledReason ? (
-            <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <div className="mt-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
               {attachDisabledReason}
             </div>
           ) : null}
           {uploadError ? (
-            <div className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            <div className="mt-2 rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
               {uploadError}
             </div>
           ) : null}
-
-          <div className="absolute bottom-2.5 right-2.5 flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={openFilePicker}
-              disabled={uploading || !canAttach}
-              className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 py-2 text-xs text-zinc-600 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
-              title="Attach documents"
-            >
-              <Paperclip className="h-3.5 w-3.5" />
-              {uploading ? "Uploading..." : "Attach"}
-            </button>
-            {isStreaming ? (
-              <button
-                type="button"
-                onClick={onStop}
-                className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 py-2 text-xs text-zinc-600 hover:bg-zinc-100"
-              >
-                <Square className="h-3.5 w-3.5" />
-                Stop
-              </button>
-            ) : null}
-            {isStreaming && draft.trim() ? (
-              <button
-                type="button"
-                onClick={steerRunNow}
-                className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 py-2 text-xs text-zinc-600 hover:bg-zinc-100"
-              >
-                <Sparkles className="h-3.5 w-3.5" />
-                Steer
-              </button>
-            ) : null}
-            <button
-              type="submit"
-              disabled={!draft.trim() && uploadedDocs.length === 0}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-zinc-900 text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300"
-              aria-label={isStreaming ? "Queue message" : "Send message"}
-              title={isStreaming ? "Queue message" : "Send message"}
-            >
-              <SendHorizontal className="h-4 w-4" />
-            </button>
-          </div>
         </form>
       </div>
     </section>
