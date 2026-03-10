@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   applyWorkspaceBrandDnaAutofill,
   compareViralStudioDocumentVersions,
@@ -140,6 +141,31 @@ const AUTOFILL_FIELD_ORDER: ViralStudioAutofillFieldKey[] = [
   "exemplars",
   "summary",
 ];
+
+const WORKFLOW_STAGE_ORDER: Array<ViralStudioWorkflowStatus["workflowStage"]> = [
+  "intake_pending",
+  "intake_complete",
+  "studio_autofill_review",
+  "extraction",
+  "curation",
+  "generation",
+  "chat_execution",
+];
+
+type WorkflowGuideAction =
+  | "open_intake"
+  | "run_autofill"
+  | "finalize_dna"
+  | "start_extraction"
+  | "curate_references"
+  | "generate_pack"
+  | "handoff_chat";
+
+function workflowStageOrderIndex(stage: ViralStudioWorkflowStatus["workflowStage"] | undefined): number {
+  if (!stage) return 0;
+  const index = WORKFLOW_STAGE_ORDER.indexOf(stage);
+  return index >= 0 ? index : 0;
+}
 
 function csvToArray(value: string): string[] {
   return value
@@ -554,9 +580,11 @@ function isStepValid(step: 1 | 2 | 3 | 4, form: BrandFormState): boolean {
 }
 
 export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
 
   const [contracts, setContracts] = useState<ViralStudioContractSnapshot | null>(null);
   const [telemetry, setTelemetry] = useState<ViralStudioTelemetrySnapshot | null>(null);
@@ -1532,6 +1560,232 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     }
   }, [workspaceId, references, resolveChatBranch]);
 
+  const runAutofillFinalize = useCallback(async () => {
+    setAutofillBusy(true);
+    setError(null);
+    try {
+      const previewPayload = autofillPreview
+        ? { preview: autofillPreview }
+        : await previewWorkspaceBrandDnaAutofill(workspaceId);
+      const preview = previewPayload.preview;
+      setAutofillPreview(preview);
+      if (!autofillPreview) {
+        setAutofillSelection(createAutofillSelection(preview));
+      }
+      const selectedFields = preview.suggestedFields.filter((field) => autofillSelection[field] !== false);
+      const appliedPayload = await applyWorkspaceBrandDnaAutofill(workspaceId, {
+        ...(selectedFields.length ? { selectedFields } : {}),
+        finalizeIfReady: true,
+      });
+      setBrandProfile(appliedPayload.profile);
+      setBrandForm(toFormState(appliedPayload.profile));
+      setAutofillPreview(appliedPayload.preview);
+      setAutofillSelection(createAutofillSelection(appliedPayload.preview));
+      if (appliedPayload.profile.status === "final" && appliedPayload.profile.completeness.ready) {
+        setOnboardingStep(4);
+        setIsEditingBrandDna(false);
+      }
+      await Promise.all([refreshWorkflow(), refreshTelemetry()]);
+    } catch (autofillError: unknown) {
+      setError(String((autofillError as Error)?.message || "Failed to run guided autofill"));
+    } finally {
+      setAutofillBusy(false);
+    }
+  }, [workspaceId, autofillPreview, autofillSelection, refreshWorkflow, refreshTelemetry]);
+
+  const workflowStage = workflowStatus?.workflowStage || "intake_pending";
+  const workflowStepIndex = workflowStageOrderIndex(workflowStage);
+  const workflowRail = useMemo(() => {
+    const fallbackFlow: ViralStudioWorkflowStatus["flow"] = [
+      "intake_complete",
+      "studio_autofill_review",
+      "extraction",
+      "curation",
+      "generation",
+      "chat_execution",
+    ];
+    const stageFlow = workflowStatus?.flow || fallbackFlow;
+    const withIntake = ["intake_pending", ...stageFlow] as Array<ViralStudioWorkflowStatus["workflowStage"]>;
+    const deduped = Array.from(new Set(withIntake));
+    return deduped.map((stage, index) => ({
+      stage,
+      label: toWorkflowStageLabel(stage),
+      state:
+        index < workflowStepIndex
+          ? ("done" as const)
+          : index === workflowStepIndex
+            ? ("active" as const)
+            : ("upcoming" as const),
+    }));
+  }, [workflowStatus?.flow, workflowStepIndex]);
+  const workflowProgressPct = Math.round(((workflowStepIndex + 1) / WORKFLOW_STAGE_ORDER.length) * 100);
+  const workflowGuide = useMemo(() => {
+    if (workflowStage === "intake_pending") {
+      return {
+        action: "open_intake" as WorkflowGuideAction,
+        title: "Complete Workspace Intake",
+        body: "Start with website/social intake so Brand DNA autofill has enough evidence to work correctly.",
+        cta: "Open Intake Form",
+      };
+    }
+    if (workflowStage === "intake_complete" || workflowStage === "studio_autofill_review") {
+      return {
+        action: "run_autofill" as WorkflowGuideAction,
+        title: "Run Autofill + Finalize DNA",
+        body: "Auto-hydrate mission, audience, voice, and guardrails from workspace evidence, then finalize in one flow.",
+        cta: "Run Smart Autofill",
+      };
+    }
+    if (workflowStage === "extraction") {
+      return {
+        action: "start_extraction" as WorkflowGuideAction,
+        title: "Start Data-Max Extraction",
+        body: "Use top suggested social source and run deep extraction to build the viral reference set.",
+        cta: "Start Data-Max Run",
+      };
+    }
+    if (workflowStage === "curation") {
+      return {
+        action: "curate_references" as WorkflowGuideAction,
+        title: "Curate Priority References",
+        body: "Auto-pin top references to seed generation with clear, explainable winners.",
+        cta: "Auto-Curate Top 3",
+      };
+    }
+    if (workflowStage === "generation") {
+      return {
+        action: "generate_pack" as WorkflowGuideAction,
+        title: "Generate Campaign Pack",
+        body: "Build hook/script/caption/CTA variants from Brand DNA + curated references in one run.",
+        cta: "Generate Pack",
+      };
+    }
+    return {
+      action: "handoff_chat" as WorkflowGuideAction,
+      title: "Ship To Core Chat",
+      body: "Send the final context pack to chat so strategy and execution continue in the main business workflow.",
+      cta: "Handoff To Chat",
+    };
+  }, [workflowStage]);
+
+  const runWorkflowGuideAction = useCallback(async () => {
+    if (workflowGuide.action === "open_intake") {
+      router.push(`/app/w/${workspaceId}/intake`);
+      return;
+    }
+    if (workflowGuide.action === "run_autofill") {
+      await runAutofillFinalize();
+      return;
+    }
+    if (workflowGuide.action === "start_extraction") {
+      if (!brandReady) {
+        setError("Finalize Brand DNA before starting extraction.");
+        setOnboardingStep(4);
+        setIsEditingBrandDna(true);
+        return;
+      }
+      const fallbackSource = suggestedSources[0];
+      const resolvedSourceUrl = sourceUrl.trim() || fallbackSource?.sourceUrl || "";
+      const resolvedPlatform = sourceUrl.trim() ? sourcePlatform : fallbackSource?.platform || sourcePlatform;
+      if (!resolvedSourceUrl) {
+        setShowExtractionModal(true);
+        return;
+      }
+      setIsBusy(true);
+      setError(null);
+      try {
+        const payload = await createViralStudioIngestion(workspaceId, {
+          sourcePlatform: resolvedPlatform,
+          sourceUrl: resolvedSourceUrl,
+          maxVideos: 120,
+          lookbackDays: 365,
+          sortBy: "engagement",
+          preset: "data-max",
+        });
+        setSourcePlatform(resolvedPlatform);
+        setSourceUrl(resolvedSourceUrl);
+        setIngestionPreset("data-max");
+        setMaxVideos(120);
+        setLookbackDays(365);
+        setShowExtractionModal(false);
+        setActiveIngestion(payload.run);
+        setIngestions((previous) => [payload.run, ...previous.filter((row) => row.id !== payload.run.id)]);
+        await Promise.all([refreshTelemetry(), refreshWorkflow()]);
+      } catch (ingestionError: unknown) {
+        setError(String((ingestionError as Error)?.message || "Failed to start guided extraction"));
+      } finally {
+        setIsBusy(false);
+      }
+      return;
+    }
+    if (workflowGuide.action === "curate_references") {
+      const candidates = references
+        .filter((item) => item.shortlistState !== "exclude")
+        .slice(0, 3);
+      if (!candidates.length) {
+        setError("No ranked references are available yet for curation.");
+        return;
+      }
+      setIsBusy(true);
+      setError(null);
+      try {
+        const updates = await Promise.all(
+          candidates.map((item, index) =>
+            updateViralStudioReferenceShortlist(workspaceId, {
+              referenceId: item.id,
+              action: index === 0 ? "must-use" : "pin",
+            })
+          )
+        );
+        const byId = new Map(updates.map((entry) => [entry.item.id, entry.item]));
+        setReferences((previous) => previous.map((item) => byId.get(item.id) || item));
+        setCurationNotice("Top references auto-curated: #1 must-use, #2-3 pinned.");
+        await Promise.all([refreshTelemetry(), refreshWorkflow()]);
+      } catch (curationError: unknown) {
+        setError(String((curationError as Error)?.message || "Failed to auto-curate references"));
+      } finally {
+        setIsBusy(false);
+      }
+      return;
+    }
+    if (workflowGuide.action === "generate_pack") {
+      if (generation) {
+        await sendGenerationToChat();
+        return;
+      }
+      await generatePack();
+      return;
+    }
+    if (generation) {
+      await sendGenerationToChat();
+      router.push(`/app/w/${workspaceId}`);
+      return;
+    }
+    if (prioritizedReferenceCount > 0) {
+      await sendShortlistToChat();
+      router.push(`/app/w/${workspaceId}`);
+      return;
+    }
+    router.push(`/app/w/${workspaceId}`);
+  }, [
+    workflowGuide.action,
+    router,
+    workspaceId,
+    runAutofillFinalize,
+    brandReady,
+    suggestedSources,
+    sourceUrl,
+    sourcePlatform,
+    refreshTelemetry,
+    refreshWorkflow,
+    references,
+    generation,
+    sendGenerationToChat,
+    prioritizedReferenceCount,
+    sendShortlistToChat,
+    generatePack,
+  ]);
+
   if (loading) {
     return (
       <section className="vbs-shell vbs-panel">
@@ -1545,18 +1799,68 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   return (
     <section className="vbs-shell">
       <header className="vbs-hero">
-        <p className="vbs-chip">Plans 1-4 Active Build</p>
+        <p className="vbs-chip">Workflow Redesign Active</p>
         <h1 className="vbs-title">Viral Brand Studio</h1>
         <p className="vbs-subtitle">
-          Pomelli-style 4-step Brand DNA onboarding, reel-inspired extraction, and explainable viral reference curation integrated with generation and document workflows.
+          Website-first Brand DNA, data-max extraction, explainable curation, and durable campaign outputs wired directly into core chat execution.
         </p>
       </header>
 
       {error ? <div className="vbs-alert">{error}</div> : null}
       {chatBridgeStatus ? <div className="vbs-alert" style={{ borderColor: "#b6f0d4", background: "#f2fff7", color: "#11643f" }}>{chatBridgeStatus}</div> : null}
 
+      <section className="vbs-command-deck">
+        <div className="vbs-command-main">
+          <p className="vbs-meta">Unified Workflow Progress</p>
+          <div className="vbs-command-header">
+            <h2>Chat-First Workflow Command Deck</h2>
+            <strong>{workflowProgressPct}% complete</strong>
+          </div>
+          <div className="vbs-progress-track" aria-hidden="true">
+            <span style={{ width: `${workflowProgressPct}%` }} />
+          </div>
+          <div className="vbs-stage-rail">
+            {workflowRail.map((item) => (
+              <div
+                key={item.stage}
+                className={`vbs-stage-card ${
+                  item.state === "active" ? "is-active" : item.state === "done" ? "is-done" : ""
+                }`}
+              >
+                <p>{item.label}</p>
+                <span>{item.state === "done" ? "Done" : item.state === "active" ? "Now" : "Queued"}</span>
+              </div>
+            ))}
+          </div>
+          <div className="vbs-command-links">
+            <a href="#vbs-section-onboarding">Brand DNA</a>
+            <a href="#vbs-section-extraction">Extraction + Curation</a>
+            <a href="#vbs-section-generation">Generation</a>
+            <a href="#vbs-section-documents">Documents</a>
+            <a href="#vbs-section-diagnostics">Diagnostics</a>
+          </div>
+        </div>
+        <aside className="vbs-command-next">
+          <p className="vbs-meta">Recommended Next Action</p>
+          <h3>{workflowGuide.title}</h3>
+          <p>{workflowGuide.body}</p>
+          <div className="vbs-actions">
+            <button type="button" disabled={isBusy || autofillBusy} onClick={() => void runWorkflowGuideAction()}>
+              {workflowGuide.cta}
+            </button>
+            <button type="button" onClick={() => router.push(`/app/w/${workspaceId}`)}>
+              Open Core Chat
+            </button>
+          </div>
+          <p className="vbs-meta">
+            Stage now: <strong>{toWorkflowStageLabel(workflowStage)}</strong> • Prioritized references:{" "}
+            <strong>{prioritizedReferenceCount}</strong>
+          </p>
+        </aside>
+      </section>
+
       <div className="vbs-grid">
-        <article className="vbs-panel">
+        <article className="vbs-panel" id="vbs-section-onboarding">
           <h2 className="vbs-panel-title">Brand DNA Onboarding</h2>
           <p className="vbs-panel-subtitle">Complete all 4 steps and finalize to unlock generation workflow.</p>
           <div className="vbs-output vbs-workflow-status">
@@ -1756,103 +2060,121 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
           </p>
         </article>
 
-        <article className="vbs-panel">
-          <h2 className="vbs-panel-title">System Contract</h2>
-          <p className="vbs-panel-subtitle">State and telemetry taxonomy from Plan 1 foundation.</p>
-          <div className="vbs-contract-grid">
+        <article className="vbs-panel" id="vbs-section-diagnostics">
+          <div className="vbs-diagnostics-head">
             <div>
-              <h3>State Machines</h3>
-              <ul>
-                <li>Onboarding: {contracts?.stateMachines.onboarding.states.join(" → ") || "n/a"}</li>
-                <li>Ingestion: {contracts?.stateMachines.ingestion.states.join(" → ") || "n/a"}</li>
-                <li>Generation: {contracts?.stateMachines.generation.states.join(" → ") || "n/a"}</li>
-                <li>Document: {contracts?.stateMachines.document.states.join(" → ") || "n/a"}</li>
-              </ul>
+              <h2 className="vbs-panel-title">System Contract</h2>
+              <p className="vbs-panel-subtitle">Operational diagnostics and state machine references.</p>
             </div>
-            <div>
-              <h3>Telemetry</h3>
-              <ul>
-                {(contracts?.telemetryEvents || []).slice(0, 7).map((event) => <li key={event.name}>{event.name}</li>)}
-              </ul>
-            </div>
+            <button type="button" onClick={() => setShowDiagnostics((previous) => !previous)}>
+              {showDiagnostics ? "Hide Diagnostics" : "Show Diagnostics"}
+            </button>
           </div>
-          <div className="vbs-telemetry-grid">
-            <div className="vbs-output">
-              <h3>Runtime Funnel</h3>
-              <ul>
-                <li>Onboarding finalized: {telemetry?.funnel.onboardingFinalized ? "yes" : "no"}</li>
-                <li>Ingestions started: {telemetry?.funnel.ingestionsStarted ?? 0}</li>
-                <li>Ingestions completed: {telemetry?.funnel.ingestionsCompleted ?? 0}</li>
-                <li>Ingestions failed: {telemetry?.funnel.ingestionsFailed ?? 0}</li>
-                <li>Generations completed: {telemetry?.funnel.generationsCompleted ?? 0}</li>
-                <li>Documents versioned: {telemetry?.funnel.documentsVersioned ?? 0}</li>
-                <li>Exports: {telemetry?.funnel.exports ?? 0}</li>
-              </ul>
-            </div>
-            <div className="vbs-output">
-              <h3>Latency (Avg)</h3>
-              <div className="vbs-telemetry-kpi">
+          {showDiagnostics ? (
+            <>
+              <div className="vbs-contract-grid">
                 <div>
-                  <span>Ingestion</span>
-                  <strong>{formatDurationMs(telemetry?.latencyMs.ingestionAvg ?? 0)}</strong>
+                  <h3>State Machines</h3>
+                  <ul>
+                    <li>Onboarding: {contracts?.stateMachines.onboarding.states.join(" → ") || "n/a"}</li>
+                    <li>Ingestion: {contracts?.stateMachines.ingestion.states.join(" → ") || "n/a"}</li>
+                    <li>Generation: {contracts?.stateMachines.generation.states.join(" → ") || "n/a"}</li>
+                    <li>Document: {contracts?.stateMachines.document.states.join(" → ") || "n/a"}</li>
+                  </ul>
                 </div>
                 <div>
-                  <span>Generation</span>
-                  <strong>{formatDurationMs(telemetry?.latencyMs.generationAvg ?? 0)}</strong>
-                </div>
-                <div>
-                  <span>Document</span>
-                  <strong>{formatDurationMs(telemetry?.latencyMs.documentAvg ?? 0)}</strong>
+                  <h3>Telemetry</h3>
+                  <ul>
+                    {(contracts?.telemetryEvents || []).slice(0, 7).map((event) => <li key={event.name}>{event.name}</li>)}
+                  </ul>
                 </div>
               </div>
-              <p className="vbs-meta">Recent runtime events: {telemetry?.recent.length ?? 0}</p>
-            </div>
-          </div>
-          <div className="vbs-telemetry-grid">
+              <div className="vbs-telemetry-grid">
+                <div className="vbs-output">
+                  <h3>Runtime Funnel</h3>
+                  <ul>
+                    <li>Onboarding finalized: {telemetry?.funnel.onboardingFinalized ? "yes" : "no"}</li>
+                    <li>Ingestions started: {telemetry?.funnel.ingestionsStarted ?? 0}</li>
+                    <li>Ingestions completed: {telemetry?.funnel.ingestionsCompleted ?? 0}</li>
+                    <li>Ingestions failed: {telemetry?.funnel.ingestionsFailed ?? 0}</li>
+                    <li>Generations completed: {telemetry?.funnel.generationsCompleted ?? 0}</li>
+                    <li>Documents versioned: {telemetry?.funnel.documentsVersioned ?? 0}</li>
+                    <li>Exports: {telemetry?.funnel.exports ?? 0}</li>
+                  </ul>
+                </div>
+                <div className="vbs-output">
+                  <h3>Latency (Avg)</h3>
+                  <div className="vbs-telemetry-kpi">
+                    <div>
+                      <span>Ingestion</span>
+                      <strong>{formatDurationMs(telemetry?.latencyMs.ingestionAvg ?? 0)}</strong>
+                    </div>
+                    <div>
+                      <span>Generation</span>
+                      <strong>{formatDurationMs(telemetry?.latencyMs.generationAvg ?? 0)}</strong>
+                    </div>
+                    <div>
+                      <span>Document</span>
+                      <strong>{formatDurationMs(telemetry?.latencyMs.documentAvg ?? 0)}</strong>
+                    </div>
+                  </div>
+                  <p className="vbs-meta">Recent runtime events: {telemetry?.recent.length ?? 0}</p>
+                </div>
+              </div>
+              <div className="vbs-telemetry-grid">
+                <div className="vbs-output">
+                  <h3>Error Classes</h3>
+                  {telemetry && Object.keys(telemetry.errorClasses).length > 0 ? (
+                    <ul>
+                      {Object.entries(telemetry.errorClasses)
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 8)
+                        .map(([name, count]) => (
+                          <li key={name}>
+                            {name}: {count}
+                          </li>
+                        ))}
+                    </ul>
+                  ) : (
+                    <p className="vbs-meta">No runtime errors recorded in this telemetry window.</p>
+                  )}
+                </div>
+                <div className="vbs-output">
+                  <h3>Recent Events</h3>
+                  {telemetry?.recent.length ? (
+                    <ul>
+                      {telemetry.recent
+                        .slice()
+                        .reverse()
+                        .slice(0, 8)
+                        .map((event) => (
+                          <li key={`${event.at}-${event.name}`}>
+                            [{event.status}] {event.name} ({event.stage}) • {formatDurationMs(event.durationMs)} •{" "}
+                            {formatTimestamp(event.at)}
+                          </li>
+                        ))}
+                    </ul>
+                  ) : (
+                    <p className="vbs-meta">No events yet.</p>
+                  )}
+                </div>
+              </div>
+            </>
+          ) : (
             <div className="vbs-output">
-              <h3>Error Classes</h3>
-              {telemetry && Object.keys(telemetry.errorClasses).length > 0 ? (
-                <ul>
-                  {Object.entries(telemetry.errorClasses)
-                    .sort((a, b) => b[1] - a[1])
-                    .slice(0, 8)
-                    .map(([name, count]) => (
-                      <li key={name}>
-                        {name}: {count}
-                      </li>
-                    ))}
-                </ul>
-              ) : (
-                <p className="vbs-meta">No runtime errors recorded in this telemetry window.</p>
-              )}
+              <p className="vbs-meta">
+                Diagnostics are hidden to keep the workflow focused. Open this panel when you need state contract,
+                telemetry, or latency details.
+              </p>
             </div>
-            <div className="vbs-output">
-              <h3>Recent Events</h3>
-              {telemetry?.recent.length ? (
-                <ul>
-                  {telemetry.recent
-                    .slice()
-                    .reverse()
-                    .slice(0, 8)
-                    .map((event) => (
-                      <li key={`${event.at}-${event.name}`}>
-                        [{event.status}] {event.name} ({event.stage}) • {formatDurationMs(event.durationMs)} •{" "}
-                        {formatTimestamp(event.at)}
-                      </li>
-                    ))}
-                </ul>
-              ) : (
-                <p className="vbs-meta">No events yet.</p>
-              )}
-            </div>
-          </div>
+          )}
         </article>
       </div>
 
       {!onboardingLocked ? (
         <>
           <div className="vbs-grid">
-            <article className="vbs-panel">
+            <article className="vbs-panel" id="vbs-section-extraction">
               <h2 className="vbs-panel-title">Competitor Extraction</h2>
               <div className="vbs-actions">
                 <button type="button" onClick={() => setShowExtractionModal(true)} disabled={isBusy}>
@@ -2152,7 +2474,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
           </div>
 
           <div className="vbs-grid">
-            <article className="vbs-panel vbs-prompt-studio">
+            <article className="vbs-panel vbs-prompt-studio" id="vbs-section-generation">
               <h2 className="vbs-panel-title">Prompt Studio</h2>
               <p className="vbs-panel-subtitle">
                 Two-pane pack builder using Brand DNA + shortlisted references with section-level refine and regenerate controls.
@@ -2284,7 +2606,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
               </div>
             </article>
 
-            <article className="vbs-panel vbs-document-workspace">
+            <article className="vbs-panel vbs-document-workspace" id="vbs-section-documents">
               <h2 className="vbs-panel-title">Document Workspace</h2>
               <p className="vbs-panel-subtitle">
                 Editable campaign artifact with autosave every 10s, version timeline, compare view, and promote/rollback workflow.

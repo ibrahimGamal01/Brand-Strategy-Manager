@@ -212,6 +212,155 @@ a {
   font-size: 0.86rem;
 }
 
+.vbs-command-deck {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 22%, var(--bat-border));
+  border-radius: 1rem;
+  background:
+    linear-gradient(155deg, color-mix(in srgb, var(--vbs-sand) 58%, white) 0%, white 40%, color-mix(in srgb, var(--vbs-cobalt) 8%, white) 100%);
+  box-shadow: 0 14px 28px rgba(16, 24, 40, 0.08);
+  padding: 0.95rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr);
+  gap: 0.9rem;
+}
+
+.vbs-command-main,
+.vbs-command-next {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 14%, var(--bat-border));
+  border-radius: 0.85rem;
+  background: color-mix(in srgb, white 95%, var(--vbs-sand));
+  padding: 0.8rem;
+}
+
+.vbs-command-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.55rem;
+}
+
+.vbs-command-header h2 {
+  margin: 0;
+  font-family: var(--vbs-display-font);
+  color: var(--vbs-ink);
+  font-size: 1.1rem;
+}
+
+.vbs-command-header strong {
+  font-size: 0.9rem;
+  color: color-mix(in srgb, var(--vbs-cobalt) 76%, var(--vbs-ink));
+}
+
+.vbs-progress-track {
+  margin-top: 0.5rem;
+  width: 100%;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--vbs-cobalt) 14%, white);
+  overflow: hidden;
+}
+
+.vbs-progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--vbs-cobalt) 72%, white),
+    color-mix(in srgb, var(--vbs-teal) 76%, white)
+  );
+  transition: width 220ms ease;
+}
+
+.vbs-stage-rail {
+  margin-top: 0.68rem;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.vbs-stage-card {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 16%, var(--bat-border));
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, white 93%, var(--vbs-sand));
+  padding: 0.45rem;
+  display: grid;
+  gap: 0.18rem;
+}
+
+.vbs-stage-card p {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--vbs-ink) 82%, #59607a);
+}
+
+.vbs-stage-card span {
+  font-size: 0.63rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: color-mix(in srgb, var(--vbs-ink) 54%, #59607a);
+}
+
+.vbs-stage-card.is-active {
+  border-color: color-mix(in srgb, var(--vbs-cobalt) 58%, white);
+  background: linear-gradient(
+    155deg,
+    color-mix(in srgb, var(--vbs-cobalt) 18%, white) 0%,
+    color-mix(in srgb, var(--vbs-teal) 14%, white) 100%
+  );
+}
+
+.vbs-stage-card.is-done {
+  border-color: color-mix(in srgb, var(--vbs-teal) 48%, white);
+  background: color-mix(in srgb, var(--vbs-teal) 14%, white);
+}
+
+.vbs-command-links {
+  margin-top: 0.65rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.vbs-command-links a {
+  text-decoration: none;
+  color: color-mix(in srgb, var(--vbs-cobalt) 82%, var(--vbs-ink));
+  font-size: 0.74rem;
+  font-weight: 600;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 24%, var(--bat-border));
+  border-radius: 999px;
+  padding: 0.3rem 0.55rem;
+  transition: background-color 180ms ease, border-color 180ms ease;
+}
+
+.vbs-command-links a:hover {
+  background: color-mix(in srgb, var(--vbs-cobalt) 14%, white);
+  border-color: color-mix(in srgb, var(--vbs-cobalt) 40%, var(--bat-border));
+}
+
+.vbs-command-next h3 {
+  margin: 0.35rem 0 0;
+  font-family: var(--vbs-display-font);
+  color: var(--vbs-ink);
+  font-size: 1.02rem;
+}
+
+.vbs-command-next p {
+  margin: 0.4rem 0 0;
+  font-size: 0.83rem;
+  line-height: 1.48;
+  color: color-mix(in srgb, var(--vbs-ink) 78%, #56607a);
+}
+
+.vbs-diagnostics-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.8rem;
+}
+
 .vbs-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1043,6 +1192,14 @@ a {
 }
 
 @media (max-width: 1100px) {
+  .vbs-command-deck {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vbs-stage-rail {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
   .vbs-grid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1096,6 +1253,20 @@ a {
     padding: 0.85rem;
   }
 
+  .vbs-command-main,
+  .vbs-command-next {
+    padding: 0.65rem;
+  }
+
+  .vbs-stage-rail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .vbs-diagnostics-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
   .vbs-prompt-controls,
   .vbs-prompt-output {
     padding: 0.6rem;
@@ -1140,6 +1311,11 @@ a {
 @media (prefers-reduced-motion: reduce) {
   .vbs-actions button,
   .vbs-mini-actions button {
+    transition: none;
+  }
+
+  .vbs-progress-track span,
+  .vbs-command-links a {
     transition: none;
   }
 
