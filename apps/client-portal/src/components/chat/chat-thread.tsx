@@ -237,6 +237,76 @@ function OverflowActionsMenu({ actions }: { actions: OverflowAction[] }) {
   );
 }
 
+function scopedArtifactInput(input: {
+  title: string;
+  scopedMessage: Exclude<ParsedScopedMessage, null>;
+  documentId?: string;
+}): ArtifactQuoteInput {
+  return {
+    title: input.title,
+    quotedText: input.scopedMessage.quote || input.scopedMessage.request,
+    ...(input.documentId ? { documentId: input.documentId } : {}),
+    ...(input.scopedMessage.versionLabel
+      ? {
+          versionNumber: Number(String(input.scopedMessage.versionLabel || "").replace(/[^\d]/g, "")) || undefined,
+        }
+      : {}),
+  };
+}
+
+function ScopedMessageTools({
+  scopedMessage,
+  documentId,
+  onQuote,
+  onAskEdit,
+  onRunAction,
+}: {
+  scopedMessage: Exclude<ParsedScopedMessage, null>;
+  documentId?: string;
+  onQuote?: (input: ArtifactQuoteInput) => void;
+  onAskEdit?: (input: ArtifactQuoteInput) => void;
+  onRunAction?: (label: string, action: string, payload?: Record<string, unknown>) => void;
+}) {
+  if (!documentId) return null;
+
+  const title = scopedMessage.title || "Document";
+  const quoteInput = scopedArtifactInput({ title, scopedMessage, documentId });
+  const overflowActions: OverflowAction[] = [
+    {
+      key: `${documentId}-open-docs`,
+      label: "Open in docs",
+      onSelect: () => onRunAction?.("Open in docs", "document.read", { documentId }),
+    },
+    {
+      key: `${documentId}-export-pdf`,
+      label: "Make PDF",
+      onSelect: () => onRunAction?.("Make PDF", "document.export", { documentId, format: "PDF" }),
+    },
+  ];
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+      {scopedMessage.kind === "document_quote" ? (
+        <button
+          type="button"
+          onClick={() => onQuote?.(quoteInput)}
+          className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-[11px] text-zinc-700 hover:bg-zinc-50"
+        >
+          Quote in chat
+        </button>
+      ) : null}
+      <button
+        type="button"
+        onClick={() => onAskEdit?.(quoteInput)}
+        className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-[11px] text-zinc-700 hover:bg-zinc-50"
+      >
+        Edit in branch
+      </button>
+      <OverflowActionsMenu actions={overflowActions} />
+    </div>
+  );
+}
+
 function compactQuote(value: string, maxChars = 1400): string {
   const normalized = String(value || "").replace(/\s+/g, " ").trim();
   if (!normalized) return "";
@@ -1279,6 +1349,7 @@ export function ChatThread({
           const previousMessage = index > 0 ? visibleMessages[index - 1] : null;
           const inheritedScopedMessage =
             !isUser && previousMessage?.role === "user" ? parseScopedMessage(previousMessage.content) : null;
+          const scopedDocumentId = isUser ? message.documentIds?.[0] : previousMessage?.documentIds?.[0];
           const assistantIsScopedReply = Boolean(
             !isUser &&
               inheritedScopedMessage &&
@@ -1331,6 +1402,13 @@ export function ChatThread({
                               ? "BAT is drafting against the scoped document edit request."
                               : "BAT is replying inside the scoped document context."}
                           </p>
+                          <ScopedMessageTools
+                            scopedMessage={inheritedScopedMessage}
+                            documentId={scopedDocumentId}
+                            onQuote={onQuoteArtifact}
+                            onAskEdit={onAskEditArtifact}
+                            onRunAction={onRunAction}
+                          />
                         </div>
                       </div>
                     </div>
@@ -1369,6 +1447,15 @@ export function ChatThread({
                               {scopedMessage.quote}
                             </p>
                           ) : null}
+                          <div className="mt-2">
+                            <ScopedMessageTools
+                              scopedMessage={scopedMessage}
+                              documentId={scopedDocumentId}
+                              onQuote={onQuoteArtifact}
+                              onAskEdit={onAskEditArtifact}
+                              onRunAction={onRunAction}
+                            />
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1416,24 +1503,6 @@ export function ChatThread({
 
               {!isUser ? (
                 <div className="mt-1 flex flex-wrap items-center gap-1.5 opacity-100 transition md:opacity-0 md:group-hover:opacity-100">
-                  {onInspectAssistantMessage ? (
-                    <button
-                      type="button"
-                      onClick={() => onInspectAssistantMessage(message.id)}
-                      className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
-                    >
-                      {selectedAssistantMessageId === message.id ? "Thoughts open" : "Open thoughts"}
-                    </button>
-                  ) : null}
-                  {onForkFromMessage ? (
-                    <button
-                      type="button"
-                      onClick={() => onForkFromMessage(message.id)}
-                      className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
-                    >
-                      Fork from here
-                    </button>
-                  ) : null}
                   {onOpenEvidence ? (
                     <button
                       type="button"
@@ -1443,6 +1512,28 @@ export function ChatThread({
                       Sources
                     </button>
                   ) : null}
+                  <OverflowActionsMenu
+                    actions={[
+                      ...(onInspectAssistantMessage
+                        ? [
+                            {
+                              key: `${message.id}-thoughts`,
+                              label: selectedAssistantMessageId === message.id ? "Thoughts open" : "Open thoughts",
+                              onSelect: () => onInspectAssistantMessage(message.id),
+                            } satisfies OverflowAction,
+                          ]
+                        : []),
+                      ...(onForkFromMessage
+                        ? [
+                            {
+                              key: `${message.id}-fork`,
+                              label: "Fork from here",
+                              onSelect: () => onForkFromMessage(message.id),
+                            } satisfies OverflowAction,
+                          ]
+                        : []),
+                    ]}
+                  />
                 </div>
               ) : null}
 
