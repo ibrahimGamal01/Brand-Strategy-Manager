@@ -288,6 +288,12 @@ function branchQuickActions(context?: ComposerBranchContext | null): Array<{ lab
   return [];
 }
 
+function pickSlashCommands(ids: string[]): SlashCommandItem[] {
+  return ids
+    .map((id) => slashCommands.find((command) => command.id === id) || null)
+    .filter((command): command is SlashCommandItem => Boolean(command));
+}
+
 export function ChatComposer({
   draft,
   onDraftChange,
@@ -323,6 +329,7 @@ export function ChatComposer({
   const [uploadedDocs, setUploadedDocs] = useState<UploadedDocumentChip[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [showIdleSlashSurface, setShowIdleSlashSurface] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const optionsMenuRef = useRef<HTMLDivElement | null>(null);
@@ -359,10 +366,53 @@ export function ChatComposer({
   }, [branchContext?.documentId, slashQuery]);
 
   const slashPills = useMemo(() => slashCommands.filter((command) => command.pill), []);
+  const idleSlashCommands = useMemo(
+    () =>
+      pickSlashCommands(
+        branchContext?.documentId
+          ? [
+              "/go-deeper",
+              "/show-sources",
+              "/make-pdf",
+              "/focus-web",
+              "/edit-doc",
+              "/rewrite-selection",
+              "/quote-doc",
+              "/mode-balanced",
+              "/mode-deep",
+              "/mode-pro",
+            ]
+          : [
+              "/go-deeper",
+              "/show-sources",
+              "/make-pdf",
+              "/focus-web",
+              "/mode-fast",
+              "/mode-balanced",
+              "/mode-deep",
+              "/mode-pro",
+              "/web",
+              "/new-branch",
+            ]
+      ),
+    [branchContext?.documentId]
+  );
+  const showSlashSurface = (!showControls && slashMatches.length > 0) || (!showControls && showIdleSlashSurface && draft.trim().length === 0);
+  const visibleSlashCommands = slashMatches.length > 0 ? slashMatches.slice(0, 10) : idleSlashCommands;
 
   useEffect(() => {
     setActiveSlashIndex(0);
   }, [slashQuery]);
+
+  useEffect(() => {
+    if (draft.trim().length > 0 && showIdleSlashSurface) {
+      setShowIdleSlashSurface(false);
+      return;
+    }
+    if (draft.trim().length === 0 && document.activeElement === textareaRef.current) {
+      setShowIdleSlashSurface(true);
+    }
+  }, [draft, showIdleSlashSurface]);
 
   useEffect(() => {
     if (!showControls) return;
@@ -406,6 +456,7 @@ export function ChatComposer({
     });
     onDraftChange("");
     setUploadedDocs([]);
+    setShowIdleSlashSurface(false);
     return true;
   };
 
@@ -416,6 +467,7 @@ export function ChatComposer({
 
   const applySlashCommand = (command: SlashCommandItem) => {
     onCommandSelect?.(command.id);
+    setShowIdleSlashSurface(false);
     if (command.insertText) {
       onDraftChange(command.insertText);
       textareaRef.current?.focus();
@@ -777,8 +829,18 @@ export function ChatComposer({
               <textarea
                 ref={textareaRef}
                 value={draft}
-                onChange={(event) => onDraftChange(event.target.value)}
+                onChange={(event) => {
+                  const nextValue = event.target.value;
+                  onDraftChange(nextValue);
+                  setShowIdleSlashSurface(nextValue.trim().length === 0);
+                }}
                 onKeyDown={onComposerKeyDown}
+                onFocus={() => {
+                  if (!draft.trim()) {
+                    setShowIdleSlashSurface(true);
+                  }
+                }}
+                onBlur={() => setShowIdleSlashSurface(false)}
                 onPaste={(event) => {
                   const pastedFiles = Array.from(event.clipboardData?.files || []);
                   if (pastedFiles.length > 0) {
@@ -815,36 +877,46 @@ export function ChatComposer({
                 </div>
               ) : null}
 
-              {slashMatches.length ? (
+              {showSlashSurface ? (
                 <div className="absolute bottom-[4.6rem] left-3 right-3 z-10 rounded-2xl border border-zinc-200 bg-white/98 p-2 shadow-2xl backdrop-blur">
                   <div className="mb-2 flex items-center justify-between px-1">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Slash Commands</p>
-                    <p className="text-[11px] text-zinc-400">ChatGPT-style quick actions</p>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                      {slashMatches.length ? "Slash Commands" : "Start With An Action"}
+                    </p>
+                    <p className="text-[11px] text-zinc-400">
+                      {slashMatches.length ? "ChatGPT-style quick actions" : "Focus first, then write"}
+                    </p>
                   </div>
                   <div className="bat-scrollbar mb-2 flex gap-2 overflow-x-auto px-1 pb-1">
                     {slashPills.map((command) => (
                       <button
                         key={command.id}
                         type="button"
+                        onMouseDown={(event) => event.preventDefault()}
                         onClick={() => applySlashCommand(command)}
-                        className="whitespace-nowrap rounded-full border border-zinc-200 bg-zinc-50 px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100"
+                        className="whitespace-nowrap rounded-full border border-zinc-200 bg-[linear-gradient(180deg,#ffffff_0%,#f5f5f5_100%)] px-4 py-2 text-sm text-zinc-700 shadow-sm hover:bg-zinc-100"
                       >
                         {command.label}
                       </button>
                     ))}
                   </div>
                   <div className="mb-2 flex items-center justify-between px-1">
-                    <p className="text-[11px] text-zinc-500">Modes, focus presets, document actions, and deliverables.</p>
-                    <p className="text-[11px] text-zinc-400">Enter to run</p>
+                    <p className="text-[11px] text-zinc-500">
+                      {slashMatches.length
+                        ? "Modes, focus presets, document actions, and deliverables."
+                        : "Pick a mode, focus, or deliverable before you start writing."}
+                    </p>
+                    <p className="text-[11px] text-zinc-400">{slashMatches.length ? "Enter to run" : "Click to start"}</p>
                   </div>
                   <div className="space-y-1">
-                    {slashMatches.slice(0, 10).map((command, index) => (
+                    {visibleSlashCommands.map((command, index) => (
                       <button
                         key={command.id}
                         type="button"
+                        onMouseDown={(event) => event.preventDefault()}
                         onClick={() => applySlashCommand(command)}
                         className={`flex w-full items-start justify-between gap-3 rounded-xl px-3 py-2 text-left ${
-                          index === activeSlashIndex ? "bg-zinc-100" : "hover:bg-zinc-50"
+                          slashMatches.length && index === activeSlashIndex ? "bg-zinc-100" : "hover:bg-zinc-50"
                         }`}
                       >
                         <div>
@@ -873,8 +945,20 @@ export function ChatComposer({
               ) : null}
 
               <div className="pointer-events-none absolute bottom-12 left-4 right-32 flex items-center justify-between gap-2 text-[11px] text-zinc-400">
-                <span>{branchContext ? "Scoped branch active" : "Enter to send, Shift+Enter for newline"}</span>
-                <span>{isStreaming ? "Cmd/Ctrl+Enter interrupts + sends" : "Type / for quick actions"}</span>
+                <span>
+                  {branchContext
+                    ? "Scoped branch active"
+                    : showIdleSlashSurface && !draft.trim()
+                      ? "Choose an action or start typing"
+                      : "Enter to send, Shift+Enter for newline"}
+                </span>
+                <span>
+                  {isStreaming
+                    ? "Cmd/Ctrl+Enter interrupts + sends"
+                    : showIdleSlashSurface && !draft.trim()
+                      ? "Type / to search all commands"
+                      : "Type / for quick actions"}
+                </span>
               </div>
 
               <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between gap-2">
