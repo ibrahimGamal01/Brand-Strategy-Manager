@@ -1,6 +1,8 @@
 import { Request, Router } from 'express';
 import {
+  applyBrandDnaAutofill,
   applyReferenceShortlistAction,
+  BrandDnaAutofillFieldKey,
   compareStudioDocumentVersions,
   createBrandDnaSummary,
   createGenerationPack,
@@ -11,15 +13,18 @@ import {
   GenerationRefineMode,
   ExportStudioDocumentFormat,
   exportStudioDocument,
+  getBrandDnaAutofillPreview,
   getBrandDNAProfile,
   getGenerationPack,
   getIngestionRun,
+  getViralStudioWorkflowStatus,
   getViralStudioStorageMode,
   getStudioDocumentWithVersions,
   getViralStudioTelemetrySnapshot,
   getViralStudioContractSnapshot,
   listIngestionRunEvents,
   listIngestionRuns,
+  listViralStudioSuggestedSources,
   listPromptTemplates,
   listReferenceAssets,
   promoteStudioDocumentVersion,
@@ -134,12 +139,35 @@ function parseShortlistAction(value: unknown): ShortlistAction | null {
   return null;
 }
 
-function parseIngestionPreset(value: unknown): 'balanced' | 'quick-scan' | 'deep-scan' | null {
+function parseIngestionPreset(value: unknown): 'balanced' | 'quick-scan' | 'deep-scan' | 'data-max' | null {
   const preset = safeString(value).toLowerCase();
-  if (preset === 'balanced' || preset === 'quick-scan' || preset === 'deep-scan') {
+  if (preset === 'balanced' || preset === 'quick-scan' || preset === 'deep-scan' || preset === 'data-max') {
     return preset;
   }
   return null;
+}
+
+function parseAutofillFieldKeys(value: unknown): BrandDnaAutofillFieldKey[] {
+  if (!Array.isArray(value)) return [];
+  const allowlist = new Set<BrandDnaAutofillFieldKey>([
+    'mission',
+    'valueProposition',
+    'productOrService',
+    'region',
+    'audiencePersonas',
+    'pains',
+    'desires',
+    'objections',
+    'voiceSliders',
+    'bannedPhrases',
+    'requiredClaims',
+    'exemplars',
+    'summary',
+  ]);
+  return value
+    .map((entry) => safeString(entry) as BrandDnaAutofillFieldKey)
+    .filter((entry) => allowlist.has(entry))
+    .slice(0, 40);
 }
 
 function parseExportFormat(value: unknown): ExportStudioDocumentFormat {
@@ -337,6 +365,84 @@ router.post('/brand-dna/summary', async (req, res) => {
     });
   } catch (error: any) {
     return res.status(500).json({ ok: false, error: 'BRAND_DNA_SUMMARY_FAILED', details: error?.message || String(error) });
+  }
+});
+
+router.post('/brand-dna/autofill-preview', async (req, res) => {
+  try {
+    const workspaceId = parseWorkspaceId(req);
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'workspaceId is required' });
+    }
+    const preview = await getBrandDnaAutofillPreview(workspaceId);
+    return res.json({
+      ok: true,
+      preview,
+    });
+  } catch (error: any) {
+    return res
+      .status(500)
+      .json({ ok: false, error: 'BRAND_DNA_AUTOFILL_PREVIEW_FAILED', details: error?.message || String(error) });
+  }
+});
+
+router.post('/brand-dna/autofill-apply', async (req, res) => {
+  try {
+    const workspaceId = parseWorkspaceId(req);
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'workspaceId is required' });
+    }
+    const payload =
+      req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+        ? (req.body as Record<string, unknown>)
+        : {};
+    const result = await applyBrandDnaAutofill(workspaceId, {
+      selectedFields: parseAutofillFieldKeys(payload.selectedFields),
+      finalizeIfReady: payload.finalizeIfReady === true,
+    });
+    return res.json({
+      ok: true,
+      ...result,
+    });
+  } catch (error: any) {
+    return res
+      .status(500)
+      .json({ ok: false, error: 'BRAND_DNA_AUTOFILL_APPLY_FAILED', details: error?.message || String(error) });
+  }
+});
+
+router.get('/viral-studio/workflow-status', async (req, res) => {
+  try {
+    const workspaceId = parseWorkspaceId(req);
+    if (!workspaceId) return res.status(400).json({ error: 'workspaceId is required' });
+    return res.json({
+      ok: true,
+      workflow: await getViralStudioWorkflowStatus(workspaceId),
+    });
+  } catch (error: any) {
+    return res
+      .status(500)
+      .json({ ok: false, error: 'VIRAL_STUDIO_WORKFLOW_STATUS_FAILED', details: error?.message || String(error) });
+  }
+});
+
+router.get('/viral-studio/extraction/suggested-sources', async (req, res) => {
+  try {
+    const workspaceId = parseWorkspaceId(req);
+    if (!workspaceId) return res.status(400).json({ error: 'workspaceId is required' });
+    const items = await listViralStudioSuggestedSources(workspaceId);
+    return res.json({
+      ok: true,
+      items,
+      count: items.length,
+      defaultPreset: 'data-max',
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      ok: false,
+      error: 'VIRAL_STUDIO_SUGGESTED_SOURCES_FAILED',
+      details: error?.message || String(error),
+    });
   }
 });
 

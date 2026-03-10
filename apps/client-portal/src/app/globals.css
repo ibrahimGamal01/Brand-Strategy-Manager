@@ -888,6 +888,55 @@ a {
   padding-left: 1rem;
 }
 
+.vbs-workflow-status .vbs-mini-actions {
+  margin-top: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.vbs-autofill-panel .vbs-mini-actions {
+  margin-bottom: 0.5rem;
+}
+
+.vbs-autofill-list {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.vbs-autofill-item {
+  display: grid;
+  gap: 0.18rem;
+  border: 1px dashed color-mix(in srgb, var(--vbs-cobalt) 28%, var(--bat-border));
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, white 94%, var(--vbs-sand));
+  padding: 0.45rem 0.55rem;
+}
+
+.vbs-autofill-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.vbs-autofill-row input[type="checkbox"] {
+  margin: 0;
+}
+
+.vbs-source-suggest-list {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.vbs-source-suggest-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 18%, var(--bat-border));
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, white 95%, var(--vbs-sand));
+  padding: 0.45rem 0.55rem;
+}
+
 .vbs-export-preview {
   margin-top: 0.7rem;
   border: 1px dashed color-mix(in srgb, var(--vbs-cobalt) 30%, var(--bat-border));
@@ -1027,6 +1076,10 @@ a {
 
   .vbs-analysis-kpi-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .vbs-source-suggest-row {
+    flex-direction: column;
   }
 
   .vbs-doc-version-tools {

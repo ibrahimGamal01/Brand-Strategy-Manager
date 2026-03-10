@@ -97,6 +97,13 @@ function parseBrandDnaPayload(value: Prisma.JsonValue | null, workspaceId: strin
     exemplars: asArray(parsed.exemplars).map((item) => String(item || '')).filter(Boolean),
     summary: String(parsed.summary || ''),
     completeness: asRecord(parsed.completeness) as BrandDNAProfile['completeness'],
+    provenance: asRecord(parsed.provenance) as BrandDNAProfile['provenance'],
+    autofillStatus:
+      String(parsed.autofillStatus || '').toLowerCase() === 'applied'
+        ? 'applied'
+        : String(parsed.autofillStatus || '').toLowerCase() === 'previewed'
+          ? 'previewed'
+          : 'none',
     createdAt: String(parsed.createdAt || new Date(0).toISOString()),
     updatedAt: String(parsed.updatedAt || new Date(0).toISOString()),
   };

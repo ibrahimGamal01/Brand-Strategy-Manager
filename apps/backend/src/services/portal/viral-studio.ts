@@ -32,11 +32,12 @@ import {
   type ViralStudioPersistenceMode,
 } from './viral-studio-persistence';
 import { buildViralStudioAssetRef } from './viral-studio-asset-refs';
+import { getPortalWorkspaceIntakeStatus } from './portal-intake';
 
 export type ViralStudioPlatform = 'instagram' | 'tiktok' | 'youtube';
 export type IngestionSortBy = 'engagement' | 'recent' | 'views';
 export type IngestionStatus = 'queued' | 'running' | 'partial' | 'completed' | 'failed';
-export type IngestionPreset = 'balanced' | 'quick-scan' | 'deep-scan';
+export type IngestionPreset = 'balanced' | 'quick-scan' | 'deep-scan' | 'data-max';
 export type ShortlistAction = 'pin' | 'exclude' | 'must-use' | 'clear';
 export type ShortlistState = 'none' | 'pin' | 'exclude' | 'must-use';
 
@@ -57,6 +58,28 @@ export type BrandDnaCompleteness = {
   ready: boolean;
 };
 
+export type ViralStudioSourceEvidence = {
+  source:
+    | 'intake'
+    | 'website_snapshot'
+    | 'ddg'
+    | 'social_reference'
+    | 'inspiration_link'
+    | 'system';
+  label: string;
+  snippet?: string;
+  url?: string;
+};
+
+export type BrandDnaFieldProvenance = {
+  source: string;
+  confidence: number;
+  sourceEvidence: ViralStudioSourceEvidence[];
+  updatedAt: string;
+};
+
+export type BrandDnaAutofillStatus = 'none' | 'previewed' | 'applied';
+
 export type BrandDNAProfile = {
   workspaceId: string;
   status: BrandDnaStatus;
@@ -74,6 +97,8 @@ export type BrandDNAProfile = {
   exemplars: string[];
   summary: string;
   completeness: BrandDnaCompleteness;
+  provenance?: Record<string, BrandDnaFieldProvenance>;
+  autofillStatus?: BrandDnaAutofillStatus;
   createdAt: string;
   updatedAt: string;
   persistedAt?: string;
@@ -95,11 +120,52 @@ export type UpsertBrandDNAInput = Partial<{
   requiredClaims: string[];
   exemplars: string[];
   summary: string;
+  provenance: Record<string, BrandDnaFieldProvenance>;
+  autofillStatus: BrandDnaAutofillStatus;
 }>;
 
 export type BrandDnaSummaryResult = {
   summary: string;
   bullets: string[];
+};
+
+export type BrandDnaAutofillFieldKey =
+  | 'mission'
+  | 'valueProposition'
+  | 'productOrService'
+  | 'region'
+  | 'audiencePersonas'
+  | 'pains'
+  | 'desires'
+  | 'objections'
+  | 'voiceSliders'
+  | 'bannedPhrases'
+  | 'requiredClaims'
+  | 'exemplars'
+  | 'summary';
+
+export type BrandDnaAutofillFieldSuggestion = {
+  field: BrandDnaAutofillFieldKey;
+  value: string | string[] | BrandDnaVoiceSliders;
+  confidence: number;
+  rationale: string;
+  sourceEvidence: ViralStudioSourceEvidence[];
+};
+
+export type BrandDnaAutofillPreview = {
+  workspaceId: string;
+  generatedAt: string;
+  workflowStage: ViralStudioWorkflowStage;
+  autofillStatus: BrandDnaAutofillStatus;
+  suggestionConfidence: number;
+  sourceEvidence: ViralStudioSourceEvidence[];
+  suggestedFields: BrandDnaAutofillFieldKey[];
+  fieldSuggestions: Partial<Record<BrandDnaAutofillFieldKey, BrandDnaAutofillFieldSuggestion>>;
+  coverage: {
+    suggestedCount: number;
+    evidenceCount: number;
+    blockedFields: BrandDnaAutofillFieldKey[];
+  };
 };
 
 export type IngestionRun = {
@@ -466,6 +532,110 @@ export type ViralStudioStorageModeDiagnostics = {
   counts: Record<string, number>;
 };
 
+export type ViralStudioWorkflowStage =
+  | 'intake_pending'
+  | 'intake_complete'
+  | 'studio_autofill_review'
+  | 'extraction'
+  | 'curation'
+  | 'generation'
+  | 'chat_execution';
+
+export type ViralStudioWorkflowStatus = {
+  workspaceId: string;
+  workflowStage: ViralStudioWorkflowStage;
+  flow: Array<'intake_complete' | 'studio_autofill_review' | 'extraction' | 'curation' | 'generation' | 'chat_execution'>;
+  intakeCompleted: boolean;
+  brandDnaReady: boolean;
+  autofillStatus: BrandDnaAutofillStatus;
+  suggestionConfidence: number;
+  sourceEvidence: ViralStudioSourceEvidence[];
+  counts: {
+    ingestions: number;
+    references: number;
+    prioritizedReferences: number;
+    generations: number;
+    documents: number;
+  };
+  latest: {
+    ingestionStatus?: IngestionStatus;
+    generationId?: string;
+    generationAssetRef?: string;
+    documentId?: string;
+    documentAssetRef?: string;
+  };
+};
+
+export type ViralStudioSuggestedSource = {
+  platform: ViralStudioPlatform;
+  sourceUrl: string;
+  source: 'intake_handle' | 'intake_social_reference' | 'inspiration_link';
+  confidence: number;
+  label: string;
+};
+
+export type ViralStudioChatContext = {
+  workspaceId: string;
+  workflowStage: ViralStudioWorkflowStage;
+  brandDna: Pick<
+    BrandDNAProfile,
+    | 'status'
+    | 'mission'
+    | 'valueProposition'
+    | 'productOrService'
+    | 'region'
+    | 'audiencePersonas'
+    | 'pains'
+    | 'desires'
+    | 'requiredClaims'
+    | 'bannedPhrases'
+    | 'summary'
+    | 'completeness'
+    | 'updatedAt'
+  > | null;
+  prioritizedReferences: Array<{
+    id: string;
+    rank: number;
+    platform: ViralStudioPlatform;
+    title: string;
+    score: number;
+    shortlistState: ShortlistState;
+    sourceUrl: string;
+    assetRef?: string;
+    topDrivers: string[];
+  }>;
+  latestGeneration?: {
+    id: string;
+    formatTarget: GenerationFormatTarget;
+    revision: number;
+    qualityPassed: boolean;
+    updatedAt: string;
+    assetRef?: string;
+  };
+  latestDocument?: {
+    id: string;
+    title: string;
+    currentVersionId: string | null;
+    updatedAt: string;
+    versionCount: number;
+    assetRef?: string;
+  };
+  latestDocumentVersion?: {
+    id: string;
+    summary: string;
+    versionNumber?: number;
+    createdAt: string;
+    assetRef?: string;
+  };
+  libraryRefs: string[];
+  citations: Array<{
+    id: string;
+    label: string;
+    url?: string;
+    libraryRef?: string;
+  }>;
+};
+
 export type ViralStudioWorkspaceReconciliation = {
   workspaceId: string;
   storageMode: ViralStudioPersistenceMode;
@@ -688,6 +858,79 @@ function cleanArray(value: unknown, maxItems: number): string[] {
     .map((entry) => cleanString(entry))
     .filter(Boolean)
     .slice(0, maxItems);
+}
+
+function splitStringList(value: unknown, maxItems = 12): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => cleanString(entry))
+      .filter(Boolean)
+      .slice(0, maxItems);
+  }
+  const raw = cleanString(value);
+  if (!raw) return [];
+  return raw
+    .split(/[\n,;|]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .slice(0, maxItems);
+}
+
+function compactSnippet(value: unknown, maxChars = 220): string {
+  const raw = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!raw) return '';
+  if (raw.length <= maxChars) return raw;
+  return `${raw.slice(0, Math.max(0, maxChars - 3))}...`;
+}
+
+function normalizeHttpUrl(value: unknown): string | undefined {
+  const raw = cleanString(value);
+  if (!raw) return undefined;
+  try {
+    const parsed = new URL(raw.startsWith('http://') || raw.startsWith('https://') ? raw : `https://${raw}`);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return undefined;
+    return parsed.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeHandle(value: unknown): string {
+  return cleanString(value).replace(/^@+/, '').toLowerCase();
+}
+
+function inferPlatformFromUrl(value: unknown): ViralStudioPlatform | null {
+  const href = normalizeHttpUrl(value);
+  if (!href) return null;
+  try {
+    const hostname = new URL(href).hostname.toLowerCase();
+    if (hostname === 'instagram.com' || hostname.endsWith('.instagram.com')) return 'instagram';
+    if (hostname === 'tiktok.com' || hostname.endsWith('.tiktok.com')) return 'tiktok';
+    if (
+      hostname === 'youtube.com' ||
+      hostname.endsWith('.youtube.com') ||
+      hostname === 'youtu.be' ||
+      hostname.endsWith('.youtu.be')
+    ) {
+      return 'youtube';
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function toPlatformProfileUrl(platform: ViralStudioPlatform, handleRaw: string): string | null {
+  const handle = normalizeHandle(handleRaw);
+  if (!handle) return null;
+  if (platform === 'instagram') return `https://www.instagram.com/${handle}`;
+  if (platform === 'tiktok') return `https://www.tiktok.com/@${handle}`;
+  return `https://www.youtube.com/@${handle}`;
+}
+
+function clampConfidence(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Number(Math.max(0, Math.min(1, value)).toFixed(3));
 }
 
 function toShortHash(input: string): number {
@@ -958,6 +1201,52 @@ function resolveVoiceSliders(
   };
 }
 
+function sanitizeSourceEvidenceList(value: unknown, maxItems = 10): ViralStudioSourceEvidence[] {
+  if (!Array.isArray(value)) return [];
+  const out: ViralStudioSourceEvidence[] = [];
+  for (const entry of value) {
+    const record = asRecord(entry);
+    const source = cleanString(record.source);
+    const label = cleanString(record.label);
+    if (!source || !label) continue;
+    const allowedSource =
+      source === 'intake' ||
+      source === 'website_snapshot' ||
+      source === 'ddg' ||
+      source === 'social_reference' ||
+      source === 'inspiration_link' ||
+      source === 'system';
+    if (!allowedSource) continue;
+    out.push({
+      source: source as ViralStudioSourceEvidence['source'],
+      label,
+      ...(cleanString(record.snippet) ? { snippet: cleanString(record.snippet) } : {}),
+      ...(normalizeHttpUrl(record.url) ? { url: normalizeHttpUrl(record.url) } : {}),
+    });
+    if (out.length >= maxItems) break;
+  }
+  return out;
+}
+
+function sanitizeBrandDnaProvenanceMap(value: unknown): Record<string, BrandDnaFieldProvenance> {
+  const record = asRecord(value);
+  const out: Record<string, BrandDnaFieldProvenance> = {};
+  for (const [field, raw] of Object.entries(record)) {
+    const key = cleanString(field);
+    if (!key) continue;
+    const row = asRecord(raw);
+    const source = cleanString(row.source);
+    if (!source) continue;
+    out[key] = {
+      source,
+      confidence: clampConfidence(Number(row.confidence)),
+      sourceEvidence: sanitizeSourceEvidenceList(row.sourceEvidence, 12),
+      updatedAt: cleanString(row.updatedAt) || toIsoNow(),
+    };
+  }
+  return out;
+}
+
 function createEmptyBrandDna(workspaceId: string): BrandDNAProfile {
   const timestamp = toIsoNow();
   const profile: Omit<BrandDNAProfile, 'completeness'> = {
@@ -976,6 +1265,8 @@ function createEmptyBrandDna(workspaceId: string): BrandDNAProfile {
     requiredClaims: [],
     exemplars: [],
     summary: '',
+    provenance: {},
+    autofillStatus: 'none',
     createdAt: timestamp,
     updatedAt: timestamp,
   };
@@ -1011,6 +1302,9 @@ function mergeBrandDna(
 ): BrandDNAProfile {
   const now = toIsoNow();
   const base = existing || createEmptyBrandDna(workspaceId);
+  const incomingProvenance = Object.prototype.hasOwnProperty.call(input, 'provenance')
+    ? sanitizeBrandDnaProvenanceMap(input.provenance)
+    : undefined;
   const draft: Omit<BrandDNAProfile, 'completeness'> = {
     workspaceId,
     status: base.status,
@@ -1027,6 +1321,11 @@ function mergeBrandDna(
     requiredClaims: input.requiredClaims ? cleanArray(input.requiredClaims, 24) : base.requiredClaims,
     exemplars: input.exemplars ? cleanArray(input.exemplars, 12) : base.exemplars,
     summary: cleanString(input.summary ?? base.summary),
+    provenance: incomingProvenance ? { ...(base.provenance || {}), ...incomingProvenance } : base.provenance || {},
+    autofillStatus:
+      input.autofillStatus === 'previewed' || input.autofillStatus === 'applied' || input.autofillStatus === 'none'
+        ? input.autofillStatus
+        : base.autofillStatus || 'none',
     createdAt: base.createdAt,
     updatedAt: now,
   };
@@ -1059,6 +1358,13 @@ function fromPersistedBrandDna(workspaceId: string, value: unknown): BrandDNAPro
       requiredClaims: cleanArray(record.requiredClaims, 24),
       exemplars: cleanArray(record.exemplars, 12),
       summary: cleanString(record.summary),
+      provenance: sanitizeBrandDnaProvenanceMap(record.provenance),
+      autofillStatus:
+        cleanString(record.autofillStatus) === 'applied'
+          ? 'applied'
+          : cleanString(record.autofillStatus) === 'previewed'
+            ? 'previewed'
+            : 'none',
     },
     null
   );
@@ -1916,11 +2222,67 @@ function resolveIngestionPreset(preset?: IngestionPreset): {
       sortBy: 'engagement',
     };
   }
+  if (normalized === 'data-max') {
+    return {
+      preset: 'data-max',
+      maxVideos: 120,
+      lookbackDays: 365,
+      sortBy: 'engagement',
+    };
+  }
   return {
     preset: DEFAULT_INGESTION_POLICY.preset,
     maxVideos: DEFAULT_INGESTION_POLICY.maxVideos,
     lookbackDays: DEFAULT_INGESTION_POLICY.lookbackDays,
     sortBy: DEFAULT_INGESTION_POLICY.sortBy,
+  };
+}
+
+function resolveWorkflowStageFromState(input: {
+  intakeCompleted: boolean;
+  brandDnaReady: boolean;
+  hasAutofillSuggestions: boolean;
+  ingestionCount: number;
+  prioritizedReferenceCount: number;
+  generationCount: number;
+}): ViralStudioWorkflowStage {
+  if (!input.intakeCompleted) return 'intake_pending';
+  if (!input.brandDnaReady) {
+    return input.hasAutofillSuggestions ? 'studio_autofill_review' : 'intake_complete';
+  }
+  if (input.ingestionCount <= 0) return 'extraction';
+  if (input.prioritizedReferenceCount <= 0) return 'curation';
+  if (input.generationCount <= 0) return 'generation';
+  return 'chat_execution';
+}
+
+function dedupeEvidenceList(items: ViralStudioSourceEvidence[], maxItems = 20): ViralStudioSourceEvidence[] {
+  const out: ViralStudioSourceEvidence[] = [];
+  const seen = new Set<string>();
+  for (const item of items) {
+    const key = `${item.source}|${item.label}|${item.url || ''}|${item.snippet || ''}`.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+    if (out.length >= maxItems) break;
+  }
+  return out;
+}
+
+function readPrefillList(prefill: Record<string, unknown>, key: string, maxItems: number): string[] {
+  return splitStringList(prefill[key], maxItems);
+}
+
+function toSourceEvidence(
+  source: ViralStudioSourceEvidence['source'],
+  label: string,
+  options?: { snippet?: string; url?: string }
+): ViralStudioSourceEvidence {
+  return {
+    source,
+    label: compactSnippet(label, 180),
+    ...(compactSnippet(options?.snippet || '', 220) ? { snippet: compactSnippet(options?.snippet || '', 220) } : {}),
+    ...(normalizeHttpUrl(options?.url) ? { url: normalizeHttpUrl(options?.url) } : {}),
   };
 }
 
@@ -3229,6 +3591,725 @@ export async function getViralStudioWorkspaceReconciliation(
     memory,
     database,
     deltas,
+  };
+}
+
+function inferVoiceSlidersFromIntake(
+  prefill: Record<string, unknown>,
+  fallback?: BrandDnaVoiceSliders
+): BrandDnaVoiceSliders {
+  const toneWords = [
+    ...readPrefillList(prefill, 'brandVoiceWords', 24),
+    cleanString(prefill.brandTone),
+  ]
+    .join(' ')
+    .toLowerCase();
+  const next = {
+    bold: fallback?.bold ?? 55,
+    formal: fallback?.formal ?? 40,
+    playful: fallback?.playful ?? 45,
+    direct: fallback?.direct ?? 65,
+  };
+  if (/(bold|assertive|confident|strong|authority)/i.test(toneWords)) next.bold = Math.max(next.bold, 72);
+  if (/(formal|professional|corporate|executive|credible)/i.test(toneWords)) next.formal = Math.max(next.formal, 72);
+  if (/(playful|fun|friendly|light|casual|witty)/i.test(toneWords)) next.playful = Math.max(next.playful, 68);
+  if (/(direct|clear|straight|no fluff|action|urgent)/i.test(toneWords)) next.direct = Math.max(next.direct, 76);
+  return resolveVoiceSliders(next, fallback);
+}
+
+function toSortedLatest<T extends { updatedAt?: string; createdAt?: string }>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => {
+    const left = new Date(b.updatedAt || b.createdAt || 0).getTime();
+    const right = new Date(a.updatedAt || a.createdAt || 0).getTime();
+    return left - right;
+  });
+}
+
+export async function listViralStudioSuggestedSources(
+  workspaceId: string
+): Promise<ViralStudioSuggestedSource[]> {
+  const intakeStatus = await getPortalWorkspaceIntakeStatus(workspaceId).catch(() => null);
+  const prefill = asRecord(intakeStatus?.prefill);
+  const rows: ViralStudioSuggestedSource[] = [];
+
+  const pushSource = (
+    platform: ViralStudioPlatform | null,
+    sourceUrlRaw: unknown,
+    source: ViralStudioSuggestedSource['source'],
+    confidence: number,
+    label: string
+  ) => {
+    if (!platform) return;
+    const sourceUrl = normalizeHttpUrl(sourceUrlRaw);
+    if (!sourceUrl) return;
+    rows.push({
+      platform,
+      sourceUrl,
+      source,
+      confidence: clampConfidence(confidence),
+      label: compactSnippet(label, 170),
+    });
+  };
+
+  const pushHandle = (
+    platform: ViralStudioPlatform,
+    handleRaw: unknown,
+    source: ViralStudioSuggestedSource['source'],
+    confidence: number,
+    labelPrefix: string
+  ) => {
+    const profileUrl = toPlatformProfileUrl(platform, String(handleRaw || ''));
+    if (!profileUrl) return;
+    rows.push({
+      platform,
+      sourceUrl: profileUrl,
+      source,
+      confidence: clampConfidence(confidence),
+      label: `${labelPrefix} @${normalizeHandle(handleRaw)}`,
+    });
+  };
+
+  const handles = asRecord(prefill.handles);
+  pushHandle('instagram', handles.instagram, 'intake_handle', 0.93, 'Intake handle');
+  pushHandle('tiktok', handles.tiktok, 'intake_handle', 0.93, 'Intake handle');
+  pushHandle('youtube', handles.youtube, 'intake_handle', 0.93, 'Intake handle');
+
+  const handlesV2 = asRecord(prefill.handlesV2);
+  for (const platform of ['instagram', 'tiktok', 'youtube'] as ViralStudioPlatform[]) {
+    const bucket = asRecord(handlesV2[platform]);
+    const v2Handles = Array.from(
+      new Set([
+        cleanString(bucket.primary),
+        ...splitStringList(bucket.handles, 5),
+      ].filter(Boolean))
+    ).slice(0, 5);
+    for (const handle of v2Handles) {
+      pushHandle(platform, handle, 'intake_handle', 0.88, 'Intake channel');
+    }
+  }
+
+  const socialReferences = readPrefillList(prefill, 'socialReferences', 16);
+  for (const ref of socialReferences) {
+    pushSource(
+      inferPlatformFromUrl(ref),
+      ref,
+      'intake_social_reference',
+      0.78,
+      'Social reference from intake'
+    );
+  }
+
+  const inspirationLinks = readPrefillList(prefill, 'competitorInspirationLinks', 16);
+  for (const ref of inspirationLinks) {
+    pushSource(
+      inferPlatformFromUrl(ref),
+      ref,
+      'inspiration_link',
+      0.74,
+      'Inspiration link from intake'
+    );
+  }
+
+  const deduped: ViralStudioSuggestedSource[] = [];
+  const seen = new Set<string>();
+  for (const row of rows.sort((a, b) => b.confidence - a.confidence)) {
+    const key = `${row.platform}|${row.sourceUrl}`.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(row);
+    if (deduped.length >= 24) break;
+  }
+  return deduped;
+}
+
+export async function getBrandDnaAutofillPreview(
+  workspaceId: string
+): Promise<BrandDnaAutofillPreview> {
+  await hydrateWorkspaceFromDbIfNeeded(workspaceId);
+  const [profile, intakeStatus, suggestedSources, snapshots, ddgRows] = await Promise.all([
+    getBrandDNAProfile(workspaceId),
+    getPortalWorkspaceIntakeStatus(workspaceId).catch(() => null),
+    listViralStudioSuggestedSources(workspaceId),
+    prisma.webPageSnapshot.findMany({
+      where: { researchJobId: workspaceId, isActive: true },
+      select: { finalUrl: true, cleanText: true, fetchedAt: true },
+      orderBy: { fetchedAt: 'desc' },
+      take: 3,
+    }),
+    prisma.rawSearchResult.findMany({
+      where: { researchJobId: workspaceId, isActive: true },
+      select: { title: true, href: true, body: true, createdAt: true },
+      orderBy: { createdAt: 'desc' },
+      take: 4,
+    }),
+  ]);
+
+  const prefill = asRecord(intakeStatus?.prefill);
+  const intakeCompleted = Boolean(intakeStatus?.completed);
+  const fieldSuggestions: Partial<Record<BrandDnaAutofillFieldKey, BrandDnaAutofillFieldSuggestion>> = {};
+  const globalEvidence: ViralStudioSourceEvidence[] = [];
+
+  const addSuggestion = (
+    field: BrandDnaAutofillFieldKey,
+    value: string | string[] | BrandDnaVoiceSliders,
+    confidence: number,
+    rationale: string,
+    evidence: ViralStudioSourceEvidence[]
+  ) => {
+    if (typeof value === 'string' && !cleanString(value)) return;
+    if (Array.isArray(value) && value.length === 0) return;
+    const item: BrandDnaAutofillFieldSuggestion = {
+      field,
+      value,
+      confidence: clampConfidence(confidence),
+      rationale: cleanString(rationale) || 'Derived from workspace evidence.',
+      sourceEvidence: dedupeEvidenceList(evidence, 8),
+    };
+    fieldSuggestions[field] = item;
+    globalEvidence.push(...item.sourceEvidence);
+  };
+
+  const name = cleanString(prefill.name);
+  const oneSentenceDescription = cleanString(prefill.oneSentenceDescription);
+  const mainOffer = cleanString(prefill.mainOffer);
+  const businessType = cleanString(prefill.businessType);
+  const idealAudience = cleanString(prefill.idealAudience);
+  const targetAudience = cleanString(prefill.targetAudience);
+  const primaryGoal = cleanString(prefill.primaryGoal);
+  const region = cleanString(prefill.wantClientsWhere) || cleanString(prefill.operateWhere) || cleanString(prefill.geoScope);
+  const pains = readPrefillList(prefill, 'topProblems', 12);
+  const desires = readPrefillList(prefill, 'resultsIn90Days', 12);
+  const objections = readPrefillList(prefill, 'questionsBeforeBuying', 12);
+  const bannedPhrases = readPrefillList(prefill, 'topicsToAvoid', 24);
+  const requiredClaims = readPrefillList(prefill, 'constraints', 16);
+  const exemplars = Array.from(
+    new Set(
+      [
+        ...readPrefillList(prefill, 'competitorInspirationLinks', 10),
+        ...readPrefillList(prefill, 'socialReferences', 10),
+      ]
+        .map((entry) => normalizeHttpUrl(entry))
+        .filter((entry): entry is string => Boolean(entry))
+    )
+  ).slice(0, 12);
+  const services = readPrefillList(prefill, 'servicesList', 12);
+  const audiencePersonas = Array.from(new Set([idealAudience, targetAudience].filter(Boolean))).slice(0, 8);
+
+  const websiteUrls = Array.from(
+    new Set(
+      [
+        normalizeHttpUrl(prefill.website),
+        ...readPrefillList(prefill, 'websites', 8).map((entry) => normalizeHttpUrl(entry)),
+      ].filter((entry): entry is string => Boolean(entry))
+    )
+  ).slice(0, 8);
+  for (const href of websiteUrls.slice(0, 3)) {
+    globalEvidence.push(toSourceEvidence('intake', 'Website provided in intake', { url: href }));
+  }
+  for (const source of suggestedSources.slice(0, 4)) {
+    globalEvidence.push(
+      toSourceEvidence('social_reference', source.label, {
+        url: source.sourceUrl,
+      })
+    );
+  }
+  for (const snapshot of snapshots.slice(0, 2)) {
+    const url = normalizeHttpUrl(snapshot.finalUrl);
+    globalEvidence.push(
+      toSourceEvidence('website_snapshot', 'Recent website snapshot', {
+        url,
+        snippet: snapshot.cleanText || '',
+      })
+    );
+  }
+  for (const row of ddgRows.slice(0, 2)) {
+    globalEvidence.push(
+      toSourceEvidence('ddg', row.title || 'DDG evidence', {
+        url: row.href,
+        snippet: row.body,
+      })
+    );
+  }
+
+  const missionCandidate =
+    oneSentenceDescription ||
+    (name
+      ? `${name} helps ${idealAudience || 'its audience'} achieve ${primaryGoal || 'measurable growth'} through ${mainOffer || businessType || 'focused offers'}.`
+      : '');
+  addSuggestion(
+    'mission',
+    missionCandidate,
+    oneSentenceDescription ? 0.86 : 0.71,
+    'Mission inferred from intake description and goals.',
+    dedupeEvidenceList([
+      toSourceEvidence('intake', 'One-sentence description', { snippet: oneSentenceDescription }),
+      toSourceEvidence('intake', 'Primary goal', { snippet: primaryGoal }),
+    ])
+  );
+
+  const valuePropositionCandidate =
+    mainOffer ||
+    cleanString(prefill.valueProposition) ||
+    oneSentenceDescription;
+  addSuggestion(
+    'valueProposition',
+    valuePropositionCandidate,
+    mainOffer ? 0.84 : 0.69,
+    'Value proposition inferred from offer and description.',
+    dedupeEvidenceList([
+      toSourceEvidence('intake', 'Main offer', { snippet: mainOffer }),
+      toSourceEvidence('intake', 'Description', { snippet: oneSentenceDescription }),
+    ])
+  );
+
+  addSuggestion(
+    'productOrService',
+    mainOffer || services[0] || businessType,
+    mainOffer ? 0.9 : services[0] ? 0.77 : 0.62,
+    'Product/service inferred from intake offer fields.',
+    dedupeEvidenceList([
+      toSourceEvidence('intake', 'Main offer', { snippet: mainOffer }),
+      toSourceEvidence('intake', 'Services list', { snippet: services.join(', ') }),
+      toSourceEvidence('intake', 'Business type', { snippet: businessType }),
+    ])
+  );
+
+  addSuggestion(
+    'region',
+    region,
+    region ? 0.8 : 0.54,
+    'Region inferred from operating and target market fields.',
+    dedupeEvidenceList([
+      toSourceEvidence('intake', 'Operate where', { snippet: cleanString(prefill.operateWhere) }),
+      toSourceEvidence('intake', 'Want clients where', { snippet: cleanString(prefill.wantClientsWhere) }),
+    ])
+  );
+
+  addSuggestion(
+    'audiencePersonas',
+    audiencePersonas,
+    audiencePersonas.length ? 0.82 : 0.57,
+    'Audience personas inferred from intake audience fields.',
+    dedupeEvidenceList([
+      toSourceEvidence('intake', 'Ideal audience', { snippet: idealAudience }),
+      toSourceEvidence('intake', 'Target audience', { snippet: targetAudience }),
+    ])
+  );
+
+  addSuggestion(
+    'pains',
+    pains,
+    pains.length ? 0.83 : 0.52,
+    'Pain points carried from intake top problems.',
+    [toSourceEvidence('intake', 'Top problems', { snippet: pains.join('; ') })]
+  );
+
+  const desireFallback = primaryGoal ? [primaryGoal] : [];
+  addSuggestion(
+    'desires',
+    desires.length ? desires : desireFallback,
+    desires.length ? 0.8 : desireFallback.length ? 0.64 : 0.5,
+    'Desired outcomes inferred from 90-day goals and primary goal.',
+    dedupeEvidenceList([
+      toSourceEvidence('intake', 'Results in 90 days', { snippet: desires.join('; ') }),
+      toSourceEvidence('intake', 'Primary goal', { snippet: primaryGoal }),
+    ])
+  );
+
+  addSuggestion(
+    'objections',
+    objections,
+    objections.length ? 0.8 : 0.48,
+    'Objections inferred from pre-purchase questions.',
+    [toSourceEvidence('intake', 'Questions before buying', { snippet: objections.join('; ') })]
+  );
+
+  const voiceSliders = inferVoiceSlidersFromIntake(prefill, profile?.voiceSliders);
+  addSuggestion(
+    'voiceSliders',
+    voiceSliders,
+    readPrefillList(prefill, 'brandVoiceWords', 24).length || cleanString(prefill.brandTone) ? 0.74 : 0.56,
+    'Voice sliders inferred from tone and voice words.',
+    dedupeEvidenceList([
+      toSourceEvidence('intake', 'Brand voice words', {
+        snippet: readPrefillList(prefill, 'brandVoiceWords', 24).join(', '),
+      }),
+      toSourceEvidence('intake', 'Brand tone', { snippet: cleanString(prefill.brandTone) }),
+    ])
+  );
+
+  addSuggestion(
+    'bannedPhrases',
+    bannedPhrases,
+    bannedPhrases.length ? 0.78 : 0.46,
+    'Banned phrases inferred from topics to avoid.',
+    [toSourceEvidence('intake', 'Topics to avoid', { snippet: bannedPhrases.join('; ') })]
+  );
+
+  const requiredClaimsFinal = requiredClaims.length
+    ? requiredClaims
+    : ['Results depend on execution quality and context.'];
+  addSuggestion(
+    'requiredClaims',
+    requiredClaimsFinal,
+    requiredClaims.length ? 0.76 : 0.58,
+    'Required claims inferred from constraints with a safe default.',
+    [toSourceEvidence('intake', 'Constraints', { snippet: requiredClaims.join('; ') })]
+  );
+
+  addSuggestion(
+    'exemplars',
+    exemplars,
+    exemplars.length ? 0.74 : 0.45,
+    'Exemplars sourced from inspiration and social references.',
+    dedupeEvidenceList(
+      exemplars.slice(0, 5).map((href) =>
+        toSourceEvidence('inspiration_link', 'Exemplar source', { url: href })
+      )
+    )
+  );
+
+  const summaryCandidate = [
+    missionCandidate,
+    valuePropositionCandidate
+      ? `Core promise: ${valuePropositionCandidate}.`
+      : '',
+    audiencePersonas[0] ? `Primary audience: ${audiencePersonas[0]}.` : '',
+    (desires[0] || primaryGoal) ? `Outcome focus: ${desires[0] || primaryGoal}.` : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+  addSuggestion(
+    'summary',
+    summaryCandidate,
+    summaryCandidate ? 0.72 : 0.5,
+    'Summary composed from inferred mission, value, and audience.',
+    dedupeEvidenceList([
+      toSourceEvidence('intake', 'Mission/value synthesis', { snippet: summaryCandidate }),
+      ...globalEvidence.slice(0, 2),
+    ])
+  );
+
+  const suggestedFields = Object.keys(fieldSuggestions) as BrandDnaAutofillFieldKey[];
+  const confidenceValues = suggestedFields
+    .map((field) => fieldSuggestions[field]?.confidence || 0)
+    .filter((value) => Number.isFinite(value) && value > 0);
+  const suggestionConfidence = confidenceValues.length
+    ? clampConfidence(confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length)
+    : 0;
+  const brandDnaReady = Boolean(profile?.status === 'final' && profile?.completeness.ready);
+  const workflowStage = resolveWorkflowStageFromState({
+    intakeCompleted,
+    brandDnaReady,
+    hasAutofillSuggestions: suggestedFields.length > 0,
+    ingestionCount: 0,
+    prioritizedReferenceCount: 0,
+    generationCount: 0,
+  });
+
+  return {
+    workspaceId,
+    generatedAt: toIsoNow(),
+    workflowStage,
+    autofillStatus:
+      profile?.autofillStatus ||
+      (suggestedFields.length > 0 ? 'previewed' : 'none'),
+    suggestionConfidence,
+    sourceEvidence: dedupeEvidenceList(globalEvidence, 16),
+    suggestedFields,
+    fieldSuggestions,
+    coverage: {
+      suggestedCount: suggestedFields.length,
+      evidenceCount: dedupeEvidenceList(globalEvidence, 20).length,
+      blockedFields: [],
+    },
+  };
+}
+
+export async function applyBrandDnaAutofill(
+  workspaceId: string,
+  input?: {
+    selectedFields?: BrandDnaAutofillFieldKey[];
+    finalizeIfReady?: boolean;
+  }
+): Promise<{
+  workspaceId: string;
+  appliedFields: BrandDnaAutofillFieldKey[];
+  skippedFields: BrandDnaAutofillFieldKey[];
+  preview: BrandDnaAutofillPreview;
+  profile: BrandDNAProfile;
+}> {
+  const preview = await getBrandDnaAutofillPreview(workspaceId);
+  const allowed = new Set<BrandDnaAutofillFieldKey>(preview.suggestedFields);
+  const requested = Array.isArray(input?.selectedFields)
+    ? input.selectedFields
+        .map((entry) => cleanString(entry) as BrandDnaAutofillFieldKey)
+        .filter((entry) => allowed.has(entry))
+    : [];
+  const appliedFields = (requested.length ? requested : preview.suggestedFields).filter((entry) =>
+    allowed.has(entry)
+  );
+  const skippedFields = preview.suggestedFields.filter((field) => !appliedFields.includes(field));
+
+  const patch: UpsertBrandDNAInput = {
+    autofillStatus: 'applied',
+    provenance: {},
+  };
+  const provenance = patch.provenance as Record<string, BrandDnaFieldProvenance>;
+  for (const field of appliedFields) {
+    const suggestion = preview.fieldSuggestions[field];
+    if (!suggestion) continue;
+    if (field === 'voiceSliders') {
+      patch.voiceSliders = suggestion.value as BrandDnaVoiceSliders;
+    } else if (field === 'mission') {
+      patch.mission = String(suggestion.value || '');
+    } else if (field === 'valueProposition') {
+      patch.valueProposition = String(suggestion.value || '');
+    } else if (field === 'productOrService') {
+      patch.productOrService = String(suggestion.value || '');
+    } else if (field === 'region') {
+      patch.region = String(suggestion.value || '');
+    } else if (field === 'audiencePersonas') {
+      patch.audiencePersonas = Array.isArray(suggestion.value) ? suggestion.value : [];
+    } else if (field === 'pains') {
+      patch.pains = Array.isArray(suggestion.value) ? suggestion.value : [];
+    } else if (field === 'desires') {
+      patch.desires = Array.isArray(suggestion.value) ? suggestion.value : [];
+    } else if (field === 'objections') {
+      patch.objections = Array.isArray(suggestion.value) ? suggestion.value : [];
+    } else if (field === 'bannedPhrases') {
+      patch.bannedPhrases = Array.isArray(suggestion.value) ? suggestion.value : [];
+    } else if (field === 'requiredClaims') {
+      patch.requiredClaims = Array.isArray(suggestion.value) ? suggestion.value : [];
+    } else if (field === 'exemplars') {
+      patch.exemplars = Array.isArray(suggestion.value) ? suggestion.value : [];
+    } else if (field === 'summary') {
+      patch.summary = String(suggestion.value || '');
+    }
+    provenance[field] = {
+      source: 'autofill_preview',
+      confidence: suggestion.confidence,
+      sourceEvidence: suggestion.sourceEvidence,
+      updatedAt: toIsoNow(),
+    };
+  }
+
+  let profile = await upsertBrandDNAProfile(workspaceId, patch, 'patch');
+  if (input?.finalizeIfReady && profile.completeness.ready && profile.status !== 'final') {
+    profile = await upsertBrandDNAProfile(workspaceId, { status: 'final' }, 'patch');
+  }
+
+  return {
+    workspaceId,
+    appliedFields,
+    skippedFields,
+    preview,
+    profile,
+  };
+}
+
+export async function getViralStudioWorkflowStatus(
+  workspaceId: string
+): Promise<ViralStudioWorkflowStatus> {
+  await hydrateWorkspaceFromDbIfNeeded(workspaceId);
+  const store = ensureWorkspaceStore(workspaceId);
+  const [profile, intakeStatus, ingestions, references, preview] = await Promise.all([
+    getBrandDNAProfile(workspaceId),
+    getPortalWorkspaceIntakeStatus(workspaceId).catch(() => null),
+    listIngestionRuns(workspaceId),
+    listReferenceAssets(workspaceId, { includeExcluded: true }),
+    getBrandDnaAutofillPreview(workspaceId).catch(() => null),
+  ]);
+
+  const prioritizedReferences = references.filter(
+    (item) => item.shortlistState === 'must-use' || item.shortlistState === 'pin'
+  );
+  const generations = toSortedLatest(Array.from(store.generations.values()));
+  const documents = toSortedLatest(Array.from(store.documents.values()));
+  const latestIngestion = ingestions[0];
+  const latestGeneration = generations[0];
+  const latestDocument = documents[0];
+
+  const workflowStage = resolveWorkflowStageFromState({
+    intakeCompleted: Boolean(intakeStatus?.completed),
+    brandDnaReady: Boolean(profile?.status === 'final' && profile?.completeness.ready),
+    hasAutofillSuggestions: Boolean(preview?.suggestedFields.length),
+    ingestionCount: ingestions.length,
+    prioritizedReferenceCount: prioritizedReferences.length,
+    generationCount: generations.length,
+  });
+
+  return {
+    workspaceId,
+    workflowStage,
+    flow: [
+      'intake_complete',
+      'studio_autofill_review',
+      'extraction',
+      'curation',
+      'generation',
+      'chat_execution',
+    ],
+    intakeCompleted: Boolean(intakeStatus?.completed),
+    brandDnaReady: Boolean(profile?.status === 'final' && profile?.completeness.ready),
+    autofillStatus: profile?.autofillStatus || preview?.autofillStatus || 'none',
+    suggestionConfidence: preview?.suggestionConfidence || 0,
+    sourceEvidence: preview?.sourceEvidence || [],
+    counts: {
+      ingestions: ingestions.length,
+      references: references.length,
+      prioritizedReferences: prioritizedReferences.length,
+      generations: generations.length,
+      documents: documents.length,
+    },
+    latest: {
+      ...(latestIngestion ? { ingestionStatus: latestIngestion.status } : {}),
+      ...(latestGeneration
+        ? {
+            generationId: latestGeneration.id,
+            generationAssetRef: latestGeneration.assetRef,
+          }
+        : {}),
+      ...(latestDocument
+        ? {
+            documentId: latestDocument.id,
+            documentAssetRef: latestDocument.assetRef,
+          }
+        : {}),
+    },
+  };
+}
+
+export async function getViralStudioWorkspaceContext(
+  workspaceId: string
+): Promise<ViralStudioChatContext> {
+  await hydrateWorkspaceFromDbIfNeeded(workspaceId);
+  const store = ensureWorkspaceStore(workspaceId);
+  const [workflow, profile, references] = await Promise.all([
+    getViralStudioWorkflowStatus(workspaceId),
+    getBrandDNAProfile(workspaceId),
+    listReferenceAssets(workspaceId, { includeExcluded: false }),
+  ]);
+
+  const prioritized = references.filter(
+    (item) => item.shortlistState === 'must-use' || item.shortlistState === 'pin'
+  );
+  const selectedReferences = (prioritized.length ? prioritized : references).slice(0, 8);
+  const generations = toSortedLatest(Array.from(store.generations.values()));
+  const documents = toSortedLatest(Array.from(store.documents.values()));
+  const latestGeneration = generations[0];
+  const latestDocument = documents[0];
+  const latestDocumentVersion = latestDocument
+    ? toSortedLatest(store.documentVersions.get(latestDocument.id) || [])[0]
+    : undefined;
+
+  const citations: ViralStudioChatContext['citations'] = [];
+  for (const reference of selectedReferences) {
+    citations.push({
+      id: reference.assetRef || reference.id,
+      label: `${reference.sourcePlatform} reference #${reference.ranking.rank}`,
+      ...(normalizeHttpUrl(reference.sourceUrl) ? { url: normalizeHttpUrl(reference.sourceUrl) } : {}),
+      ...(reference.assetRef ? { libraryRef: reference.assetRef } : {}),
+    });
+  }
+  if (latestGeneration?.assetRef) {
+    citations.unshift({
+      id: latestGeneration.assetRef,
+      label: `Latest generation (${latestGeneration.formatTarget})`,
+      libraryRef: latestGeneration.assetRef,
+    });
+  }
+  if (latestDocument?.assetRef) {
+    citations.unshift({
+      id: latestDocument.assetRef,
+      label: `Latest document (${latestDocument.title})`,
+      libraryRef: latestDocument.assetRef,
+    });
+  }
+  if (latestDocumentVersion?.assetRef) {
+    citations.unshift({
+      id: latestDocumentVersion.assetRef,
+      label: `Latest document version (${latestDocumentVersion.versionNumber || 'n/a'})`,
+      libraryRef: latestDocumentVersion.assetRef,
+    });
+  }
+
+  const libraryRefs = Array.from(
+    new Set(
+      citations
+        .map((item) => cleanString(item.libraryRef))
+        .filter(Boolean)
+    )
+  ).slice(0, 24);
+
+  return {
+    workspaceId,
+    workflowStage: workflow.workflowStage,
+    brandDna: profile
+      ? {
+          status: profile.status,
+          mission: profile.mission,
+          valueProposition: profile.valueProposition,
+          productOrService: profile.productOrService,
+          region: profile.region,
+          audiencePersonas: profile.audiencePersonas,
+          pains: profile.pains,
+          desires: profile.desires,
+          requiredClaims: profile.requiredClaims,
+          bannedPhrases: profile.bannedPhrases,
+          summary: profile.summary,
+          completeness: profile.completeness,
+          updatedAt: profile.updatedAt,
+        }
+      : null,
+    prioritizedReferences: selectedReferences.map((reference) => ({
+      id: reference.id,
+      rank: reference.ranking.rank,
+      platform: reference.sourcePlatform,
+      title: reference.ranking.rationaleTitle,
+      score: Number(reference.scores.composite.toFixed(4)),
+      shortlistState: reference.shortlistState,
+      sourceUrl: reference.sourceUrl,
+      ...(reference.assetRef ? { assetRef: reference.assetRef } : {}),
+      topDrivers: reference.explainability.topDrivers,
+    })),
+    ...(latestGeneration
+      ? {
+          latestGeneration: {
+            id: latestGeneration.id,
+            formatTarget: latestGeneration.formatTarget,
+            revision: latestGeneration.revision,
+            qualityPassed: latestGeneration.qualityCheck.passed,
+            updatedAt: latestGeneration.updatedAt,
+            ...(latestGeneration.assetRef ? { assetRef: latestGeneration.assetRef } : {}),
+          },
+        }
+      : {}),
+    ...(latestDocument
+      ? {
+          latestDocument: {
+            id: latestDocument.id,
+            title: latestDocument.title,
+            currentVersionId: latestDocument.currentVersionId,
+            updatedAt: latestDocument.updatedAt,
+            versionCount: Number(latestDocument.versionCount || 0),
+            ...(latestDocument.assetRef ? { assetRef: latestDocument.assetRef } : {}),
+          },
+        }
+      : {}),
+    ...(latestDocumentVersion
+      ? {
+          latestDocumentVersion: {
+            id: latestDocumentVersion.id,
+            summary: latestDocumentVersion.summary,
+            versionNumber: latestDocumentVersion.versionNumber,
+            createdAt: latestDocumentVersion.createdAt,
+            ...(latestDocumentVersion.assetRef ? { assetRef: latestDocumentVersion.assetRef } : {}),
+          },
+        }
+      : {}),
+    libraryRefs,
+    citations: citations.slice(0, 24),
   };
 }
 

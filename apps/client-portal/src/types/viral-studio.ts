@@ -28,6 +28,16 @@ export type BrandDNAProfile = {
     step4: boolean;
     ready: boolean;
   };
+  provenance?: Record<
+    string,
+    {
+      source: string;
+      confidence: number;
+      sourceEvidence: ViralStudioSourceEvidence[];
+      updatedAt: string;
+    }
+  >;
+  autofillStatus?: "none" | "previewed" | "applied";
   createdAt: string;
   updatedAt: string;
   persistedAt?: string;
@@ -42,7 +52,7 @@ export type ViralStudioIngestionRun = {
   maxVideos: number;
   lookbackDays: number;
   sortBy: "engagement" | "recent" | "views";
-  preset: "balanced" | "quick-scan" | "deep-scan";
+  preset: "balanced" | "quick-scan" | "deep-scan" | "data-max";
   attempt: number;
   retryOfRunId?: string;
   status: "queued" | "running" | "partial" | "completed" | "failed";
@@ -329,4 +339,121 @@ export type ViralStudioStorageModeDiagnostics = {
     VIRAL_STUDIO_DB_READ_WORKSPACES: string;
   };
   counts: Record<string, number>;
+};
+
+export type ViralStudioSourceEvidence = {
+  source:
+    | "intake"
+    | "website_snapshot"
+    | "ddg"
+    | "social_reference"
+    | "inspiration_link"
+    | "system";
+  label: string;
+  snippet?: string;
+  url?: string;
+};
+
+export type ViralStudioAutofillFieldKey =
+  | "mission"
+  | "valueProposition"
+  | "productOrService"
+  | "region"
+  | "audiencePersonas"
+  | "pains"
+  | "desires"
+  | "objections"
+  | "voiceSliders"
+  | "bannedPhrases"
+  | "requiredClaims"
+  | "exemplars"
+  | "summary";
+
+export type ViralStudioBrandDnaAutofillPreview = {
+  workspaceId: string;
+  generatedAt: string;
+  workflowStage:
+    | "intake_pending"
+    | "intake_complete"
+    | "studio_autofill_review"
+    | "extraction"
+    | "curation"
+    | "generation"
+    | "chat_execution";
+  autofillStatus: "none" | "previewed" | "applied";
+  suggestionConfidence: number;
+  sourceEvidence: ViralStudioSourceEvidence[];
+  suggestedFields: ViralStudioAutofillFieldKey[];
+  fieldSuggestions: Partial<
+    Record<
+      ViralStudioAutofillFieldKey,
+      {
+        field: ViralStudioAutofillFieldKey;
+        value:
+          | string
+          | string[]
+          | {
+              bold: number;
+              formal: number;
+              playful: number;
+              direct: number;
+            };
+        confidence: number;
+        rationale: string;
+        sourceEvidence: ViralStudioSourceEvidence[];
+      }
+    >
+  >;
+  coverage: {
+    suggestedCount: number;
+    evidenceCount: number;
+    blockedFields: ViralStudioAutofillFieldKey[];
+  };
+};
+
+export type ViralStudioWorkflowStatus = {
+  workspaceId: string;
+  workflowStage:
+    | "intake_pending"
+    | "intake_complete"
+    | "studio_autofill_review"
+    | "extraction"
+    | "curation"
+    | "generation"
+    | "chat_execution";
+  flow: Array<
+    | "intake_complete"
+    | "studio_autofill_review"
+    | "extraction"
+    | "curation"
+    | "generation"
+    | "chat_execution"
+  >;
+  intakeCompleted: boolean;
+  brandDnaReady: boolean;
+  autofillStatus: "none" | "previewed" | "applied";
+  suggestionConfidence: number;
+  sourceEvidence: ViralStudioSourceEvidence[];
+  counts: {
+    ingestions: number;
+    references: number;
+    prioritizedReferences: number;
+    generations: number;
+    documents: number;
+  };
+  latest: {
+    ingestionStatus?: "queued" | "running" | "partial" | "completed" | "failed";
+    generationId?: string;
+    generationAssetRef?: string;
+    documentId?: string;
+    documentAssetRef?: string;
+  };
+};
+
+export type ViralStudioSuggestedSource = {
+  platform: ViralStudioPlatform;
+  sourceUrl: string;
+  source: "intake_handle" | "intake_social_reference" | "inspiration_link";
+  confidence: number;
+  label: string;
 };

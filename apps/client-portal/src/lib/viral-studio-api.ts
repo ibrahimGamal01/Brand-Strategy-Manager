@@ -1,5 +1,7 @@
 import {
   BrandDNAProfile,
+  ViralStudioAutofillFieldKey,
+  ViralStudioBrandDnaAutofillPreview,
   ViralStudioContractSnapshot,
   ViralStudioDocument,
   ViralStudioDocumentSection,
@@ -14,8 +16,10 @@ import {
   ViralStudioPlatform,
   ViralStudioPromptTemplate,
   ViralStudioReferenceAsset,
+  ViralStudioSuggestedSource,
   ViralStudioStorageModeDiagnostics,
   ViralStudioTelemetrySnapshot,
+  ViralStudioWorkflowStatus,
 } from "@/types/viral-studio";
 
 export type ViralStudioApiError = Error & {
@@ -108,6 +112,68 @@ export async function generateWorkspaceBrandDnaSummary(
   }>(response);
 }
 
+export async function previewWorkspaceBrandDnaAutofill(workspaceId: string) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/brand-dna/autofill-preview`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  return parseJson<{
+    ok: boolean;
+    preview: ViralStudioBrandDnaAutofillPreview;
+  }>(response);
+}
+
+export async function applyWorkspaceBrandDnaAutofill(
+  workspaceId: string,
+  payload?: {
+    selectedFields?: ViralStudioAutofillFieldKey[];
+    finalizeIfReady?: boolean;
+  }
+) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/brand-dna/autofill-apply`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload || {}),
+  });
+  return parseJson<{
+    ok: boolean;
+    workspaceId: string;
+    appliedFields: ViralStudioAutofillFieldKey[];
+    skippedFields: ViralStudioAutofillFieldKey[];
+    preview: ViralStudioBrandDnaAutofillPreview;
+    profile: BrandDNAProfile;
+  }>(response);
+}
+
+export async function fetchViralStudioWorkflowStatus(workspaceId: string) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/viral-studio/workflow-status`, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+  });
+  return parseJson<{
+    ok: boolean;
+    workflow: ViralStudioWorkflowStatus;
+  }>(response);
+}
+
+export async function fetchViralStudioSuggestedSources(workspaceId: string) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/viral-studio/extraction/suggested-sources`, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+  });
+  return parseJson<{
+    ok: boolean;
+    items: ViralStudioSuggestedSource[];
+    count: number;
+    defaultPreset: "data-max";
+  }>(response);
+}
+
 export async function fetchViralStudioContracts(workspaceId: string) {
   const response = await fetch(`/api/portal/workspaces/${workspaceId}/viral-studio/contracts`, {
     method: "GET",
@@ -156,7 +222,7 @@ export async function createViralStudioIngestion(
     maxVideos?: number;
     lookbackDays?: number;
     sortBy?: "engagement" | "recent" | "views";
-    preset?: "balanced" | "quick-scan" | "deep-scan";
+    preset?: "balanced" | "quick-scan" | "deep-scan" | "data-max";
   }
 ) {
   const response = await fetch(`/api/portal/workspaces/${workspaceId}/viral-studio/ingestions`, {

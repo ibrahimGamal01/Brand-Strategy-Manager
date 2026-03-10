@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  applyWorkspaceBrandDnaAutofill,
   compareViralStudioDocumentVersions,
   createViralStudioDocument,
   createViralStudioDocumentVersion,
@@ -12,7 +13,9 @@ import {
   fetchViralStudioContracts,
   fetchViralStudioDocument,
   fetchViralStudioIngestion,
+  fetchViralStudioSuggestedSources,
   fetchViralStudioTelemetry,
+  fetchViralStudioWorkflowStatus,
   fetchWorkspaceBrandDna,
   generateWorkspaceBrandDnaSummary,
   listViralStudioIngestions,
@@ -20,6 +23,7 @@ import {
   patchViralStudioDocument,
   patchWorkspaceBrandDna,
   promoteViralStudioDocumentVersion,
+  previewWorkspaceBrandDnaAutofill,
   refineViralStudioGeneration,
   retryViralStudioIngestion,
   updateViralStudioReferenceShortlist,
@@ -30,6 +34,8 @@ import {
   sendRuntimeMessage,
 } from "@/lib/runtime-api";
 import {
+  ViralStudioAutofillFieldKey,
+  ViralStudioBrandDnaAutofillPreview,
   BrandDNAProfile,
   ViralStudioContractSnapshot,
   ViralStudioDocument,
@@ -43,7 +49,9 @@ import {
   ViralStudioPlatform,
   ViralStudioPromptTemplate,
   ViralStudioReferenceAsset,
+  ViralStudioSuggestedSource,
   ViralStudioTelemetrySnapshot,
+  ViralStudioWorkflowStatus,
 } from "@/types/viral-studio";
 
 type BrandFormState = {
@@ -79,7 +87,7 @@ type ViralStudioChatBridgePayload = {
   libraryRefs: string[];
 };
 
-type IngestionPreset = "balanced" | "quick-scan" | "deep-scan";
+type IngestionPreset = "balanced" | "quick-scan" | "deep-scan" | "data-max";
 type ReferenceShortlistAction = "pin" | "exclude" | "must-use" | "clear";
 
 type PromptStudioSectionMeta = {
@@ -116,6 +124,22 @@ const DEFAULT_FORM_STATE: BrandFormState = {
   voicePlayful: 45,
   voiceDirect: 65,
 };
+
+const AUTOFILL_FIELD_ORDER: ViralStudioAutofillFieldKey[] = [
+  "mission",
+  "valueProposition",
+  "productOrService",
+  "region",
+  "audiencePersonas",
+  "pains",
+  "desires",
+  "objections",
+  "voiceSliders",
+  "bannedPhrases",
+  "requiredClaims",
+  "exemplars",
+  "summary",
+];
 
 function csvToArray(value: string): string[] {
   return value
@@ -193,9 +217,42 @@ function toPlatformLabel(platform: ViralStudioPlatform): string {
 }
 
 function toPresetLabel(preset: IngestionPreset): string {
+  if (preset === "data-max") return "Data max";
   if (preset === "quick-scan") return "Quick scan";
   if (preset === "deep-scan") return "Deep scan";
   return "Balanced";
+}
+
+function toWorkflowStageLabel(stage: ViralStudioWorkflowStatus["workflowStage"] | string): string {
+  if (stage === "intake_pending") return "Intake pending";
+  if (stage === "intake_complete") return "Intake complete";
+  if (stage === "studio_autofill_review") return "Studio autofill review";
+  if (stage === "extraction") return "Extraction";
+  if (stage === "curation") return "Curation";
+  if (stage === "generation") return "Generation";
+  if (stage === "chat_execution") return "Chat execution";
+  return stage;
+}
+
+function toAutofillFieldLabel(field: ViralStudioAutofillFieldKey): string {
+  if (field === "valueProposition") return "Value proposition";
+  if (field === "productOrService") return "Product / service";
+  if (field === "audiencePersonas") return "Audience personas";
+  if (field === "voiceSliders") return "Voice sliders";
+  if (field === "bannedPhrases") return "Banned phrases";
+  if (field === "requiredClaims") return "Required claims";
+  return field.replace(/([A-Z])/g, " $1").replace(/^./, (value) => value.toUpperCase());
+}
+
+function createAutofillSelection(
+  preview: ViralStudioBrandDnaAutofillPreview | null
+): Partial<Record<ViralStudioAutofillFieldKey, boolean>> {
+  const next: Partial<Record<ViralStudioAutofillFieldKey, boolean>> = {};
+  if (!preview) return next;
+  for (const field of preview.suggestedFields) {
+    next[field] = true;
+  }
+  return next;
 }
 
 function toGenerationFormatLabel(target: ViralStudioGenerationFormatTarget): string {
@@ -264,6 +321,9 @@ function moveDocumentSection(
 }
 
 function presetDefaults(preset: IngestionPreset): { maxVideos: number; lookbackDays: number } {
+  if (preset === "data-max") {
+    return { maxVideos: 120, lookbackDays: 365 };
+  }
   if (preset === "quick-scan") {
     return { maxVideos: 24, lookbackDays: 90 };
   }
@@ -502,6 +562,11 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   const [telemetry, setTelemetry] = useState<ViralStudioTelemetrySnapshot | null>(null);
   const [promptTemplates, setPromptTemplates] = useState<ViralStudioPromptTemplate[]>([]);
   const [brandProfile, setBrandProfile] = useState<BrandDNAProfile | null>(null);
+  const [workflowStatus, setWorkflowStatus] = useState<ViralStudioWorkflowStatus | null>(null);
+  const [autofillPreview, setAutofillPreview] = useState<ViralStudioBrandDnaAutofillPreview | null>(null);
+  const [autofillSelection, setAutofillSelection] = useState<Partial<Record<ViralStudioAutofillFieldKey, boolean>>>({});
+  const [suggestedSources, setSuggestedSources] = useState<ViralStudioSuggestedSource[]>([]);
+  const [autofillBusy, setAutofillBusy] = useState(false);
   const [brandForm, setBrandForm] = useState<BrandFormState>({ ...DEFAULT_FORM_STATE });
   const [onboardingStep, setOnboardingStep] = useState<1 | 2 | 3 | 4>(1);
   const [isEditingBrandDna, setIsEditingBrandDna] = useState(false);
@@ -525,9 +590,9 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
 
   const [sourcePlatform, setSourcePlatform] = useState<ViralStudioPlatform>("instagram");
   const [sourceUrl, setSourceUrl] = useState("");
-  const [ingestionPreset, setIngestionPreset] = useState<IngestionPreset>("balanced");
-  const [maxVideos, setMaxVideos] = useState(50);
-  const [lookbackDays, setLookbackDays] = useState(180);
+  const [ingestionPreset, setIngestionPreset] = useState<IngestionPreset>("data-max");
+  const [maxVideos, setMaxVideos] = useState(120);
+  const [lookbackDays, setLookbackDays] = useState(365);
   const [showExtractionModal, setShowExtractionModal] = useState(false);
   const [promptText, setPromptText] = useState(
     "Generate a campaign-ready multi-pack with aggressive hooks, proof-backed scripts, and direct CTAs."
@@ -560,16 +625,39 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     }
   }, [workspaceId]);
 
+  const refreshWorkflow = useCallback(async () => {
+    try {
+      const [workflowPayload, sourcesPayload] = await Promise.all([
+        fetchViralStudioWorkflowStatus(workspaceId),
+        fetchViralStudioSuggestedSources(workspaceId),
+      ]);
+      setWorkflowStatus(workflowPayload.workflow);
+      setSuggestedSources(sourcesPayload.items);
+    } catch {
+      // Keep prior workflow snapshot when refresh fails.
+    }
+  }, [workspaceId]);
+
   const bootstrap = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [brandPayload, contractPayload, telemetryPayload, ingestionPayload, referencePayload] = await Promise.all([
+      const [
+        brandPayload,
+        contractPayload,
+        telemetryPayload,
+        ingestionPayload,
+        referencePayload,
+        workflowPayload,
+        sourcePayload,
+      ] = await Promise.all([
         fetchWorkspaceBrandDna(workspaceId),
         fetchViralStudioContracts(workspaceId),
         fetchViralStudioTelemetry(workspaceId),
         listViralStudioIngestions(workspaceId),
         listViralStudioReferences(workspaceId),
+        fetchViralStudioWorkflowStatus(workspaceId),
+        fetchViralStudioSuggestedSources(workspaceId),
       ]);
       setBrandProfile(brandPayload.profile);
       setBrandForm(toFormState(brandPayload.profile));
@@ -579,6 +667,8 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       setIngestions(ingestionPayload.runs);
       setActiveIngestion(ingestionPayload.runs[0] || null);
       setReferences(referencePayload.items);
+      setWorkflowStatus(workflowPayload.workflow);
+      setSuggestedSources(sourcePayload.items);
       if (brandPayload.profile?.status === "final" && brandPayload.profile?.completeness.ready) {
         setOnboardingStep(4);
       }
@@ -595,12 +685,12 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      void refreshTelemetry();
+      void Promise.all([refreshTelemetry(), refreshWorkflow()]);
     }, 5000);
     return () => {
       window.clearInterval(timer);
     };
-  }, [refreshTelemetry]);
+  }, [refreshTelemetry, refreshWorkflow]);
 
   useEffect(() => {
     if (!promptTemplates.length) return;
@@ -624,7 +714,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
           if (payload.run.status === "completed" || payload.run.status === "partial") {
             void listViralStudioReferences(workspaceId, { ingestionRunId: payload.run.id }).then((referencePayload) => {
               setReferences(referencePayload.items);
-              void refreshTelemetry();
+              void Promise.all([refreshTelemetry(), refreshWorkflow()]);
             });
           }
         })
@@ -633,7 +723,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     return () => {
       window.clearInterval(poller);
     };
-  }, [workspaceId, activeIngestion, refreshTelemetry]);
+  }, [workspaceId, activeIngestion, refreshTelemetry, refreshWorkflow]);
 
   useEffect(() => {
     if (!showExtractionModal) return;
@@ -647,6 +737,14 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [showExtractionModal]);
+
+  useEffect(() => {
+    if (sourceUrl.trim()) return;
+    const primary = suggestedSources[0];
+    if (!primary) return;
+    setSourcePlatform(primary.platform);
+    setSourceUrl(primary.sourceUrl);
+  }, [suggestedSources, sourceUrl]);
 
   const selectedReferenceIds = useMemo(() => {
     const prioritized = references.filter((item) => item.shortlistState === "must-use" || item.shortlistState === "pin");
@@ -803,9 +901,20 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       .map((version) => ({
         id: version.id,
         label: `${version.summary || "Snapshot"} • ${new Date(version.createdAt).toLocaleString()}`,
-      }));
+    }));
     return [...base, ...timeline];
   }, [versions]);
+
+  const orderedAutofillFields = useMemo(() => {
+    if (!autofillPreview) return [] as ViralStudioAutofillFieldKey[];
+    const allowed = new Set(autofillPreview.suggestedFields);
+    return AUTOFILL_FIELD_ORDER.filter((field) => allowed.has(field));
+  }, [autofillPreview]);
+
+  const selectedAutofillCount = useMemo(() => {
+    if (!autofillPreview) return 0;
+    return autofillPreview.suggestedFields.filter((field) => autofillSelection[field] !== false).length;
+  }, [autofillPreview, autofillSelection]);
 
   const saveBrandDna = useCallback(
     async (mode: "draft" | "final") => {
@@ -842,14 +951,14 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
           setIsEditingBrandDna(false);
           setOnboardingStep(4);
         }
-        void refreshTelemetry();
+        void Promise.all([refreshTelemetry(), refreshWorkflow()]);
       } catch (saveError: unknown) {
         setError(String((saveError as Error)?.message || "Failed to save Brand DNA"));
       } finally {
         setIsBusy(false);
       }
     },
-    [workspaceId, brandForm, brandProfile, refreshTelemetry]
+    [workspaceId, brandForm, brandProfile, refreshTelemetry, refreshWorkflow]
   );
 
   const generateSummary = useCallback(async () => {
@@ -879,6 +988,60 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     }
   }, [workspaceId, brandForm]);
 
+  const previewAutofill = useCallback(async () => {
+    setAutofillBusy(true);
+    setError(null);
+    try {
+      const payload = await previewWorkspaceBrandDnaAutofill(workspaceId);
+      setAutofillPreview(payload.preview);
+      setAutofillSelection(createAutofillSelection(payload.preview));
+      await refreshWorkflow();
+    } catch (previewError: unknown) {
+      setError(String((previewError as Error)?.message || "Failed to generate autofill preview"));
+    } finally {
+      setAutofillBusy(false);
+    }
+  }, [workspaceId, refreshWorkflow]);
+
+  const toggleAutofillField = useCallback((field: ViralStudioAutofillFieldKey) => {
+    setAutofillSelection((previous) => ({ ...previous, [field]: !(previous[field] !== false) }));
+  }, []);
+
+  const applyAutofill = useCallback(async () => {
+    setAutofillBusy(true);
+    setError(null);
+    try {
+      const selectedFields = (autofillPreview?.suggestedFields || []).filter(
+        (field) => autofillSelection[field] !== false
+      );
+      const payload = await applyWorkspaceBrandDnaAutofill(workspaceId, {
+        selectedFields,
+        finalizeIfReady: true,
+      });
+      setBrandProfile(payload.profile);
+      setBrandForm(toFormState(payload.profile));
+      setAutofillPreview(payload.preview);
+      setAutofillSelection(createAutofillSelection(payload.preview));
+      if (payload.profile.status === "final" && payload.profile.completeness.ready) {
+        setOnboardingStep(4);
+        setIsEditingBrandDna(false);
+      }
+      await Promise.all([refreshWorkflow(), refreshTelemetry()]);
+    } catch (applyError: unknown) {
+      setError(String((applyError as Error)?.message || "Failed to apply autofill suggestions"));
+    } finally {
+      setAutofillBusy(false);
+    }
+  }, [workspaceId, autofillPreview, autofillSelection, refreshTelemetry, refreshWorkflow]);
+
+  useEffect(() => {
+    if (brandReady) return;
+    if (autofillPreview || autofillBusy) return;
+    const stage = workflowStatus?.workflowStage;
+    if (stage !== "studio_autofill_review" && stage !== "intake_complete") return;
+    void previewAutofill();
+  }, [brandReady, autofillBusy, autofillPreview, previewAutofill, workflowStatus?.workflowStage]);
+
   const runExtraction = useCallback(async () => {
     if (!brandReady) return;
     setIsBusy(true);
@@ -895,13 +1058,13 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       setShowExtractionModal(false);
       setActiveIngestion(payload.run);
       setIngestions((previous) => [payload.run, ...previous.filter((row) => row.id !== payload.run.id)]);
-      void refreshTelemetry();
+      void Promise.all([refreshTelemetry(), refreshWorkflow()]);
     } catch (runError: unknown) {
       setError(String((runError as Error)?.message || "Failed to start extraction"));
     } finally {
       setIsBusy(false);
     }
-  }, [workspaceId, sourcePlatform, sourceUrl, maxVideos, lookbackDays, ingestionPreset, brandReady, refreshTelemetry]);
+  }, [workspaceId, sourcePlatform, sourceUrl, maxVideos, lookbackDays, ingestionPreset, brandReady, refreshTelemetry, refreshWorkflow]);
 
   const applyIngestionPreset = useCallback((preset: IngestionPreset) => {
     setIngestionPreset(preset);
@@ -910,6 +1073,16 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     setLookbackDays(defaults.lookbackDays);
   }, []);
 
+  const selectSuggestedSource = useCallback(
+    (source: ViralStudioSuggestedSource) => {
+      setSourcePlatform(source.platform);
+      setSourceUrl(source.sourceUrl);
+      applyIngestionPreset("data-max");
+      setShowExtractionModal(true);
+    },
+    [applyIngestionPreset]
+  );
+
   const openIngestionResults = useCallback(
     async (run: ViralStudioIngestionRun) => {
       setActiveIngestion(run);
@@ -917,13 +1090,13 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         try {
           const payload = await listViralStudioReferences(workspaceId, { ingestionRunId: run.id });
           setReferences(payload.items);
-          void refreshTelemetry();
+          void Promise.all([refreshTelemetry(), refreshWorkflow()]);
         } catch {
           // Keep current list if refresh fails.
         }
       }
     },
-    [workspaceId, refreshTelemetry]
+    [workspaceId, refreshTelemetry, refreshWorkflow]
   );
 
   const retryExtraction = useCallback(
@@ -934,14 +1107,14 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         const payload = await retryViralStudioIngestion(workspaceId, runId);
         setActiveIngestion(payload.run);
         setIngestions((previous) => [payload.run, ...previous.filter((row) => row.id !== payload.run.id)]);
-        void refreshTelemetry();
+        void Promise.all([refreshTelemetry(), refreshWorkflow()]);
       } catch (retryError: unknown) {
         setError(String((retryError as Error)?.message || "Failed to retry extraction"));
       } finally {
         setIsBusy(false);
       }
     },
-    [workspaceId, refreshTelemetry]
+    [workspaceId, refreshTelemetry, refreshWorkflow]
   );
 
   const shortlistReference = useCallback(
@@ -957,7 +1130,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
             ? `Reference #${payload.item.ranking.rank} cleared from shortlist.`
             : `Reference #${payload.item.ranking.rank} moved to ${shortlistLabel(payload.item.shortlistState)}.`
         );
-        void refreshTelemetry();
+        void Promise.all([refreshTelemetry(), refreshWorkflow()]);
       } catch (shortlistError: unknown) {
         setError(String((shortlistError as Error)?.message || "Failed to update shortlist"));
       } finally {
@@ -968,7 +1141,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         });
       }
     },
-    [workspaceId, refreshTelemetry]
+    [workspaceId, refreshTelemetry, refreshWorkflow]
   );
 
   useEffect(() => {
@@ -1016,13 +1189,13 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       });
       setGeneration(payload.generation);
       setActivePromptSection("hooks");
-      void refreshTelemetry();
+      void Promise.all([refreshTelemetry(), refreshWorkflow()]);
     } catch (generationError: unknown) {
       setError(String((generationError as Error)?.message || "Failed to generate pack"));
     } finally {
       setIsBusy(false);
     }
-  }, [workspaceId, selectedReferenceIds, promptText, brandReady, selectedTemplateId, generationFormatTarget, refreshTelemetry]);
+  }, [workspaceId, selectedReferenceIds, promptText, brandReady, selectedTemplateId, generationFormatTarget, refreshTelemetry, refreshWorkflow]);
 
   const runPromptSectionAction = useCallback(
     async (section: ViralStudioGenerationSection, mode: "refine" | "regenerate") => {
@@ -1039,7 +1212,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         });
         setGeneration(payload.generation);
         setActivePromptSection(section);
-        void refreshTelemetry();
+        void Promise.all([refreshTelemetry(), refreshWorkflow()]);
       } catch (refineError: unknown) {
         setError(String((refineError as Error)?.message || "Failed to refine generation section"));
       } finally {
@@ -1047,7 +1220,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         setIsBusy(false);
       }
     },
-    [workspaceId, generation, sectionInstructions, refreshTelemetry]
+    [workspaceId, generation, sectionInstructions, refreshTelemetry, refreshWorkflow]
   );
 
   const updateSectionInstruction = useCallback(
@@ -1105,13 +1278,13 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       setCompareLeftVersionId("current");
       setCompareRightVersionId("current");
       setPromoteVersionId(documentPayload.versions[documentPayload.versions.length - 1]?.id || "");
-      void refreshTelemetry();
+      void Promise.all([refreshTelemetry(), refreshWorkflow()]);
     } catch (documentError: unknown) {
       setError(String((documentError as Error)?.message || "Failed to create document"));
     } finally {
       setIsBusy(false);
     }
-  }, [workspaceId, generation, refreshTelemetry]);
+  }, [workspaceId, generation, refreshTelemetry, refreshWorkflow]);
 
   const snapshotVersion = useCallback(async () => {
     if (!document) return;
@@ -1134,13 +1307,13 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         return [...previous, payload.version];
       });
       setPromoteVersionId(payload.version.id);
-      void refreshTelemetry();
+      void Promise.all([refreshTelemetry(), refreshWorkflow()]);
     } catch (versionError: unknown) {
       setError(String((versionError as Error)?.message || "Failed to create document version"));
     } finally {
       setIsBusy(false);
     }
-  }, [workspaceId, document, documentDraft, documentDirty, persistDocumentDraft, refreshTelemetry]);
+  }, [workspaceId, document, documentDraft, documentDirty, persistDocumentDraft, refreshTelemetry, refreshWorkflow]);
 
   const saveDocumentNow = useCallback(async () => {
     if (!documentDraft || !documentDirty) return;
@@ -1178,13 +1351,13 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       });
       setCompareLeftVersionId(payload.promotedFromVersionId);
       setCompareRightVersionId(payload.version.id);
-      void refreshTelemetry();
+      void Promise.all([refreshTelemetry(), refreshWorkflow()]);
     } catch (promoteError: unknown) {
       setError(String((promoteError as Error)?.message || "Failed to promote document version"));
     } finally {
       setIsBusy(false);
     }
-  }, [workspaceId, document, promoteVersionId, documentDraft, documentDirty, persistDocumentDraft, refreshTelemetry]);
+  }, [workspaceId, document, promoteVersionId, documentDraft, documentDirty, persistDocumentDraft, refreshTelemetry, refreshWorkflow]);
 
   const runVersionCompare = useCallback(async () => {
     if (!document) return;
@@ -1265,14 +1438,14 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         }
         const payload = await exportViralStudioDocument(workspaceId, document.id, format);
         setLastExport({ format: payload.export.format, content: payload.export.content.slice(0, 800) });
-        void refreshTelemetry();
+        void Promise.all([refreshTelemetry(), refreshWorkflow()]);
       } catch (exportError: unknown) {
         setError(String((exportError as Error)?.message || "Failed to export document"));
       } finally {
         setIsBusy(false);
       }
     },
-    [workspaceId, document, documentDraft, documentDirty, persistDocumentDraft, refreshTelemetry]
+    [workspaceId, document, documentDraft, documentDirty, persistDocumentDraft, refreshTelemetry, refreshWorkflow]
   );
 
   useEffect(() => {
@@ -1386,6 +1559,120 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         <article className="vbs-panel">
           <h2 className="vbs-panel-title">Brand DNA Onboarding</h2>
           <p className="vbs-panel-subtitle">Complete all 4 steps and finalize to unlock generation workflow.</p>
+          <div className="vbs-output vbs-workflow-status">
+            <p className="vbs-meta">
+              Unified workflow stage:{" "}
+              <strong>{toWorkflowStageLabel(workflowStatus?.workflowStage || "intake_pending")}</strong>
+              {" • "}
+              Intake complete: <strong>{workflowStatus?.intakeCompleted ? "yes" : "no"}</strong>
+              {" • "}
+              Brand DNA ready: <strong>{workflowStatus?.brandDnaReady ? "yes" : "no"}</strong>
+            </p>
+            <div className="vbs-mini-actions">
+              {(workflowStatus?.flow || [
+                "intake_complete",
+                "studio_autofill_review",
+                "extraction",
+                "curation",
+                "generation",
+                "chat_execution",
+              ]).map((step) => (
+                <span
+                  key={step}
+                  className={
+                    workflowStatus?.workflowStage === step
+                      ? "vbs-chip-toggle is-active"
+                      : "vbs-chip-toggle"
+                  }
+                >
+                  {toWorkflowStageLabel(step)}
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className="vbs-output vbs-autofill-panel">
+            <div className="vbs-mini-actions">
+              <button type="button" disabled={autofillBusy || isBusy} onClick={() => void previewAutofill()}>
+                {autofillBusy ? "Loading preview..." : "Preview Autofill"}
+              </button>
+              <button
+                type="button"
+                disabled={autofillBusy || isBusy || !autofillPreview || selectedAutofillCount === 0}
+                onClick={() => void applyAutofill()}
+              >
+                Apply Selected ({selectedAutofillCount})
+              </button>
+            </div>
+            <p className="vbs-meta">
+              Preview-then-apply mode from intake + website + social evidence. Confidence{" "}
+              <strong>
+                {autofillPreview ? `${Math.round((autofillPreview.suggestionConfidence || 0) * 100)}%` : "n/a"}
+              </strong>
+              {" • "}
+              Coverage{" "}
+              <strong>
+                {autofillPreview?.coverage.suggestedCount || 0} field(s)
+              </strong>
+            </p>
+            {autofillPreview ? (
+              <div className="vbs-autofill-list">
+                {orderedAutofillFields.map((field) => {
+                  const suggestion = autofillPreview.fieldSuggestions[field];
+                  if (!suggestion) return null;
+                  return (
+                    <label key={field} className="vbs-autofill-item">
+                      <span className="vbs-autofill-row">
+                        <input
+                          type="checkbox"
+                          checked={autofillSelection[field] !== false}
+                          onChange={() => toggleAutofillField(field)}
+                        />
+                        <strong>{toAutofillFieldLabel(field)}</strong>
+                        <span className="vbs-meta">{Math.round((suggestion.confidence || 0) * 100)}%</span>
+                      </span>
+                      <span className="vbs-meta">{compactText(suggestion.rationale, 220)}</span>
+                      <span className="vbs-meta">
+                        Evidence:{" "}
+                        {suggestion.sourceEvidence
+                          .slice(0, 2)
+                          .map((entry) => entry.label)
+                          .filter(Boolean)
+                          .join(" • ") || "n/a"}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="vbs-meta">
+                No autofill preview loaded yet. Use preview to hydrate fields from workspace evidence.
+              </p>
+            )}
+          </div>
+          <div className="vbs-output">
+            <h3>Suggested Extraction Sources (Data-max)</h3>
+            {suggestedSources.length ? (
+              <div className="vbs-source-suggest-list">
+                {suggestedSources.slice(0, 8).map((source) => (
+                  <div key={`${source.platform}:${source.sourceUrl}`} className="vbs-source-suggest-row">
+                    <div>
+                      <p>
+                        <strong>{toPlatformLabel(source.platform)}</strong> • {source.label}
+                      </p>
+                      <p className="vbs-meta">
+                        Confidence {Math.round((source.confidence || 0) * 100)}% • {source.sourceUrl}
+                      </p>
+                    </div>
+                    <button type="button" disabled={isBusy} onClick={() => selectSuggestedSource(source)}>
+                      Use Source
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="vbs-meta">No social/profile suggestions detected yet in intake evidence.</p>
+            )}
+          </div>
 
           {brandReady && !isEditingBrandDna ? (
             <div className="vbs-output">
@@ -2218,7 +2505,8 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                   value={ingestionPreset}
                   onChange={(e) => applyIngestionPreset(e.target.value as IngestionPreset)}
                 >
-                  <option value="balanced">Balanced (Recommended)</option>
+                  <option value="data-max">Data max (Recommended)</option>
+                  <option value="balanced">Balanced</option>
                   <option value="quick-scan">Quick Scan</option>
                   <option value="deep-scan">Deep Scan</option>
                 </select>
