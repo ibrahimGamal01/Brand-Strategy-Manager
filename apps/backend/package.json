@@ -57,6 +57,7 @@
         "test:viral-studio-plan6": "tsx src/scripts/test-viral-studio-plan6.ts",
         "test:viral-studio-plan8": "tsx src/scripts/test-viral-studio-plan8.ts",
         "test:viral-studio-plan9": "tsx src/scripts/test-viral-studio-plan9.ts",
+        "test:viral-studio-plan10": "tsx src/scripts/test-viral-studio-plan10.ts",
         "test:instagram-session-pool": "tsx src/scripts/test-instagram-session-pool.ts",
         "test:instagram-graphql-retry-guard": "tsx src/scripts/test-instagram-graphql-retry-guard.ts",
         "test:instagram-service-graphql-cooldown": "tsx src/scripts/test-instagram-service-graphql-cooldown.ts",
