@@ -31,8 +31,17 @@ function pickSourceUrlForStatus(input: {
   lookbackDays: number;
   attempt: number;
 }): string {
+  const candidateFor = (index: number) => {
+    if (input.platform === 'instagram') {
+      return `https://www.instagram.com/${input.target}_creator_${index}`;
+    }
+    if (input.platform === 'tiktok') {
+      return `https://www.tiktok.com/@${input.target}_creator_${index}`;
+    }
+    return `https://www.youtube.com/@${input.target}_creator_${index}`;
+  };
   for (let index = 1; index <= 5000; index += 1) {
-    const candidate = `https://example.com/${input.target}/creator-${index}`;
+    const candidate = candidateFor(index);
     const seed = toShortHash(
       `${input.platform}|${candidate}|${input.maxVideos}|${input.lookbackDays}|${input.attempt}`
     );
