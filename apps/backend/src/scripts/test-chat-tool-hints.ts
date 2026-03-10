@@ -51,4 +51,12 @@ assert.ok(
   'Expected workspace.intake.get call for original form response request'
 );
 
+const viralStudioCalls = inferHeuristicToolCalls({
+  userMessage: 'Use Viral Studio context and summarize brand DNA plus shortlist references',
+});
+assert.ok(
+  viralStudioCalls.some((entry) => entry.name === 'workspace.viral_studio.get_context'),
+  'Expected workspace.viral_studio.get_context call for Viral Studio context requests'
+);
+
 console.log('chat-tool-hints tests passed');

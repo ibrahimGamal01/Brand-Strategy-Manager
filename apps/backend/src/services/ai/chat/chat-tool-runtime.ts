@@ -263,6 +263,7 @@ async function runPlanner(params: {
     '- "show web snapshots/sources/recipes/runs" -> intel.list section matching request',
     '- "get item by id" -> intel.get (requires section + id/target; never call intel.get with missing section)',
     '- "original form/intake response" -> workspace.intake.get',
+    '- "viral studio / brand dna / generation pack / shortlist context" -> workspace.viral_studio.get_context',
     'If no tools are required, return {"tool_calls":[]}.',
     'JSON schema:',
     '{"tool_calls":[{"name":"tool","args":{}}]}',

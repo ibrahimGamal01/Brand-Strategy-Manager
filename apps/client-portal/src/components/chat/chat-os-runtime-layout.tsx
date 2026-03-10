@@ -18,6 +18,13 @@ import {
   RuntimeWorkspaceDocumentDto,
   uploadRuntimeDocuments,
 } from "@/lib/runtime-api";
+import {
+  applyWorkspaceBrandDnaAutofill,
+  createViralStudioIngestion,
+  fetchViralStudioSuggestedSources,
+  fetchViralStudioWorkflowStatus,
+  previewWorkspaceBrandDnaAutofill,
+} from "@/lib/viral-studio-api";
 import { ChatComposer } from "./chat-composer";
 import { ChatThread } from "./chat-thread";
 import { CommandPalette } from "./command-palette";
@@ -25,6 +32,11 @@ import { DocumentWorkspacePanel } from "./document-workspace-panel";
 import { LiveActivityPanel } from "./live-activity-panel";
 import { LibraryDrawer } from "@/components/library/library-drawer";
 import type { UploadedDocumentChip } from "@/types/chat";
+import type {
+  ViralStudioBrandDnaAutofillPreview,
+  ViralStudioSuggestedSource,
+  ViralStudioWorkflowStatus,
+} from "@/types/viral-studio";
 
 const steerSystemPrompts: Record<
   string,
@@ -88,6 +100,18 @@ function formatPhaseLabel(phase?: string | null): string {
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
+function formatViralWorkflowStage(stage?: ViralStudioWorkflowStatus["workflowStage"] | null): string {
+  const normalized = String(stage || "").trim().toLowerCase();
+  if (normalized === "intake_pending") return "Intake pending";
+  if (normalized === "intake_complete") return "Intake complete";
+  if (normalized === "studio_autofill_review") return "Autofill review";
+  if (normalized === "extraction") return "Extraction";
+  if (normalized === "curation") return "Curation";
+  if (normalized === "generation") return "Generation";
+  if (normalized === "chat_execution") return "Chat execution";
+  return "Not started";
+}
+
 function mapParserStatusToUploadChipStatus(
   status: string | null | undefined
 ): UploadedDocumentChip["status"] {
@@ -135,6 +159,11 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     acceptedMimePrefixes: string[];
     imageUploadsEnabled: boolean;
   } | null>(null);
+  const [viralWorkflow, setViralWorkflow] = useState<ViralStudioWorkflowStatus | null>(null);
+  const [viralAutofillPreview, setViralAutofillPreview] = useState<ViralStudioBrandDnaAutofillPreview | null>(null);
+  const [viralSuggestedSources, setViralSuggestedSources] = useState<ViralStudioSuggestedSource[]>([]);
+  const [viralBridgeBusy, setViralBridgeBusy] = useState(false);
+  const [viralBridgeError, setViralBridgeError] = useState<string | null>(null);
   const seenGeneratedDocumentIdsRef = useRef<Set<string>>(new Set());
   const generatedDocumentsSeededRef = useRef(false);
   const pendingGeneratedDocumentIdRef = useRef<string | null>(null);
@@ -313,6 +342,31 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    const loadViralBridge = async () => {
+      try {
+        const [workflowPayload, sourcesPayload] = await Promise.all([
+          fetchViralStudioWorkflowStatus(workspaceId),
+          fetchViralStudioSuggestedSources(workspaceId),
+        ]);
+        if (cancelled) return;
+        setViralWorkflow(workflowPayload.workflow);
+        setViralSuggestedSources(sourcesPayload.items || []);
+      } catch {
+        if (cancelled) return;
+      }
+    };
+    void loadViralBridge();
+    const timer = window.setInterval(() => {
+      void loadViralBridge();
+    }, 12_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [workspaceId]);
+
   const runAsync = (work: Promise<void>) => {
     setActionError(null);
     void work.catch((workError) => {
@@ -393,6 +447,88 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
       return `${current}${separator}${next}`;
     });
     setComposerFocusSignal((previous) => previous + 1);
+  };
+
+  const refreshViralBridgeNow = async () => {
+    const [workflowPayload, sourcesPayload] = await Promise.all([
+      fetchViralStudioWorkflowStatus(workspaceId),
+      fetchViralStudioSuggestedSources(workspaceId),
+    ]);
+    setViralWorkflow(workflowPayload.workflow);
+    setViralSuggestedSources(sourcesPayload.items || []);
+  };
+
+  const previewViralAutofill = () => {
+    runAsync(
+      (async () => {
+        setViralBridgeError(null);
+        setViralBridgeBusy(true);
+        try {
+          const payload = await previewWorkspaceBrandDnaAutofill(workspaceId);
+          setViralAutofillPreview(payload.preview);
+        } catch (error) {
+          setViralBridgeError(String((error as Error)?.message || "Failed to load Viral Studio autofill preview."));
+        } finally {
+          setViralBridgeBusy(false);
+        }
+      })()
+    );
+  };
+
+  const applyViralAutofill = () => {
+    runAsync(
+      (async () => {
+        setViralBridgeError(null);
+        setViralBridgeBusy(true);
+        try {
+          await applyWorkspaceBrandDnaAutofill(workspaceId, { finalizeIfReady: true });
+          await refreshViralBridgeNow();
+          injectComposerText(
+            "Brand DNA autofill suggestions were applied. Use Viral Studio context from this workspace and prepare the next extraction/curation actions.",
+            "replace"
+          );
+        } catch (error) {
+          setViralBridgeError(String((error as Error)?.message || "Failed to apply Viral Studio autofill."));
+        } finally {
+          setViralBridgeBusy(false);
+        }
+      })()
+    );
+  };
+
+  const launchViralExtractionFromSuggestion = () => {
+    runAsync(
+      (async () => {
+        const source = viralSuggestedSources[0];
+        if (!source) {
+          setViralBridgeError("No suggested social source found yet.");
+          return;
+        }
+        if (!viralWorkflow?.brandDnaReady) {
+          setViralBridgeError("Finalize Brand DNA first (preview/apply autofill), then start extraction.");
+          return;
+        }
+        setViralBridgeError(null);
+        setViralBridgeBusy(true);
+        try {
+          await createViralStudioIngestion(workspaceId, {
+            sourcePlatform: source.platform,
+            sourceUrl: source.sourceUrl,
+            preset: "data-max",
+            sortBy: "engagement",
+          });
+          await refreshViralBridgeNow();
+          injectComposerText(
+            `A Viral Studio data-max extraction run was started from ${source.sourceUrl}. Track progress, then build a shortlist and execution plan.`,
+            "replace"
+          );
+        } catch (error) {
+          setViralBridgeError(String((error as Error)?.message || "Failed to start Viral Studio extraction run."));
+        } finally {
+          setViralBridgeBusy(false);
+        }
+      })()
+    );
   };
 
   const onSteer = (chip: string) => {
@@ -856,6 +992,18 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
       );
       return;
     }
+    if (command === "Viral Studio: Preview autofill") {
+      previewViralAutofill();
+      return;
+    }
+    if (command === "Viral Studio: Apply autofill") {
+      applyViralAutofill();
+      return;
+    }
+    if (command === "Viral Studio: Start data-max extraction") {
+      launchViralExtractionFromSuggestion();
+      return;
+    }
     if (command === "Run V3 competitor finder (standard)") {
       injectComposerText(
         "Run the V3 competitor finder in standard mode and summarize direct plus adjacent competitors with evidence.",
@@ -1159,6 +1307,75 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
               }`}
             >
               <div className="flex min-h-0 flex-col border-zinc-200 xl:border-r">
+                {viralWorkflow ? (
+                  <div className="mx-4 mt-3 rounded-xl border border-sky-200 bg-sky-50/60 p-3 sm:mx-6 xl:mx-8">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-sky-700">
+                        Viral Studio Bridge
+                      </p>
+                      <p className="text-xs text-sky-700">
+                        Stage: <strong>{formatViralWorkflowStage(viralWorkflow.workflowStage)}</strong>
+                      </p>
+                    </div>
+                    <p className="mt-1 text-xs text-zinc-700">
+                      Intake {viralWorkflow.intakeCompleted ? "complete" : "pending"} • Brand DNA{" "}
+                      {viralWorkflow.brandDnaReady ? "ready" : "not ready"} • Prioritized refs{" "}
+                      {viralWorkflow.counts.prioritizedReferences}
+                    </p>
+                    {viralAutofillPreview ? (
+                      <p className="mt-1 text-xs text-zinc-600">
+                        Autofill preview: {viralAutofillPreview.coverage.suggestedCount} field(s) • Confidence{" "}
+                        {Math.round((viralAutofillPreview.suggestionConfidence || 0) * 100)}%
+                      </p>
+                    ) : null}
+                    {viralSuggestedSources[0] ? (
+                      <p className="mt-1 line-clamp-2 text-xs text-zinc-600">
+                        Suggested source: {viralSuggestedSources[0].label} • {viralSuggestedSources[0].sourceUrl}
+                      </p>
+                    ) : null}
+                    {viralBridgeError ? (
+                      <p className="mt-1 text-xs text-red-700">{viralBridgeError}</p>
+                    ) : null}
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={previewViralAutofill}
+                        disabled={viralBridgeBusy}
+                        className="rounded-md border border-sky-200 bg-white px-2.5 py-1 text-xs text-sky-700 hover:bg-sky-100 disabled:opacity-60"
+                      >
+                        Preview autofill
+                      </button>
+                      <button
+                        type="button"
+                        onClick={applyViralAutofill}
+                        disabled={viralBridgeBusy}
+                        className="rounded-md border border-sky-200 bg-white px-2.5 py-1 text-xs text-sky-700 hover:bg-sky-100 disabled:opacity-60"
+                      >
+                        Apply autofill
+                      </button>
+                      <button
+                        type="button"
+                        onClick={launchViralExtractionFromSuggestion}
+                        disabled={viralBridgeBusy || !viralWorkflow.brandDnaReady || viralSuggestedSources.length === 0}
+                        className="rounded-md border border-sky-200 bg-white px-2.5 py-1 text-xs text-sky-700 hover:bg-sky-100 disabled:opacity-60"
+                      >
+                        Start data-max extraction
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          injectComposerText(
+                            "Use Viral Studio context from this workspace (brand DNA, prioritized references, and latest generation/doc refs) and produce the next execution actions.",
+                            "replace"
+                          )
+                        }
+                        className="rounded-md border border-sky-200 bg-white px-2.5 py-1 text-xs text-sky-700 hover:bg-sky-100"
+                      >
+                        Draft with context
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
                 <ChatThread
                   messages={messages}
                   onForkFromMessage={onForkBranch}

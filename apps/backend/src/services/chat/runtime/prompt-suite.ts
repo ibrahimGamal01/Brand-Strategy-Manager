@@ -147,6 +147,8 @@ const TOOL_NAME_ALIASES: Record<string, { tool: string; args: Record<string, unk
   searchweb: { tool: 'search.web', args: { provider: 'auto', count: 10 } },
   bravesearch: { tool: 'search.web', args: { provider: 'brave', count: 10 } },
   scraplyscan: { tool: 'research.gather', args: { depth: 'deep', includeScrapling: true, includeAccountContext: true } },
+  viralstudiocontext: { tool: 'workspace.viral_studio.get_context', args: {} },
+  useviralstudiocontext: { tool: 'workspace.viral_studio.get_context', args: {} },
 };
 
 type JsonRequestResult = {
@@ -1510,6 +1512,11 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   const hasEvidenceReferenceIntent =
     /use evidence from|evidence from/i.test(messageWithMentions) ||
     (/\b(evidence|source|sources)\b/.test(normalized) && /\b(use|ground|base|summariz|detail|answer)\b/.test(normalized));
+  const hasViralStudioContextIntent =
+    /\bviral studio\b/.test(normalized) ||
+    /\bbrand dna\b/.test(normalized) ||
+    /\bgeneration pack\b/.test(normalized) ||
+    /\bshortlist(ed)?\b.*\breference/.test(normalized);
   const hasWorkspaceOverviewIntent =
     /\b(what do (you|we) (see|have)|what['’]s (on|in) (the )?(app|application|workspace)|show (me )?(what|everything) (we|you) (have|see)|workspace status|workspace snapshot|summari[sz]e (the )?(workspace|app|application))\b/.test(
       normalized
@@ -1635,6 +1642,10 @@ function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   }
   if (hasIntakeReadIntent) {
     pushIfMissing('workspace.intake.get', {});
+  }
+
+  if (hasViralStudioContextIntent) {
+    pushIfMissing('workspace.viral_studio.get_context', {});
   }
   if ((hasRunIntent && hasCompetitorDiscoveryIntent) || (hasFindIntent && /\bcompetitor\b/.test(normalized))) {
     if (hasV3DiscoveryIntent) {

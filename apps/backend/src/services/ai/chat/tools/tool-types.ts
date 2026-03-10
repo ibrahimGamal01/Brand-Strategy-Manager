@@ -8,6 +8,7 @@ export type ToolName =
   | 'intel.undoMutation'
   | 'intake.update_from_text'
   | 'workspace.intake.get'
+  | 'workspace.viral_studio.get_context'
   | 'competitors.add_links'
   | 'competitors.discover_v3'
   | 'research.gather'

@@ -234,6 +234,8 @@ const TOOL_NAME_ALIASES: Record<string, { tool: string; args: Record<string, unk
   scraplingscan: { tool: 'research.gather', args: { depth: 'deep', includeScrapling: true, includeAccountContext: true } },
   addcompetitorlinks: { tool: 'competitors.add_links', args: {} },
   updateintake: { tool: 'intake.update_from_text', args: {} },
+  viralstudiocontext: { tool: 'workspace.viral_studio.get_context', args: {} },
+  useviralstudiocontext: { tool: 'workspace.viral_studio.get_context', args: {} },
   newssearch: { tool: 'evidence.news', args: { limit: 8 } },
   newsaggregator: { tool: 'evidence.news', args: { limit: 8 } },
   newsaggregatortool: { tool: 'evidence.news', args: { limit: 8 } },
@@ -1689,6 +1691,10 @@ function normalizeToolArgs(tool: string, args: Record<string, unknown>, userMess
     return {};
   }
 
+  if (tool === 'workspace.viral_studio.get_context') {
+    return {};
+  }
+
   if (tool === 'evidence.news' || tool === 'evidence.videos') {
     const limit = Number(normalized.limit);
     normalized.limit = Number.isFinite(limit) ? Math.max(1, Math.min(20, Math.floor(limit))) : 8;
@@ -3141,6 +3147,11 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
   const hasEvidenceReferenceIntent =
     /use evidence from|evidence from/i.test(messageWithMentions) ||
     (/\b(evidence|source|sources)\b/.test(normalized) && /\b(use|ground|base|summariz|detail|answer)\b/.test(normalized));
+  const hasViralStudioContextIntent =
+    /\bviral studio\b/.test(normalized) ||
+    /\bbrand dna\b/.test(normalized) ||
+    /\bgeneration pack\b/.test(normalized) ||
+    /\bshortlist(ed)?\b.*\breference/.test(normalized);
   const hasWorkspaceOverviewIntent =
     /\b(what do (you|we) (see|have)|what['’]s (on|in) (the )?(app|application|workspace)|show (me )?(what|everything) (we|you) (have|see)|workspace status|workspace snapshot|summari[sz]e (the )?(workspace|app|application))\b/.test(
       normalized
@@ -3252,6 +3263,9 @@ export function inferToolCallsFromMessage(message: string): RuntimeToolCall[] {
 
   if (hasIntakeReadIntent) {
     pushIfMissing('workspace.intake.get', {});
+  }
+  if (hasViralStudioContextIntent) {
+    pushIfMissing('workspace.viral_studio.get_context', {});
   }
 
   if ((hasRunIntent && hasCompetitorDiscoveryIntent) || (hasFindIntent && /\bcompetitor\b/.test(normalized))) {

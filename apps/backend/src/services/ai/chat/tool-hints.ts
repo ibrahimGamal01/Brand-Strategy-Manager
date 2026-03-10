@@ -65,6 +65,13 @@ export function inferHeuristicToolCalls(input: {
     /\b(original|initial|first)\b.*\b(form|intake|onboarding)\b.*\b(response|submission|answers?)\b/i,
     /\bwhat was my original form response\b/i,
   ]);
+  const asksViralStudioContext = includesAny(message, [
+    /\bviral studio\b/i,
+    /\bbrand dna\b/i,
+    /\bshortlist(ed)?\b.*\breference/i,
+    /\bgeneration pack\b/i,
+    /\buse viral studio context\b/i,
+  ]);
 
   if (asksPosts && !existingNames.has('evidence.posts')) {
     const competitorOnly = includesAny(message, [/\bcompetitors?\b/i, /\btheir\s+posts\b/i]);
@@ -178,6 +185,14 @@ export function inferHeuristicToolCalls(input: {
       name: 'workspace.intake.get',
       args: {},
       reason: 'Message asks for original intake/form responses stored in the workspace.',
+    });
+  }
+
+  if (asksViralStudioContext && !existingNames.has('workspace.viral_studio.get_context')) {
+    calls.push({
+      name: 'workspace.viral_studio.get_context',
+      args: {},
+      reason: 'Message references Viral Studio context; fetch durable Brand DNA/references/generation context.',
     });
   }
 

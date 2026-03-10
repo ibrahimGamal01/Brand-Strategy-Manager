@@ -18,6 +18,9 @@ const commands = [
   "Open library: Competitors",
   "Open Viral Studio",
   "Use Viral Studio context",
+  "Viral Studio: Preview autofill",
+  "Viral Studio: Apply autofill",
+  "Viral Studio: Start data-max extraction",
   "Add constraint",
   "Switch workspace"
 ];

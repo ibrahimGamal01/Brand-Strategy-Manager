@@ -9,6 +9,7 @@ import {
   crawlAndPersistWebSources,
   fetchAndPersistWebSnapshot,
 } from '../../../scraping/web-intelligence-service';
+import { getViralStudioWorkspaceContext } from '../../../portal/viral-studio';
 
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -516,6 +517,72 @@ export const workspaceOpsTools: ToolDefinition<Record<string, unknown>, Record<s
           {
             kind: 'internal',
             label: 'Open workspace intake',
+            url: deepLink,
+          },
+        ],
+        deepLink,
+      };
+    },
+  },
+  {
+    name: 'workspace.viral_studio.get_context',
+    description:
+      'Read durable Viral Studio context for this workspace (Brand DNA, prioritized references, latest generation/document refs).',
+    argsSchema: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    },
+    returnsSchema: {
+      type: 'object',
+      properties: {
+        section: { type: 'string' },
+        summary: { type: 'string' },
+        workflowStage: { type: 'string' },
+        brandReady: { type: 'boolean' },
+        prioritizedReferenceCount: { type: 'number' },
+        libraryRefs: { type: 'array' },
+        context: { type: 'object' },
+        evidence: { type: 'array' },
+        deepLink: { type: 'string' },
+      },
+      required: [
+        'section',
+        'summary',
+        'workflowStage',
+        'brandReady',
+        'prioritizedReferenceCount',
+        'libraryRefs',
+        'context',
+        'evidence',
+        'deepLink',
+      ],
+      additionalProperties: true,
+    },
+    mutate: false,
+    execute: async (context) => {
+      const viralContext = await getViralStudioWorkspaceContext(context.researchJobId);
+      const deepLink = context.links.moduleLink('workspace', { view: 'viral-studio' });
+      const brandReady = Boolean(viralContext.brandDna?.status === 'final' && viralContext.brandDna?.completeness?.ready);
+      const prioritizedReferenceCount = Array.isArray(viralContext.prioritizedReferences)
+        ? viralContext.prioritizedReferences.length
+        : 0;
+      const summary = brandReady
+        ? `Viral Studio is in ${viralContext.workflowStage} with ${prioritizedReferenceCount} prioritized reference(s).`
+        : `Viral Studio Brand DNA is not finalized yet. Current stage: ${viralContext.workflowStage}.`;
+
+      return {
+        section: 'workspace_viral_studio',
+        summary,
+        workflowStage: viralContext.workflowStage,
+        brandReady,
+        prioritizedReferenceCount,
+        libraryRefs: Array.isArray(viralContext.libraryRefs) ? viralContext.libraryRefs.slice(0, 30) : [],
+        context: viralContext,
+        evidence: [
+          {
+            kind: 'internal',
+            label: 'Open Viral Studio workspace',
             url: deepLink,
           },
         ],
