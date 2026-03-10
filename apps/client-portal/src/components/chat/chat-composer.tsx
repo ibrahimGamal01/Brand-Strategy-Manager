@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -10,7 +10,6 @@ import {
   ListOrdered,
   Paperclip,
   SendHorizontal,
-  SlidersHorizontal,
   Sparkles,
   Square,
   X,
@@ -326,6 +325,7 @@ export function ChatComposer({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const optionsMenuRef = useRef<HTMLDivElement | null>(null);
 
   const currentInputOptions = useMemo<ChatInputOptions>(
     () => ({
@@ -363,6 +363,24 @@ export function ChatComposer({
   useEffect(() => {
     setActiveSlashIndex(0);
   }, [slashQuery]);
+
+  useEffect(() => {
+    if (!showControls) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!(event.target instanceof Node)) return;
+      if (optionsMenuRef.current?.contains(event.target)) return;
+      setShowControls(false);
+    };
+    const handleEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setShowControls(false);
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [showControls]);
 
   useEffect(() => {
     if (typeof focusSignal !== "number") return;
@@ -407,7 +425,7 @@ export function ChatComposer({
     textareaRef.current?.focus();
   };
 
-  const onComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+  const onComposerKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (slashMatches.length && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
       event.preventDefault();
       setActiveSlashIndex((current) => {
@@ -531,9 +549,6 @@ export function ChatComposer({
               <ListOrdered className="h-3.5 w-3.5" />
               Queue {queuedMessages.length}
             </button>
-            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-zinc-600">
-              {responseMode}
-            </span>
             <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-zinc-500">
               {scopeSummary}
             </span>
@@ -542,56 +557,7 @@ export function ChatComposer({
               / commands
             </span>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowControls((previous) => !previous)}
-            className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-zinc-600 hover:bg-zinc-100"
-          >
-            <SlidersHorizontal className="h-3.5 w-3.5" />
-            {showControls ? "Hide" : "Tune"}
-          </button>
         </div>
-
-        {showControls ? (
-          <div className="mb-2 rounded-2xl border border-zinc-200 bg-[linear-gradient(180deg,#ffffff_0%,#f6f7f8_100%)] p-3 shadow-[0_1px_0_rgba(255,255,255,0.9)_inset]">
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <div className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white p-1">
-                {(["fast", "balanced", "deep", "pro"] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => onResponseModeChange(mode)}
-                    className={`rounded-full px-3 py-1 capitalize transition ${
-                      responseMode === mode ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"
-                    }`}
-                  >
-                    {mode}
-                  </button>
-                ))}
-              </div>
-              <div className="bat-scrollbar inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-full border border-zinc-200 bg-white p-1">
-                {sourceScopeOptions.map((option) => {
-                  const active = sourceScope[option.key];
-                  return (
-                    <button
-                      key={option.key}
-                      type="button"
-                      onClick={() => onSourceScopeChange(option.key, !active)}
-                      className={`whitespace-nowrap rounded-full px-3 py-1 transition ${
-                        active ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"
-                      }`}
-                    >
-                      {option.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <p className="mt-3 text-[11px] text-zinc-500">
-              Quick actions like deeper mode, sources, PDF generation, and evidence focus now live in `/` commands.
-            </p>
-          </div>
-        ) : null}
 
         {showQueue && queuedMessages.length > 0 ? (
           <div className="mb-2 rounded-2xl border border-zinc-200 bg-zinc-50/85 p-2.5">
@@ -917,12 +883,112 @@ export function ChatComposer({
                     type="button"
                     onClick={openFilePicker}
                     disabled={uploading || !canAttach}
-                    className="inline-flex h-10 items-center gap-1 rounded-full border border-zinc-200 bg-white px-3 text-xs text-zinc-600 shadow-sm hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
-                    title="Attach documents"
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-600 shadow-sm hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
+                    title={uploading ? "Uploading..." : "Attach documents"}
+                    aria-label={uploading ? "Uploading documents" : "Attach documents"}
                   >
-                    <Paperclip className="h-3.5 w-3.5" />
-                    {uploading ? "Uploading..." : "Attach"}
+                    <Paperclip className="h-4 w-4" />
                   </button>
+                  <div ref={optionsMenuRef} className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setShowControls((previous) => !previous)}
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-600 shadow-sm hover:bg-zinc-100"
+                      title="More options"
+                      aria-label="More options"
+                    >
+                      {showControls ? <X className="h-4 w-4" /> : <span className="text-lg leading-none">...</span>}
+                    </button>
+                    {showControls ? (
+                      <div className="absolute bottom-12 left-0 z-20 w-[21rem] rounded-2xl border border-zinc-200 bg-white/98 p-3 shadow-2xl backdrop-blur">
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Options</p>
+                            <p className="text-xs text-zinc-500">Modes and evidence controls, closer to ChatGPT.</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setShowControls(false)}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-zinc-200 text-zinc-500 hover:bg-zinc-100"
+                            aria-label="Close options"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                        <div className="mt-3">
+                          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Mode</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            {(["fast", "balanced", "deep", "pro"] as const).map((mode) => (
+                              <button
+                                key={mode}
+                                type="button"
+                                onClick={() => {
+                                  onResponseModeChange(mode);
+                                  setShowControls(false);
+                                }}
+                                className={`rounded-xl border px-3 py-2 text-left text-xs transition ${
+                                  responseMode === mode
+                                    ? "border-zinc-900 bg-zinc-900 text-white"
+                                    : "border-zinc-200 bg-zinc-50 text-zinc-700 hover:bg-zinc-100"
+                                }`}
+                              >
+                                <span className="block font-medium capitalize">{mode}</span>
+                                <span className={`mt-0.5 block text-[11px] ${responseMode === mode ? "text-white/75" : "text-zinc-500"}`}>
+                                  {mode === "fast"
+                                    ? "Shorter, quicker"
+                                    : mode === "balanced"
+                                      ? "Default depth"
+                                      : mode === "deep"
+                                        ? "Longer synthesis"
+                                        : "Strictest quality"}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="mt-3">
+                          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Quick Actions</p>
+                          <div className="flex flex-wrap gap-2">
+                            {["Go deeper", "Show sources", "Make it a PDF", "Focus on Web evidence"].map((chip) => (
+                              <button
+                                key={chip}
+                                type="button"
+                                onClick={() => {
+                                  onSteer(chip);
+                                  setShowControls(false);
+                                }}
+                                className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
+                              >
+                                {chip}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="mt-3">
+                          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Evidence Scope</p>
+                          <div className="bat-scrollbar flex flex-wrap gap-2 overflow-x-auto">
+                            {sourceScopeOptions.map((option) => {
+                              const active = sourceScope[option.key];
+                              return (
+                                <button
+                                  key={option.key}
+                                  type="button"
+                                  onClick={() => onSourceScopeChange(option.key, !active)}
+                                  className={`rounded-full px-3 py-1.5 text-xs transition ${
+                                    active
+                                      ? "bg-zinc-900 text-white"
+                                      : "border border-zinc-200 bg-zinc-50 text-zinc-600 hover:bg-zinc-100"
+                                  }`}
+                                >
+                                  {option.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
                   {isStreaming ? (
                     <button
                       type="button"

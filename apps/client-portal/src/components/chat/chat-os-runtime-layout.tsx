@@ -357,6 +357,16 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(`bat.runtime.rightRailCollapsed.${workspaceId}`) === "1";
   });
+  const [rightRailWidth, setRightRailWidth] = useState(() => {
+    if (typeof window === "undefined") return 420;
+    const stored = Number(window.localStorage.getItem(`bat.runtime.rightRailWidth.${workspaceId}`));
+    return Number.isFinite(stored) ? Math.max(320, Math.min(720, stored)) : 420;
+  });
+  const [isWideViewport, setIsWideViewport] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.innerWidth >= 1280;
+  });
+  const [rightRailResizing, setRightRailResizing] = useState(false);
   const [selectedRuntimeDocumentId, setSelectedRuntimeDocumentId] = useState<string | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [activeLibraryCollection, setActiveLibraryCollection] = useState<LibraryCollection | "all">("all");
@@ -535,6 +545,12 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   }, [rightRailCollapsed, workspaceId]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const storageKey = `bat.runtime.rightRailWidth.${workspaceId}`;
+    window.localStorage.setItem(storageKey, String(rightRailWidth));
+  }, [rightRailWidth, workspaceId]);
+
+  useEffect(() => {
     let cancelled = false;
     if (!activeBranchId) return;
     void fetchRuntimeUploadCapabilities(workspaceId, activeBranchId)
@@ -702,6 +718,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const handleResize = () => {
+      setIsWideViewport(window.innerWidth >= 1280);
       if (window.innerWidth >= 1024) {
         setSidebarOpen(false);
       }
@@ -712,6 +729,25 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
+
+  useEffect(() => {
+    if (!rightRailResizing) return;
+    const handlePointerMove = (event: PointerEvent) => {
+      const nextWidth = Math.max(320, Math.min(760, window.innerWidth - event.clientX));
+      setRightRailWidth(nextWidth);
+    };
+    const handlePointerUp = () => setRightRailResizing(false);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    return () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [rightRailResizing]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1894,6 +1930,11 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                   ? "xl:grid-cols-1"
                   : "xl:grid-cols-[minmax(0,1fr)_25rem] 2xl:grid-cols-[minmax(0,1fr)_28rem]"
               }`}
+              style={
+                !rightRailCollapsed && isWideViewport
+                  ? { gridTemplateColumns: `minmax(0,1fr) ${rightRailWidth}px` }
+                  : undefined
+              }
             >
               <div className="flex min-h-0 flex-col border-zinc-200 xl:border-r xl:border-zinc-200/80">
                 {viralWorkflow ? (
@@ -2122,7 +2163,21 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
               </div>
 
               {!rightRailCollapsed ? (
-                <div className="hidden min-h-0 border-l border-zinc-200 bg-white xl:flex xl:flex-col">
+                <div className="relative hidden min-h-0 border-l border-zinc-200 bg-white xl:flex xl:flex-col">
+                  {isWideViewport ? (
+                    <button
+                      type="button"
+                      onPointerDown={(event) => {
+                        event.preventDefault();
+                        setRightRailResizing(true);
+                      }}
+                      className="absolute left-0 top-0 z-20 hidden h-full w-3 -translate-x-1/2 cursor-col-resize xl:block"
+                      aria-label="Resize inspector"
+                      title="Drag to resize inspector"
+                    >
+                      <span className="absolute left-1/2 top-1/2 h-16 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-zinc-300 transition hover:bg-zinc-400" />
+                    </button>
+                  ) : null}
                   <RightRailPulse
                     runsCount={processRuns.filter((run) => run.status === "running" || run.status === "waiting_input").length}
                     activeRunLabel={activeRun ? `${activeRun.label} • ${formatPhaseLabel(activeRun.phase)}` : visibleFeed[0]?.message || ""}
