@@ -134,6 +134,21 @@ async function finalizeBrandDna(page: Page) {
 }
 
 async function runExtraction(page: Page) {
+  const extractButton = page.getByRole('button', { name: 'Extract Best Videos', exact: true });
+  const visibleNow = await extractButton
+    .first()
+    .isVisible()
+    .catch(() => false);
+  if (!visibleNow) {
+    const powerModeToggle = page
+      .getByRole('button', { name: /Switch To Power Surface|Open Full Workspace/i })
+      .first();
+    const hasToggle = (await powerModeToggle.count().catch(() => 0)) > 0;
+    if (hasToggle) {
+      await powerModeToggle.click();
+    }
+    await extractButton.first().waitFor({ timeout: 20_000 });
+  }
   await clickButtonByText(page, 'Extract Best Videos');
   await page.getByRole('dialog', { name: /Extract best videos/i }).waitFor({ timeout: 20_000 });
   await page.getByLabel('Source URL').fill('https://instagram.com/viral.studio.reference');

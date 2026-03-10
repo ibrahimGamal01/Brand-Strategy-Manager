@@ -1155,6 +1155,10 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
       runViralBridgePrimaryAction();
       return;
     }
+    if (command === "Viral Studio: Run website-first autopilot") {
+      router.push(`/app/w/${workspaceId}/viral-studio?autopilot=website-first`);
+      return;
+    }
     if (command === "Run V3 competitor finder (standard)") {
       injectComposerText(
         "Run the V3 competitor finder in standard mode and summarize direct plus adjacent competitors with evidence.",
@@ -1541,6 +1545,13 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                             className="rounded-md border border-sky-200 bg-white px-2.5 py-1 text-xs text-sky-700 hover:bg-sky-100"
                           >
                             Open Viral Studio
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => router.push(`/app/w/${workspaceId}/viral-studio?autopilot=website-first`)}
+                            className="rounded-md border border-sky-200 bg-white px-2.5 py-1 text-xs text-sky-700 hover:bg-sky-100"
+                          >
+                            Run website-first autopilot
                           </button>
                           <button
                             type="button"

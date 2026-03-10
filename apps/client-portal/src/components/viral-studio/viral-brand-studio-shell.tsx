@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   applyWorkspaceBrandDnaAutofill,
   compareViralStudioDocumentVersions,
@@ -622,8 +622,15 @@ function onboardingCoveragePercent(form: BrandFormState): number {
   return Math.round((currentSignals / totalSignals) * 100);
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
 export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
@@ -659,6 +666,9 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   const [promoteVersionId, setPromoteVersionId] = useState<string>("");
   const [lastExport, setLastExport] = useState<{ format: string; content: string } | null>(null);
   const [chatBridgeStatus, setChatBridgeStatus] = useState<string | null>(null);
+  const [autopilotBusy, setAutopilotBusy] = useState(false);
+  const [autopilotStatus, setAutopilotStatus] = useState<string | null>(null);
+  const autopilotTriggerRef = useRef<string>("");
 
   const [sourcePlatform, setSourcePlatform] = useState<ViralStudioPlatform>("instagram");
   const [sourceUrl, setSourceUrl] = useState("");
@@ -687,6 +697,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
 
   const brandReady = Boolean(brandProfile?.status === "final" && brandProfile?.completeness.ready);
   const onboardingLocked = !brandReady || isEditingBrandDna;
+  const autopilotQuery = searchParams.get("autopilot");
 
   const refreshTelemetry = useCallback(async () => {
     try {
@@ -1637,6 +1648,181 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     }
   }, [workspaceId, autofillPreview, autofillSelection, refreshWorkflow, refreshTelemetry]);
 
+  const startGuidedDataMaxExtraction = useCallback(
+    async (preferredSource?: ViralStudioSuggestedSource | null) => {
+      const fallbackSource = preferredSource || suggestedSources[0];
+      const resolvedSourceUrl = sourceUrl.trim() || fallbackSource?.sourceUrl || "";
+      const resolvedPlatform = sourceUrl.trim() ? sourcePlatform : fallbackSource?.platform || sourcePlatform;
+      if (!resolvedSourceUrl) {
+        setShowExtractionModal(true);
+        throw new Error("No source URL available for data-max extraction.");
+      }
+      const payload = await createViralStudioIngestion(workspaceId, {
+        sourcePlatform: resolvedPlatform,
+        sourceUrl: resolvedSourceUrl,
+        maxVideos: 120,
+        lookbackDays: 365,
+        sortBy: "engagement",
+        preset: "data-max",
+      });
+      setSourcePlatform(resolvedPlatform);
+      setSourceUrl(resolvedSourceUrl);
+      setIngestionPreset("data-max");
+      setMaxVideos(120);
+      setLookbackDays(365);
+      setShowExtractionModal(false);
+      setActiveIngestion(payload.run);
+      setIngestions((previous) => [payload.run, ...previous.filter((row) => row.id !== payload.run.id)]);
+      await Promise.all([refreshTelemetry(), refreshWorkflow()]);
+      return payload.run;
+    },
+    [workspaceId, sourceUrl, sourcePlatform, suggestedSources, refreshTelemetry, refreshWorkflow]
+  );
+
+  const waitForIngestionTerminal = useCallback(
+    async (
+      ingestionId: string,
+      options?: {
+        timeoutMs?: number;
+        onProgress?: (run: ViralStudioIngestionRun) => void;
+      }
+    ) => {
+      const timeoutMs = Math.max(20_000, options?.timeoutMs || 140_000);
+      const startedAt = Date.now();
+      let lastRun: ViralStudioIngestionRun | null = null;
+      while (Date.now() - startedAt < timeoutMs) {
+        const payload = await fetchViralStudioIngestion(workspaceId, ingestionId);
+        lastRun = payload.run;
+        setActiveIngestion(payload.run);
+        setIngestions((previous) => {
+          const next = previous.filter((row) => row.id !== payload.run.id);
+          return [payload.run, ...next];
+        });
+        options?.onProgress?.(payload.run);
+        if (isTerminalIngestionStatus(payload.run.status)) {
+          return payload.run;
+        }
+        await delay(1250);
+      }
+      throw new Error(
+        `Timed out waiting for extraction completion. Last status: ${lastRun?.status || "unknown"}.`
+      );
+    },
+    [workspaceId]
+  );
+
+  const autoCurateTopReferences = useCallback(
+    async (referenceSource?: ViralStudioReferenceAsset[]) => {
+      const base = referenceSource && referenceSource.length ? referenceSource : references;
+      const candidates = base.filter((item) => item.shortlistState !== "exclude").slice(0, 3);
+      if (!candidates.length) {
+        throw new Error("No ranked references are available yet for curation.");
+      }
+      const updates = await Promise.all(
+        candidates.map((item, index) =>
+          updateViralStudioReferenceShortlist(workspaceId, {
+            referenceId: item.id,
+            action: index === 0 ? "must-use" : "pin",
+          })
+        )
+      );
+      const byId = new Map(updates.map((entry) => [entry.item.id, entry.item]));
+      setReferences((previous) =>
+        (referenceSource && referenceSource.length ? referenceSource : previous).map(
+          (item) => byId.get(item.id) || item
+        )
+      );
+      setCurationNotice("Top references auto-curated: #1 must-use, #2-3 pinned.");
+      await Promise.all([refreshTelemetry(), refreshWorkflow()]);
+      return updates.map((entry) => entry.item);
+    },
+    [workspaceId, references, refreshTelemetry, refreshWorkflow]
+  );
+
+  const runWebsiteFirstAutopilot = useCallback(async () => {
+    if (autopilotBusy) return;
+    setAutopilotBusy(true);
+    setError(null);
+    setAutopilotStatus("Checking intake and workspace evidence...");
+    try {
+      const [workflowPayload, sourcePayload] = await Promise.all([
+        fetchViralStudioWorkflowStatus(workspaceId),
+        fetchViralStudioSuggestedSources(workspaceId),
+      ]);
+      setWorkflowStatus(workflowPayload.workflow);
+      setSuggestedSources(sourcePayload.items || []);
+      setSurfaceMode("guided");
+
+      if (!workflowPayload.workflow.intakeCompleted) {
+        setAutopilotStatus("Intake is still required. Complete intake first, then rerun autopilot.");
+        router.push(`/app/w/${workspaceId}`);
+        return;
+      }
+
+      if (!workflowPayload.workflow.brandDnaReady) {
+        setAutopilotStatus("Hydrating Brand DNA from website + social evidence...");
+        await runAutofillFinalize();
+        const workflowAfterAutofill = await fetchViralStudioWorkflowStatus(workspaceId);
+        setWorkflowStatus(workflowAfterAutofill.workflow);
+        if (!workflowAfterAutofill.workflow.brandDnaReady) {
+          throw new Error("Brand DNA is still not finalized. Review DNA fields and finalize before extraction.");
+        }
+      }
+
+      setAutopilotStatus("Launching data-max extraction...");
+      const run = await startGuidedDataMaxExtraction(sourcePayload.items[0] || null);
+
+      setAutopilotStatus("Extraction running. Monitoring progress...");
+      const terminalRun = await waitForIngestionTerminal(run.id, {
+        timeoutMs: 170_000,
+        onProgress: (snapshot) => {
+          setAutopilotStatus(
+            `Extraction ${statusLabel(snapshot.status)}: ${snapshot.progress.ranked}/${snapshot.progress.found || snapshot.maxVideos} ranked`
+          );
+        },
+      });
+
+      if (terminalRun.status === "failed") {
+        throw new Error(terminalRun.error || "Extraction failed in autopilot.");
+      }
+
+      setAutopilotStatus("Loading ranked references...");
+      const referencesPayload = await listViralStudioReferences(workspaceId, {
+        ingestionRunId: terminalRun.id,
+      });
+      setReferences(referencesPayload.items);
+
+      setAutopilotStatus("Curating top references...");
+      await autoCurateTopReferences(referencesPayload.items);
+
+      setAutopilotStatus("Website-first autopilot complete: DNA finalized, extraction completed, and top references curated.");
+      setChatBridgeStatus("Website-first autopilot completed. Continue in Prompt Studio or send context to core chat.");
+    } catch (autopilotError: unknown) {
+      setError(String((autopilotError as Error)?.message || "Website-first autopilot failed."));
+      setAutopilotStatus("Autopilot stopped with an error. Review details and retry.");
+    } finally {
+      setAutopilotBusy(false);
+    }
+  }, [
+    workspaceId,
+    autopilotBusy,
+    router,
+    runAutofillFinalize,
+    startGuidedDataMaxExtraction,
+    waitForIngestionTerminal,
+    autoCurateTopReferences,
+  ]);
+
+  useEffect(() => {
+    if (loading) return;
+    if (autopilotQuery !== "website-first") return;
+    const triggerKey = `${workspaceId}:${autopilotQuery}`;
+    if (autopilotTriggerRef.current === triggerKey) return;
+    autopilotTriggerRef.current = triggerKey;
+    void runWebsiteFirstAutopilot();
+    router.replace(`/app/w/${workspaceId}/viral-studio`);
+  }, [loading, autopilotQuery, workspaceId, runWebsiteFirstAutopilot, router]);
+
   const workflowStage = workflowStatus?.workflowStage || "intake_pending";
   const workflowStepIndex = workflowStageOrderIndex(workflowStage);
   const workflowRail = useMemo(() => {
@@ -1790,6 +1976,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   );
   const showExtractionSection =
     surfaceMode === "power" ||
+    brandReady ||
     workflowStepIndex >= workflowStageOrderIndex("extraction") ||
     Boolean(activeIngestion);
   const showCurationSection =
@@ -1818,63 +2005,27 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         setIsEditingBrandDna(true);
         return;
       }
-      const fallbackSource = suggestedSources[0];
-      const resolvedSourceUrl = sourceUrl.trim() || fallbackSource?.sourceUrl || "";
-      const resolvedPlatform = sourceUrl.trim() ? sourcePlatform : fallbackSource?.platform || sourcePlatform;
-      if (!resolvedSourceUrl) {
-        setShowExtractionModal(true);
-        return;
-      }
       setIsBusy(true);
       setError(null);
       try {
-        const payload = await createViralStudioIngestion(workspaceId, {
-          sourcePlatform: resolvedPlatform,
-          sourceUrl: resolvedSourceUrl,
-          maxVideos: 120,
-          lookbackDays: 365,
-          sortBy: "engagement",
-          preset: "data-max",
-        });
-        setSourcePlatform(resolvedPlatform);
-        setSourceUrl(resolvedSourceUrl);
-        setIngestionPreset("data-max");
-        setMaxVideos(120);
-        setLookbackDays(365);
-        setShowExtractionModal(false);
-        setActiveIngestion(payload.run);
-        setIngestions((previous) => [payload.run, ...previous.filter((row) => row.id !== payload.run.id)]);
-        await Promise.all([refreshTelemetry(), refreshWorkflow()]);
+        await startGuidedDataMaxExtraction();
       } catch (ingestionError: unknown) {
-        setError(String((ingestionError as Error)?.message || "Failed to start guided extraction"));
+        const message = String((ingestionError as Error)?.message || "Failed to start guided extraction");
+        if (message.includes("No source URL available")) {
+          setShowExtractionModal(true);
+        } else {
+          setError(message);
+        }
       } finally {
         setIsBusy(false);
       }
       return;
     }
     if (workflowGuide.action === "curate_references") {
-      const candidates = references
-        .filter((item) => item.shortlistState !== "exclude")
-        .slice(0, 3);
-      if (!candidates.length) {
-        setError("No ranked references are available yet for curation.");
-        return;
-      }
       setIsBusy(true);
       setError(null);
       try {
-        const updates = await Promise.all(
-          candidates.map((item, index) =>
-            updateViralStudioReferenceShortlist(workspaceId, {
-              referenceId: item.id,
-              action: index === 0 ? "must-use" : "pin",
-            })
-          )
-        );
-        const byId = new Map(updates.map((entry) => [entry.item.id, entry.item]));
-        setReferences((previous) => previous.map((item) => byId.get(item.id) || item));
-        setCurationNotice("Top references auto-curated: #1 must-use, #2-3 pinned.");
-        await Promise.all([refreshTelemetry(), refreshWorkflow()]);
+        await autoCurateTopReferences(references);
       } catch (curationError: unknown) {
         setError(String((curationError as Error)?.message || "Failed to auto-curate references"));
       } finally {
@@ -1907,17 +2058,14 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     workspaceId,
     runAutofillFinalize,
     brandReady,
-    suggestedSources,
-    sourceUrl,
-    sourcePlatform,
-    refreshTelemetry,
-    refreshWorkflow,
     references,
     generation,
     sendGenerationToChat,
     prioritizedReferenceCount,
     sendShortlistToChat,
     generatePack,
+    startGuidedDataMaxExtraction,
+    autoCurateTopReferences,
   ]);
 
   if (loading) {
@@ -2027,7 +2175,18 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
             <button type="button" onClick={() => router.push(`/app/w/${workspaceId}`)}>
               Open Core Chat
             </button>
+            <button
+              type="button"
+              disabled={isBusy || autofillBusy || autopilotBusy}
+              onClick={() => void runWebsiteFirstAutopilot()}
+            >
+              {autopilotBusy ? "Running Website-First Autopilot..." : "Run Website-First Autopilot"}
+            </button>
           </div>
+          <p className="vbs-meta">
+            Autopilot: Brand DNA autofill + data-max extraction + top-reference curation from intake website/social evidence.
+          </p>
+          {autopilotStatus ? <p className="vbs-meta">{autopilotStatus}</p> : null}
           <p className="vbs-meta">
             Stage now: <strong>{toWorkflowStageLabel(workflowStage)}</strong> • Prioritized references:{" "}
             <strong>{prioritizedReferenceCount}</strong>
