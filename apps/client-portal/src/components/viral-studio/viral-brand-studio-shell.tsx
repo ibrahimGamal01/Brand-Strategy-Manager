@@ -350,6 +350,47 @@ function parseSectionText(
     .filter(Boolean);
 }
 
+function buildDocumentSectionsFromGeneration(
+  generation: ViralStudioGenerationPack,
+  existingSections?: ViralStudioDocumentSection[]
+): ViralStudioDocumentSection[] {
+  const existingByKind = new Map(
+    (existingSections || []).map((section) => [section.kind, section] as const)
+  );
+  const scriptBlock = [
+    "Short",
+    generation.outputs.scripts.short || "",
+    "",
+    "Medium",
+    generation.outputs.scripts.medium || "",
+    "",
+    "Long",
+    generation.outputs.scripts.long || "",
+  ]
+    .join("\n")
+    .trim();
+  const sectionOrder: Array<{
+    kind: ViralStudioDocumentSection["kind"];
+    fallbackTitle: string;
+    content: string | string[];
+  }> = [
+    { kind: "hooks", fallbackTitle: "Hooks", content: generation.outputs.hooks },
+    { kind: "script", fallbackTitle: "Script Pack", content: scriptBlock },
+    { kind: "captions", fallbackTitle: "Captions", content: generation.outputs.captions },
+    { kind: "ctas", fallbackTitle: "CTA Variants", content: generation.outputs.ctas },
+    { kind: "angles", fallbackTitle: "Angle Remixes", content: generation.outputs.angleRemixes },
+  ];
+  return sectionOrder.map((entry) => {
+    const existing = existingByKind.get(entry.kind);
+    return {
+      id: existing?.id || `auto-${entry.kind}`,
+      title: existing?.title || entry.fallbackTitle,
+      kind: entry.kind,
+      content: entry.content,
+    };
+  });
+}
+
 function moveDocumentSection(
   sections: ViralStudioDocumentSection[],
   sectionId: string,
@@ -668,7 +709,10 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   const [chatBridgeStatus, setChatBridgeStatus] = useState<string | null>(null);
   const [autopilotBusy, setAutopilotBusy] = useState(false);
   const [autopilotStatus, setAutopilotStatus] = useState<string | null>(null);
+  const [generationSaveStatus, setGenerationSaveStatus] = useState<string | null>(null);
   const autopilotTriggerRef = useRef<string>("");
+  const generationSnapshotKeysRef = useRef<Set<string>>(new Set());
+  const generationSnapshotBusyRef = useRef(false);
 
   const [sourcePlatform, setSourcePlatform] = useState<ViralStudioPlatform>("instagram");
   const [sourceUrl, setSourceUrl] = useState("");
@@ -1368,6 +1412,93 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       setIsBusy(false);
     }
   }, [workspaceId, generation, refreshTelemetry, refreshWorkflow]);
+
+  const syncGenerationToVersionHistory = useCallback(
+    async (nextGeneration: ViralStudioGenerationPack) => {
+      const snapshotKey = `${nextGeneration.id}:${nextGeneration.revision}`;
+      if (generationSnapshotKeysRef.current.has(snapshotKey)) return;
+      if (generationSnapshotBusyRef.current) return;
+      if (documentDirty) {
+        setGenerationSaveStatus(
+          "Auto-save paused because document edits are pending. Save draft to resume generation snapshots."
+        );
+        return;
+      }
+      generationSnapshotBusyRef.current = true;
+      setGenerationSaveStatus(`Saving generation revision ${nextGeneration.revision}...`);
+      try {
+        let workingDocument = document;
+        let initialVersions: ViralStudioDocumentVersion[] = versions;
+        if (!workingDocument) {
+          const created = await createViralStudioDocument(workspaceId, {
+            generationId: nextGeneration.id,
+            title: `Campaign Pack - ${toGenerationFormatLabel(nextGeneration.formatTarget)}`,
+          });
+          const fetched = await fetchViralStudioDocument(workspaceId, created.document.id);
+          workingDocument = fetched.document;
+          initialVersions = fetched.versions;
+          setDocument(fetched.document);
+          setDocumentDraft(fetched.document);
+          setVersions(fetched.versions);
+          setComparison(null);
+          setCompareLeftVersionId("current");
+          setCompareRightVersionId("current");
+          setPromoteVersionId(fetched.versions[fetched.versions.length - 1]?.id || "");
+        }
+
+        const syncedSections = buildDocumentSectionsFromGeneration(nextGeneration, workingDocument.sections);
+        const patched = await patchViralStudioDocument(workspaceId, workingDocument.id, {
+          title: workingDocument.title || `Campaign Pack - ${toGenerationFormatLabel(nextGeneration.formatTarget)}`,
+          sections: syncedSections.map((section) => ({
+            id: section.id,
+            title: section.title,
+            kind: section.kind,
+            content: section.content,
+          })),
+          orderedSectionIds: syncedSections.map((section) => section.id),
+          autosave: false,
+        });
+        setDocument(patched.document);
+        setDocumentDraft(patched.document);
+        setDocumentDirty(false);
+        setAutosaveState("saved");
+
+        const versionPayload = await createViralStudioDocumentVersion(workspaceId, patched.document.id, {
+          author: "viral-studio-autosave",
+          summary: `Auto-saved generation revision ${nextGeneration.revision}`,
+        });
+        setDocument(versionPayload.document);
+        setDocumentDraft(versionPayload.document);
+        setDocumentDirty(false);
+        setAutosaveState("saved");
+        setVersions((previous) => {
+          const base = previous.length > 0 ? previous : initialVersions;
+          if (base.some((version) => version.id === versionPayload.version.id)) return base;
+          return [...base, versionPayload.version];
+        });
+        setPromoteVersionId(versionPayload.version.id);
+        setGenerationSaveStatus(
+          `Revision ${nextGeneration.revision} saved to document timeline as an immutable version.`
+        );
+        generationSnapshotKeysRef.current.add(snapshotKey);
+        void Promise.all([refreshTelemetry(), refreshWorkflow()]);
+      } catch (snapshotError: unknown) {
+        setGenerationSaveStatus("Automatic generation snapshot failed. Use Create Version to capture manually.");
+        setError(String((snapshotError as Error)?.message || "Failed to auto-save generation revision"));
+      } finally {
+        generationSnapshotBusyRef.current = false;
+      }
+    },
+    [workspaceId, document, versions, documentDirty, refreshTelemetry, refreshWorkflow]
+  );
+
+  useEffect(() => {
+    if (!generation) return;
+    const snapshotKey = `${generation.id}:${generation.revision}`;
+    if (generationSnapshotKeysRef.current.has(snapshotKey)) return;
+    if (generationSnapshotBusyRef.current) return;
+    void syncGenerationToVersionHistory(generation);
+  }, [generation, syncGenerationToVersionHistory]);
 
   const snapshotVersion = useCallback(async () => {
     if (!document) return;
@@ -2910,6 +3041,10 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                     Active template: {selectedTemplate?.title || "n/a"} • Prioritized references: {prioritizedReferenceCount} •
                     Format: {toGenerationFormatLabel(generationFormatTarget)}
                   </p>
+                  <p className="vbs-meta">
+                    Every generation revision is auto-saved into Document Workspace version history.
+                  </p>
+                  {generationSaveStatus ? <p className="vbs-meta">{generationSaveStatus}</p> : null}
                   <div className="vbs-actions">
                     <button type="button" disabled={isBusy} onClick={() => void generatePack()}>
                       Generate Multi-Pack
@@ -3011,8 +3146,12 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                 Editable campaign artifact with autosave every 10s, version timeline, compare view, and promote/rollback workflow.
               </p>
               <div className="vbs-actions">
-                <button type="button" disabled={isBusy || !generation} onClick={() => void createDocumentFromGeneration()}>
-                  Create Document
+                <button
+                  type="button"
+                  disabled={isBusy || !generation || Boolean(document)}
+                  onClick={() => void createDocumentFromGeneration()}
+                >
+                  {document ? "Document Ready" : "Create Document"}
                 </button>
                 <button type="button" disabled={isBusy || !documentDraft || !documentDirty} onClick={() => void saveDocumentNow()}>
                   Save Draft
@@ -3039,6 +3178,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                         ? "pending edits"
                         : "idle"}
               </p>
+              {generationSaveStatus ? <p className="vbs-meta">{generationSaveStatus}</p> : null}
               {documentDraft ? (
                 <div className="vbs-doc-editor">
                   <label className="vbs-doc-title-input">

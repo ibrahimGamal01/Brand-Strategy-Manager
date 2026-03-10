@@ -50,7 +50,10 @@ export function CommandPalette({ onSelect, showTrigger = true, openSignal }: Com
 
   useEffect(() => {
     if (typeof openSignal !== "number") return;
-    setOpen(true);
+    const timer = window.setTimeout(() => {
+      setOpen(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [openSignal]);
 
   const filtered = useMemo(() => {

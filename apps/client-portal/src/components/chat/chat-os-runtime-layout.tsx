@@ -413,6 +413,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   const [viralSuggestedSources, setViralSuggestedSources] = useState<ViralStudioSuggestedSource[]>([]);
   const [viralBridgeBusy, setViralBridgeBusy] = useState(false);
   const [viralBridgeError, setViralBridgeError] = useState<string | null>(null);
+  const [showViralBridgeAdvanced, setShowViralBridgeAdvanced] = useState(false);
   const seenGeneratedDocumentIdsRef = useRef<Set<string>>(new Set());
   const generatedDocumentsSeededRef = useRef(false);
   const pendingGeneratedDocumentIdRef = useRef<string | null>(null);
@@ -2063,10 +2064,62 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                           </button>
                           <button
                             type="button"
+                            onClick={() => setShowViralBridgeAdvanced((previous) => !previous)}
+                            className="rounded-md border border-sky-200 bg-white px-2.5 py-1 text-xs text-sky-700 hover:bg-sky-100"
+                          >
+                            {showViralBridgeAdvanced ? "Hide advanced controls" : "Show advanced controls"}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {viralBridgeError ? (
+                      <p className="mt-1 text-xs text-red-700">{viralBridgeError}</p>
+                    ) : null}
+                    {showViralBridgeAdvanced ? (
+                      <div className="mt-2 rounded-lg border border-sky-100 bg-white/80 p-2">
+                        {viralAutofillPreview ? (
+                          <p className="text-xs text-zinc-600">
+                            Autofill preview: {viralAutofillPreview.coverage.suggestedCount} field(s) • Confidence{" "}
+                            {Math.round((viralAutofillPreview.suggestionConfidence || 0) * 100)}%
+                          </p>
+                        ) : null}
+                        {viralSuggestedSources[0] ? (
+                          <p className="mt-1 line-clamp-2 text-xs text-zinc-600">
+                            Suggested source: {viralSuggestedSources[0].label} • {viralSuggestedSources[0].sourceUrl}
+                          </p>
+                        ) : null}
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <button
+                            type="button"
                             onClick={() => router.push(`/app/w/${workspaceId}/viral-studio?autopilot=website-first`)}
                             className="rounded-md border border-sky-200 bg-white px-2.5 py-1 text-xs text-sky-700 hover:bg-sky-100"
                           >
                             Run website-first autopilot
+                          </button>
+                          <button
+                            type="button"
+                            onClick={previewViralAutofill}
+                            disabled={viralBridgeBusy}
+                            className="rounded-md border border-sky-200 bg-white px-2.5 py-1 text-xs text-sky-700 hover:bg-sky-100 disabled:opacity-60"
+                          >
+                            Preview autofill
+                          </button>
+                          <button
+                            type="button"
+                            onClick={applyViralAutofill}
+                            disabled={viralBridgeBusy}
+                            className="rounded-md border border-sky-200 bg-white px-2.5 py-1 text-xs text-sky-700 hover:bg-sky-100 disabled:opacity-60"
+                          >
+                            Apply autofill
+                          </button>
+                          <button
+                            type="button"
+                            onClick={launchViralExtractionFromSuggestion}
+                            disabled={viralBridgeBusy || !viralWorkflow.brandDnaReady || viralSuggestedSources.length === 0}
+                            className="rounded-md border border-sky-200 bg-white px-2.5 py-1 text-xs text-sky-700 hover:bg-sky-100 disabled:opacity-60"
+                          >
+                            Start data-max extraction
                           </button>
                           <button
                             type="button"
@@ -2083,47 +2136,6 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                         </div>
                       </div>
                     ) : null}
-
-                    {viralAutofillPreview ? (
-                      <p className="mt-2 text-xs text-zinc-600">
-                        Autofill preview: {viralAutofillPreview.coverage.suggestedCount} field(s) • Confidence{" "}
-                        {Math.round((viralAutofillPreview.suggestionConfidence || 0) * 100)}%
-                      </p>
-                    ) : null}
-                    {viralSuggestedSources[0] ? (
-                      <p className="mt-1 line-clamp-2 text-xs text-zinc-600">
-                        Suggested source: {viralSuggestedSources[0].label} • {viralSuggestedSources[0].sourceUrl}
-                      </p>
-                    ) : null}
-                    {viralBridgeError ? (
-                      <p className="mt-1 text-xs text-red-700">{viralBridgeError}</p>
-                    ) : null}
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={previewViralAutofill}
-                        disabled={viralBridgeBusy}
-                        className="rounded-md border border-sky-200 bg-white px-2.5 py-1 text-xs text-sky-700 hover:bg-sky-100 disabled:opacity-60"
-                      >
-                        Manual: Preview autofill
-                      </button>
-                      <button
-                        type="button"
-                        onClick={applyViralAutofill}
-                        disabled={viralBridgeBusy}
-                        className="rounded-md border border-sky-200 bg-white px-2.5 py-1 text-xs text-sky-700 hover:bg-sky-100 disabled:opacity-60"
-                      >
-                        Manual: Apply autofill
-                      </button>
-                      <button
-                        type="button"
-                        onClick={launchViralExtractionFromSuggestion}
-                        disabled={viralBridgeBusy || !viralWorkflow.brandDnaReady || viralSuggestedSources.length === 0}
-                        className="rounded-md border border-sky-200 bg-white px-2.5 py-1 text-xs text-sky-700 hover:bg-sky-100 disabled:opacity-60"
-                      >
-                        Manual: Start data-max extraction
-                      </button>
-                    </div>
                   </div>
                 ) : null}
                 <ChatThread

@@ -424,10 +424,6 @@ function ArtifactPreviewDialog({
   const hasPdf = Boolean(preview.href);
 
   useEffect(() => {
-    setActiveView(preview.previewModeDefault || "markdown");
-  }, [preview.documentId, preview.href, preview.previewModeDefault]);
-
-  useEffect(() => {
     let frame = 0;
     const updateSelection = () => {
       if (activeView !== "markdown") {
