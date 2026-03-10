@@ -292,6 +292,9 @@ function RightRailPulse({
   mode,
   hasDocs,
   onSelectMode,
+  taskEyebrow,
+  taskTitle,
+  taskDetail,
 }: {
   runsCount: number;
   activeRunLabel: string;
@@ -301,24 +304,31 @@ function RightRailPulse({
   mode: "activity" | "docs";
   hasDocs: boolean;
   onSelectMode: (mode: "activity" | "docs") => void;
+  taskEyebrow: string;
+  taskTitle: string;
+  taskDetail: string;
 }) {
   return (
     <div className="border-b border-zinc-200 bg-[linear-gradient(180deg,#ffffff_0%,#f7f8f9_100%)] px-3 py-3">
-      <div className="grid grid-cols-3 gap-2">
-        <div className="rounded-2xl border border-zinc-200 bg-white px-3 py-2">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Live</p>
-          <p className="mt-1 text-sm font-semibold text-zinc-900">{runsCount ? `${runsCount} run${runsCount === 1 ? "" : "s"}` : "Idle"}</p>
-          <p className="mt-0.5 line-clamp-2 text-[11px] text-zinc-500">{activeRunLabel || "No active process right now."}</p>
-        </div>
-        <div className="rounded-2xl border border-zinc-200 bg-white px-3 py-2">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Feed</p>
-          <p className="mt-1 text-sm font-semibold text-zinc-900">{feedCount}</p>
-          <p className="mt-0.5 text-[11px] text-zinc-500">{decisionsCount ? `${decisionsCount} decision${decisionsCount === 1 ? "" : "s"} waiting` : "No open approvals"}</p>
-        </div>
-        <div className="rounded-2xl border border-zinc-200 bg-white px-3 py-2">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Docs</p>
-          <p className="mt-1 text-sm font-semibold text-zinc-900">{docsCount}</p>
-          <p className="mt-0.5 text-[11px] text-zinc-500">{hasDocs ? "Ready to inspect and edit" : "No runtime docs yet"}</p>
+      <div className="rounded-[1.35rem] border border-zinc-200 bg-white px-3 py-3 shadow-[0_14px_32px_-28px_rgba(15,23,42,0.35)]">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">{taskEyebrow}</p>
+        <p className="mt-1 text-sm font-semibold text-zinc-900">{taskTitle}</p>
+        <p className="mt-1 line-clamp-3 text-[11px] leading-5 text-zinc-500">{taskDetail || activeRunLabel || "No active process right now."}</p>
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-600">
+            {runsCount ? `${runsCount} live` : "Idle"}
+          </span>
+          <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-600">
+            Feed {feedCount}
+          </span>
+          <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-600">
+            Docs {docsCount}
+          </span>
+          {decisionsCount ? (
+            <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-700">
+              {decisionsCount} waiting
+            </span>
+          ) : null}
         </div>
       </div>
       <div className="mt-3 inline-flex w-full items-center rounded-full border border-zinc-200 bg-white p-1">
@@ -674,6 +684,51 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   const hasDocsContext = runtimeDocuments.length > 0;
   const resolvedRightRailMode: "activity" | "docs" =
     rightRailMode === "docs" && !hasDocsContext ? "activity" : rightRailMode;
+  const activeTaskSummary = useMemo(() => {
+    if (composerBranchContext?.documentId) {
+      return {
+        eyebrow: composerBranchContext.kind === "document_edit" ? "Editing Document" : "Document Branch",
+        title: composerBranchContext.title || "Active document",
+        detail:
+          compactContextText(
+            composerBranchContext.quotedText ||
+              composerBranchContext.subtitle ||
+              "Selections, edits, and exports are scoped to this document branch.",
+            160
+          ) || "Selections, edits, and exports are scoped to this document branch.",
+      };
+    }
+
+    if (activeRun) {
+      return {
+        eyebrow: "Active Run",
+        title: activeRun.label || "Running workspace task",
+        detail: [formatPhaseLabel(activeRun.phase), activeRun.stage].filter(Boolean).join(" • ") || "Working now.",
+      };
+    }
+
+    if (selectedRuntimeDocument) {
+      return {
+        eyebrow: "Document Context",
+        title: selectedRuntimeDocument.title || selectedRuntimeDocument.originalFileName || "Selected document",
+        detail: "Inspect versions, exports, and document edits from this branch.",
+      };
+    }
+
+    if (decisions.length) {
+      return {
+        eyebrow: "Awaiting Input",
+        title: "Approval needed to continue",
+        detail: compactContextText(decisions[0]?.prompt || `${decisions.length} approvals waiting.`, 160),
+      };
+    }
+
+    return {
+      eyebrow: "Workspace Ready",
+      title: activeBranch ? activeBranch.name : "Main branch",
+      detail: "Start with an action, open a document, or continue the current branch.",
+    };
+  }, [activeBranch, activeRun, composerBranchContext, decisions, selectedRuntimeDocument]);
   const generatedDocumentIds = useMemo(
     () =>
       feedItems
@@ -1867,9 +1922,9 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
           </aside>
 
           <section className="relative flex min-h-0 flex-col overflow-hidden bg-[#fbfbfc]">
-            <header className="flex items-center justify-between gap-3 border-b border-zinc-200/90 bg-white/90 px-3 py-2.5 backdrop-blur sm:px-4 xl:px-5">
-              <div className="min-w-0">
-                <div className="mb-1 flex items-center gap-2">
+            <header className="flex items-center justify-between gap-3 border-b border-zinc-200/80 bg-white/90 px-2.5 py-2 backdrop-blur sm:px-3 xl:px-4">
+              <div className="min-w-0 flex items-center gap-2">
+                <div className="shrink-0">
                   <button
                     type="button"
                     className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-200 text-zinc-700 lg:hidden"
@@ -1877,20 +1932,13 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                   >
                     <Menu className="h-4 w-4" />
                   </button>
-                  <h1 className="truncate text-sm font-semibold text-zinc-900">{activeThread?.title || "New chat"}</h1>
                 </div>
-                <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
-                  <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5">
-                    {syncing ? "Syncing..." : activeBranch ? `Branch: ${activeBranch.name}` : "Main branch"}
-                  </span>
-                  <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5">
-                    {isStreaming ? formatPhaseLabel(activeRun?.phase) : "Idle"}
-                  </span>
-                  {streamingInsight ? (
-                    <span className="max-w-[28rem] truncate rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5">
-                      {streamingInsight}
-                    </span>
-                  ) : null}
+                <div className="min-w-0">
+                  <h1 className="truncate text-[15px] font-semibold text-zinc-900">{activeThread?.title || "New chat"}</h1>
+                  <p className="truncate text-xs text-zinc-500">
+                    {syncing ? "Syncing workspace" : activeBranch ? `Branch ${activeBranch.name}` : "Main branch"}
+                    {streamingInsight ? ` • ${streamingInsight}` : ""}
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-1.5">
@@ -1912,14 +1960,6 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                 >
                   <PanelRight className="h-3.5 w-3.5" />
                   {rightRailCollapsed ? "Open inspector" : "Hide inspector"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => router.push(`/app/w/${workspaceId}/viral-studio`)}
-                  className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
-                >
-                  <Sparkles className="h-3.5 w-3.5" />
-                  Studio
                 </button>
               </div>
             </header>
@@ -2186,6 +2226,9 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                     decisionsCount={decisions.length}
                     mode={resolvedRightRailMode}
                     hasDocs={hasDocsContext}
+                    taskEyebrow={activeTaskSummary.eyebrow}
+                    taskTitle={activeTaskSummary.title}
+                    taskDetail={activeTaskSummary.detail}
                     onSelectMode={openRightRailMode}
                   />
                   <div className="min-h-0 flex-1 overflow-hidden">
@@ -2198,6 +2241,9 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                         onRunAudit={onRunAudit}
                         onSteer={(instruction) => runAsync(steerRun(instruction))}
                         onFeedItemAction={onFeedItemAction}
+                        focusTitle={activeTaskSummary.title}
+                        focusDetail={activeTaskSummary.detail}
+                        focusDocumentId={activeDocumentContextId}
                       />
                     ) : (
                       <DocumentWorkspacePanel
@@ -2264,6 +2310,9 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                 decisionsCount={decisions.length}
                 mode={resolvedRightRailMode}
                 hasDocs={hasDocsContext}
+                taskEyebrow={activeTaskSummary.eyebrow}
+                taskTitle={activeTaskSummary.title}
+                taskDetail={activeTaskSummary.detail}
                 onSelectMode={setRightRailMode}
               />
               <div className="min-h-0 flex-1 overflow-hidden">
@@ -2276,6 +2325,9 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                     onRunAudit={onRunAudit}
                     onSteer={(instruction) => runAsync(steerRun(instruction))}
                     onFeedItemAction={onFeedItemAction}
+                    focusTitle={activeTaskSummary.title}
+                    focusDetail={activeTaskSummary.detail}
+                    focusDocumentId={activeDocumentContextId}
                   />
                 ) : (
                   <DocumentWorkspacePanel

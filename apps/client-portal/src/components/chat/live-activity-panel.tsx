@@ -72,6 +72,9 @@ export function LiveActivityPanel({
   onRunAudit,
   onSteer,
   onFeedItemAction,
+  focusTitle,
+  focusDetail,
+  focusDocumentId,
 }: {
   runs: ProcessRun[];
   feedItems: ProcessFeedItem[];
@@ -80,23 +83,58 @@ export function LiveActivityPanel({
   onRunAudit?: () => void;
   onSteer?: (instruction: string) => void;
   onFeedItemAction?: (item: ProcessFeedItem) => void;
+  focusTitle?: string;
+  focusDetail?: string;
+  focusDocumentId?: string | null;
 }) {
   const [steerNote, setSteerNote] = useState("");
   const activeRun = useMemo(
     () => runs.find((run) => run.status === "running" || run.status === "waiting_input") || null,
     [runs]
   );
-  const timeline = useMemo(() => feedItems.slice(0, 80), [feedItems]);
+  const timeline = useMemo(() => {
+    if (!focusDocumentId) return feedItems.slice(0, 80);
+    const isFocusedDocumentItem = (item: ProcessFeedItem) => {
+      if (item.actionTarget?.kind === "document") {
+        return item.actionTarget.documentId === focusDocumentId;
+      }
+      if ((item.toolName || "").startsWith("document.")) return true;
+      if (item.docFamily || item.sectionId || item.sectionTitle || item.renderTheme) return true;
+      if (typeof item.qualityScore === "number") return true;
+      return false;
+    };
+    const focused = feedItems.filter(isFocusedDocumentItem);
+    if (focused.length >= 8) return focused.slice(0, 36);
+    const remainder = feedItems.filter((item) => !isFocusedDocumentItem(item));
+    return [...focused, ...remainder].slice(0, 36);
+  }, [feedItems, focusDocumentId]);
 
   return (
     <aside className="flex h-full min-h-0 flex-col bg-white">
       <div className="flex items-center justify-between gap-2 border-b border-zinc-200 px-3 py-2">
-        <h2 className="text-sm font-semibold text-zinc-900">Activity</h2>
-        <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-500">Work Ledger</span>
+        <div>
+          <h2 className="text-sm font-semibold text-zinc-900">{focusDocumentId ? "Focused Activity" : "Activity"}</h2>
+          <p className="text-[11px] text-zinc-500">
+            {focusDocumentId ? "Prioritizing the active document lane." : "Live work ledger for this branch."}
+          </p>
+        </div>
+        <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-500">
+          {focusDocumentId ? "Scoped" : "Ledger"}
+        </span>
       </div>
 
+      {focusTitle ? (
+        <div className="mx-3 mt-2 rounded-2xl border border-zinc-200 bg-[linear-gradient(180deg,#ffffff_0%,#f7f8f9_100%)] px-3 py-2.5">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+            {focusDocumentId ? "Active Task" : "Current Focus"}
+          </p>
+          <p className="mt-1 text-sm font-semibold text-zinc-900">{focusTitle}</p>
+          {focusDetail ? <p className="mt-1 text-[11px] leading-5 text-zinc-600">{focusDetail}</p> : null}
+        </div>
+      ) : null}
+
       {activeRun ? (
-        <div className="mx-3 mt-2 mb-2 rounded-md border border-zinc-200 bg-zinc-50 px-2.5 py-2">
+        <div className="mx-3 mt-2 mb-2 rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2.5">
           <div className="flex items-center justify-between gap-2">
             <p className="text-sm font-medium text-zinc-900">{activeRun.label}</p>
             <StatusIcon status={activeRun.status} />
@@ -137,7 +175,7 @@ export function LiveActivityPanel({
           ) : null}
         </div>
       ) : onRunAudit ? (
-        <div className="mx-3 mt-2 mb-2 rounded-md border border-zinc-200 bg-zinc-50 px-2.5 py-2">
+        <div className="mx-3 mt-2 mb-2 rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2.5">
           <p className="text-sm font-medium text-zinc-900">No active run</p>
           <p className="mt-1 text-xs text-zinc-600">Start a workspace audit or send a new message.</p>
           <button
@@ -153,7 +191,7 @@ export function LiveActivityPanel({
       {decisions.length ? (
         <div className="mx-3 mb-2 space-y-2">
           {decisions.map((decision) => (
-            <article key={decision.id} className="rounded-md border border-amber-200 bg-amber-50 p-2">
+            <article key={decision.id} className="rounded-2xl border border-amber-200 bg-amber-50 p-2.5">
               <p className="text-xs font-semibold uppercase tracking-[0.08em] text-amber-700">Approval needed</p>
               <p className="mt-1 text-sm text-zinc-800">{decision.prompt}</p>
               <div className="mt-2 flex flex-wrap gap-2">
@@ -175,7 +213,7 @@ export function LiveActivityPanel({
 
       <div className="bat-scrollbar min-h-0 flex-1 space-y-1 overflow-y-auto px-3 pb-2">
         {timeline.map((item) => (
-          <article key={item.id} className="rounded-md border border-zinc-200 bg-white p-2">
+          <article key={item.id} className="rounded-2xl border border-zinc-200 bg-white p-2.5">
             <div className="flex items-center justify-between gap-2">
               <p className="text-[11px] text-zinc-500">{item.timestamp}</p>
               <div className="flex items-center gap-1.5">

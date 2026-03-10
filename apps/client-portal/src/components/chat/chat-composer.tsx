@@ -8,6 +8,7 @@ import {
   FileText,
   GitBranch,
   ListOrdered,
+  MoreHorizontal,
   Paperclip,
   SendHorizontal,
   Sparkles,
@@ -582,34 +583,33 @@ export function ChatComposer({
     return item.steer?.note || "";
   };
 
-  const scopeSummary = summarizeScope(sourceScope);
   const branchActions = branchQuickActions(branchContext);
+  const showComposerStatusRow = isStreaming || queuedMessages.length > 0;
 
   return (
     <section className="sticky bottom-0 z-20 border-t border-zinc-200/80 bg-white/96 px-0 pb-2 pt-2 backdrop-blur-xl">
       <div className={`mx-auto w-full ${contentWidthClassName} px-2 sm:px-3 xl:px-4`}>
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className={`rounded-full border px-2.5 py-1 ${isStreaming ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-zinc-200 bg-zinc-50 text-zinc-600"}`}>
-              {isStreaming ? "Generating" : "Ready"}
-            </span>
-            <button
-              type="button"
-              onClick={() => setShowQueue((previous) => !previous)}
-              className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 ${queuedMessages.length ? "border-zinc-300 bg-white text-zinc-700" : "border-zinc-200 bg-zinc-50 text-zinc-500"}`}
-            >
-              <ListOrdered className="h-3.5 w-3.5" />
-              Queue {queuedMessages.length}
-            </button>
-            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-zinc-500">
-              {scopeSummary}
-            </span>
-            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-zinc-500">
-              <Command className="mr-1 inline h-3.5 w-3.5" />
-              / commands
-            </span>
+        {showComposerStatusRow ? (
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] text-zinc-500">
+            <div className="flex items-center gap-2">
+              <span className={`inline-flex items-center gap-1.5 ${isStreaming ? "text-emerald-700" : "text-zinc-500"}`}>
+                <span className={`h-2 w-2 rounded-full ${isStreaming ? "bg-emerald-500" : "bg-zinc-300"}`} />
+                {isStreaming ? "Generating response" : "Ready"}
+              </span>
+              <span className="hidden text-zinc-400 sm:inline">Type `/` for actions</span>
+            </div>
+            {queuedMessages.length ? (
+              <button
+                type="button"
+                onClick={() => setShowQueue((previous) => !previous)}
+                className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-zinc-600 shadow-sm hover:bg-zinc-50"
+              >
+                <ListOrdered className="h-3.5 w-3.5" />
+                Queue {queuedMessages.length}
+              </button>
+            ) : null}
           </div>
-        </div>
+        ) : null}
 
         {showQueue && queuedMessages.length > 0 ? (
           <div className="mb-2 rounded-2xl border border-zinc-200 bg-zinc-50/85 p-2.5">
@@ -878,29 +878,29 @@ export function ChatComposer({
               ) : null}
 
               {showSlashSurface ? (
-                <div className="absolute bottom-[4.6rem] left-3 right-3 z-10 rounded-2xl border border-zinc-200 bg-white/98 p-2 shadow-2xl backdrop-blur">
-                  <div className="mb-2 flex items-center justify-between px-1">
+                <div className="absolute bottom-[4.6rem] left-2 right-2 z-10 rounded-[1.75rem] border border-zinc-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(248,248,248,0.98)_100%)] p-2.5 shadow-[0_24px_70px_-40px_rgba(15,23,42,0.45)] backdrop-blur-xl">
+                  <div className="mb-2 flex items-center justify-between px-1.5">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
                       {slashMatches.length ? "Slash Commands" : "Start With An Action"}
                     </p>
                     <p className="text-[11px] text-zinc-400">
-                      {slashMatches.length ? "ChatGPT-style quick actions" : "Focus first, then write"}
+                      {slashMatches.length ? "Modes, focus, docs, exports" : "Pick the lane before you write"}
                     </p>
                   </div>
-                  <div className="bat-scrollbar mb-2 flex gap-2 overflow-x-auto px-1 pb-1">
+                  <div className="bat-scrollbar mb-2 flex flex-wrap gap-2.5 px-1.5 pb-1">
                     {slashPills.map((command) => (
                       <button
                         key={command.id}
                         type="button"
                         onMouseDown={(event) => event.preventDefault()}
                         onClick={() => applySlashCommand(command)}
-                        className="whitespace-nowrap rounded-full border border-zinc-200 bg-[linear-gradient(180deg,#ffffff_0%,#f5f5f5_100%)] px-4 py-2 text-sm text-zinc-700 shadow-sm hover:bg-zinc-100"
+                        className="min-h-11 whitespace-nowrap rounded-full border border-zinc-200/90 bg-white px-5 py-2.5 text-[15px] font-medium text-zinc-700 shadow-[0_1px_0_rgba(255,255,255,0.9),0_8px_20px_-18px_rgba(15,23,42,0.35)] transition hover:border-zinc-300 hover:bg-zinc-50"
                       >
                         {command.label}
                       </button>
                     ))}
                   </div>
-                  <div className="mb-2 flex items-center justify-between px-1">
+                  <div className="mb-2 flex items-center justify-between px-1.5">
                     <p className="text-[11px] text-zinc-500">
                       {slashMatches.length
                         ? "Modes, focus presets, document actions, and deliverables."
@@ -915,8 +915,10 @@ export function ChatComposer({
                         type="button"
                         onMouseDown={(event) => event.preventDefault()}
                         onClick={() => applySlashCommand(command)}
-                        className={`flex w-full items-start justify-between gap-3 rounded-xl px-3 py-2 text-left ${
-                          slashMatches.length && index === activeSlashIndex ? "bg-zinc-100" : "hover:bg-zinc-50"
+                        className={`flex w-full items-start justify-between gap-3 rounded-2xl border px-3.5 py-3 text-left transition ${
+                          slashMatches.length && index === activeSlashIndex
+                            ? "border-zinc-200 bg-zinc-100/90"
+                            : "border-transparent bg-white/65 hover:border-zinc-200 hover:bg-white"
                         }`}
                       >
                         <div>
@@ -981,7 +983,7 @@ export function ChatComposer({
                       title="More options"
                       aria-label="More options"
                     >
-                      {showControls ? <X className="h-4 w-4" /> : <span className="text-lg leading-none">...</span>}
+                      {showControls ? <X className="h-4 w-4" /> : <MoreHorizontal className="h-4 w-4" />}
                     </button>
                     {showControls ? (
                       <div className="absolute bottom-12 left-0 z-20 w-[21rem] rounded-2xl border border-zinc-200 bg-white/98 p-3 shadow-2xl backdrop-blur">
