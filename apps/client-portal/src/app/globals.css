@@ -252,6 +252,13 @@ a {
   color: color-mix(in srgb, var(--vbs-cobalt) 76%, var(--vbs-ink));
 }
 
+.vbs-command-modes {
+  margin-top: 0.55rem;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
 .vbs-progress-track {
   margin-top: 0.5rem;
   width: 100%;
@@ -338,6 +345,81 @@ a {
 .vbs-command-links a:hover {
   background: color-mix(in srgb, var(--vbs-cobalt) 14%, white);
   border-color: color-mix(in srgb, var(--vbs-cobalt) 40%, var(--bat-border));
+}
+
+.vbs-journey-lanes {
+  margin-top: 0.7rem;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.vbs-journey-card {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 18%, var(--bat-border));
+  border-radius: 0.72rem;
+  padding: 0.55rem;
+  background: color-mix(in srgb, white 95%, var(--vbs-sand));
+  display: grid;
+  gap: 0.28rem;
+}
+
+.vbs-journey-card.is-active {
+  border-color: color-mix(in srgb, var(--vbs-cobalt) 56%, var(--bat-border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--vbs-cobalt) 13%, transparent);
+  background: linear-gradient(
+    150deg,
+    color-mix(in srgb, var(--vbs-cobalt) 14%, white) 0%,
+    color-mix(in srgb, var(--vbs-teal) 9%, white) 100%
+  );
+}
+
+.vbs-journey-card.is-done {
+  border-color: color-mix(in srgb, var(--vbs-teal) 44%, var(--bat-border));
+  background: color-mix(in srgb, var(--vbs-teal) 10%, white);
+}
+
+.vbs-journey-card h4 {
+  margin: 0;
+  font-family: var(--vbs-display-font);
+  font-size: 0.85rem;
+  color: var(--vbs-ink);
+}
+
+.vbs-journey-card p {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--vbs-ink) 74%, #616a84);
+}
+
+.vbs-journey-foot {
+  margin-top: 0.12rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.vbs-journey-foot strong {
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--vbs-ink) 68%, #616a84);
+}
+
+.vbs-journey-foot a {
+  text-decoration: none;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 26%, var(--bat-border));
+  border-radius: 999px;
+  padding: 0.2rem 0.48rem;
+  color: color-mix(in srgb, var(--vbs-cobalt) 82%, var(--vbs-ink));
+  background: color-mix(in srgb, var(--vbs-cobalt) 8%, white);
+}
+
+.vbs-journey-foot a:hover {
+  background: color-mix(in srgb, var(--vbs-cobalt) 14%, white);
 }
 
 .vbs-command-next h3 {
@@ -1042,6 +1124,71 @@ a {
   flex-wrap: wrap;
 }
 
+.vbs-onboarding-progress {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.vbs-onboarding-step-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.vbs-onboarding-step {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 16%, var(--bat-border));
+  border-radius: 0.65rem;
+  padding: 0.48rem 0.54rem;
+  background: color-mix(in srgb, white 95%, var(--vbs-sand));
+  text-align: left;
+  display: grid;
+  gap: 0.14rem;
+  cursor: pointer;
+  transition: border-color 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
+}
+
+.vbs-onboarding-step span {
+  font-size: 0.67rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--vbs-ink) 56%, #66708b);
+}
+
+.vbs-onboarding-step strong {
+  font-size: 0.78rem;
+  color: var(--vbs-ink);
+}
+
+.vbs-onboarding-step p {
+  margin: 0;
+  font-size: 0.71rem;
+  color: color-mix(in srgb, var(--vbs-ink) 66%, #66708b);
+}
+
+.vbs-onboarding-step.is-active {
+  border-color: color-mix(in srgb, var(--vbs-cobalt) 50%, var(--bat-border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--vbs-cobalt) 12%, transparent);
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--vbs-cobalt) 12%, white) 0%,
+    color-mix(in srgb, var(--vbs-teal) 8%, white) 100%
+  );
+}
+
+.vbs-onboarding-step.is-ready {
+  border-color: color-mix(in srgb, var(--vbs-cobalt) 36%, var(--bat-border));
+}
+
+.vbs-onboarding-step.is-done {
+  border-color: color-mix(in srgb, var(--vbs-teal) 44%, var(--bat-border));
+  background: color-mix(in srgb, var(--vbs-teal) 10%, white);
+}
+
+.vbs-onboarding-step:hover {
+  border-color: color-mix(in srgb, var(--vbs-cobalt) 42%, var(--bat-border));
+}
+
 .vbs-autofill-panel .vbs-mini-actions {
   margin-bottom: 0.5rem;
 }
@@ -1200,6 +1347,10 @@ a {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
+  .vbs-journey-lanes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .vbs-grid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1260,6 +1411,11 @@ a {
 
   .vbs-stage-rail {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .vbs-journey-lanes,
+  .vbs-onboarding-step-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .vbs-diagnostics-head {
