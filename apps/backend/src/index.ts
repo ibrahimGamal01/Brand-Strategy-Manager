@@ -1,6 +1,7 @@
 import express from 'express';
 import http from 'http';
 import cors from 'cors';
+import fs from 'fs';
 import path from 'path';
 import { prisma } from './lib/prisma';
 import { validateRuntimePreflight } from './lib/runtime-preflight';
@@ -30,6 +31,7 @@ import portalRouter from './routes/portal';
 import { STORAGE_ROOT } from './services/storage/storage-root';
 import { attachChatWebSocketServer } from './services/chat/chat-ws';
 import { attachRuntimeWebSocketServer } from './services/chat/runtime/runtime-ws';
+import { requirePortalAuth, requireWorkspaceMembership } from './services/portal/portal-auth-middleware';
 
 const envLoad = loadBackendEnv();
 console.log('[DEBUG] DATABASE_URL loaded:', process.env.DATABASE_URL?.replace(/:[^:@]*@/, ':***@'));
@@ -60,7 +62,49 @@ function resolvePortalDdgEnabled(): boolean {
 app.use(cors());
 app.use(express.json());
 
-// Serve static files from storage directory
+app.use('/storage/documents/:workspaceId', requirePortalAuth, requireWorkspaceMembership, (req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    return res.status(405).json({ error: 'METHOD_NOT_ALLOWED' });
+  }
+
+  const workspaceId = String(req.params.workspaceId || '').trim();
+  if (!workspaceId) {
+    return res.status(400).json({ error: 'workspaceId is required' });
+  }
+
+  let relativeFilePath = '';
+  try {
+    relativeFilePath = decodeURIComponent(String(req.path || '').replace(/^\/+/, '').trim());
+  } catch {
+    return res.status(400).json({ error: 'INVALID_STORAGE_PATH' });
+  }
+
+  if (!relativeFilePath) {
+    return res.status(404).json({ error: 'FILE_NOT_FOUND' });
+  }
+
+  const workspaceStorageRoot = path.resolve(STORAGE_ROOT, 'documents', workspaceId);
+  const absoluteFilePath = path.resolve(workspaceStorageRoot, relativeFilePath);
+  if (
+    absoluteFilePath !== workspaceStorageRoot &&
+    !absoluteFilePath.startsWith(`${workspaceStorageRoot}${path.sep}`)
+  ) {
+    return res.status(400).json({ error: 'INVALID_STORAGE_PATH' });
+  }
+
+  fs.stat(absoluteFilePath, (error, stats) => {
+    if (error || !stats.isFile()) {
+      return res.status(404).json({ error: 'FILE_NOT_FOUND' });
+    }
+
+    res.setHeader('Cache-Control', 'private, no-store, no-cache, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+    return res.sendFile(absoluteFilePath);
+  });
+});
+
+// Serve non-document storage assets publicly from storage directory.
 app.use('/storage', express.static(STORAGE_ROOT));
 
 // Health check (always available, even if schema is not ready)

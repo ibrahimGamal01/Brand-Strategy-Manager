@@ -9,8 +9,8 @@ import type { DocumentSpecV1 } from './document-spec-schema';
 import { draftDocumentSections, type DraftedDocumentSection } from './section-drafter';
 
 const AUTHORING_TIMEOUT_MS = Number.isFinite(Number(process.env.DOCUMENT_AUTHORING_TIMEOUT_MS))
-  ? Math.max(20_000, Math.min(240_000, Math.floor(Number(process.env.DOCUMENT_AUTHORING_TIMEOUT_MS))))
-  : 90_000;
+  ? Math.max(20_000, Math.min(300_000, Math.floor(Number(process.env.DOCUMENT_AUTHORING_TIMEOUT_MS))))
+  : 120_000;
 
 export type SectionBrief = {
   id: string;
@@ -87,6 +87,18 @@ export type PremiumDocumentPipelineResult = {
   factCheck: FactCheckResult;
   quality: PremiumDocumentQuality;
   theme: RenderTheme;
+  editorialPassCount: number;
+  iterationsUsed: number;
+};
+
+type DocumentDepthSignals = {
+  totalWords: number;
+  minimumWords: number;
+  calendarRows: number;
+  minimumCalendarRows: number;
+  underdevelopedSections: string[];
+  reasons: string[];
+  needsExpansion: boolean;
 };
 
 type JsonRequestResult = {
@@ -633,13 +645,95 @@ function duplicateSentenceRatio(sections: SectionDraft[]): number {
   return 1 - unique.size / sentences.length;
 }
 
+function countWords(value: string): number {
+  return String(value || '')
+    .replace(/[`*_>#|]/g, ' ')
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter(Boolean).length;
+}
+
+function countMarkdownTableRows(value: string): number {
+  const lines = String(value || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('|'));
+  if (lines.length <= 2) return 0;
+  return lines.slice(2).filter((line) => !/^|\s*-+\s*\|/i.test(line)).length;
+}
+
+function minimumDocumentWords(docFamily: DocumentSpecV1['docFamily'], depth: DocumentSpecV1['depth']): number {
+  const table: Record<DocumentSpecV1['docFamily'], Record<DocumentSpecV1['depth'], number>> = {
+    SWOT: { short: 500, standard: 900, deep: 1400 },
+    BUSINESS_STRATEGY: { short: 700, standard: 1200, deep: 1800 },
+    PLAYBOOK: { short: 650, standard: 1100, deep: 1550 },
+    COMPETITOR_AUDIT: { short: 700, standard: 1200, deep: 1700 },
+    CONTENT_CALENDAR: { short: 650, standard: 1150, deep: 1600 },
+    GO_TO_MARKET: { short: 750, standard: 1300, deep: 1900 },
+  };
+  return table[docFamily]?.[depth] ?? 1000;
+}
+
+function minimumSectionWords(section: SectionDraft, depth: DocumentSpecV1['depth']): number {
+  if (depth === 'short') return 45;
+  if (section.kind === 'content_calendar_slots') return depth === 'deep' ? 420 : 260;
+  if (section.kind === 'executive_summary') return depth === 'deep' ? 100 : 70;
+  if (section.kind === 'source_ledger') return depth === 'deep' ? 120 : 80;
+  if (section.kind === 'risk_register' || section.kind === 'kpi_block') return depth === 'deep' ? 90 : 70;
+  return depth === 'deep' ? 85 : 60;
+}
+
+function evaluateDocumentDepthSignals(input: {
+  spec: DocumentSpecV1;
+  sections: SectionDraft[];
+}): DocumentDepthSignals {
+  const totalWords = input.sections.reduce((sum, section) => sum + countWords(section.contentMd), 0);
+  const minimumWords = minimumDocumentWords(input.spec.docFamily, input.spec.depth);
+  const calendarSection = input.sections.find((section) => section.kind === 'content_calendar_slots');
+  const calendarRows = calendarSection ? countMarkdownTableRows(calendarSection.contentMd) : 0;
+  const minimumCalendarRows =
+    input.spec.docFamily === 'CONTENT_CALENDAR'
+      ? input.spec.depth === 'deep'
+        ? 24
+        : input.spec.depth === 'standard'
+          ? 16
+          : 8
+      : 0;
+  const underdevelopedSections = input.sections
+    .filter((section) => countWords(section.contentMd) < minimumSectionWords(section, input.spec.depth))
+    .map((section) => section.id);
+
+  const reasons: string[] = [];
+  if (totalWords < minimumWords) {
+    reasons.push(`Document depth is below premium target (${totalWords}/${minimumWords} words).`);
+  }
+  if (minimumCalendarRows > 0 && calendarRows < minimumCalendarRows) {
+    reasons.push(`Content calendar coverage is thin (${calendarRows}/${minimumCalendarRows} scheduled rows).`);
+  }
+  if (underdevelopedSections.length > 0) {
+    reasons.push(`Underdeveloped sections remain: ${underdevelopedSections.join(', ')}.`);
+  }
+
+  return {
+    totalWords,
+    minimumWords,
+    calendarRows,
+    minimumCalendarRows,
+    underdevelopedSections,
+    reasons,
+    needsExpansion: input.spec.depth === 'deep' && reasons.length > 0,
+  };
+}
+
 export function evaluatePremiumDocumentQuality(input: {
+  spec: DocumentSpecV1;
   payload: DocumentDataPayload;
   sections: SectionDraft[];
   factCheck: FactCheckResult;
   html: string;
 }): PremiumDocumentQuality {
   const sections = input.sections;
+  const depthSignals = evaluateDocumentDepthSignals({ spec: input.spec, sections });
   const totalEvidenceRefs = sections.reduce((sum, section) => sum + section.evidenceRefIds.length, 0);
   const avgEvidenceRefs = sections.length ? totalEvidenceRefs / sections.length : 0;
   const factPassCount = input.factCheck.sections.filter((section) => section.status === 'pass').length;
@@ -652,7 +746,10 @@ export function evaluatePremiumDocumentQuality(input: {
     const matches = (content.match(/@[a-z0-9._-]+/gi) || []).length + (content.match(/\b\d{2,}\b/g) || []).length;
     return sum + matches;
   }, 0);
-  const specificity = Math.max(0, Math.min(100, Math.round(42 + specificitySignals * 2.3 + avgEvidenceRefs * 4)));
+  const depthPenalty = depthSignals.totalWords < depthSignals.minimumWords
+    ? Math.ceil((depthSignals.minimumWords - depthSignals.totalWords) / 22)
+    : 0;
+  const specificity = Math.max(0, Math.min(100, Math.round(42 + specificitySignals * 2.3 + avgEvidenceRefs * 4 - depthPenalty)));
 
   const usefulnessKinds = new Set(sections.map((section) => section.kind));
   const usefulness = Math.max(
@@ -664,7 +761,9 @@ export function evaluatePremiumDocumentQuality(input: {
           (usefulnessKinds.has('roadmap_30_60_90') ? 22 : 0) +
           (usefulnessKinds.has('kpi_block') ? 18 : 0) +
           (usefulnessKinds.has('risk_register') ? 10 : 0) +
-          (usefulnessKinds.has('positioning') ? 10 : 0)
+          (usefulnessKinds.has('positioning') ? 10 : 0) -
+          depthSignals.underdevelopedSections.length * 5 -
+          (depthSignals.minimumCalendarRows > 0 && depthSignals.calendarRows < depthSignals.minimumCalendarRows ? 10 : 0)
       ),
     ),
   );
@@ -701,6 +800,7 @@ export function evaluatePremiumDocumentQuality(input: {
   if (redundancy < 78) notes.push('Some sections still repeat similar language or claims.');
   if (tone < 85) notes.push('Tone needs more polish; remove any process-like or self-referential phrasing.');
   if (visual < 80) notes.push('Rendered document needs stronger visual hierarchy or layout treatment.');
+  if (depthSignals.reasons.length) notes.push(...depthSignals.reasons);
   if (!notes.length) notes.push('Document passed the premium quality rubric with strong grounding, usefulness, and presentation.');
 
   return {
@@ -740,18 +840,58 @@ export async function buildPremiumDocumentPipeline(input: {
     }),
   });
 
-  const editorialReview = await editSectionsWithAi({
+  const initialEditorialReview = await editSectionsWithAi({
     spec: input.spec,
     sections: draftedSections,
     qualityHistory: input.qualityHistory,
   });
-  const editedSections = mergeEditorialSections(draftedSections, editorialReview);
-  const factCheck = await factCheckSectionsWithAi({
+  const editedSections = mergeEditorialSections(draftedSections, initialEditorialReview);
+  const initialFactCheck = await factCheckSectionsWithAi({
     spec: input.spec,
     sections: editedSections,
     sectionBriefs,
   });
-  const finalSections = applyFactCheckSections(editedSections, factCheck);
+  let editorialReview = initialEditorialReview;
+  let factCheck = initialFactCheck;
+  let finalSections = applyFactCheckSections(editedSections, factCheck);
+  let editorialPassCount = 1;
+  let iterationsUsed = 1;
+
+  const depthSignals = evaluateDocumentDepthSignals({
+    spec: input.spec,
+    sections: finalSections,
+  });
+  if (depthSignals.needsExpansion) {
+    const expansionReview = await editSectionsWithAi({
+      spec: input.spec,
+      sections: finalSections,
+      qualityHistory: {
+        ...(input.qualityHistory || {}),
+        expansionRequired: true,
+        expansionReasons: depthSignals.reasons,
+        currentWordCount: depthSignals.totalWords,
+        targetWordCount: depthSignals.minimumWords,
+        currentCalendarRows: depthSignals.calendarRows,
+        targetCalendarRows: depthSignals.minimumCalendarRows,
+        underdevelopedSections: depthSignals.underdevelopedSections,
+      },
+    });
+    const expansionEditedSections = mergeEditorialSections(finalSections, expansionReview);
+    const expansionFactCheck = await factCheckSectionsWithAi({
+      spec: input.spec,
+      sections: expansionEditedSections,
+      sectionBriefs,
+    });
+    finalSections = applyFactCheckSections(expansionEditedSections, expansionFactCheck);
+    factCheck = expansionFactCheck;
+    editorialReview = {
+      summary: [initialEditorialReview.summary, expansionReview.summary].filter(Boolean).join(' '),
+      issues: uniqueStrings([...initialEditorialReview.issues, ...expansionReview.issues, ...depthSignals.reasons]).slice(0, 12),
+      sections: expansionReview.sections.length ? expansionReview.sections : initialEditorialReview.sections,
+    };
+    editorialPassCount = 2;
+    iterationsUsed = 2;
+  }
 
   return {
     sectionBriefs,
@@ -771,5 +911,7 @@ export async function buildPremiumDocumentPipeline(input: {
       },
     },
     theme: defaultTheme(),
+    editorialPassCount,
+    iterationsUsed,
   };
 }

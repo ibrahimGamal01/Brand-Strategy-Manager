@@ -23,7 +23,7 @@ const TOOL_TIMEOUT_OVERRIDES_MS: Record<string, number> = {
   'web.crawl': 120_000,
   'web.fetch': 45_000,
   'search.web': 25_000,
-  'document.generate': 180_000,
+  'document.generate': 300_000,
   'intel.list': 12_000,
   'intel.get': 12_000,
 };

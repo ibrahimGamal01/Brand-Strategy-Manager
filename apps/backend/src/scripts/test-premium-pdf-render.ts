@@ -162,6 +162,7 @@ async function main(): Promise<void> {
     },
   });
   const quality = evaluatePremiumDocumentQuality({
+    spec,
     payload,
     sections,
     factCheck,

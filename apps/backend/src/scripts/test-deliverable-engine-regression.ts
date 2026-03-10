@@ -271,6 +271,7 @@ function runRendererAssertions() {
     'ELUUMIS Content Calendar'
   );
   assert.ok(contentCalendarMarkdown.includes('## Weekly Calendar'));
+  assert.ok(contentCalendarMarkdown.includes('## Content Signal Analysis'));
   assert.ok(contentCalendarMarkdown.includes('| Date | Slot | Channel |'));
 
   const goToMarketMarkdown = renderDocumentMarkdown(

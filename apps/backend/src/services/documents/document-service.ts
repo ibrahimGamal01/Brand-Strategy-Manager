@@ -1296,7 +1296,7 @@ export async function generateDocumentForResearchJob(
     memoryContext: memoryContext.byScope.deliverable_preferences,
     qualityHistory: memoryContext.byScope.quality_history,
   });
-  const editorialPassCount = 2;
+  const editorialPassCount = premiumPipeline.editorialPassCount;
   const sectionDrafting = {
     sections: premiumPipeline.sections,
     partialReasons: premiumPipeline.sections
@@ -1495,6 +1495,7 @@ export async function generateDocumentForResearchJob(
     theme: premiumPipeline.theme,
   });
   const premiumQuality = evaluatePremiumDocumentQuality({
+    spec: specBuild.spec,
     payload,
     sections: premiumPipeline.sections,
     factCheck: premiumPipeline.factCheck,
@@ -1739,7 +1740,7 @@ export async function generateDocumentForResearchJob(
     renderTheme: premiumPipeline.theme.id,
     partial: payload.coverage.partial,
     partialReasons: payload.coverage.partialReasons,
-    iterationsUsed: 1,
+    iterationsUsed: premiumPipeline.iterationsUsed,
     depthApplied: plan.depth,
     sectionCoverage: sectionDrafting.sections.map((section) => ({
       sectionId: section.id,

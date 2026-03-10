@@ -49,6 +49,12 @@ function toIsoDate(value: Date): string {
   return value.toISOString().slice(0, 10);
 }
 
+function titleCaseWord(value: string): string {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return 'Channel';
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
 function resolveCalendarStartDate(payload: DocumentDataPayload): Date {
   const parsed = new Date(String(payload.generatedAt || '').trim());
   if (!Number.isNaN(parsed.getTime())) return parsed;
@@ -230,26 +236,51 @@ function buildSectionContent(
 
   if (section.kind === 'cadence_assumptions') {
     return [
-      '- Default cadence: 3 core posts/week + 2 derivative assets.',
-      '- Repurpose best-performing narrative into short, mid, and long-form variants.',
-      '- Weekly optimization window on KPI + qualitative audience feedback.',
+      `- Weekly publishing target: ${depth === 'deep' ? '6-8' : depth === 'standard' ? '4-6' : '3-4'} planned assets anchored to the strongest proven signal patterns.`,
+      '- Every primary post should create at least one derivative follow-up asset for stories, email, or website conversion support.',
+      `- Use ${payload.topPosts[0] ? `@${payload.topPosts[0].handle}` : 'top available'} signal patterns as the default narrative benchmark until new winners emerge.`,
+      '- Reserve one slot each week for a conversion-led CTA or offer validation asset, not only audience growth content.',
+      '- Run a weekly optimization review on saves, shares, clicks, and qualified conversion movement before rolling the next batch forward.',
     ].join('\n');
   }
 
   if (section.kind === 'content_calendar_slots') {
-    const max = sectionLimit(depth, 12, 18);
+    const slotTarget = depth === 'deep' ? 24 : depth === 'standard' ? 16 : 8;
     const start = resolveCalendarStartDate(payload);
-    const rows = payload.topPosts.slice(0, max).map((post, index) => {
-      const week = Math.floor(index / 3) + 1;
-      const day = (index % 3) + 1;
+    const signalPool = payload.topPosts.length ? payload.topPosts : [null];
+    const rows = Array.from({ length: slotTarget }, (_, index) => {
+      const signal = signalPool[index % signalPool.length];
+      const week = Math.floor(index / 4) + 1;
+      const day = (index % 4) + 1;
       const slotDate = new Date(start);
       slotDate.setUTCDate(start.getUTCDate() + index * 2);
-      return `| ${toIsoDate(slotDate)} | Week ${week} / Slot ${day} | ${post.platform} | @${post.handle} | ${String(post.caption || '').slice(0, 110)} | ${post.postUrl || 'n/a'} |`;
+      const channel = signal?.platform ? titleCaseWord(signal.platform) : ['Instagram', 'Website', 'Email', 'TikTok'][index % 4];
+      const angle =
+        signal?.caption
+          ? String(signal.caption).replace(/\s+/g, ' ').trim().slice(0, 72)
+          : `Tie content to ${payload.primaryGoal.toLowerCase()} with one clear audience problem/solution arc.`;
+      const cta =
+        index % 4 === 3
+          ? 'Direct CTA to booking / inquiry'
+          : index % 4 === 2
+            ? 'Proof-led CTA'
+            : index % 4 === 1
+              ? 'Save / share CTA'
+              : 'Engagement + problem-awareness CTA';
+      const evidencePattern = signal ? `Pattern from @${signal.handle}` : 'Use strongest current workspace evidence';
+      return `| ${toIsoDate(slotDate)} | Week ${week} / Slot ${day} | ${channel} | ${angle} | ${cta} | ${evidencePattern} | ${signal?.postUrl || 'n/a'} |`;
     });
     return [
-      '| Date | Slot | Channel | Reference | Brief | Link |',
-      '| --- | --- | --- | --- | --- | --- |',
-      ...(rows.length ? rows : [`| ${toIsoDate(start)} | Week 1 / Slot 1 | n/a | n/a | No signals available yet. | n/a |`]),
+      '| Date | Slot | Channel | Recommended Angle | CTA | Evidence Pattern | Link |',
+      '| --- | --- | --- | --- | --- | --- | --- |',
+      ...(rows.length
+        ? rows
+        : [`| ${toIsoDate(start)} | Week 1 / Slot 1 | n/a | No signals available yet. | Hold | Use strongest current workspace evidence | n/a |`]),
+      '',
+      '### Sequencing Notes',
+      '- Use Week 1 to establish the strongest narrative angle, Week 2 to deepen proof, Week 3 to rotate objections, and Week 4 to increase conversion pressure.',
+      '- Pair every high-performing awareness post with one follow-up proof or CTA asset inside the next 72 hours.',
+      '- Recycle the best-performing topic into at least two additional hooks before introducing a new theme.',
     ].join('\n');
   }
 
@@ -258,8 +289,11 @@ function buildSectionContent(
       '| Channel | Pillar | Objective | KPI |',
       '| --- | --- | --- | --- |',
       '| Instagram | Education | Build trust and save rates | Saves / Shares |',
+      '| Instagram | Proof | Turn audience interest into credibility and DM intent | Profile visits / DMs |',
       '| Website | Conversion | Turn intent into leads/bookings | CVR / Qualified leads |',
       '| Email | Retention | Nurture recurring engagement | CTR / Response rate |',
+      '| TikTok | Discovery | Expand reach with high-velocity narrative testing | 3s hold / shares |',
+      '| Community | Objection handling | Surface language gaps and recurring friction | Comment quality / repeats |',
     ].join('\n');
   }
 

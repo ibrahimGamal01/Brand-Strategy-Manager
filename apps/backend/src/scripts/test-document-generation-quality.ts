@@ -337,7 +337,12 @@ function runSixFamilyFormatAssertions(): void {
     payload,
     'ELUUMIS Content Calendar'
   );
-  assertContainsAll(contentCalendar, ['## Weekly Calendar', '| Date | Slot | Channel |']);
+  assertContainsAll(contentCalendar, [
+    '## Weekly Calendar',
+    '## Content Signal Analysis',
+    '| Date | Slot | Channel |',
+    '### Sequencing Notes',
+  ]);
 
   const goToMarket = renderDocumentMarkdown(
     {
@@ -400,6 +405,7 @@ function runPremiumRenderingAssertions(): void {
   assert.ok(html.includes('Quality score 87/100'), 'Premium renderer should surface quality metadata.');
 
   const quality = evaluatePremiumDocumentQuality({
+    spec,
     payload,
     sections,
     factCheck,
