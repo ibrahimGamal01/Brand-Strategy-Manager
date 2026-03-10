@@ -1615,7 +1615,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     }
   }, [workspaceId, references, resolveChatBranch]);
 
-  const runAutofillFinalize = useCallback(async () => {
+  const runAutofillFinalize = useCallback(async (options?: { forceAll?: boolean }) => {
     setAutofillBusy(true);
     setError(null);
     try {
@@ -1627,7 +1627,9 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       if (!autofillPreview) {
         setAutofillSelection(createAutofillSelection(preview));
       }
-      const selectedFields = preview.suggestedFields.filter((field) => autofillSelection[field] !== false);
+      const selectedFields = options?.forceAll
+        ? preview.suggestedFields
+        : preview.suggestedFields.filter((field) => autofillSelection[field] !== false);
       const appliedPayload = await applyWorkspaceBrandDnaAutofill(workspaceId, {
         ...(selectedFields.length ? { selectedFields } : {}),
         finalizeIfReady: true,
@@ -1761,7 +1763,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
 
       if (!workflowPayload.workflow.brandDnaReady) {
         setAutopilotStatus("Hydrating Brand DNA from website + social evidence...");
-        await runAutofillFinalize();
+        await runAutofillFinalize({ forceAll: true });
         const workflowAfterAutofill = await fetchViralStudioWorkflowStatus(workspaceId);
         setWorkflowStatus(workflowAfterAutofill.workflow);
         if (!workflowAfterAutofill.workflow.brandDnaReady) {
