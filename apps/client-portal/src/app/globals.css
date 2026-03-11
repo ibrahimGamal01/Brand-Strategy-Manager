@@ -1315,6 +1315,127 @@ a {
   gap: 0.8rem;
 }
 
+.vbs-generation-shell,
+.vbs-generation-brief,
+.vbs-document-shell {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.vbs-generation-hero,
+.vbs-document-hero,
+.vbs-doc-editor-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.9rem;
+  align-items: flex-start;
+}
+
+.vbs-generation-hero h3,
+.vbs-document-hero h3,
+.vbs-doc-editor-head h3,
+.vbs-output-head h3,
+.vbs-document-empty h3,
+.vbs-generation-empty h3 {
+  margin: 0.1rem 0 0;
+  font-family: var(--vbs-display-font);
+  font-size: 1.08rem;
+  color: var(--vbs-ink);
+}
+
+.vbs-generation-hero p:not(.vbs-meta),
+.vbs-document-hero p:not(.vbs-meta),
+.vbs-doc-editor-head p:not(.vbs-meta),
+.vbs-document-empty p:not(.vbs-meta),
+.vbs-output-empty p:not(.vbs-meta) {
+  margin: 0.35rem 0 0;
+  max-width: 44rem;
+  font-size: 0.84rem;
+  line-height: 1.55;
+  color: color-mix(in srgb, var(--vbs-ink) 78%, #62697b);
+}
+
+.vbs-generation-summary,
+.vbs-document-summary,
+.vbs-prompt-control-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(90px, 1fr));
+  gap: 0.55rem;
+  min-width: min(100%, 300px);
+}
+
+.vbs-generation-summary div,
+.vbs-document-summary div,
+.vbs-prompt-control-stats div {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 16%, var(--bat-border));
+  border-radius: 0.85rem;
+  background: color-mix(in srgb, white 96%, var(--vbs-sand));
+  padding: 0.65rem 0.72rem;
+  display: grid;
+  gap: 0.18rem;
+}
+
+.vbs-generation-summary span,
+.vbs-document-summary span,
+.vbs-prompt-control-stats span {
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--vbs-ink) 55%, #6a7387);
+}
+
+.vbs-generation-summary strong,
+.vbs-document-summary strong,
+.vbs-prompt-control-stats strong {
+  font-family: var(--vbs-display-font);
+  font-size: 0.88rem;
+  color: var(--vbs-ink);
+}
+
+.vbs-generation-ribbon,
+.vbs-document-ribbon {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.vbs-generation-ribbon span,
+.vbs-document-ribbon span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 18%, var(--bat-border));
+  border-radius: 999px;
+  padding: 0.2rem 0.72rem;
+  font-size: 0.74rem;
+  color: color-mix(in srgb, var(--vbs-ink) 78%, #62697b);
+  background: color-mix(in srgb, white 94%, var(--vbs-sand));
+}
+
+.vbs-generation-deliverables {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.vbs-deliverable-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 14%, var(--bat-border));
+  border-radius: 999px;
+  padding: 0.18rem 0.7rem;
+  font-size: 0.75rem;
+  color: color-mix(in srgb, var(--vbs-ink) 74%, #66708b);
+  background: color-mix(in srgb, white 96%, var(--vbs-sand));
+}
+
+.vbs-deliverable-chip.is-ready {
+  border-color: color-mix(in srgb, var(--vbs-teal) 36%, var(--bat-border));
+  background: color-mix(in srgb, var(--vbs-teal) 10%, white);
+  color: var(--vbs-ink);
+}
+
 .vbs-prompt-two-pane {
   display: grid;
   grid-template-columns: minmax(260px, 0.95fr) minmax(0, 1.3fr);
@@ -1336,6 +1457,48 @@ a {
   overflow: auto;
 }
 
+.vbs-prompt-controls-head,
+.vbs-output-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  align-items: flex-start;
+}
+
+.vbs-output-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  border-radius: 999px;
+  padding: 0.2rem 0.75rem;
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--vbs-ink);
+  background: color-mix(in srgb, var(--vbs-cobalt) 14%, white);
+}
+
+.vbs-prompt-direction {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.vbs-prompt-direction textarea {
+  min-height: 124px;
+}
+
+.vbs-generation-actions,
+.vbs-document-actions {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.vbs-generation-notes {
+  display: grid;
+  gap: 0.22rem;
+}
+
 .vbs-pack-card {
   border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 14%, var(--bat-border));
   border-radius: 0.75rem;
@@ -1343,6 +1506,13 @@ a {
   padding: 0.65rem;
   display: grid;
   gap: 0.55rem;
+  cursor: pointer;
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.vbs-pack-card:hover {
+  border-color: color-mix(in srgb, var(--vbs-cobalt) 32%, var(--bat-border));
+  transform: translateY(-1px);
 }
 
 .vbs-pack-card.is-active {
@@ -1352,7 +1522,7 @@ a {
 
 .vbs-pack-card-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 0.55rem;
 }
@@ -1369,6 +1539,10 @@ a {
   color: color-mix(in srgb, var(--vbs-ink) 62%, #6f7488);
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.vbs-pack-card-head .vbs-meta {
+  margin: 0;
 }
 
 .vbs-pack-card-body ul {
@@ -1426,9 +1600,36 @@ a {
   color: color-mix(in srgb, var(--vbs-ink) 82%, #5f6374);
 }
 
+.vbs-document-shell {
+  gap: 0.95rem;
+}
+
+.vbs-document-topline {
+  display: grid;
+  gap: 0.8rem;
+}
+
 .vbs-document-workspace {
   display: grid;
   gap: 0.75rem;
+}
+
+.vbs-document-action-bar {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.vbs-document-actions-secondary {
+  opacity: 0.92;
+}
+
+.vbs-document-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
+  gap: 0.8rem;
+  align-items: start;
 }
 
 .vbs-doc-editor {
@@ -1438,6 +1639,11 @@ a {
   padding: 0.7rem;
   display: grid;
   gap: 0.7rem;
+}
+
+.vbs-document-summary-compact {
+  min-width: min(100%, 240px);
+  grid-template-columns: repeat(2, minmax(90px, 1fr));
 }
 
 .vbs-doc-title-input {
@@ -1488,10 +1694,14 @@ a {
   line-height: 1.45;
 }
 
-.vbs-doc-version-tools {
+.vbs-doc-sidebar {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.65rem;
+}
+
+.vbs-doc-sidebar-card {
+  display: grid;
+  gap: 0.55rem;
 }
 
 .vbs-doc-compare-controls,
@@ -1522,6 +1732,15 @@ a {
 .vbs-doc-timeline li {
   font-size: 0.76rem;
   color: color-mix(in srgb, var(--vbs-ink) 82%, #5f6374);
+}
+
+.vbs-document-empty,
+.vbs-output-empty,
+.vbs-generation-empty {
+  border: 1px dashed color-mix(in srgb, var(--vbs-cobalt) 26%, var(--bat-border));
+  border-radius: 0.85rem;
+  background: color-mix(in srgb, white 95%, var(--vbs-sand));
+  padding: 1rem;
 }
 
 .vbs-output {
@@ -1843,6 +2062,25 @@ a {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .vbs-document-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vbs-generation-hero,
+  .vbs-document-hero,
+  .vbs-doc-editor-head,
+  .vbs-prompt-controls-head,
+  .vbs-output-head {
+    flex-direction: column;
+  }
+
+  .vbs-generation-summary,
+  .vbs-document-summary,
+  .vbs-prompt-control-stats {
+    min-width: 0;
+    width: 100%;
+  }
+
   .vbs-kpi-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1865,10 +2103,6 @@ a {
 
   .vbs-source-suggest-row {
     flex-direction: column;
-  }
-
-  .vbs-doc-version-tools {
-    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -1932,6 +2166,16 @@ a {
   .vbs-prompt-controls,
   .vbs-prompt-output {
     padding: 0.6rem;
+  }
+
+  .vbs-generation-summary,
+  .vbs-document-summary,
+  .vbs-prompt-control-stats {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vbs-document-action-bar {
+    flex-direction: column;
   }
 
   .vbs-doc-section-head {

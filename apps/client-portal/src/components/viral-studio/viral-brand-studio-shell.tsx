@@ -1073,6 +1073,25 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     return signals;
   }, [generation]);
 
+  const generatedSectionCount = useMemo(() => {
+    if (!generation) return 0;
+    return PROMPT_STUDIO_SECTIONS.reduce((count, sectionMeta) => {
+      return count + (readGenerationSectionContent(generation, sectionMeta.id).length > 0 ? 1 : 0);
+    }, 0);
+  }, [generation]);
+
+  const autosaveLabel = useMemo(() => {
+    if (autosaveState === "saving") return "Saving";
+    if (autosaveState === "saved") return "Saved";
+    if (autosaveState === "error") return "Error";
+    if (documentDirty) return "Pending";
+    return "Idle";
+  }, [autosaveState, documentDirty]);
+
+  const latestVersion = useMemo(() => {
+    return versions.length > 0 ? versions[versions.length - 1] : null;
+  }, [versions]);
+
   const versionOptions = useMemo(() => {
     const base = [{ id: "current", label: "Current Draft" }];
     const timeline = [...versions]
@@ -3264,324 +3283,466 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
             </div>
             <div className="vbs-grid">
               <article className="vbs-panel vbs-prompt-studio" id="vbs-section-generation">
-              <h2 className="vbs-panel-title">Prompt Studio</h2>
-              <p className="vbs-panel-subtitle">
-                Two-pane pack builder using Brand DNA + shortlisted references with section-level refine and regenerate controls.
-              </p>
-              <div className="vbs-prompt-two-pane">
-                <div className="vbs-prompt-controls">
-                  <div className="vbs-form-grid">
-                    <label>
-                      Template
-                      <select value={selectedTemplateId} onChange={(event) => setSelectedTemplateId(event.target.value)}>
-                        {promptTemplates.map((template) => (
-                          <option key={template.id} value={template.id}>
-                            {template.title}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      Format Target
-                      <select
-                        value={generationFormatTarget}
-                        onChange={(event) => setGenerationFormatTarget(event.target.value as ViralStudioGenerationFormatTarget)}
-                      >
-                        <option value="reel-30">30s Reel</option>
-                        <option value="reel-60">60s Reel</option>
-                        <option value="shorts">YouTube Shorts</option>
-                        <option value="story">Story Sequence</option>
-                      </select>
-                    </label>
-                  </div>
-                  <label>
-                    Prompt direction
-                    <textarea value={promptText} rows={4} onChange={(e) => setPromptText(e.target.value)} />
-                  </label>
-                  <p className="vbs-meta">
-                    Active template: {selectedTemplate?.title || "n/a"} • Prioritized references: {prioritizedReferenceCount} •
-                    Format: {toGenerationFormatLabel(generationFormatTarget)}
-                  </p>
-                  <p className="vbs-meta">
-                    Every generation revision is auto-saved into Document Workspace version history.
-                  </p>
-                  {generationSaveStatus ? <p className="vbs-meta">{generationSaveStatus}</p> : null}
-                  <div className="vbs-actions">
-                    <button type="button" disabled={isBusy} onClick={() => void generatePack()}>
-                      Generate Multi-Pack
-                    </button>
-                    <button type="button" disabled={isBusy || !generation} onClick={() => void sendGenerationToChat()}>
-                      Send Pack To Chat
-                    </button>
-                  </div>
-                  {generation ? (
-                    <div className="vbs-quality-report">
-                      <p className="vbs-meta">
-                        Revision {generation.revision} • Quality: {generation.qualityCheck.passed ? "pass" : "review"}
-                      </p>
-                      {qualitySignals.length > 0 ? (
-                        <ul>
-                          {qualitySignals.map((line) => (
-                            <li key={line}>{line}</li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="vbs-meta">Quality gate clear: no banned terms, tone violations, or length warnings.</p>
-                      )}
-                      <p className="vbs-meta">
-                        Composer prompt: {compactText(generation.promptContext.composedPrompt, 340)}
-                      </p>
+                <h2 className="vbs-panel-title">Prompt Studio</h2>
+                <p className="vbs-panel-subtitle">
+                  Set the brief once, then refine only the sections that need more edge, clarity, or control.
+                </p>
+                <div className="vbs-generation-shell">
+                  <div className="vbs-generation-brief">
+                    <div className="vbs-generation-hero">
+                      <div>
+                        <p className="vbs-meta">Generation brief</p>
+                        <h3>{selectedTemplate?.title || "Campaign pack setup"}</h3>
+                        <p>
+                          Brand DNA, prioritized references, and format target combine here. This should feel like setting
+                          direction, not filling a machine.
+                        </p>
+                      </div>
+                      <div className="vbs-generation-summary">
+                        <div>
+                          <span>References</span>
+                          <strong>{prioritizedReferenceCount}</strong>
+                        </div>
+                        <div>
+                          <span>Format</span>
+                          <strong>{toGenerationFormatLabel(generationFormatTarget)}</strong>
+                        </div>
+                        <div>
+                          <span>Revision</span>
+                          <strong>{generation ? generation.revision : "Draft"}</strong>
+                        </div>
+                      </div>
                     </div>
-                  ) : (
-                    <p className="vbs-meta">No generation yet.</p>
-                  )}
-                </div>
-                <div className="vbs-prompt-output">
-                  {generation ? (
-                    PROMPT_STUDIO_SECTIONS.map((sectionMeta) => {
-                      const sectionLines = readGenerationSectionContent(generation, sectionMeta.id);
-                      const sectionInstruction = sectionInstructions[sectionMeta.id] || "";
-                      const isSectionPending = promptActionSection === sectionMeta.id;
-                      return (
-                        <article
-                          key={sectionMeta.id}
-                          className={`vbs-pack-card ${activePromptSection === sectionMeta.id ? "is-active" : ""}`}
-                          onClick={() => setActivePromptSection(sectionMeta.id)}
-                        >
-                          <header className="vbs-pack-card-head">
-                            <h3>{sectionMeta.title}</h3>
-                            <span>{sectionMeta.kind === "list" ? `${sectionLines.length} variants` : "1 block"}</span>
-                          </header>
-                          <div className="vbs-pack-card-body">
-                            {sectionMeta.kind === "list" ? (
+                    <div className="vbs-generation-ribbon" role="status" aria-live="polite">
+                      <span>Auto-save on every revision</span>
+                      <span>{generation ? `Quality ${generation.qualityCheck.passed ? "ready" : "review"}` : "Waiting for first draft"}</span>
+                      <span>{generatedSectionCount}/{PROMPT_STUDIO_SECTIONS.length} sections ready</span>
+                    </div>
+                    <div className="vbs-generation-deliverables">
+                      {PROMPT_STUDIO_SECTIONS.map((sectionMeta) => {
+                        const ready = generation ? readGenerationSectionContent(generation, sectionMeta.id).length > 0 : false;
+                        return (
+                          <span key={sectionMeta.id} className={`vbs-deliverable-chip ${ready ? "is-ready" : ""}`}>
+                            {sectionMeta.title}
+                          </span>
+                        );
+                      })}
+                    </div>
+                    <div className="vbs-prompt-two-pane">
+                      <div className="vbs-prompt-controls">
+                        <div className="vbs-prompt-controls-head">
+                          <div>
+                            <p className="vbs-meta">Direction setup</p>
+                            <h3>Shape the pack once</h3>
+                            <p>
+                              Pick the output frame, add one clear instruction, then let the section cards carry the rest of
+                              the iteration.
+                            </p>
+                          </div>
+                          <div className="vbs-prompt-control-stats">
+                            <div>
+                              <span>Template</span>
+                              <strong>{selectedTemplate?.title || "None"}</strong>
+                            </div>
+                            <div>
+                              <span>Save state</span>
+                              <strong>{generationSaveStatus ? "Synced" : "Ready"}</strong>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="vbs-form-grid">
+                          <label>
+                            Template
+                            <select value={selectedTemplateId} onChange={(event) => setSelectedTemplateId(event.target.value)}>
+                              {promptTemplates.map((template) => (
+                                <option key={template.id} value={template.id}>
+                                  {template.title}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            Format Target
+                            <select
+                              value={generationFormatTarget}
+                              onChange={(event) => setGenerationFormatTarget(event.target.value as ViralStudioGenerationFormatTarget)}
+                            >
+                              <option value="reel-30">30s Reel</option>
+                              <option value="reel-60">60s Reel</option>
+                              <option value="shorts">YouTube Shorts</option>
+                              <option value="story">Story Sequence</option>
+                            </select>
+                          </label>
+                        </div>
+                        <label className="vbs-prompt-direction">
+                          Prompt direction
+                          <textarea value={promptText} rows={4} onChange={(e) => setPromptText(e.target.value)} />
+                        </label>
+                        <div className="vbs-generation-actions">
+                          <button type="button" disabled={isBusy} onClick={() => void generatePack()}>
+                            Generate Multi-Pack
+                          </button>
+                          <button type="button" disabled={isBusy || !generation} onClick={() => void sendGenerationToChat()}>
+                            Send Pack To Chat
+                          </button>
+                        </div>
+                        <div className="vbs-generation-notes">
+                          <p className="vbs-meta">Every generation revision is auto-saved into Document Workspace version history.</p>
+                          <p className="vbs-meta">{generationSaveStatus || "Your next revision will appear here as soon as the pack finishes."}</p>
+                        </div>
+                        {generation ? (
+                          <div className="vbs-quality-report">
+                            <p className="vbs-meta">
+                              Revision {generation.revision} • Quality: {generation.qualityCheck.passed ? "pass" : "review"}
+                            </p>
+                            {qualitySignals.length > 0 ? (
                               <ul>
-                                {sectionLines.map((line, index) => (
-                                  <li key={`${sectionMeta.id}-${index}`}>{line}</li>
+                                {qualitySignals.map((line) => (
+                                  <li key={line}>{line}</li>
                                 ))}
                               </ul>
                             ) : (
-                              <pre>{sectionLines[0] || ""}</pre>
+                              <p className="vbs-meta">Quality gate clear: no banned terms, tone violations, or length warnings.</p>
                             )}
+                            <p className="vbs-meta">
+                              Composer prompt: {compactText(generation.promptContext.composedPrompt, 340)}
+                            </p>
                           </div>
-                          <label className="vbs-pack-instruction">
-                            Section instruction
-                            <input
-                              value={sectionInstruction}
-                              onChange={(event) => updateSectionInstruction(sectionMeta.id, event.target.value)}
-                              placeholder="How should this section change?"
-                            />
-                          </label>
-                          <div className="vbs-mini-actions">
-                            <button
-                              type="button"
-                              disabled={isBusy}
-                              onClick={() => void runPromptSectionAction(sectionMeta.id, "refine")}
-                            >
-                              {isSectionPending ? "Working…" : "Refine Section"}
-                            </button>
-                            <button
-                              type="button"
-                              disabled={isBusy}
-                              onClick={() => void runPromptSectionAction(sectionMeta.id, "regenerate")}
-                            >
-                              {isSectionPending ? "Working…" : "Regenerate Only"}
-                            </button>
+                        ) : (
+                          <div className="vbs-generation-empty">
+                            <p className="vbs-meta">No generation yet. Launch one run to populate the pack gallery.</p>
                           </div>
-                        </article>
-                      );
-                    })
-                  ) : (
-                    <div className="vbs-output">
-                      <p className="vbs-meta">Run Generate Multi-Pack to populate section cards.</p>
+                        )}
+                      </div>
+                      <div className="vbs-prompt-output">
+                        <div className="vbs-output-head">
+                          <div>
+                            <p className="vbs-meta">Pack gallery</p>
+                            <h3>Refine card by card</h3>
+                          </div>
+                          <div className="vbs-output-badge">
+                            {generatedSectionCount}/{PROMPT_STUDIO_SECTIONS.length} live
+                          </div>
+                        </div>
+                        {generation ? (
+                          PROMPT_STUDIO_SECTIONS.map((sectionMeta) => {
+                            const sectionLines = readGenerationSectionContent(generation, sectionMeta.id);
+                            const sectionInstruction = sectionInstructions[sectionMeta.id] || "";
+                            const isSectionPending = promptActionSection === sectionMeta.id;
+                            return (
+                              <article
+                                key={sectionMeta.id}
+                                className={`vbs-pack-card ${activePromptSection === sectionMeta.id ? "is-active" : ""}`}
+                                onClick={() => setActivePromptSection(sectionMeta.id)}
+                              >
+                                <header className="vbs-pack-card-head">
+                                  <div>
+                                    <p className="vbs-meta">{sectionMeta.kind === "list" ? "Variant set" : "Narrative block"}</p>
+                                    <h3>{sectionMeta.title}</h3>
+                                  </div>
+                                  <span>{sectionMeta.kind === "list" ? `${sectionLines.length} variants` : "1 block"}</span>
+                                </header>
+                                <div className="vbs-pack-card-body">
+                                  {sectionMeta.kind === "list" ? (
+                                    <ul>
+                                      {sectionLines.map((line, index) => (
+                                        <li key={`${sectionMeta.id}-${index}`}>{line}</li>
+                                      ))}
+                                    </ul>
+                                  ) : (
+                                    <pre>{sectionLines[0] || ""}</pre>
+                                  )}
+                                </div>
+                                <label className="vbs-pack-instruction">
+                                  Section instruction
+                                  <input
+                                    value={sectionInstruction}
+                                    onChange={(event) => updateSectionInstruction(sectionMeta.id, event.target.value)}
+                                    placeholder="How should this section change?"
+                                  />
+                                </label>
+                                <div className="vbs-mini-actions">
+                                  <button
+                                    type="button"
+                                    disabled={isBusy}
+                                    onClick={() => void runPromptSectionAction(sectionMeta.id, "refine")}
+                                  >
+                                    {isSectionPending ? "Working…" : "Refine Section"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={isBusy}
+                                    onClick={() => void runPromptSectionAction(sectionMeta.id, "regenerate")}
+                                  >
+                                    {isSectionPending ? "Working…" : "Regenerate Only"}
+                                  </button>
+                                </div>
+                              </article>
+                            );
+                          })
+                        ) : (
+                          <div className="vbs-output vbs-output-empty">
+                            <p className="vbs-meta">Pack gallery waiting</p>
+                            <h3>Run Generate Multi-Pack to create your first working draft</h3>
+                            <p>
+                              The studio will return hooks, scripts, captions, CTAs, and angle remixes as editable cards you
+                              can tune one section at a time.
+                            </p>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  )}
+                  </div>
                 </div>
-              </div>
               </article>
 
               <article className="vbs-panel vbs-document-workspace" id="vbs-section-documents">
-              <h2 className="vbs-panel-title">Document Workspace</h2>
-              <p className="vbs-panel-subtitle">
-                Editable campaign artifact with autosave every 10s, version timeline, compare view, and promote/rollback workflow.
-              </p>
-              <div className="vbs-actions">
-                <button
-                  type="button"
-                  disabled={isBusy || !generation || Boolean(document)}
-                  onClick={() => void createDocumentFromGeneration()}
-                >
-                  {document ? "Document Ready" : "Create Document"}
-                </button>
-                <button type="button" disabled={isBusy || !documentDraft || !documentDirty} onClick={() => void saveDocumentNow()}>
-                  Save Draft
-                </button>
-                <button type="button" disabled={isBusy || !document} onClick={() => void snapshotVersion()}>
-                  Create Version
-                </button>
-                <button type="button" disabled={isBusy || !document} onClick={() => void exportDocument("markdown")}>
-                  Export MD
-                </button>
-                <button type="button" disabled={isBusy || !document} onClick={() => void exportDocument("json")}>
-                  Export JSON
-                </button>
-              </div>
-              <p className="vbs-meta" role="status" aria-live="polite">
-                Document: {document ? document.title : "none"} • Versions: {versions.length} • Autosave:{" "}
-                {autosaveState === "saving"
-                  ? "saving..."
-                  : autosaveState === "saved"
-                    ? "saved"
-                    : autosaveState === "error"
-                      ? "error"
-                      : documentDirty
-                        ? "pending edits"
-                        : "idle"}
-              </p>
-              {generationSaveStatus ? <p className="vbs-meta">{generationSaveStatus}</p> : null}
-              {documentDraft ? (
-                <div className="vbs-doc-editor">
-                  <label className="vbs-doc-title-input">
-                    Document title
-                    <input
-                      value={documentDraft.title}
-                      onChange={(event) => updateDocumentTitle(event.target.value)}
-                    />
-                  </label>
-
-                  <div className="vbs-doc-sections">
-                    {documentDraft.sections.map((section, index) => (
-                      <article key={section.id} className="vbs-doc-section-card">
-                        <div className="vbs-doc-section-head">
-                          <input
-                            value={section.title}
-                            onChange={(event) => updateDocumentSectionTitle(section.id, event.target.value)}
-                            aria-label={`Section ${index + 1} title`}
-                          />
-                          <div className="vbs-mini-actions">
-                            <button
-                              type="button"
-                              disabled={isBusy || index === 0}
-                              onClick={() => reorderDocumentSection(section.id, "up")}
-                            >
-                              Move Up
-                            </button>
-                            <button
-                              type="button"
-                              disabled={isBusy || index === documentDraft.sections.length - 1}
-                              onClick={() => reorderDocumentSection(section.id, "down")}
-                            >
-                              Move Down
-                            </button>
-                          </div>
-                        </div>
-                        <textarea
-                          rows={Array.isArray(section.content) ? Math.max(4, section.content.length + 1) : 8}
-                          value={toSectionText(section)}
-                          onChange={(event) => updateDocumentSectionContent(section.id, event.target.value)}
-                        />
-                        <p className="vbs-meta">{section.kind} section</p>
-                      </article>
-                    ))}
-                  </div>
-
-                  <div className="vbs-doc-version-tools">
-                    <div className="vbs-doc-compare-controls">
-                      <h3>Version Compare</h3>
-                      <div className="vbs-form-grid">
-                        <label>
-                          Left
-                          <select
-                            value={compareLeftVersionId}
-                            onChange={(event) => setCompareLeftVersionId(event.target.value)}
-                          >
-                            {versionOptions.map((option) => (
-                              <option key={`left-${option.id}`} value={option.id}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label>
-                          Right
-                          <select
-                            value={compareRightVersionId}
-                            onChange={(event) => setCompareRightVersionId(event.target.value)}
-                          >
-                            {versionOptions.map((option) => (
-                              <option key={`right-${option.id}`} value={option.id}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
+                <h2 className="vbs-panel-title">Document Workspace</h2>
+                <p className="vbs-panel-subtitle">
+                  Keep the winning pack as a durable working document, then publish clean versions without losing history.
+                </p>
+                <div className="vbs-document-shell">
+                  <div className="vbs-document-topline">
+                    <div className="vbs-document-hero">
+                      <div>
+                        <p className="vbs-meta">Document control</p>
+                        <h3>{document ? document.title : "No document created yet"}</h3>
+                        <p>
+                          This is the durable artifact for the campaign. Edit the content directly, then snapshot versions when
+                          the team reaches a better draft.
+                        </p>
                       </div>
-                      <div className="vbs-actions">
-                        <button type="button" disabled={compareLoading || !document} onClick={() => void runVersionCompare()}>
-                          {compareLoading ? "Comparing..." : "Compare Versions"}
+                      <div className="vbs-document-summary">
+                        <div>
+                          <span>Versions</span>
+                          <strong>{versions.length}</strong>
+                        </div>
+                        <div>
+                          <span>Autosave</span>
+                          <strong>
+                            {autosaveState === "saving"
+                              ? "Saving"
+                              : autosaveState === "saved"
+                                ? "Saved"
+                                : autosaveState === "error"
+                                  ? "Error"
+                                  : documentDirty
+                                    ? "Pending"
+                                    : "Idle"}
+                          </strong>
+                        </div>
+                        <div>
+                          <span>Export</span>
+                          <strong>{lastExport ? lastExport.format.toUpperCase() : "None"}</strong>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="vbs-document-action-bar">
+                      <div className="vbs-document-actions">
+                        <button
+                          type="button"
+                          disabled={isBusy || !generation || Boolean(document)}
+                          onClick={() => void createDocumentFromGeneration()}
+                        >
+                          {document ? "Document Ready" : "Create Document"}
+                        </button>
+                        <button type="button" disabled={isBusy || !documentDraft || !documentDirty} onClick={() => void saveDocumentNow()}>
+                          Save Draft
+                        </button>
+                        <button type="button" disabled={isBusy || !document} onClick={() => void snapshotVersion()}>
+                          Create Version
                         </button>
                       </div>
-                      {comparison ? (
-                        <div className="vbs-doc-compare-results">
-                          <p className="vbs-meta">
-                            {comparison.changedSections} changed sections out of {comparison.totalSections}
-                          </p>
-                          <ul>
-                            {comparison.sectionDiffs.slice(0, 12).map((diff) => (
-                              <li key={diff.sectionKey}>
-                                <strong>{diff.title}</strong> • {diff.changed ? "changed" : "unchanged"}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      ) : null}
+                      <div className="vbs-document-actions vbs-document-actions-secondary">
+                        <button type="button" disabled={isBusy || !document} onClick={() => void exportDocument("markdown")}>
+                          Export MD
+                        </button>
+                        <button type="button" disabled={isBusy || !document} onClick={() => void exportDocument("json")}>
+                          Export JSON
+                        </button>
+                      </div>
                     </div>
+                    <div className="vbs-document-ribbon" role="status" aria-live="polite">
+                      <span>Document {document ? "ready" : "not created yet"}</span>
+                      <span>{versions.length} versions</span>
+                      <span>Autosave {autosaveLabel.toLowerCase()}</span>
+                      <span>{latestVersion ? `Latest ${formatTimestamp(latestVersion.createdAt)}` : "No published version yet"}</span>
+                    </div>
+                    {generationSaveStatus ? <p className="vbs-meta">{generationSaveStatus}</p> : null}
+                  </div>
+                  {documentDraft ? (
+                    <div className="vbs-document-layout">
+                      <div className="vbs-doc-editor">
+                        <div className="vbs-doc-editor-head">
+                          <div>
+                            <p className="vbs-meta">Editor canvas</p>
+                            <h3>Shape the durable draft</h3>
+                            <p>Reorder sections, polish the copy, and let autosave hold the working state while versions capture milestones.</p>
+                          </div>
+                          <div className="vbs-document-summary vbs-document-summary-compact">
+                            <div>
+                              <span>Sections</span>
+                              <strong>{documentDraft.sections.length}</strong>
+                            </div>
+                            <div>
+                              <span>Latest export</span>
+                              <strong>{lastExport ? lastExport.format.toUpperCase() : "None"}</strong>
+                            </div>
+                          </div>
+                        </div>
+                        <label className="vbs-doc-title-input">
+                          Document title
+                          <input
+                            value={documentDraft.title}
+                            onChange={(event) => updateDocumentTitle(event.target.value)}
+                          />
+                        </label>
 
-                    <div className="vbs-doc-timeline">
-                      <h3>Version Timeline</h3>
-                      <div className="vbs-form-grid">
-                        <label>
-                          Promote version
-                          <select value={promoteVersionId} onChange={(event) => setPromoteVersionId(event.target.value)}>
-                            <option value="">Select version</option>
+                        <div className="vbs-doc-sections">
+                          {documentDraft.sections.map((section, index) => (
+                            <article key={section.id} className="vbs-doc-section-card">
+                              <div className="vbs-doc-section-head">
+                                <input
+                                  value={section.title}
+                                  onChange={(event) => updateDocumentSectionTitle(section.id, event.target.value)}
+                                  aria-label={`Section ${index + 1} title`}
+                                />
+                                <div className="vbs-mini-actions">
+                                  <button
+                                    type="button"
+                                    disabled={isBusy || index === 0}
+                                    onClick={() => reorderDocumentSection(section.id, "up")}
+                                  >
+                                    Move Up
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={isBusy || index === documentDraft.sections.length - 1}
+                                    onClick={() => reorderDocumentSection(section.id, "down")}
+                                  >
+                                    Move Down
+                                  </button>
+                                </div>
+                              </div>
+                              <textarea
+                                rows={Array.isArray(section.content) ? Math.max(4, section.content.length + 1) : 8}
+                                value={toSectionText(section)}
+                                onChange={(event) => updateDocumentSectionContent(section.id, event.target.value)}
+                              />
+                              <p className="vbs-meta">{section.kind} section</p>
+                            </article>
+                          ))}
+                        </div>
+                      </div>
+
+                      <aside className="vbs-doc-sidebar">
+                        <div className="vbs-doc-sidebar-card vbs-doc-compare-controls">
+                          <h3>Version Compare</h3>
+                          <p className="vbs-meta">Check what changed before you promote a draft into the main working version.</p>
+                          <div className="vbs-form-grid">
+                            <label>
+                              Left
+                              <select
+                                value={compareLeftVersionId}
+                                onChange={(event) => setCompareLeftVersionId(event.target.value)}
+                              >
+                                {versionOptions.map((option) => (
+                                  <option key={`left-${option.id}`} value={option.id}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label>
+                              Right
+                              <select
+                                value={compareRightVersionId}
+                                onChange={(event) => setCompareRightVersionId(event.target.value)}
+                              >
+                                {versionOptions.map((option) => (
+                                  <option key={`right-${option.id}`} value={option.id}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          </div>
+                          <div className="vbs-actions">
+                            <button type="button" disabled={compareLoading || !document} onClick={() => void runVersionCompare()}>
+                              {compareLoading ? "Comparing..." : "Compare Versions"}
+                            </button>
+                          </div>
+                          {comparison ? (
+                            <div className="vbs-doc-compare-results">
+                              <p className="vbs-meta">
+                                {comparison.changedSections} changed sections out of {comparison.totalSections}
+                              </p>
+                              <ul>
+                                {comparison.sectionDiffs.slice(0, 12).map((diff) => (
+                                  <li key={diff.sectionKey}>
+                                    <strong>{diff.title}</strong> • {diff.changed ? "changed" : "unchanged"}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+                        </div>
+
+                        <div className="vbs-doc-sidebar-card vbs-doc-timeline">
+                          <h3>Version Timeline</h3>
+                          <p className="vbs-meta">Every checkpoint stays durable, so the team can safely roll forward without losing history.</p>
+                          <div className="vbs-form-grid">
+                            <label>
+                              Promote version
+                              <select value={promoteVersionId} onChange={(event) => setPromoteVersionId(event.target.value)}>
+                                <option value="">Select version</option>
+                                {versions
+                                  .slice()
+                                  .reverse()
+                                  .map((version) => (
+                                    <option key={version.id} value={version.id}>
+                                      {version.summary || "Snapshot"} • {new Date(version.createdAt).toLocaleString()}
+                                    </option>
+                                  ))}
+                              </select>
+                            </label>
+                          </div>
+                          <div className="vbs-actions">
+                            <button type="button" disabled={isBusy || !promoteVersionId} onClick={() => void promoteVersion()}>
+                              Promote Version
+                            </button>
+                          </div>
+                          <ul>
                             {versions
                               .slice()
                               .reverse()
                               .map((version) => (
-                                <option key={version.id} value={version.id}>
-                                  {version.summary || "Snapshot"} • {new Date(version.createdAt).toLocaleString()}
-                                </option>
+                                <li key={version.id}>
+                                  <strong>{version.summary}</strong> • {version.author} • {formatTimestamp(version.createdAt)}
+                                  {version.basedOnVersionId ? ` • based on ${version.basedOnVersionId}` : ""}
+                                </li>
                               ))}
-                          </select>
-                        </label>
-                      </div>
-                      <div className="vbs-actions">
-                        <button type="button" disabled={isBusy || !promoteVersionId} onClick={() => void promoteVersion()}>
-                          Promote Version
-                        </button>
-                      </div>
-                      <ul>
-                        {versions
-                          .slice()
-                          .reverse()
-                          .map((version) => (
-                            <li key={version.id}>
-                              <strong>{version.summary}</strong> • {version.author} • {formatTimestamp(version.createdAt)}
-                              {version.basedOnVersionId ? ` • based on ${version.basedOnVersionId}` : ""}
-                            </li>
-                          ))}
-                      </ul>
+                          </ul>
+                        </div>
+                      </aside>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="vbs-document-empty">
+                      <p className="vbs-meta">Document workspace waiting</p>
+                      <h3>Turn the best pack into a working document</h3>
+                      <p>
+                        Once created, the document becomes the durable team artifact for edits, version snapshots, exports, and
+                        rollback.
+                      </p>
+                    </div>
+                  )}
+                  {lastExport ? (
+                    <div className="vbs-export-preview">
+                      <p className="vbs-meta">Last export ({lastExport.format})</p>
+                      <pre>{lastExport.content}</pre>
+                    </div>
+                  ) : null}
                 </div>
-              ) : (
-                <p className="vbs-meta">No document created yet. Generate a pack and create a document to start editing.</p>
-              )}
-              {lastExport ? (
-                <div className="vbs-export-preview">
-                  <p className="vbs-meta">Last export ({lastExport.format})</p>
-                  <pre>{lastExport.content}</pre>
-                </div>
-              ) : null}
               </article>
             </div>
           </article>
