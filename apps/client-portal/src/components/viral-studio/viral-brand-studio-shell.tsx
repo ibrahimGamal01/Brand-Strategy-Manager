@@ -1,29 +1,7 @@
 "use client";
 
-import Image from "next/image";
-import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import type { LucideIcon } from "lucide-react";
-import {
-  ArrowLeft,
-  ArrowRight,
-  Bot,
-  CheckCircle2,
-  CircleOff,
-  Compass,
-  FileText,
-  FolderArchive,
-  Layers3,
-  Palette,
-  Pin,
-  Rocket,
-  ScanSearch,
-  Send,
-  Sparkles,
-  WandSparkles,
-  Workflow,
-} from "lucide-react";
 import {
   applyWorkspaceBrandDnaAutofill,
   compareViralStudioDocumentVersions,
@@ -32,7 +10,6 @@ import {
   createViralStudioGeneration,
   createViralStudioIngestion,
   createWorkspaceBrandDna,
-  fetchViralStudioGeneration,
   exportViralStudioDocument,
   fetchViralStudioContracts,
   fetchViralStudioDocument,
@@ -176,38 +153,6 @@ const WORKFLOW_STAGE_ORDER: Array<ViralStudioWorkflowStatus["workflowStage"]> = 
   "chat_execution",
 ];
 
-const STUDIO_SLIDE_ORDER = ["launchpad", "foundation", "reference", "create"] as const;
-type StudioSlideId = (typeof STUDIO_SLIDE_ORDER)[number];
-
-const STUDIO_SLIDE_META: Array<{
-  id: StudioSlideId;
-  label: string;
-  chapter: string;
-  detail: string;
-  icon: LucideIcon;
-}> = [
-  { id: "launchpad", label: "Launchpad", chapter: "00", detail: "Autopilot + workflow", icon: Workflow },
-  { id: "foundation", label: "Brand DNA", chapter: "01", detail: "Identity + tone", icon: Palette },
-  { id: "reference", label: "Reference Engine", chapter: "02", detail: "Extract + shortlist", icon: ScanSearch },
-  { id: "create", label: "Create & Save", chapter: "03", detail: "Generate + version", icon: FolderArchive },
-];
-
-const WORKFLOW_STAGE_META: Array<{
-  stage: ViralStudioWorkflowStatus["workflowStage"];
-  label: string;
-  caption: string;
-  icon: LucideIcon;
-  slide: StudioSlideId;
-}> = [
-  { stage: "intake_pending", label: "Intake", caption: "evidence", icon: Compass, slide: "launchpad" },
-  { stage: "intake_complete", label: "Ready", caption: "workspace", icon: Compass, slide: "launchpad" },
-  { stage: "studio_autofill_review", label: "Autofill", caption: "review", icon: WandSparkles, slide: "foundation" },
-  { stage: "extraction", label: "Extract", caption: "sources", icon: ScanSearch, slide: "reference" },
-  { stage: "curation", label: "Curate", caption: "winners", icon: Pin, slide: "reference" },
-  { stage: "generation", label: "Generate", caption: "pack", icon: Sparkles, slide: "create" },
-  { stage: "chat_execution", label: "Ship", caption: "to chat", icon: Send, slide: "launchpad" },
-];
-
 const ONBOARDING_STEP_META: Array<{
   step: 1 | 2 | 3 | 4;
   title: string;
@@ -270,10 +215,6 @@ type WorkflowGuideAction =
   | "generate_pack"
   | "handoff_chat";
 
-function isStudioSlideId(value: string): value is StudioSlideId {
-  return STUDIO_SLIDE_ORDER.includes(value as StudioSlideId);
-}
-
 function workflowStageOrderIndex(stage: ViralStudioWorkflowStatus["workflowStage"] | undefined): number {
   if (!stage) return 0;
   const index = WORKFLOW_STAGE_ORDER.indexOf(stage);
@@ -328,65 +269,6 @@ function tonePreview(form: BrandFormState): string {
   if (form.voiceDirect >= 60) tags.push("direct");
   if (tags.length === 0) tags.push("balanced");
   return `Voice profile: ${tags.join(", ")}. Keep messaging clear, specific, and aligned with your brand promise.`;
-}
-
-function buildTonePreviewCards(form: BrandFormState): Array<{
-  id: string;
-  eyebrow: string;
-  sample: string;
-}> {
-  return [
-    {
-      id: "hook",
-      eyebrow: "Hook",
-      sample:
-        form.voiceBold >= 60
-          ? "Stop posting polite filler. Lead with the measurable shift your audience wants now."
-          : "Start with the clearest transformation your audience can recognize in one line.",
-    },
-    {
-      id: "proof",
-      eyebrow: "Proof",
-      sample:
-        form.voiceFormal >= 60
-          ? "Ground each claim in evidence, process, or a named outcome so trust shows up fast."
-          : "Add one concrete proof point so the message feels earned, not just louder.",
-    },
-    {
-      id: "cta",
-      eyebrow: "CTA",
-      sample:
-        form.voiceDirect >= 60
-          ? "Ask for the next action clearly and cut the soft language."
-          : form.voicePlayful >= 60
-            ? "Invite the next step with warmth and momentum, not pressure."
-            : "Keep the CTA simple, clear, and easy to act on.",
-    },
-  ];
-}
-
-function formatShortTime(value?: string | null): string {
-  if (!value) return "n/a";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "n/a";
-  return parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-function hasBrandDraftSignal(form: BrandFormState): boolean {
-  return Boolean(
-    form.mission.trim() ||
-      form.valueProposition.trim() ||
-      form.productOrService.trim() ||
-      form.region.trim() ||
-      form.audiencePersonas.trim() ||
-      form.pains.trim() ||
-      form.desires.trim() ||
-      form.objections.trim() ||
-      form.bannedPhrases.trim() ||
-      form.requiredClaims.trim() ||
-      form.exemplars.trim() ||
-      form.summary.trim()
-  );
 }
 
 function compactText(value: string, maxChars = 180): string {
@@ -614,127 +496,6 @@ function formatCompactNumber(value: number): string {
   return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(value);
 }
 
-function encodeSvgDataUri(svg: string): string {
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-}
-
-function escapeSvgText(value: string): string {
-  return String(value || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function splitPosterText(value: string, maxLineLength: number, maxLines: number): string[] {
-  const words = compactText(value, 120).split(/\s+/).filter(Boolean);
-  if (words.length === 0) return [];
-  const lines: string[] = [];
-  let current = "";
-  while (words.length > 0 && lines.length < maxLines) {
-    const word = words.shift()!;
-    const next = current ? `${current} ${word}` : word;
-    if (next.length <= maxLineLength || !current) {
-      current = next;
-      continue;
-    }
-    lines.push(current);
-    current = word;
-  }
-  if (lines.length < maxLines && current) lines.push(current);
-  if (words.length > 0 && lines.length > 0) lines[lines.length - 1] = `${lines[lines.length - 1].replace(/[.,;:!?-]+$/g, "")}…`;
-  return lines;
-}
-
-function platformVisualPalette(platform: ViralStudioPlatform): string[] {
-  if (platform === "instagram") return ["#18181B", "#F97316", "#F8F4EC"];
-  if (platform === "tiktok") return ["#07111F", "#14B8A6", "#F4FEFF"];
-  return ["#190B0F", "#DC2626", "#FFF1E8"];
-}
-
-function buildReferencePosterFallback(reference: ViralStudioReferenceAsset, palette: string[]): string {
-  const [ink, accent, paper] = palette;
-  const eyebrow = `${toPlatformLabel(reference.sourcePlatform)} reference`;
-  const headline = compactText(
-    reference.visual?.headline ||
-      reference.caption.replace(/^High-performing\s+\w+\s+angle\s+\d+:\s*/i, "") ||
-      reference.ranking.rationaleTitle,
-    68
-  );
-  const footer = compactText(
-    reference.visual?.footer || reference.transcriptSummary || reference.ocrSummary || reference.ranking.rationaleBullets[0] || "",
-    96
-  );
-  const headlineLines = splitPosterText(headline, 16, 3);
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1500" viewBox="0 0 1200 1500" role="img" aria-label="${escapeSvgText(
-      headline
-    )}">
-      <defs>
-        <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="${ink}"/>
-          <stop offset="55%" stop-color="${accent}"/>
-          <stop offset="100%" stop-color="${paper}"/>
-        </linearGradient>
-      </defs>
-      <rect width="1200" height="1500" rx="72" fill="url(#bg)"/>
-      <circle cx="1004" cy="224" r="250" fill="${paper}" opacity="0.12"/>
-      <circle cx="210" cy="1210" r="340" fill="${accent}" opacity="0.18"/>
-      <rect x="76" y="76" width="1048" height="1348" rx="48" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.22)"/>
-      <text x="112" y="164" fill="${paper}" opacity="0.8" font-family="Arial, sans-serif" font-size="38" font-weight="700" letter-spacing="7">${escapeSvgText(
-        eyebrow.toUpperCase()
-      )}</text>
-      ${headlineLines
-        .map(
-          (line, index) =>
-            `<text x="112" y="${360 + index * 132}" fill="${paper}" font-family="Georgia, serif" font-size="104" font-weight="700">${escapeSvgText(
-              line
-            )}</text>`
-        )
-        .join("")}
-      <text x="112" y="1170" fill="${paper}" font-family="Arial, sans-serif" font-size="58" font-weight="700">${escapeSvgText(
-        `${formatCompactNumber(reference.metrics.views)} views`
-      )}</text>
-      <text x="112" y="1262" fill="${paper}" opacity="0.76" font-family="Arial, sans-serif" font-size="34">${escapeSvgText(
-        footer
-      )}</text>
-      <rect x="888" y="1162" width="224" height="184" rx="34" fill="rgba(11,19,43,0.35)" stroke="rgba(255,255,255,0.22)"/>
-      <text x="930" y="1238" fill="${paper}" opacity="0.72" font-family="Arial, sans-serif" font-size="28" letter-spacing="4">SCORE</text>
-      <text x="930" y="1320" fill="${paper}" font-family="Arial, sans-serif" font-size="74" font-weight="700">${escapeSvgText(
-        String(Math.round(reference.scores.composite * 100))
-      )}</text>
-    </svg>
-  `;
-  return encodeSvgDataUri(svg);
-}
-
-function resolveReferenceVisual(reference: ViralStudioReferenceAsset) {
-  const palette = reference.visual?.palette?.length ? reference.visual.palette : platformVisualPalette(reference.sourcePlatform);
-  return {
-    palette,
-    eyebrow:
-      reference.visual?.eyebrow ||
-      `${toPlatformLabel(reference.sourcePlatform)} • ${shortlistLabel(reference.shortlistState)}`,
-    headline:
-      compactText(
-        reference.visual?.headline ||
-          reference.caption.replace(/^High-performing\s+\w+\s+angle\s+\d+:\s*/i, "") ||
-          reference.ranking.rationaleTitle,
-        78
-      ) || reference.ranking.rationaleTitle,
-    footer:
-      compactText(
-        reference.visual?.footer || reference.transcriptSummary || reference.ocrSummary || reference.ranking.rationaleBullets[0] || "",
-        120
-      ) || reference.ranking.rationaleBullets[0],
-    posterUrl:
-      reference.visual?.posterUrl ||
-      reference.visual?.thumbnailUrl ||
-      buildReferencePosterFallback(reference, palette),
-  };
-}
-
 function formatUnitPercent(value: number): string {
   if (!Number.isFinite(value)) return "0%";
   return `${(Math.max(0, Math.min(1, value)) * 100).toFixed(1)}%`;
@@ -937,43 +698,6 @@ function onboardingCoveragePercent(form: BrandFormState): number {
   return Math.round((currentSignals / totalSignals) * 100);
 }
 
-function onboardingStepFieldStats(
-  step: 1 | 2 | 3 | 4,
-  form: BrandFormState
-): { filled: number; total: number } {
-  if (step === 1) {
-    const fields = [form.mission, form.valueProposition, form.productOrService, form.region];
-    return { filled: fields.filter((value) => String(value || "").trim().length > 0).length, total: fields.length };
-  }
-  if (step === 2) {
-    const fields = [form.audiencePersonas, form.pains, form.desires, form.objections];
-    return { filled: fields.filter((value) => String(value || "").trim().length > 0).length, total: fields.length };
-  }
-  if (step === 3) {
-    const toneSignal = 1;
-    const guardrails = [form.bannedPhrases, form.requiredClaims];
-    return {
-      filled: toneSignal + guardrails.filter((value) => String(value || "").trim().length > 0).length,
-      total: 3,
-    };
-  }
-  const fields = [form.exemplars, form.summary];
-  return { filled: fields.filter((value) => String(value || "").trim().length > 0).length, total: fields.length };
-}
-
-function voiceSignature(form: BrandFormState): string {
-  const signals = [
-    { label: "Bold", value: form.voiceBold },
-    { label: "Formal", value: form.voiceFormal },
-    { label: "Playful", value: form.voicePlayful },
-    { label: "Direct", value: form.voiceDirect },
-  ].sort((a, b) => b.value - a.value);
-  if (signals[0].value - signals[signals.length - 1].value < 12) {
-    return "Balanced studio mix";
-  }
-  return `${signals[0].label} + ${signals[1].label.toLowerCase()} voice`;
-}
-
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
@@ -983,7 +707,6 @@ function delay(ms: number): Promise<void> {
 export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const shellRef = useRef<HTMLElement | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
@@ -1001,12 +724,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   const [autofillBusy, setAutofillBusy] = useState(false);
   const [brandForm, setBrandForm] = useState<BrandFormState>({ ...DEFAULT_FORM_STATE });
   const [onboardingStep, setOnboardingStep] = useState<1 | 2 | 3 | 4>(1);
-  const [activeSlide, setActiveSlide] = useState<StudioSlideId>("launchpad");
   const [isEditingBrandDna, setIsEditingBrandDna] = useState(false);
-  const [brandAutosaveState, setBrandAutosaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const [brandAutosavedAt, setBrandAutosavedAt] = useState<string | null>(null);
-  const [extractionAutosavedAt, setExtractionAutosavedAt] = useState<string | null>(null);
-  const [curationAutosavedAt, setCurationAutosavedAt] = useState<string | null>(null);
 
   const [ingestions, setIngestions] = useState<ViralStudioIngestionRun[]>([]);
   const [activeIngestion, setActiveIngestion] = useState<ViralStudioIngestionRun | null>(null);
@@ -1030,9 +748,6 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   const autopilotTriggerRef = useRef<string>("");
   const generationSnapshotKeysRef = useRef<Set<string>>(new Set());
   const generationSnapshotBusyRef = useRef(false);
-  const brandAutosaveFingerprintRef = useRef<string>("");
-  const brandAutosaveInFlightRef = useRef(false);
-  const extractionAutosaveRunIdsRef = useRef<Set<string>>(new Set());
 
   const [sourcePlatform, setSourcePlatform] = useState<ViralStudioPlatform>("instagram");
   const [sourceUrl, setSourceUrl] = useState("");
@@ -1040,7 +755,6 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   const [maxVideos, setMaxVideos] = useState(120);
   const [lookbackDays, setLookbackDays] = useState(365);
   const [showExtractionModal, setShowExtractionModal] = useState(false);
-  const [shellViewportHeight, setShellViewportHeight] = useState<number | null>(null);
   const [promptText, setPromptText] = useState(
     "Generate a campaign-ready multi-pack with aggressive hooks, proof-backed scripts, and direct CTAs."
   );
@@ -1056,7 +770,6 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   const [referenceFilter, setReferenceFilter] = useState<"all" | "prioritized" | "must-use" | "pin" | "exclude">("all");
   const [referencePlatformFilter, setReferencePlatformFilter] = useState<"all" | ViralStudioPlatform>("all");
   const [selectedReferenceId, setSelectedReferenceId] = useState<string | null>(null);
-  const [compareReferenceIds, setCompareReferenceIds] = useState<string[]>([]);
   const [shortlistPendingById, setShortlistPendingById] = useState<Record<string, ReferenceShortlistAction | undefined>>({});
   const [recentShortlistReferenceId, setRecentShortlistReferenceId] = useState<string | null>(null);
   const [curationNotice, setCurationNotice] = useState<string | null>(null);
@@ -1065,8 +778,6 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   const onboardingLocked = !brandReady || isEditingBrandDna;
   const autopilotQuery = searchParams.get("autopilot");
   const diagnosticsQuery = searchParams.get("devtools");
-  const onboardingStepStorageKey = useMemo(() => `viral-studio:onboarding-step:${workspaceId}`, [workspaceId]);
-  const activeSlideStorageKey = useMemo(() => `viral-studio:active-slide:${workspaceId}`, [workspaceId]);
 
   useEffect(() => {
     const hostname = typeof window !== "undefined" ? window.location.hostname : "";
@@ -1083,57 +794,6 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         setCanAccessDiagnostics(false);
       });
   }, [diagnosticsQuery]);
-
-  useEffect(() => {
-    try {
-      const storedStep = window.localStorage.getItem(onboardingStepStorageKey);
-      if (storedStep) {
-        const parsed = Number(storedStep);
-        if (parsed >= 1 && parsed <= 4) {
-          setOnboardingStep(parsed as 1 | 2 | 3 | 4);
-        }
-      }
-      const storedSlide = window.localStorage.getItem(activeSlideStorageKey);
-      if (storedSlide && isStudioSlideId(storedSlide)) {
-        setActiveSlide(storedSlide);
-      }
-    } catch {
-      // Ignore storage failures.
-    }
-  }, [onboardingStepStorageKey, activeSlideStorageKey]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const shellNode = shellRef.current;
-    if (!shellNode) return;
-
-    let animationFrame = 0;
-    const measure = () => {
-      window.cancelAnimationFrame(animationFrame);
-      animationFrame = window.requestAnimationFrame(() => {
-        const rect = shellNode.getBoundingClientRect();
-        const nextHeight = Math.max(520, Math.floor(window.innerHeight - rect.top - 12));
-        setShellViewportHeight((previous) => {
-          if (previous !== null && Math.abs(previous - nextHeight) < 2) return previous;
-          return nextHeight;
-        });
-      });
-    };
-
-    measure();
-    const resizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
-    const appHeader = window.document.querySelector("header");
-    const appMain = window.document.querySelector("main");
-    resizeObserver?.observe(shellNode);
-    if (appHeader instanceof Element) resizeObserver?.observe(appHeader);
-    if (appMain instanceof Element) resizeObserver?.observe(appMain);
-    window.addEventListener("resize", measure);
-    return () => {
-      window.cancelAnimationFrame(animationFrame);
-      window.removeEventListener("resize", measure);
-      resizeObserver?.disconnect();
-    };
-  }, []);
 
   const refreshTelemetry = useCallback(async () => {
     try {
@@ -1178,16 +838,6 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         fetchViralStudioWorkflowStatus(workspaceId),
         fetchViralStudioSuggestedSources(workspaceId),
       ]);
-      const latestGenerationId = workflowPayload.workflow.latest?.generationId;
-      const latestDocumentId = workflowPayload.workflow.latest?.documentId;
-      const [generationPayload, documentPayload] = await Promise.all([
-        latestGenerationId
-          ? fetchViralStudioGeneration(workspaceId, latestGenerationId).catch(() => null)
-          : Promise.resolve(null),
-        latestDocumentId
-          ? fetchViralStudioDocument(workspaceId, latestDocumentId).catch(() => null)
-          : Promise.resolve(null),
-      ]);
       setBrandProfile(brandPayload.profile);
       setBrandForm(toFormState(brandPayload.profile));
       setContracts(contractPayload.contract);
@@ -1198,29 +848,6 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       setReferences(referencePayload.items);
       setWorkflowStatus(workflowPayload.workflow);
       setSuggestedSources(sourcePayload.items);
-      setGeneration(generationPayload?.generation || null);
-      if (generationPayload?.generation) {
-        generationSnapshotKeysRef.current.add(
-          `${generationPayload.generation.id}:${generationPayload.generation.revision}`
-        );
-      }
-      if (documentPayload) {
-        setDocument(documentPayload.document);
-        setDocumentDraft(documentPayload.document);
-        setVersions(documentPayload.versions);
-        setComparison(null);
-        setCompareLeftVersionId("current");
-        setCompareRightVersionId("current");
-        setPromoteVersionId(documentPayload.versions[documentPayload.versions.length - 1]?.id || "");
-      } else {
-        setDocument(null);
-        setDocumentDraft(null);
-        setVersions([]);
-        setComparison(null);
-        setCompareLeftVersionId("current");
-        setCompareRightVersionId("current");
-        setPromoteVersionId("");
-      }
       if (brandPayload.profile?.status === "final" && brandPayload.profile?.completeness.ready) {
         setOnboardingStep(4);
       }
@@ -1266,10 +893,6 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
           if (payload.run.status === "completed" || payload.run.status === "partial") {
             void listViralStudioReferences(workspaceId, { ingestionRunId: payload.run.id }).then((referencePayload) => {
               setReferences(referencePayload.items);
-              if (!extractionAutosaveRunIdsRef.current.has(payload.run.id)) {
-                extractionAutosaveRunIdsRef.current.add(payload.run.id);
-                setExtractionAutosavedAt(new Date().toISOString());
-              }
               void Promise.all([refreshTelemetry(), refreshWorkflow()]);
             });
           }
@@ -1394,21 +1017,6 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     );
   }, [filteredReferences, references, selectedReferenceId]);
 
-  const selectedReferenceVisual = useMemo(() => {
-    return selectedReference ? resolveReferenceVisual(selectedReference) : null;
-  }, [selectedReference]);
-
-  const comparedReferences = useMemo(() => {
-    return compareReferenceIds
-      .map((id) => references.find((item) => item.id === id))
-      .filter((item): item is ViralStudioReferenceAsset => Boolean(item))
-      .slice(0, 2);
-  }, [compareReferenceIds, references]);
-
-  useEffect(() => {
-    setCompareReferenceIds((previous) => previous.filter((id) => references.some((item) => item.id === id)).slice(0, 2));
-  }, [references]);
-
   const selectedReferenceInsights = useMemo(() => {
     if (!selectedReference) return null;
     const board = filteredReferences.length > 0 ? filteredReferences : references;
@@ -1465,72 +1073,6 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     return signals;
   }, [generation]);
 
-  const generatedSectionCount = useMemo(() => {
-    if (!generation) return 0;
-    return PROMPT_STUDIO_SECTIONS.reduce((count, sectionMeta) => {
-      return count + (readGenerationSectionContent(generation, sectionMeta.id).length > 0 ? 1 : 0);
-    }, 0);
-  }, [generation]);
-
-  const autosaveLabel = useMemo(() => {
-    if (autosaveState === "saving") return "Saving";
-    if (autosaveState === "saved") return "Saved";
-    if (autosaveState === "error") return "Error";
-    if (documentDirty) return "Pending";
-    return "Idle";
-  }, [autosaveState, documentDirty]);
-
-  const latestVersion = useMemo(() => {
-    return versions.length > 0 ? versions[versions.length - 1] : null;
-  }, [versions]);
-
-  const versionTimelinePreview = useMemo(() => {
-    return [...versions].reverse().slice(0, 4);
-  }, [versions]);
-
-  const generationGalleryPreview = useMemo(() => {
-    return PROMPT_STUDIO_SECTIONS.map((sectionMeta) => {
-      const lines = generation ? readGenerationSectionContent(generation, sectionMeta.id) : [];
-      return {
-        id: sectionMeta.id,
-        title: sectionMeta.title,
-        kind: sectionMeta.kind,
-        count: lines.length,
-        preview:
-          lines.length > 0
-            ? compactText(lines[0], sectionMeta.kind === "list" ? 72 : 108)
-            : "Waiting for first revision",
-      };
-    });
-  }, [generation]);
-
-  const qualityGateCards = useMemo(() => {
-    if (!generation) {
-      return [
-        { label: "Guardrails", value: "Waiting", tone: "neutral" },
-        { label: "Duplicates", value: "0", tone: "neutral" },
-        { label: "Warnings", value: "0", tone: "neutral" },
-      ];
-    }
-    return [
-      {
-        label: "Guardrails",
-        value: generation.qualityCheck.passed ? "Clear" : "Review",
-        tone: generation.qualityCheck.passed ? "positive" : "warning",
-      },
-      {
-        label: "Duplicates",
-        value: String(generation.qualityCheck.duplicates.length),
-        tone: generation.qualityCheck.duplicates.length > 0 ? "warning" : "positive",
-      },
-      {
-        label: "Warnings",
-        value: String(qualitySignals.length),
-        tone: qualitySignals.length > 0 ? "warning" : "positive",
-      },
-    ];
-  }, [generation, qualitySignals]);
-
   const versionOptions = useMemo(() => {
     const base = [{ id: "current", label: "Current Draft" }];
     const timeline = [...versions]
@@ -1553,185 +1095,37 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     return autofillPreview.suggestedFields.filter((field) => autofillSelection[field] !== false).length;
   }, [autofillPreview, autofillSelection]);
 
-  const activeStepStats = useMemo(() => onboardingStepFieldStats(onboardingStep, brandForm), [onboardingStep, brandForm]);
-
-  const foundationPulseCards = useMemo(
-    () => [
-      {
-        id: "intake",
-        icon: Compass,
-        label: "Workspace evidence",
-        value: workflowStatus?.intakeCompleted ? "Ready to use" : "Needs intake",
-        note: workflowStatus?.intakeCompleted
-          ? "Website and workspace context can now support smarter autofill."
-          : "Complete intake first so the studio has real business evidence to work from.",
-      },
-      {
-        id: "autofill",
-        icon: WandSparkles,
-        label: "Autofill preview",
-        value: autofillPreview ? `${autofillPreview.coverage.suggestedCount} field hints` : "Preview not loaded",
-        note: autofillPreview
-          ? `${selectedAutofillCount} suggestion(s) selected for apply.`
-          : "Pull website and social evidence into the form before you type everything yourself.",
-      },
-      {
-        id: "voice",
-        icon: Sparkles,
-        label: "Voice direction",
-        value: voiceSignature(brandForm),
-        note: `Bold ${brandForm.voiceBold} • Formal ${brandForm.voiceFormal} • Playful ${brandForm.voicePlayful} • Direct ${brandForm.voiceDirect}`,
-      },
-      {
-        id: "save",
-        icon: CheckCircle2,
-        label: "Save ribbon",
-        value: brandReady
-          ? "Finalized"
-          : brandAutosaveState === "saving"
-            ? "Saving"
-            : brandAutosaveState === "saved"
-              ? "Saved"
-            : brandAutosaveState === "error"
-                ? "Needs retry"
-                : "Ready",
-        note: brandReady
-          ? `Finalized and saved at ${formatShortTime(brandProfile?.updatedAt)}`
-          : brandAutosaveState === "saving"
-            ? "Auto-saving foundation..."
-            : brandAutosaveState === "saved"
-              ? `Foundation auto-saved at ${formatShortTime(brandAutosavedAt)}`
-              : brandAutosaveState === "error"
-                ? "Auto-save failed. Keep editing and retry finalize."
-                : "Auto-save activates as soon as inputs are added.",
-      },
-    ],
-    [
-      autofillPreview,
-      brandAutosaveState,
-      brandAutosavedAt,
-      brandForm,
-      brandProfile?.updatedAt,
-      brandReady,
-      selectedAutofillCount,
-      workflowStatus?.intakeCompleted,
-    ]
-  );
-
-  const dnaSummaryHighlights = useMemo(
-    () => [
-      {
-        id: "mission",
-        label: "Mission",
-        value: compactText(brandForm.mission || "Add a sharper mission", 52),
-        note: compactText(brandForm.valueProposition || "Value proposition stays editable as the brand evolves.", 92),
-      },
-      {
-        id: "audience",
-        label: "Audience",
-        value: `${Math.max(0, csvToArray(brandForm.audiencePersonas).length)} persona signal(s)`,
-        note: compactText(brandForm.audiencePersonas || brandForm.pains || "Audience pains and desires can still be refined later.", 92),
-      },
-      {
-        id: "voice",
-        label: "Voice",
-        value: voiceSignature(brandForm),
-        note: `B ${brandForm.voiceBold} • F ${brandForm.voiceFormal} • P ${brandForm.voicePlayful} • D ${brandForm.voiceDirect}`,
-      },
-      {
-        id: "guardrails",
-        label: "Guardrails",
-        value: `${csvToArray(brandForm.bannedPhrases).length + csvToArray(brandForm.requiredClaims).length} rule(s)`,
-        note: compactText(
-          brandForm.requiredClaims || brandForm.bannedPhrases || "Add banned phrases or required claims whenever the brand needs tighter rules.",
-          92
-        ),
-      },
-    ],
-    [brandForm]
-  );
-
-  const buildBrandDnaPayload = useCallback(
-    (mode: "draft" | "final") => ({
-      status: mode,
-      mission: brandForm.mission,
-      valueProposition: brandForm.valueProposition,
-      productOrService: brandForm.productOrService,
-      region: brandForm.region,
-      audiencePersonas: csvToArray(brandForm.audiencePersonas),
-      pains: csvToArray(brandForm.pains),
-      desires: csvToArray(brandForm.desires),
-      objections: csvToArray(brandForm.objections),
-      bannedPhrases: csvToArray(brandForm.bannedPhrases),
-      requiredClaims: csvToArray(brandForm.requiredClaims),
-      exemplars: csvToArray(brandForm.exemplars),
-      summary: brandForm.summary,
-      voiceSliders: {
-        bold: brandForm.voiceBold,
-        formal: brandForm.voiceFormal,
-        playful: brandForm.voicePlayful,
-        direct: brandForm.voiceDirect,
-      },
-    }),
-    [brandForm]
-  );
-
-  const autoSaveBrandDnaDraft = useCallback(
-    async (reason: "typing" | "step") => {
-      if (brandReady || autofillBusy || isBusy) return;
-      if (brandAutosaveInFlightRef.current) return;
-      if (!hasBrandDraftSignal(brandForm)) return;
-      const payload = buildBrandDnaPayload("draft");
-      const fingerprint = JSON.stringify(payload);
-      if (brandAutosaveFingerprintRef.current === fingerprint) return;
-      brandAutosaveInFlightRef.current = true;
-      setBrandAutosaveState("saving");
-      try {
-        const response = brandProfile
-          ? await patchWorkspaceBrandDna(workspaceId, payload)
-          : await createWorkspaceBrandDna(workspaceId, payload);
-        brandAutosaveFingerprintRef.current = fingerprint;
-        setBrandProfile(response.profile);
-        const savedAt = new Date().toISOString();
-        setBrandAutosaveState("saved");
-        setBrandAutosavedAt(savedAt);
-        if (reason === "step") {
-          setChatBridgeStatus(`Foundation step auto-saved at ${formatShortTime(savedAt)}.`);
-        }
-        void Promise.all([refreshTelemetry(), refreshWorkflow()]);
-      } catch {
-        setBrandAutosaveState("error");
-      } finally {
-        brandAutosaveInFlightRef.current = false;
-      }
-    },
-    [
-      workspaceId,
-      brandReady,
-      autofillBusy,
-      isBusy,
-      brandForm,
-      buildBrandDnaPayload,
-      brandProfile,
-      refreshTelemetry,
-      refreshWorkflow,
-    ]
-  );
-
   const saveBrandDna = useCallback(
     async (mode: "draft" | "final") => {
       setIsBusy(true);
       setError(null);
       try {
-        const payload = buildBrandDnaPayload(mode);
+        const payload = {
+          status: mode,
+          mission: brandForm.mission,
+          valueProposition: brandForm.valueProposition,
+          productOrService: brandForm.productOrService,
+          region: brandForm.region,
+          audiencePersonas: csvToArray(brandForm.audiencePersonas),
+          pains: csvToArray(brandForm.pains),
+          desires: csvToArray(brandForm.desires),
+          objections: csvToArray(brandForm.objections),
+          bannedPhrases: csvToArray(brandForm.bannedPhrases),
+          requiredClaims: csvToArray(brandForm.requiredClaims),
+          exemplars: csvToArray(brandForm.exemplars),
+          summary: brandForm.summary,
+          voiceSliders: {
+            bold: brandForm.voiceBold,
+            formal: brandForm.voiceFormal,
+            playful: brandForm.voicePlayful,
+            direct: brandForm.voiceDirect,
+          },
+        };
         const response = brandProfile
           ? await patchWorkspaceBrandDna(workspaceId, payload)
           : await createWorkspaceBrandDna(workspaceId, payload);
         setBrandProfile(response.profile);
         setBrandForm(toFormState(response.profile));
-        brandAutosaveFingerprintRef.current = JSON.stringify(buildBrandDnaPayload("draft"));
-        setBrandAutosaveState("saved");
-        setBrandAutosavedAt(new Date().toISOString());
         if (response.profile.status === "final" && response.profile.completeness.ready) {
           setIsEditingBrandDna(false);
           setOnboardingStep(4);
@@ -1743,7 +1137,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         setIsBusy(false);
       }
     },
-    [workspaceId, buildBrandDnaPayload, brandProfile, refreshTelemetry, refreshWorkflow]
+    [workspaceId, brandForm, brandProfile, refreshTelemetry, refreshWorkflow]
   );
 
   const generateSummary = useCallback(async () => {
@@ -1807,9 +1201,6 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       setBrandForm(toFormState(payload.profile));
       setAutofillPreview(payload.preview);
       setAutofillSelection(createAutofillSelection(payload.preview));
-      brandAutosaveFingerprintRef.current = JSON.stringify(buildBrandDnaPayload("draft"));
-      setBrandAutosaveState("saved");
-      setBrandAutosavedAt(new Date().toISOString());
       if (payload.profile.status === "final" && payload.profile.completeness.ready) {
         setOnboardingStep(4);
         setIsEditingBrandDna(false);
@@ -1820,7 +1211,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     } finally {
       setAutofillBusy(false);
     }
-  }, [workspaceId, autofillPreview, autofillSelection, refreshTelemetry, refreshWorkflow, buildBrandDnaPayload]);
+  }, [workspaceId, autofillPreview, autofillSelection, refreshTelemetry, refreshWorkflow]);
 
   useEffect(() => {
     if (brandReady) return;
@@ -1829,71 +1220,6 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     if (stage !== "studio_autofill_review" && stage !== "intake_complete") return;
     void previewAutofill();
   }, [brandReady, autofillBusy, autofillPreview, previewAutofill, workflowStatus?.workflowStage]);
-
-  useEffect(() => {
-    const latestGenerationId = workflowStatus?.latest?.generationId;
-    if (!latestGenerationId) return;
-    if (generation?.id === latestGenerationId) return;
-    void fetchViralStudioGeneration(workspaceId, latestGenerationId)
-      .then((payload) => {
-        setGeneration(payload.generation);
-        generationSnapshotKeysRef.current.add(`${payload.generation.id}:${payload.generation.revision}`);
-      })
-      .catch(() => undefined);
-  }, [workspaceId, workflowStatus?.latest?.generationId, generation?.id]);
-
-  useEffect(() => {
-    const latestDocumentId = workflowStatus?.latest?.documentId;
-    if (!latestDocumentId) return;
-    if (document?.id === latestDocumentId && versions.length > 0) return;
-    void fetchViralStudioDocument(workspaceId, latestDocumentId)
-      .then((payload) => {
-        setDocument(payload.document);
-        setDocumentDraft(payload.document);
-        setVersions(payload.versions);
-        setComparison(null);
-        setCompareLeftVersionId("current");
-        setCompareRightVersionId("current");
-        setPromoteVersionId(payload.versions[payload.versions.length - 1]?.id || "");
-      })
-      .catch(() => undefined);
-  }, [workspaceId, workflowStatus?.latest?.documentId, document?.id, versions.length]);
-
-  const brandDraftSignature = useMemo(
-    () =>
-      JSON.stringify({
-        mission: brandForm.mission,
-        valueProposition: brandForm.valueProposition,
-        productOrService: brandForm.productOrService,
-        region: brandForm.region,
-        audiencePersonas: brandForm.audiencePersonas,
-        pains: brandForm.pains,
-        desires: brandForm.desires,
-        objections: brandForm.objections,
-        bannedPhrases: brandForm.bannedPhrases,
-        requiredClaims: brandForm.requiredClaims,
-        exemplars: brandForm.exemplars,
-        summary: brandForm.summary,
-        voiceBold: brandForm.voiceBold,
-        voiceFormal: brandForm.voiceFormal,
-        voicePlayful: brandForm.voicePlayful,
-        voiceDirect: brandForm.voiceDirect,
-      }),
-    [brandForm]
-  );
-
-  useEffect(() => {
-    if (loading) return;
-    if (brandReady) return;
-    if (autofillBusy || isBusy) return;
-    if (!hasBrandDraftSignal(brandForm)) return;
-    const timer = window.setTimeout(() => {
-      void autoSaveBrandDnaDraft("typing");
-    }, 1400);
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [loading, brandReady, autofillBusy, isBusy, brandForm, brandDraftSignature, autoSaveBrandDnaDraft]);
 
   const runExtraction = useCallback(async () => {
     if (!brandReady) return;
@@ -1943,10 +1269,6 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         try {
           const payload = await listViralStudioReferences(workspaceId, { ingestionRunId: run.id });
           setReferences(payload.items);
-          if (!extractionAutosaveRunIdsRef.current.has(run.id)) {
-            extractionAutosaveRunIdsRef.current.add(run.id);
-            setExtractionAutosavedAt(new Date().toISOString());
-          }
           void Promise.all([refreshTelemetry(), refreshWorkflow()]);
         } catch {
           // Keep current list if refresh fails.
@@ -1987,7 +1309,6 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
             ? `Reference #${payload.item.ranking.rank} cleared from shortlist.`
             : `Reference #${payload.item.ranking.rank} moved to ${shortlistLabel(payload.item.shortlistState)}.`
         );
-        setCurationAutosavedAt(new Date().toISOString());
         void Promise.all([refreshTelemetry(), refreshWorkflow()]);
       } catch (shortlistError: unknown) {
         setError(String((shortlistError as Error)?.message || "Failed to update shortlist"));
@@ -2001,15 +1322,6 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     },
     [workspaceId, refreshTelemetry, refreshWorkflow]
   );
-
-  const toggleCompareReference = useCallback((referenceId: string) => {
-    setCompareReferenceIds((previous) => {
-      if (previous.includes(referenceId)) {
-        return previous.filter((id) => id !== referenceId);
-      }
-      return [...previous, referenceId].slice(-2);
-    });
-  }, []);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -2509,9 +1821,6 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       setBrandForm(toFormState(appliedPayload.profile));
       setAutofillPreview(appliedPayload.preview);
       setAutofillSelection(createAutofillSelection(appliedPayload.preview));
-      brandAutosaveFingerprintRef.current = JSON.stringify(buildBrandDnaPayload("draft"));
-      setBrandAutosaveState("saved");
-      setBrandAutosavedAt(new Date().toISOString());
       if (appliedPayload.profile.status === "final" && appliedPayload.profile.completeness.ready) {
         setOnboardingStep(4);
         setIsEditingBrandDna(false);
@@ -2522,7 +1831,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     } finally {
       setAutofillBusy(false);
     }
-  }, [workspaceId, autofillPreview, autofillSelection, refreshWorkflow, refreshTelemetry, buildBrandDnaPayload]);
+  }, [workspaceId, autofillPreview, autofillSelection, refreshWorkflow, refreshTelemetry]);
 
   const startGuidedDataMaxExtraction = useCallback(
     async (preferredSource?: ViralStudioSuggestedSource | null) => {
@@ -2609,7 +1918,6 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         )
       );
       setCurationNotice("Top references auto-curated: #1 must-use, #2-3 pinned.");
-      setCurationAutosavedAt(new Date().toISOString());
       await Promise.all([refreshTelemetry(), refreshWorkflow()]);
       return updates.map((entry) => entry.item);
     },
@@ -2667,10 +1975,6 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         ingestionRunId: terminalRun.id,
       });
       setReferences(referencesPayload.items);
-      if (!extractionAutosaveRunIdsRef.current.has(terminalRun.id)) {
-        extractionAutosaveRunIdsRef.current.add(terminalRun.id);
-        setExtractionAutosavedAt(new Date().toISOString());
-      }
 
       setAutopilotStatus("Curating top references...");
       await autoCurateTopReferences(referencesPayload.items);
@@ -2692,63 +1996,6 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     waitForIngestionTerminal,
     autoCurateTopReferences,
   ]);
-
-  const setOnboardingStepWithAutosave = useCallback(
-    (nextStep: 1 | 2 | 3 | 4) => {
-      const previousStep = onboardingStep;
-      if (!brandReady && nextStep > previousStep && isStepValid(previousStep, brandForm)) {
-        void autoSaveBrandDnaDraft("step");
-      }
-      setOnboardingStep(nextStep);
-    },
-    [onboardingStep, brandReady, brandForm, autoSaveBrandDnaDraft]
-  );
-
-  useEffect(() => {
-    if (loading) return;
-    try {
-      window.localStorage.setItem(onboardingStepStorageKey, String(onboardingStep));
-    } catch {
-      // Ignore storage failures.
-    }
-  }, [loading, onboardingStepStorageKey, onboardingStep]);
-
-  useEffect(() => {
-    if (loading) return;
-    try {
-      window.localStorage.setItem(activeSlideStorageKey, activeSlide);
-    } catch {
-      // Ignore storage failures.
-    }
-  }, [loading, activeSlideStorageKey, activeSlide]);
-
-  useEffect(() => {
-    if (loading) return;
-    const handler = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return;
-      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-      const target = event.target as HTMLElement | null;
-      if (target) {
-        const tag = target.tagName.toLowerCase();
-        const isTypingTarget =
-          tag === "input" || tag === "textarea" || tag === "select" || target.isContentEditable;
-        if (isTypingTarget) return;
-      }
-      const currentIndex = STUDIO_SLIDE_ORDER.indexOf(activeSlide);
-      if (currentIndex < 0) return;
-      if (event.key === "ArrowLeft" && currentIndex > 0) {
-        event.preventDefault();
-        setActiveSlide(STUDIO_SLIDE_ORDER[currentIndex - 1]);
-      } else if (event.key === "ArrowRight" && currentIndex < STUDIO_SLIDE_ORDER.length - 1) {
-        event.preventDefault();
-        setActiveSlide(STUDIO_SLIDE_ORDER[currentIndex + 1]);
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => {
-      window.removeEventListener("keydown", handler);
-    };
-  }, [loading, activeSlide]);
 
   useEffect(() => {
     if (loading) return;
@@ -2818,35 +2065,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   const latestReferenceSummary = activeIngestion
     ? `${activeIngestion.progress.ranked}/${activeIngestion.progress.found || activeIngestion.maxVideos} ranked`
     : `${references.length} references loaded`;
-  const foundationAutosaveNote = brandReady
-    ? `Finalized and saved at ${formatShortTime(brandProfile?.updatedAt)}`
-    : brandAutosaveState === "saving"
-      ? "Auto-saving foundation..."
-      : brandAutosaveState === "saved"
-        ? `Foundation auto-saved at ${formatShortTime(brandAutosavedAt)}`
-        : brandAutosaveState === "error"
-          ? "Auto-save failed. Keep editing and retry finalize."
-          : "Auto-save activates as soon as inputs are added.";
-  const extractionAutosaveNote = extractionAutosavedAt
-    ? `Downloaded references auto-saved at ${formatShortTime(extractionAutosavedAt)}`
-    : activeIngestion
-      ? "Run progress is persisted automatically."
-      : "Downloaded references auto-save when extraction finishes.";
-  const curationAutosaveNote = curationAutosavedAt
-    ? `Shortlist auto-saved at ${formatShortTime(curationAutosavedAt)}`
-    : "Shortlist decisions auto-save per action.";
-  const generationAutosaveNote = generationSaveStatus || "Every generation revision auto-saves to the document timeline.";
-  const launchpadCards: Array<{
-    id: "foundation" | "references" | "create";
-    eyebrow: string;
-    title: string;
-    body: string;
-    stat: string;
-    saveNote: string;
-    actionLabel: string;
-    action: () => void | Promise<void>;
-    disabled?: boolean;
-  }> = [
+  const launchpadCards = [
     {
       id: "foundation",
       eyebrow: "01 Foundation",
@@ -2855,17 +2074,15 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         ? compactText(brandProfile?.summary || "Brand DNA is finalized and ready to drive generation.", 170)
         : "Use one website-first autofill pass, confirm the summary, and finalize voice guardrails.",
       stat: `${onboardingCoveragePct}% coverage`,
-      saveNote: foundationAutosaveNote,
       actionLabel: brandReady ? "Edit DNA" : workflowGuide.cta,
       action: () => {
-        setActiveSlide("foundation");
+        window.document.getElementById("vbs-section-onboarding")?.scrollIntoView({ behavior: "smooth", block: "start" });
         if (brandReady) {
           setIsEditingBrandDna(true);
           return;
         }
         void runWorkflowGuideAction();
       },
-      disabled: isBusy || autofillBusy,
     },
     {
       id: "references",
@@ -2875,36 +2092,15 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         ? `${latestSuggestedSource.label} is the top website/social source. Run data-max extraction and curate only the winners.`
         : "We will use suggested website and social evidence as soon as intake is complete.",
       stat: latestReferenceSummary,
-      saveNote: `${extractionAutosaveNote} ${curationAutosaveNote}`,
       actionLabel: activeIngestion ? "Open reference engine" : "Start extraction",
-      action: async () => {
-        setActiveSlide("reference");
+      action: () => {
+        window.document.getElementById("vbs-section-extraction")?.scrollIntoView({ behavior: "smooth", block: "start" });
         if (activeIngestion) {
-          await openIngestionResults(activeIngestion);
+          void openIngestionResults(activeIngestion);
           return;
         }
-        if (!brandReady) {
-          setError("Finalize Brand DNA before extraction.");
-          setOnboardingStep(4);
-          setIsEditingBrandDna(true);
-          return;
-        }
-        setIsBusy(true);
-        setError(null);
-        try {
-          await startGuidedDataMaxExtraction();
-        } catch (ingestionError: unknown) {
-          const message = String((ingestionError as Error)?.message || "Failed to start extraction");
-          if (message.includes("No source URL available")) {
-            setShowExtractionModal(true);
-          } else {
-            setError(message);
-          }
-        } finally {
-          setIsBusy(false);
-        }
+        setShowExtractionModal(true);
       },
-      disabled: isBusy || autofillBusy || autopilotBusy,
     },
     {
       id: "create",
@@ -2914,25 +2110,13 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         ? `Revision ${generation.revision} is available and every revision now saves into document history automatically.`
         : "Generate one multi-pack and let the studio save each revision into the document timeline.",
       stat: document ? `${versions.length} saved version(s)` : "No document yet",
-      saveNote: generationAutosaveNote,
       actionLabel: generation ? "Open create & save" : "Generate pack",
-      action: async () => {
-        setActiveSlide("create");
-        if (generation) {
-          return;
+      action: () => {
+        window.document.getElementById("vbs-section-create-save")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        if (!generation) {
+          void generatePack();
         }
-        if (!brandReady) {
-          setError("Finalize Brand DNA before generation.");
-          setOnboardingStep(4);
-          setIsEditingBrandDna(true);
-          return;
-        }
-        if (prioritizedReferenceCount === 0 && references.length > 0) {
-          await autoCurateTopReferences(references);
-        }
-        await generatePack();
       },
-      disabled: isBusy || autofillBusy || autopilotBusy,
     },
   ];
 
@@ -2942,12 +2126,10 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       return;
     }
     if (workflowGuide.action === "run_autofill") {
-      setActiveSlide("foundation");
       await runAutofillFinalize();
       return;
     }
     if (workflowGuide.action === "start_extraction") {
-      setActiveSlide("reference");
       if (!brandReady) {
         setError("Finalize Brand DNA before starting extraction.");
         setOnboardingStep(4);
@@ -2971,7 +2153,6 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       return;
     }
     if (workflowGuide.action === "curate_references") {
-      setActiveSlide("reference");
       setIsBusy(true);
       setError(null);
       try {
@@ -2984,7 +2165,6 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       return;
     }
     if (workflowGuide.action === "generate_pack") {
-      setActiveSlide("create");
       if (generation) {
         await sendGenerationToChat();
         return;
@@ -3019,368 +2199,6 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     autoCurateTopReferences,
   ]);
 
-  const toneCards = useMemo(() => buildTonePreviewCards(brandForm), [brandForm]);
-  const leadReference = selectedReference || references[0] || null;
-  const leadReferenceVisual = useMemo(
-    () => (leadReference ? resolveReferenceVisual(leadReference) : null),
-    [leadReference]
-  );
-  const workflowStageCards = useMemo(
-    () =>
-      WORKFLOW_STAGE_META.map((item, index) => ({
-        ...item,
-        state:
-          index < workflowStepIndex ? "done" : index === workflowStepIndex ? "active" : "upcoming",
-      })),
-    [workflowStepIndex]
-  );
-
-  const actionDock = useMemo(() => {
-    if (activeSlide === "launchpad") {
-      return {
-        eyebrow: "Launch handlers",
-        title: workflowGuide.title,
-        note: workflowGuide.body,
-        saveNote: generationAutosaveNote,
-        shortcuts: ["Jump stages", "Website-first", "Send to chat"],
-        actions: [
-          {
-            key: "guide",
-            label: workflowGuide.cta,
-            icon: Rocket,
-            emphasis: "primary" as const,
-            disabled: isBusy || autofillBusy,
-            run: () => runWorkflowGuideAction(),
-          },
-          {
-            key: "autopilot",
-            label: autopilotBusy ? "Autopilot running" : "Website-first autopilot",
-            icon: WandSparkles,
-            emphasis: "ghost" as const,
-            disabled: isBusy || autofillBusy || autopilotBusy,
-            run: () => runWebsiteFirstAutopilot(),
-          },
-          {
-            key: "chat",
-            label: "Open core chat",
-            icon: Bot,
-            emphasis: "ghost" as const,
-            disabled: false,
-            run: () => router.push(`/app/w/${workspaceId}`),
-          },
-        ],
-      };
-    }
-
-    if (activeSlide === "foundation") {
-      return {
-        eyebrow: "Foundation handlers",
-        title: brandReady && !isEditingBrandDna ? "DNA is locked in" : `Question cluster ${onboardingStep} of 4`,
-        note:
-          brandReady && !isEditingBrandDna
-            ? "The brand summary is active across extraction, generation, and chat."
-            : activeOnboardingMeta.helper,
-        saveNote: foundationAutosaveNote,
-        shortcuts: ["Preview then apply", "One cluster at a time", "Finalize once"],
-        actions: [
-          {
-            key: "preview",
-            label: autofillBusy ? "Previewing" : "Preview autofill",
-            icon: WandSparkles,
-            emphasis: "ghost" as const,
-            disabled: autofillBusy || isBusy,
-            run: () => previewAutofill(),
-          },
-          {
-            key: "apply",
-            label: `Apply selected (${selectedAutofillCount})`,
-            icon: Sparkles,
-            emphasis: "ghost" as const,
-            disabled: autofillBusy || isBusy || !autofillPreview || selectedAutofillCount === 0,
-            run: () => applyAutofill(),
-          },
-          {
-            key: "advance",
-            label:
-              brandReady && !isEditingBrandDna
-                ? "Edit DNA"
-                : onboardingStep === 4
-                  ? "Finalize DNA"
-                  : "Next cluster",
-            icon: brandReady && !isEditingBrandDna ? Palette : CheckCircle2,
-            emphasis: "primary" as const,
-            disabled:
-              isBusy ||
-              (!(brandReady && !isEditingBrandDna) &&
-                (onboardingStep === 4 ? !isStepValid(4, brandForm) : !isStepValid(onboardingStep, brandForm))),
-            run: () => {
-              if (brandReady && !isEditingBrandDna) {
-                setIsEditingBrandDna(true);
-                return;
-              }
-              if (onboardingStep === 4) {
-                return saveBrandDna("final");
-              }
-              return setOnboardingStepWithAutosave(Math.min(4, onboardingStep + 1) as 1 | 2 | 3 | 4);
-            },
-          },
-          {
-            key: "references",
-            label: "Go to references",
-            icon: ArrowRight,
-            emphasis: "ghost" as const,
-            disabled: !brandReady,
-            run: () => setActiveSlide("reference"),
-          },
-        ],
-      };
-    }
-
-    if (activeSlide === "reference") {
-      return {
-        eyebrow: "Reference handlers",
-        title: activeIngestion ? "Extraction and curation are live" : "Load winners, then steer them visibly",
-        note:
-          activeIngestion?.status === "running"
-            ? "Progress is durable while the run keeps downloading, analyzing, and ranking."
-            : "Use shortlist handlers on the selected card or send the winning set back into chat.",
-        saveNote: `${extractionAutosaveNote} ${curationAutosaveNote}`,
-        shortcuts: ["1 pin", "2 must-use", "3 exclude", "0 clear"],
-        actions: [
-          {
-            key: "extract",
-            label: activeIngestion ? "Refresh run" : "Start extraction",
-            icon: ScanSearch,
-            emphasis: "primary" as const,
-            disabled: isBusy || (!brandReady && !activeIngestion),
-            run: async () => {
-              if (activeIngestion) {
-                await openIngestionResults(activeIngestion);
-                return;
-              }
-              setActiveSlide("reference");
-              if (!brandReady) {
-                setError("Finalize Brand DNA before extraction.");
-                setOnboardingStep(4);
-                setIsEditingBrandDna(true);
-                return;
-              }
-              setIsBusy(true);
-              setError(null);
-              try {
-                await startGuidedDataMaxExtraction();
-              } catch (ingestionError: unknown) {
-                const message = String((ingestionError as Error)?.message || "Failed to start extraction");
-                if (message.includes("No source URL available")) {
-                  setShowExtractionModal(true);
-                } else {
-                  setError(message);
-                }
-              } finally {
-                setIsBusy(false);
-              }
-            },
-          },
-          {
-            key: "pin",
-            label: "Pin selected",
-            icon: Pin,
-            emphasis: "ghost" as const,
-            disabled: !selectedReference || Boolean(selectedReference && shortlistPendingById[selectedReference.id]),
-            run: () =>
-              selectedReference ? shortlistReference(selectedReference.id, "pin") : undefined,
-          },
-          {
-            key: "must-use",
-            label: "Must-use",
-            icon: CheckCircle2,
-            emphasis: "ghost" as const,
-            disabled: !selectedReference || Boolean(selectedReference && shortlistPendingById[selectedReference.id]),
-            run: () =>
-              selectedReference ? shortlistReference(selectedReference.id, "must-use") : undefined,
-          },
-          {
-            key: "compare",
-            label:
-              selectedReference && compareReferenceIds.includes(selectedReference.id)
-                ? "Remove compare"
-                : "Compare selected",
-            icon: Layers3,
-            emphasis: "ghost" as const,
-            disabled: !selectedReference,
-            run: () => (selectedReference ? toggleCompareReference(selectedReference.id) : undefined),
-          },
-          {
-            key: "chat",
-            label: "Send shortlist to chat",
-            icon: Send,
-            emphasis: "ghost" as const,
-            disabled: prioritizedReferenceCount === 0 || isBusy,
-            run: () => sendShortlistToChat(),
-          },
-        ],
-      };
-    }
-
-    return {
-      eyebrow: "Create handlers",
-      title: generation ? "Pack gallery and vault are live" : "Generate once, then keep every revision",
-      note:
-        generation
-          ? "Refine sections, create versions, and move the winning output into chat or export."
-          : "The first run builds the gallery, and each revision saves into the document timeline.",
-      saveNote: generationAutosaveNote,
-      shortcuts: ["Generate", "Refine", "Version", "Export"],
-      actions: [
-        {
-          key: "generate",
-          label: generation ? "Regenerate pack" : "Generate pack",
-          icon: Sparkles,
-          emphasis: "primary" as const,
-          disabled: isBusy || !brandReady,
-          run: () => generatePack(),
-        },
-        {
-          key: "document",
-          label: document ? "Create version" : "Create document",
-          icon: FileText,
-          emphasis: "ghost" as const,
-          disabled: isBusy || (!generation && !document),
-          run: () => {
-            if (document) return snapshotVersion();
-            return createDocumentFromGeneration();
-          },
-        },
-        {
-          key: "chat",
-          label: "Send pack to chat",
-          icon: Send,
-          emphasis: "ghost" as const,
-          disabled: !generation || isBusy,
-          run: () => sendGenerationToChat(),
-        },
-        {
-          key: "export",
-          label: "Export markdown",
-          icon: FolderArchive,
-          emphasis: "ghost" as const,
-          disabled: !document || isBusy,
-          run: () => exportDocument("markdown"),
-        },
-      ],
-    };
-  }, [
-    activeOnboardingMeta.helper,
-    activeIngestion,
-    activeSlide,
-    applyAutofill,
-    autofillBusy,
-    autofillPreview,
-    brandForm,
-    brandReady,
-    curationAutosaveNote,
-    createDocumentFromGeneration,
-    document,
-    exportDocument,
-    extractionAutosaveNote,
-    foundationAutosaveNote,
-    generatePack,
-    generation,
-    generationAutosaveNote,
-    isBusy,
-    onboardingStep,
-    openIngestionResults,
-    previewAutofill,
-    prioritizedReferenceCount,
-    router,
-    runWebsiteFirstAutopilot,
-    runWorkflowGuideAction,
-    saveBrandDna,
-    selectedAutofillCount,
-    selectedReference,
-    sendGenerationToChat,
-    sendShortlistToChat,
-    shortlistPendingById,
-    shortlistReference,
-    startGuidedDataMaxExtraction,
-    snapshotVersion,
-    toggleCompareReference,
-    workspaceId,
-    workflowGuide.body,
-    workflowGuide.cta,
-    workflowGuide.title,
-    compareReferenceIds,
-    autopilotBusy,
-    isEditingBrandDna,
-    setOnboardingStepWithAutosave,
-  ]);
-
-  const renderLaunchpadVisual = (cardId: "foundation" | "references" | "create") => {
-    if (cardId === "foundation") {
-      return (
-        <div className="vbs-launchpad-visual vbs-tone-preview-grid">
-          {toneCards.map((card) => (
-            <article key={card.id} className="vbs-tone-preview-card">
-              <p className="vbs-meta">{card.eyebrow}</p>
-              <strong>{card.sample}</strong>
-            </article>
-          ))}
-        </div>
-      );
-    }
-
-    if (cardId === "references") {
-      return leadReferenceVisual ? (
-        <div className="vbs-launchpad-visual vbs-launchpad-poster">
-          <Image
-            src={leadReferenceVisual.posterUrl}
-            alt={leadReferenceVisual.headline}
-            fill
-            sizes="(max-width: 900px) 100vw, 420px"
-            style={{ objectFit: "cover" }}
-          />
-          <div className="vbs-launchpad-poster-copy">
-            <span>{leadReferenceVisual.eyebrow}</span>
-            <strong>{leadReferenceVisual.headline}</strong>
-          </div>
-        </div>
-      ) : (
-        <div className="vbs-launchpad-visual vbs-visual-empty">
-          <p className="vbs-meta">Visual board</p>
-          <strong>Reference posters appear here once extraction begins.</strong>
-        </div>
-      );
-    }
-
-    return (
-      <div className="vbs-launchpad-visual vbs-pack-stack">
-        {(generation?.outputs.hooks?.slice(0, 3) || [
-          "Hooks stack here",
-          "Scripts stack here",
-          "Captions + CTA variants stack here",
-        ]).map((line, index) => (
-          <div key={`${cardId}-${index}`} className="vbs-pack-stack-card">
-            <span>{index === 0 ? "Hook" : index === 1 ? "Script" : "CTA"}</span>
-            <strong>{compactText(line, 74)}</strong>
-          </div>
-        ))}
-      </div>
-    );
-  };
-
-  const activeSlideIndex = Math.max(0, STUDIO_SLIDE_ORDER.indexOf(activeSlide));
-  const canSlideBack = activeSlideIndex > 0;
-  const canSlideForward = activeSlideIndex < STUDIO_SLIDE_ORDER.length - 1;
-  const slideTransform = `translateX(-${activeSlideIndex * 100}%)`;
-  const showGlobalActionDock = activeSlide !== "reference";
-  const shellStyle = useMemo(
-    () =>
-      shellViewportHeight
-        ? ({ ["--vbs-shell-height" as string]: `${shellViewportHeight}px` } as CSSProperties)
-        : undefined,
-    [shellViewportHeight]
-  );
-
   if (loading) {
     return (
       <section className="vbs-shell vbs-panel">
@@ -3392,13 +2210,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   }
 
   return (
-    <section
-      ref={shellRef}
-      className={["vbs-shell", "vbs-shell-slides", activeSlide === "launchpad" ? "" : "is-compact"]
-        .filter(Boolean)
-        .join(" ")}
-      style={shellStyle}
-    >
+    <section className="vbs-shell">
       <header className="vbs-reset-hero">
         <div>
           <p className="vbs-chip">Editorial Reset</p>
@@ -3423,112 +2235,10 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         </div>
       </header>
 
-      {error ? (
-        <div className="vbs-alert bat-status bat-status-danger" role="alert">
-          <strong>Attention</strong>
-          <span>{error}</span>
-        </div>
-      ) : null}
-      {chatBridgeStatus ? (
-        <div className="vbs-alert bat-status bat-status-success" role="status" aria-live="polite">
-          <strong>Saved to workflow</strong>
-          <span>{chatBridgeStatus}</span>
-        </div>
-      ) : null}
+      {error ? <div className="vbs-alert">{error}</div> : null}
+      {chatBridgeStatus ? <div className="vbs-alert" style={{ borderColor: "#b6f0d4", background: "#f2fff7", color: "#11643f" }}>{chatBridgeStatus}</div> : null}
 
-      <div className="vbs-slide-toolbar">
-        <div className="vbs-slide-tabs" role="tablist" aria-label="Viral Studio workflow slides">
-          {STUDIO_SLIDE_META.map((slide) => (
-            <button
-              key={slide.id}
-              type="button"
-              role="tab"
-              aria-selected={activeSlide === slide.id}
-              aria-controls={`vbs-slide-${slide.id}`}
-              className={activeSlide === slide.id ? "vbs-slide-tab is-active" : "vbs-slide-tab"}
-              onClick={() => setActiveSlide(slide.id)}
-            >
-              <span>{slide.chapter}</span>
-              <strong>
-                <slide.icon className="h-3.5 w-3.5" />
-                {slide.label}
-              </strong>
-              <small>{slide.detail}</small>
-            </button>
-          ))}
-        </div>
-        <div className="vbs-slide-arrows">
-          <button
-            type="button"
-            onClick={() => setActiveSlide(STUDIO_SLIDE_ORDER[Math.max(0, activeSlideIndex - 1)])}
-            disabled={!canSlideBack}
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Previous Slide
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveSlide(STUDIO_SLIDE_ORDER[Math.min(STUDIO_SLIDE_ORDER.length - 1, activeSlideIndex + 1)])}
-            disabled={!canSlideForward}
-          >
-            Next Slide
-            <ArrowRight className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
-
-      <div className="vbs-stage-handler-rail" role="navigation" aria-label="Workflow stages">
-        {workflowStageCards.map((item) => {
-          const isCurrent = workflowStage === item.stage;
-          return (
-            <button
-              key={item.stage}
-              type="button"
-              className={[
-                "vbs-stage-handler",
-                item.state === "active" ? "is-active" : "",
-                item.state === "done" ? "is-done" : "",
-              ]
-                .filter(Boolean)
-                .join(" ")}
-              aria-current={isCurrent ? "step" : undefined}
-              onClick={() => {
-                if (item.stage === "intake_pending" && workflowStage === "intake_pending") {
-                  router.push(`/app/w/${workspaceId}/intake`);
-                  return;
-                }
-                setActiveSlide(item.slide);
-              }}
-            >
-              <span className="vbs-stage-handler-icon">
-                <item.icon className="h-4 w-4" />
-              </span>
-              <span className="vbs-stage-handler-copy">
-                <strong>{item.label}</strong>
-                <small>{item.caption}</small>
-                <span className="vbs-stage-handler-progress" aria-hidden="true">
-                  <span
-                    style={{
-                      width: item.state === "done" ? "100%" : isCurrent ? "68%" : "18%",
-                    }}
-                  />
-                </span>
-              </span>
-              <span className="vbs-stage-handler-state">{item.state === "done" ? "Done" : isCurrent ? "Now" : "Queued"}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      <div className="vbs-slide-viewport">
-        <div className="vbs-slide-track" style={{ transform: slideTransform }}>
-      <section
-        className="vbs-launchpad vbs-slide-card vbs-page-scroll"
-        id="vbs-slide-launchpad"
-        role="tabpanel"
-        aria-label="Launchpad slide"
-        tabIndex={0}
-      >
+      <section className="vbs-launchpad">
         <div className="vbs-launchpad-main">
           <div className="vbs-launchpad-copy">
             <p className="vbs-meta">Current mission</p>
@@ -3538,15 +2248,13 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
               <button type="button" disabled={isBusy || autofillBusy} onClick={() => void runWorkflowGuideAction()}>
                 {workflowGuide.cta}
               </button>
-              {!brandReady || !activeIngestion || references.length === 0 ? (
-                <button
-                  type="button"
-                  disabled={isBusy || autofillBusy || autopilotBusy}
-                  onClick={() => void runWebsiteFirstAutopilot()}
-                >
-                  {autopilotBusy ? "Running Website-First Autopilot..." : "Run Website-First Autopilot"}
-                </button>
-              ) : null}
+              <button
+                type="button"
+                disabled={isBusy || autofillBusy || autopilotBusy}
+                onClick={() => void runWebsiteFirstAutopilot()}
+              >
+                {autopilotBusy ? "Running Website-First Autopilot..." : "Run Website-First Autopilot"}
+              </button>
               <button type="button" onClick={() => router.push(`/app/w/${workspaceId}`)}>
                 Open Core Chat
               </button>
@@ -3570,49 +2278,23 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         </div>
         <div className="vbs-launchpad-grid">
           {launchpadCards.map((card) => (
-            <article key={card.id} className={`vbs-launchpad-card vbs-launchpad-card-${card.id}`}>
+            <article key={card.id} className="vbs-launchpad-card">
               <p className="vbs-meta">{card.eyebrow}</p>
               <h3>{card.title}</h3>
               <p>{card.body}</p>
-              {renderLaunchpadVisual(card.id)}
               <div className="vbs-launchpad-foot">
                 <strong>{card.stat}</strong>
-                <button
-                  type="button"
-                  className="vbs-launchpad-action"
-                  onClick={() => void card.action()}
-                  disabled={Boolean(card.disabled)}
-                >
+                <button type="button" onClick={card.action}>
                   {card.actionLabel}
                 </button>
               </div>
-              <p className="vbs-meta vbs-launchpad-save-note">{card.saveNote}</p>
             </article>
           ))}
         </div>
       </section>
 
-      <div
-        className="vbs-stack vbs-slide-card vbs-page-scroll"
-        id="vbs-slide-foundation"
-        role="tabpanel"
-        aria-label="Brand DNA slide"
-        tabIndex={0}
-      >
-        <article
-          className={[
-            "vbs-panel",
-            "vbs-section-shell",
-            "vbs-chapter-shell",
-            "vbs-chapter-foundation",
-            "vbs-scroll-section",
-            brandReady && !isEditingBrandDna ? "is-compact" : "",
-          ]
-            .filter(Boolean)
-            .join(" ")}
-          id="vbs-section-onboarding"
-          data-chapter="01"
-        >
+      <div className="vbs-stack">
+        <article className="vbs-panel vbs-section-shell" id="vbs-section-onboarding">
           <div className="vbs-section-head">
             <div>
               <p className="vbs-meta">Foundation</p>
@@ -3654,7 +2336,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                     ]
                       .filter(Boolean)
                       .join(" ")}
-                    onClick={() => setOnboardingStepWithAutosave(item.step)}
+                    onClick={() => setOnboardingStep(item.step)}
                   >
                     <span>{item.step}</span>
                     <strong>{item.title}</strong>
@@ -3665,49 +2347,12 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
             </div>
           </div>
           <div className="vbs-output vbs-foundation-note">
-            <div className="vbs-foundation-note-copy">
-              <p className="vbs-meta">Foundation cockpit</p>
-              <h3>Approve the brand once, then let the rest of the workflow inherit it.</h3>
-              <p>
-                Viral Studio now behaves like one continuous system: lock the brand, let references inherit that context,
-                then generate and save without re-explaining the business every step.
-              </p>
-            </div>
-            <div className="vbs-foundation-pulse-grid">
-              {foundationPulseCards.map((card) => {
-                const Icon = card.icon;
-                return (
-                  <article key={card.id} className="vbs-foundation-pulse-card">
-                    <span className="vbs-foundation-pulse-icon">
-                      <Icon className="h-4 w-4" />
-                    </span>
-                    <div>
-                      <p className="vbs-meta">{card.label}</p>
-                      <strong>{card.value}</strong>
-                      <p>{card.note}</p>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
+            <p className="vbs-meta">
+              Viral Studio now behaves like one continuous system: approve foundation once, let references inherit that
+              context, then generate and save without re-explaining the brand every step.
+            </p>
           </div>
           <div className="vbs-output vbs-autofill-panel">
-            <div className="vbs-autofill-panel-head">
-              <div>
-                <p className="vbs-meta">Website-first autofill</p>
-                <h3>Preview the evidence before it touches the form</h3>
-              </div>
-              <div className="vbs-autofill-panel-stats">
-                <div>
-                  <span>Confidence</span>
-                  <strong>{autofillPreview ? `${Math.round((autofillPreview.suggestionConfidence || 0) * 100)}%` : "n/a"}</strong>
-                </div>
-                <div>
-                  <span>Coverage</span>
-                  <strong>{autofillPreview?.coverage.suggestedCount || 0} field(s)</strong>
-                </div>
-              </div>
-            </div>
             <div className="vbs-mini-actions">
               <button type="button" disabled={autofillBusy || isBusy} onClick={() => void previewAutofill()}>
                 {autofillBusy ? "Loading preview..." : "Preview Autofill"}
@@ -3745,21 +2390,17 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                           onChange={() => toggleAutofillField(field)}
                         />
                         <strong>{toAutofillFieldLabel(field)}</strong>
-                        <span className="vbs-chip-toggle is-active">
-                          {Math.round((suggestion.confidence || 0) * 100)}%
-                        </span>
+                        <span className="vbs-meta">{Math.round((suggestion.confidence || 0) * 100)}%</span>
                       </span>
                       <span className="vbs-meta">{compactText(suggestion.rationale, 220)}</span>
-                      <span className="vbs-autofill-evidence">
-                        {suggestion.sourceEvidence.slice(0, 3).map((entry) => (
-                          <span key={`${field}-${entry.label}`} className="vbs-evidence-badge">
-                            {entry.label}
-                          </span>
-                        ))}
+                      <span className="vbs-meta">
+                        Evidence:{" "}
+                        {suggestion.sourceEvidence
+                          .slice(0, 2)
+                          .map((entry) => entry.label)
+                          .filter(Boolean)
+                          .join(" • ") || "n/a"}
                       </span>
-                      <small className="vbs-autofill-item-footer">
-                        {autofillSelection[field] !== false ? "Selected for apply" : "Skipped for now"}
-                      </small>
                     </label>
                   );
                 })}
@@ -3770,7 +2411,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
               </p>
             )}
           </div>
-          <div className="vbs-output vbs-foundation-sources">
+          <div className="vbs-output">
             <h3>Suggested Extraction Sources (Data-max)</h3>
             {suggestedSources.length ? (
               <div className="vbs-source-suggest-list">
@@ -3796,64 +2437,20 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
           </div>
 
           {brandReady && !isEditingBrandDna ? (
-            <div className="vbs-output vbs-dna-summary-shell">
-              <div className="vbs-dna-summary-card">
-                <p className="vbs-meta">Brand DNA is finalized and active.</p>
-                <h3>{brandProfile?.summary || tonePreview(brandForm)}</h3>
-                <p>
-                  This summary now drives extraction choices, reference weighting, generation, and chat handoff without
-                  forcing the team to restate the business.
-                </p>
-                <div className="vbs-dna-summary-highlights">
-                  {dnaSummaryHighlights.map((item) => (
-                    <article key={item.id} className="vbs-dna-summary-highlight">
-                      <span>{item.label}</span>
-                      <strong>{item.value}</strong>
-                      <p>{item.note}</p>
-                    </article>
-                  ))}
-                </div>
+            <div className="vbs-output">
+              <p className="vbs-meta">Brand DNA is finalized and active.</p>
+              <p>{brandProfile?.summary}</p>
+              <div className="vbs-actions">
+                <button type="button" onClick={() => setIsEditingBrandDna(true)}>Edit Brand DNA</button>
               </div>
-              <aside className="vbs-dna-summary-sidecar">
-                <div className="vbs-output vbs-dna-tone-card">
-                  <p className="vbs-meta">Live tone preview</p>
-                  <p>{tonePreview(brandForm)}</p>
-                  <div className="vbs-tone-preview-grid">
-                    {toneCards.map((card) => (
-                      <article key={card.id} className="vbs-tone-preview-card">
-                        <p className="vbs-meta">{card.eyebrow}</p>
-                        <strong>{card.sample}</strong>
-                      </article>
-                    ))}
-                  </div>
-                </div>
-                <div className="vbs-actions">
-                  <button type="button" onClick={() => setIsEditingBrandDna(true)}>Edit Brand DNA</button>
-                </div>
-              </aside>
             </div>
           ) : (
             <div className="vbs-dna-flow">
-              <aside className="vbs-dna-sidecar vbs-scroll-column">
+              <aside className="vbs-dna-sidecar">
                 <div className="vbs-dna-step-card">
                   <p className="vbs-meta">Step {activeOnboardingMeta.step} of 4</p>
                   <h3>{activeOnboardingMeta.title}</h3>
                   <p>{activeOnboardingMeta.helper}</p>
-                  <div className="vbs-dna-step-meter" aria-hidden="true">
-                    <span style={{ width: `${Math.max(16, Math.round((activeStepStats.filled / activeStepStats.total) * 100))}%` }} />
-                  </div>
-                  <div className="vbs-dna-step-stats">
-                    <div>
-                      <span>Step fill</span>
-                      <strong>
-                        {activeStepStats.filled}/{activeStepStats.total}
-                      </strong>
-                    </div>
-                    <div>
-                      <span>Workflow unlock</span>
-                      <strong>{onboardingStep === 4 ? "Finalize DNA" : `Step ${onboardingStep + 1}`}</strong>
-                    </div>
-                  </div>
                 </div>
                 <div className="vbs-dna-prompt-list">
                   {activeOnboardingMeta.prompts.map((prompt) => (
@@ -3865,59 +2462,17 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                 <div className="vbs-output vbs-dna-tone-card">
                   <p className="vbs-meta">Live tone preview</p>
                   <p>{tonePreview(brandForm)}</p>
-                  <div className="vbs-tone-preview-grid">
-                    {toneCards.map((card) => (
-                      <article key={card.id} className="vbs-tone-preview-card">
-                        <p className="vbs-meta">{card.eyebrow}</p>
-                        <strong>{card.sample}</strong>
-                      </article>
-                    ))}
-                  </div>
                 </div>
               </aside>
 
-              <div className="vbs-dna-main vbs-scroll-column">
-                <div className="vbs-dna-spotlight">
-                  <div>
-                    <p className="vbs-meta">Current question cluster</p>
-                    <h3>{activeOnboardingMeta.title}</h3>
-                    <p>{activeOnboardingMeta.helper}</p>
-                  </div>
-                  <div className="vbs-dna-spotlight-stats">
-                    <article className="vbs-dna-spotlight-stat">
-                      <span>Step health</span>
-                      <strong>
-                        {activeStepStats.filled}/{activeStepStats.total} signals
-                      </strong>
-                      <p>{activeStepStats.filled === activeStepStats.total ? "This step is ready to move on." : "Add the missing signals so the next step inherits stronger context."}</p>
-                    </article>
-                    <article className="vbs-dna-spotlight-stat">
-                      <span>Save state</span>
-                      <strong>
-                        {brandAutosaveState === "saving"
-                          ? "Saving"
-                          : brandAutosaveState === "saved"
-                            ? "Saved"
-                            : brandAutosaveState === "error"
-                              ? "Needs retry"
-                              : "Ready"}
-                      </strong>
-                      <p>{foundationAutosaveNote}</p>
-                    </article>
-                    <article className="vbs-dna-spotlight-stat">
-                      <span>Next unlock</span>
-                      <strong>{onboardingStep === 4 ? "Finalize DNA" : ONBOARDING_STEP_META[onboardingStep]?.title || "Next step"}</strong>
-                      <p>{onboardingStep === 4 ? "Finalizing opens extraction, generation, and the save vault." : "Finish this cluster so the next part of the brand story can open."}</p>
-                    </article>
-                  </div>
-                </div>
+              <div className="vbs-dna-main">
                 <div className="vbs-dna-step-tabs">
                   {ONBOARDING_STEP_META.map((item) => (
                     <button
                       key={item.step}
                       type="button"
                       className={item.step === onboardingStep ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
-                      onClick={() => setOnboardingStepWithAutosave(item.step)}
+                      onClick={() => setOnboardingStep(item.step)}
                     >
                       {item.step}. {item.title}
                     </button>
@@ -4127,14 +2682,14 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                   <button
                     type="button"
                     disabled={onboardingStep === 1 || isBusy}
-                    onClick={() => setOnboardingStepWithAutosave(Math.max(1, onboardingStep - 1) as 1 | 2 | 3 | 4)}
+                    onClick={() => setOnboardingStep((Math.max(1, onboardingStep - 1) as 1 | 2 | 3 | 4))}
                   >
                     Back
                   </button>
                   <button
                     type="button"
                     disabled={onboardingStep === 4 || !isStepValid(onboardingStep, brandForm) || isBusy}
-                    onClick={() => setOnboardingStepWithAutosave(Math.min(4, onboardingStep + 1) as 1 | 2 | 3 | 4)}
+                    onClick={() => setOnboardingStep((Math.min(4, onboardingStep + 1) as 1 | 2 | 3 | 4))}
                   >
                     Next
                   </button>
@@ -4155,13 +2710,12 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
           )}
 
           <p className="vbs-meta">
-            Status: <strong>{brandProfile?.status || "draft"}</strong> • Ready: <strong>{brandProfile?.completeness.ready ? "yes" : "no"}</strong> • Updated: {formatTimestamp(brandProfile?.updatedAt)} • Autosave:{" "}
-            <strong>{brandAutosaveState === "saving" ? "saving" : brandAutosaveState === "saved" ? "saved" : brandAutosaveState === "error" ? "error" : "idle"}</strong>
+            Status: <strong>{brandProfile?.status || "draft"}</strong> • Ready: <strong>{brandProfile?.completeness.ready ? "yes" : "no"}</strong> • Updated: {formatTimestamp(brandProfile?.updatedAt)}
           </p>
         </article>
 
         {canAccessDiagnostics ? (
-          <article className="vbs-panel vbs-dev-drawer vbs-scroll-section" id="vbs-section-diagnostics">
+          <article className="vbs-panel vbs-dev-drawer" id="vbs-section-diagnostics">
             <div className="vbs-diagnostics-head">
               <div>
                 <p className="vbs-meta">Developer Access</p>
@@ -4275,14 +2829,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
 
       {!onboardingLocked ? (
         <>
-          <article
-            className="vbs-panel vbs-section-shell vbs-chapter-shell vbs-chapter-reference vbs-slide-card vbs-reference-slide vbs-page-scroll"
-            id="vbs-slide-reference"
-            role="tabpanel"
-            aria-label="Reference engine slide"
-            data-chapter="02"
-            tabIndex={0}
-          >
+          <article className="vbs-panel vbs-section-shell">
             <div className="vbs-section-head">
               <div>
                 <p className="vbs-meta">Reference Engine</p>
@@ -4298,620 +2845,307 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
               </div>
             </div>
             <div className="vbs-grid">
-              <article className="vbs-panel vbs-scroll-section" id="vbs-section-extraction">
-                <div className="vbs-extraction-stage">
-                  <div className="vbs-extraction-launchpad">
-                    <p className="vbs-meta">Launch</p>
-                    <h3>Start with the strongest source, not a blank form</h3>
-                    <p>
-                      Viral Studio can start from suggested social sources immediately. Open the setup sheet when you need to
-                      adjust platform, preset, or volume.
-                    </p>
-                    <div className="vbs-extraction-facts">
-                      <div>
-                        <span>Top source</span>
-                        <strong>{latestSuggestedSource ? latestSuggestedSource.label : "Awaiting intake evidence"}</strong>
+              <article className="vbs-panel" id="vbs-section-extraction">
+              <h2 className="vbs-panel-title">Competitor Extraction</h2>
+              <div className="vbs-actions">
+                <button type="button" onClick={() => setShowExtractionModal(true)} disabled={isBusy}>
+                  Extract Best Videos
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    isBusy ||
+                    !activeIngestion ||
+                    (activeIngestion.status !== "failed" && activeIngestion.status !== "partial")
+                  }
+                  onClick={() => activeIngestion && void retryExtraction(activeIngestion.id)}
+                >
+                  Retry Active Run
+                </button>
+              </div>
+              {activeIngestion ? (
+                <div className="vbs-output">
+                  <p className="vbs-meta">
+                    Active run: {toPlatformLabel(activeIngestion.sourcePlatform)} • {statusLabel(activeIngestion.status)} • Attempt{" "}
+                    {activeIngestion.attempt || 1}
+                  </p>
+                  <p className="vbs-meta">
+                    Preset {toPresetLabel(activeIngestion.preset)} • {activeIngestion.maxVideos} videos •{" "}
+                    {activeIngestion.lookbackDays} days • Auto-refresh every 0.9s
+                  </p>
+                  <div className="vbs-ingestion-timeline">
+                    {ingestionTimeline.map((item) => (
+                      <div key={item.key} className="vbs-ingestion-step">
+                        <span>{item.label}</span>
+                        <strong>{item.value}</strong>
                       </div>
-                      <div>
-                        <span>Preset</span>
-                        <strong>{toPresetLabel(ingestionPreset)}</strong>
-                      </div>
-                      <div>
-                        <span>Depth</span>
-                        <strong>{maxVideos} videos</strong>
-                      </div>
+                    ))}
+                  </div>
+                  {activeIngestion.error ? <p className="vbs-meta">Last warning: {activeIngestion.error}</p> : null}
+                </div>
+              ) : <p className="vbs-meta">No run yet.</p>}
+              <p className="vbs-meta">Run history ({ingestions.length})</p>
+              <div className="vbs-run-history">
+                {ingestions.slice(0, 6).map((run) => (
+                  <div key={run.id} className="vbs-run-row">
+                    <div>
+                      <p>
+                        {toPlatformLabel(run.sourcePlatform)} • {statusLabel(run.status)} • Attempt {run.attempt || 1}
+                      </p>
+                      <p className="vbs-meta">
+                        {run.progress.ranked}/{run.progress.found || run.maxVideos} ranked • {formatTimestamp(run.createdAt)}
+                      </p>
                     </div>
-                    <div className="vbs-actions">
-                      <button type="button" onClick={() => setShowExtractionModal(true)} disabled={isBusy}>
-                        Extract Best Videos
+                    <div className="vbs-mini-actions">
+                      <button type="button" onClick={() => void openIngestionResults(run)} disabled={isBusy}>
+                        View Results
                       </button>
                       <button
                         type="button"
-                        disabled={
-                          isBusy ||
-                          !activeIngestion ||
-                          (activeIngestion.status !== "failed" && activeIngestion.status !== "partial")
-                        }
-                        onClick={() => activeIngestion && void retryExtraction(activeIngestion.id)}
+                        onClick={() => void retryExtraction(run.id)}
+                        disabled={isBusy || (run.status !== "failed" && run.status !== "partial")}
                       >
-                        Retry Active Run
+                        Retry
                       </button>
                     </div>
                   </div>
-
-                  <div className="vbs-extraction-source-grid">
-                    {(suggestedSources.length ? suggestedSources.slice(0, 3) : [null]).map((source, index) =>
-                      source ? (
-                        <article key={`${source.platform}:${source.sourceUrl}`} className="vbs-extraction-source-card">
-                          <p className="vbs-meta">Suggested source {index + 1}</p>
-                          <h4>{source.label}</h4>
-                          <p>{source.sourceUrl}</p>
-                          <div className="vbs-mini-actions">
-                            <span className="vbs-chip-toggle is-active">
-                              {toPlatformLabel(source.platform)} • {Math.round((source.confidence || 0) * 100)}%
-                            </span>
-                            <button type="button" disabled={isBusy} onClick={() => selectSuggestedSource(source)}>
-                              Use Source
-                            </button>
-                          </div>
-                        </article>
-                      ) : (
-                        <article key="empty-source" className="vbs-extraction-source-card">
-                          <p className="vbs-meta">Suggested source</p>
-                          <h4>Need more intake evidence</h4>
-                          <p>Add or improve website and social inputs so the extraction setup can prefill high-confidence sources.</p>
-                        </article>
-                      )
-                    )}
-                  </div>
-                </div>
-
-                <div className="vbs-output vbs-extraction-monitor">
-                  <div className="vbs-curation-kpis">
-                    <div>
-                      <span>Status</span>
-                      <strong>{activeIngestion ? statusLabel(activeIngestion.status) : "Idle"}</strong>
-                    </div>
-                    <div>
-                      <span>Ranked</span>
-                      <strong>{activeIngestion ? activeIngestion.progress.ranked : 0}</strong>
-                    </div>
-                    <div>
-                      <span>Window</span>
-                      <strong>{activeIngestion ? `${activeIngestion.lookbackDays}d` : `${lookbackDays}d`}</strong>
-                    </div>
-                  </div>
-                  {activeIngestion ? (
-                    <>
-                      <p className="vbs-meta">
-                        Active run: {toPlatformLabel(activeIngestion.sourcePlatform)} • Attempt {activeIngestion.attempt || 1} •
-                        Preset {toPresetLabel(activeIngestion.preset)}
-                      </p>
-                      <div className="vbs-ingestion-timeline">
-                        {ingestionTimeline.map((item) => (
-                          <div key={item.key} className="vbs-ingestion-step">
-                            <span>{item.label}</span>
-                            <strong>{item.value}</strong>
-                          </div>
-                        ))}
-                      </div>
-                      {activeIngestion.error ? <p className="vbs-meta">Last warning: {activeIngestion.error}</p> : null}
-                    </>
-                  ) : (
-                    <p className="vbs-meta">No active run yet. Start with the suggested source or open the extraction sheet.</p>
-                  )}
-                </div>
-
-                <p className="vbs-meta">Run history ({ingestions.length})</p>
-                <div className="vbs-run-history">
-                  {ingestions.slice(0, 6).map((run) => (
-                    <div key={run.id} className="vbs-run-row">
-                      <div>
-                        <p>
-                          {toPlatformLabel(run.sourcePlatform)} • {statusLabel(run.status)} • Attempt {run.attempt || 1}
-                        </p>
-                        <p className="vbs-meta">
-                          {run.progress.ranked}/{run.progress.found || run.maxVideos} ranked • {formatTimestamp(run.createdAt)}
-                        </p>
-                      </div>
-                      <div className="vbs-mini-actions">
-                        <button type="button" onClick={() => void openIngestionResults(run)} disabled={isBusy}>
-                          View Results
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void retryExtraction(run.id)}
-                          disabled={isBusy || (run.status !== "failed" && run.status !== "partial")}
-                        >
-                          Retry
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  {ingestions.length === 0 ? <p className="vbs-meta">No extraction history yet.</p> : null}
-                </div>
+                ))}
+                {ingestions.length === 0 ? <p className="vbs-meta">No extraction history yet.</p> : null}
+              </div>
               </article>
 
-              <article className="vbs-panel vbs-scroll-section" id="vbs-section-curation">
-                <div className="vbs-curation-shell">
-                  <div className="vbs-curation-topline">
-                    <div>
-                      <h2 className="vbs-panel-title">Reference Curation</h2>
-                      <p className="vbs-panel-subtitle">Review the ranking, pick winners, and keep only what deserves to steer generation.</p>
-                    </div>
-                    <div className="vbs-curation-kpis">
-                      <div>
-                        <span>Must-use</span>
-                        <strong>{referenceCounts["must-use"]}</strong>
-                      </div>
-                      <div>
-                        <span>Pinned</span>
-                        <strong>{referenceCounts.pin}</strong>
-                      </div>
-                      <div>
-                        <span>Excluded</span>
-                        <strong>{referenceCounts.exclude}</strong>
-                      </div>
+              <article className="vbs-panel">
+              <h2 className="vbs-panel-title">Reference Curation</h2>
+              <p className="vbs-panel-subtitle">Ranked board with explainability, filter chips, and expandable analysis drawer.</p>
+              <div className="vbs-reference-toolbar">
+                <div className="vbs-mini-actions">
+                  <button
+                    type="button"
+                    aria-pressed={referenceViewMode === "grid"}
+                    className={referenceViewMode === "grid" ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
+                    onClick={() => setReferenceViewMode("grid")}
+                  >
+                    Grid
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={referenceViewMode === "list"}
+                    className={referenceViewMode === "list" ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
+                    onClick={() => setReferenceViewMode("list")}
+                  >
+                    List
+                  </button>
+                </div>
+                <div className="vbs-mini-actions">
+                  {[
+                    { key: "all", label: "All" },
+                    { key: "prioritized", label: "Prioritized" },
+                    { key: "must-use", label: "Must-use" },
+                    { key: "pin", label: "Pinned" },
+                    { key: "exclude", label: "Excluded" },
+                  ].map((chip) => (
+                    <button
+                      key={chip.key}
+                      type="button"
+                      aria-pressed={referenceFilter === chip.key}
+                      className={referenceFilter === chip.key ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
+                      onClick={() =>
+                        setReferenceFilter(
+                          chip.key as "all" | "prioritized" | "must-use" | "pin" | "exclude"
+                        )
+                      }
+                    >
+                      {chip.label} ({referenceCounts[chip.key as keyof typeof referenceCounts]})
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {curationNotice ? (
+                <p className="vbs-curation-notice" role="status" aria-live="polite">
+                  {curationNotice}
+                </p>
+              ) : null}
+              <div className="vbs-mini-actions" style={{ marginTop: "0.45rem" }}>
+                {(["all", "instagram", "tiktok", "youtube"] as const).map((platform) => (
+                  <button
+                    key={platform}
+                    type="button"
+                    aria-pressed={referencePlatformFilter === platform}
+                    className={referencePlatformFilter === platform ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
+                    onClick={() => setReferencePlatformFilter(platform)}
+                  >
+                    {platform === "all" ? "All Platforms" : toPlatformLabel(platform)}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => void sendShortlistToChat()}
+                  disabled={isBusy || filteredReferences.length === 0}
+                >
+                  Send Filtered Shortlist To Chat
+                </button>
+              </div>
+              <div className={referenceViewMode === "grid" ? "vbs-reference-board-grid" : "vbs-reference-board-list"}>
+                {filteredReferences.map((reference) => (
+                  <div
+                    key={reference.id}
+                    className={[
+                      "vbs-reference-card",
+                      selectedReference?.id === reference.id ? "is-selected" : "",
+                      recentShortlistReferenceId === reference.id ? "is-updated" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                  >
+                    <button
+                      type="button"
+                      className="vbs-reference-card-head"
+                      onClick={() => setSelectedReferenceId(reference.id)}
+                    >
+                      <span className="vbs-rank-badge">#{reference.ranking.rank}</span>
+                      <p>{reference.ranking.rationaleTitle}</p>
+                      <p className="vbs-meta">
+                        {toPlatformLabel(reference.sourcePlatform)} • score {reference.scores.composite.toFixed(3)} •{" "}
+                        {shortlistLabel(reference.shortlistState)}
+                      </p>
+                      <p className="vbs-meta">
+                        {formatCompactNumber(reference.metrics.views)} views • {formatTimestamp(reference.metrics.postedAt)}
+                      </p>
+                      <p className="vbs-meta">
+                        {reference.explainability.topDrivers[0] || reference.ranking.rationaleBullets[0]}
+                      </p>
+                    </button>
+                    <div className="vbs-mini-actions vbs-shortlist-actions">
+                      {(
+                        [
+                          { key: "pin", label: "Pin" },
+                          { key: "must-use", label: "Must-use" },
+                          { key: "exclude", label: "Exclude" },
+                          { key: "clear", label: "Clear" },
+                        ] as Array<{ key: ReferenceShortlistAction; label: string }>
+                      ).map((item) => {
+                        const pendingAction = shortlistPendingById[reference.id];
+                        const isPending = pendingAction === item.key;
+                        const isActive =
+                          item.key === "clear"
+                            ? reference.shortlistState === "none"
+                            : reference.shortlistState === item.key;
+                        return (
+                          <button
+                            key={item.key}
+                            type="button"
+                            aria-pressed={isActive}
+                            className={[
+                              "vbs-action-chip",
+                              `vbs-action-${item.key}`,
+                              isActive ? "is-active" : "",
+                            ]
+                              .filter(Boolean)
+                              .join(" ")}
+                            onClick={() => void shortlistReference(reference.id, item.key)}
+                            disabled={Boolean(pendingAction)}
+                          >
+                            {isPending ? `${item.label}…` : item.label}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
-
-                  <div className="vbs-curation-layout">
-                    <div className="vbs-reference-board-shell">
-                      <div className="vbs-reference-workspace-head">
-                        <div className="vbs-reference-toolbar">
-                          <div className="vbs-mini-actions">
-                            <button
-                              type="button"
-                              aria-pressed={referenceViewMode === "grid"}
-                              className={referenceViewMode === "grid" ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
-                              onClick={() => setReferenceViewMode("grid")}
-                            >
-                              Grid
-                            </button>
-                            <button
-                              type="button"
-                              aria-pressed={referenceViewMode === "list"}
-                              className={referenceViewMode === "list" ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
-                              onClick={() => setReferenceViewMode("list")}
-                            >
-                              List
-                            </button>
-                            <button
-                              type="button"
-                              disabled={isBusy || references.length === 0}
-                              onClick={() => void autoCurateTopReferences(references)}
-                            >
-                              Auto-Curate Top 3
-                            </button>
-                          </div>
-                          <div className="vbs-mini-actions">
-                            {[
-                              { key: "all", label: "All" },
-                              { key: "prioritized", label: "Prioritized" },
-                              { key: "must-use", label: "Must-use" },
-                              { key: "pin", label: "Pinned" },
-                              { key: "exclude", label: "Excluded" },
-                            ].map((chip) => (
-                              <button
-                                key={chip.key}
-                                type="button"
-                                aria-pressed={referenceFilter === chip.key}
-                                className={referenceFilter === chip.key ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
-                                onClick={() =>
-                                  setReferenceFilter(chip.key as "all" | "prioritized" | "must-use" | "pin" | "exclude")
-                                }
-                              >
-                                {chip.label} ({referenceCounts[chip.key as keyof typeof referenceCounts]})
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        {curationNotice ? (
-                          <p className="vbs-curation-notice" role="status" aria-live="polite">
-                            {curationNotice}
-                          </p>
-                        ) : null}
-
-                        <div className="vbs-curation-assist">
-                          <div className="vbs-mini-actions">
-                            {(["all", "instagram", "tiktok", "youtube"] as const).map((platform) => (
-                              <button
-                                key={platform}
-                                type="button"
-                                aria-pressed={referencePlatformFilter === platform}
-                                className={referencePlatformFilter === platform ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
-                                onClick={() => setReferencePlatformFilter(platform)}
-                              >
-                                {platform === "all" ? "All Platforms" : toPlatformLabel(platform)}
-                              </button>
-                            ))}
-                          </div>
-                          <div className="vbs-shortlist-handler-rail">
-                            <button
-                              type="button"
-                              disabled={!selectedReference || Boolean(selectedReference && shortlistPendingById[selectedReference.id])}
-                              onClick={() => selectedReference && void shortlistReference(selectedReference.id, "pin")}
-                            >
-                              <Pin className="h-4 w-4" />
-                              Pin
-                            </button>
-                            <button
-                              type="button"
-                              disabled={!selectedReference || Boolean(selectedReference && shortlistPendingById[selectedReference.id])}
-                              onClick={() => selectedReference && void shortlistReference(selectedReference.id, "must-use")}
-                            >
-                              <CheckCircle2 className="h-4 w-4" />
-                              Must-use
-                            </button>
-                            <button
-                              type="button"
-                              disabled={!selectedReference || Boolean(selectedReference && shortlistPendingById[selectedReference.id])}
-                              onClick={() => selectedReference && void shortlistReference(selectedReference.id, "exclude")}
-                            >
-                              <CircleOff className="h-4 w-4" />
-                              Exclude
-                            </button>
-                            <button
-                              type="button"
-                              disabled={!selectedReference || Boolean(selectedReference && shortlistPendingById[selectedReference.id])}
-                              onClick={() => selectedReference && void shortlistReference(selectedReference.id, "clear")}
-                            >
-                              <ArrowLeft className="h-4 w-4" />
-                              Clear
-                            </button>
-                            <button
-                              type="button"
-                              aria-pressed={selectedReference ? compareReferenceIds.includes(selectedReference.id) : false}
-                              disabled={!selectedReference}
-                              onClick={() => selectedReference && toggleCompareReference(selectedReference.id)}
-                            >
-                              <Layers3 className="h-4 w-4" />
-                              Compare
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void sendShortlistToChat()}
-                              disabled={isBusy || filteredReferences.length === 0}
-                            >
-                              <Send className="h-4 w-4" />
-                              Send to chat
-                            </button>
-                          </div>
-                          <div className="vbs-shortcut-chips" aria-label="Keyboard shortcuts">
-                            <span>1 Pin</span>
-                            <span>2 Must-use</span>
-                            <span>3 Exclude</span>
-                            <span>0 Clear</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {selectedReference && selectedReferenceInsights && selectedReferenceVisual ? (
-                        <div className="vbs-reference-focus-card">
-                          <div className="vbs-reference-focus-poster">
-                            <Image
-                              src={selectedReferenceVisual.posterUrl}
-                              alt={`${toPlatformLabel(selectedReference.sourcePlatform)} selected reference poster`}
-                              fill
-                              unoptimized
-                              sizes="(max-width: 1100px) 100vw, 28vw"
-                            />
-                          </div>
-                          <div className="vbs-reference-focus-copy">
-                            <p className="vbs-meta">Selected winner</p>
-                            <h3>{selectedReferenceVisual.headline}</h3>
-                            <p>{selectedReference.ranking.rationaleTitle}</p>
-                            <div className="vbs-reference-focus-metrics">
-                              <div>
-                                <span>Score</span>
-                                <strong>{selectedReference.scores.composite.toFixed(3)}</strong>
-                              </div>
-                              <div>
-                                <span>Views</span>
-                                <strong>{formatCompactNumber(selectedReference.metrics.views)}</strong>
-                              </div>
-                              <div>
-                                <span>Age</span>
-                                <strong>
-                                  {selectedReferenceInsights.postedAgeDays === null
-                                    ? "n/a"
-                                    : `${selectedReferenceInsights.postedAgeDays}d`}
-                                </strong>
-                              </div>
-                            </div>
-                            <div className="vbs-top-driver-row">
-                              {selectedReference.explainability.topDrivers.map((driver) => (
-                                <span key={driver} className="vbs-driver-chip">
-                                  {driver}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-                      ) : null}
-
-                      <div className="vbs-reference-board-wrap">
-                        <div className={referenceViewMode === "grid" ? "vbs-reference-board-grid" : "vbs-reference-board-list"}>
-                          {filteredReferences.map((reference) => {
-                            const visual = resolveReferenceVisual(reference);
-                            const interactionRate =
-                              ((reference.metrics.likes + reference.metrics.comments + reference.metrics.shares) /
-                                Math.max(1, reference.metrics.views)) *
-                              100;
-                            const postedAgeDays = daysSinceIso(reference.metrics.postedAt);
-                            return (
-                              <div
-                                key={reference.id}
-                                className={[
-                                  "vbs-reference-card",
-                                  selectedReference?.id === reference.id ? "is-selected" : "",
-                                  compareReferenceIds.includes(reference.id) ? "is-compare" : "",
-                                  recentShortlistReferenceId === reference.id ? "is-updated" : "",
-                                ]
-                                  .filter(Boolean)
-                                  .join(" ")}
-                              >
-                                <button
-                                  type="button"
-                                  className="vbs-reference-card-head"
-                                  onClick={() => setSelectedReferenceId(reference.id)}
-                                >
-                                  <div className="vbs-reference-poster">
-                                    <Image
-                                      src={visual.posterUrl}
-                                      alt={`${toPlatformLabel(reference.sourcePlatform)} reference preview`}
-                                      fill
-                                      unoptimized
-                                      sizes="(max-width: 1100px) 100vw, 33vw"
-                                    />
-                                    <div className="vbs-reference-poster-top">
-                                      <span className="vbs-rank-badge">#{reference.ranking.rank}</span>
-                                      <span className={`vbs-reference-state vbs-reference-state-${reference.shortlistState}`}>
-                                        {shortlistLabel(reference.shortlistState)}
-                                      </span>
-                                    </div>
-                                    <div className="vbs-reference-poster-bottom">
-                                      <p className="vbs-reference-eyebrow">{visual.eyebrow}</p>
-                                      <h3>{visual.headline}</h3>
-                                      <p>{visual.footer}</p>
-                                    </div>
-                                  </div>
-                                  <div className="vbs-reference-card-summary">
-                                    <div className="vbs-reference-card-copy">
-                                      <p>{reference.ranking.rationaleTitle}</p>
-                                      <p className="vbs-meta">
-                                        {toPlatformLabel(reference.sourcePlatform)} • score {reference.scores.composite.toFixed(3)} •{" "}
-                                        {formatCompactNumber(reference.metrics.views)} views
-                                      </p>
-                                    </div>
-                                    <div className="vbs-reference-card-metrics">
-                                      <span>{interactionRate.toFixed(1)}% interaction</span>
-                                      <span>{postedAgeDays === null ? "n/a" : `${postedAgeDays}d old`}</span>
-                                      <span>{reference.explainability.formulaVersion}</span>
-                                    </div>
-                                    <div className="vbs-top-driver-row">
-                                      {reference.explainability.topDrivers.slice(0, 3).map((driver) => (
-                                        <span key={driver} className="vbs-driver-chip">
-                                          {driver}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  </div>
-                                </button>
-                                <div className="vbs-mini-actions vbs-shortlist-actions">
-                                  {(
-                                    [
-                                      { key: "pin", label: "Pin" },
-                                      { key: "must-use", label: "Must-use" },
-                                      { key: "exclude", label: "Exclude" },
-                                      { key: "clear", label: "Clear" },
-                                    ] as Array<{ key: ReferenceShortlistAction; label: string }>
-                                  ).map((item) => {
-                                    const pendingAction = shortlistPendingById[reference.id];
-                                    const isPending = pendingAction === item.key;
-                                    const isActive =
-                                      item.key === "clear"
-                                        ? reference.shortlistState === "none"
-                                        : reference.shortlistState === item.key;
-                                    return (
-                                      <button
-                                        key={item.key}
-                                        type="button"
-                                        aria-pressed={isActive}
-                                        className={[
-                                          "vbs-action-chip",
-                                          `vbs-action-${item.key}`,
-                                          isActive ? "is-active" : "",
-                                        ]
-                                          .filter(Boolean)
-                                          .join(" ")}
-                                        onClick={() => void shortlistReference(reference.id, item.key)}
-                                        disabled={Boolean(pendingAction)}
-                                      >
-                                        {isPending ? `${item.label}…` : item.label}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                        {filteredReferences.length === 0 ? <p className="vbs-meta">No references match current filters.</p> : null}
-                      </div>
+                ))}
+              </div>
+              {filteredReferences.length === 0 ? <p className="vbs-meta">No references match current filters.</p> : null}
+              {selectedReference && selectedReferenceInsights ? (
+                <div className="vbs-analysis-drawer">
+                  <p className="vbs-meta">
+                    Analysis Drawer • #{selectedReference.ranking.rank} • {toPlatformLabel(selectedReference.sourcePlatform)} •{" "}
+                    {shortlistLabel(selectedReference.shortlistState)}
+                  </p>
+                  <h3>{selectedReference.ranking.rationaleTitle}</h3>
+                  <div className="vbs-analysis-kpi-grid">
+                    <div>
+                      <span>Composite</span>
+                      <strong>{selectedReference.scores.composite.toFixed(3)}</strong>
+                      <p
+                        className={
+                          selectedReferenceInsights.compositeDelta >= 0 ? "vbs-delta-positive" : "vbs-delta-negative"
+                        }
+                      >
+                        {selectedReferenceInsights.compositeDelta >= 0 ? "+" : ""}
+                        {selectedReferenceInsights.compositeDelta.toFixed(3)} vs board avg{" "}
+                        {selectedReferenceInsights.avgComposite.toFixed(3)}
+                      </p>
                     </div>
-
-                    <aside className="vbs-analysis-sidecar">
-                      {selectedReference && selectedReferenceInsights && selectedReferenceVisual ? (
-                        <div className="vbs-analysis-drawer">
-                          <p className="vbs-meta">
-                            Analysis Drawer • #{selectedReference.ranking.rank} • {toPlatformLabel(selectedReference.sourcePlatform)} •{" "}
-                            {shortlistLabel(selectedReference.shortlistState)}
-                          </p>
-                          <div className="vbs-analysis-hero">
-                            <div className="vbs-analysis-poster">
-                              <Image
-                                src={selectedReferenceVisual.posterUrl}
-                                alt={`${toPlatformLabel(selectedReference.sourcePlatform)} reference analysis preview`}
-                                fill
-                                unoptimized
-                                sizes="(max-width: 1100px) 100vw, 40vw"
-                              />
-                            </div>
-                            <div className="vbs-analysis-story">
-                              <div className="vbs-analysis-story-head">
-                                <h3>{selectedReferenceVisual.headline}</h3>
-                                <p>{selectedReference.ranking.rationaleTitle}</p>
-                              </div>
-                              <div className="vbs-top-driver-row">
-                                {selectedReference.explainability.topDrivers.map((driver) => (
-                                  <span key={driver} className="vbs-driver-chip">
-                                    {driver}
-                                  </span>
-                                ))}
-                              </div>
-                              <div className="vbs-analysis-story-grid">
-                                <article>
-                                  <span>Hook</span>
-                                  <strong>{compactText(selectedReference.caption, 120)}</strong>
-                                </article>
-                                <article>
-                                  <span>Narrative Beat</span>
-                                  <strong>{compactText(selectedReference.transcriptSummary, 120)}</strong>
-                                </article>
-                                <article>
-                                  <span>On-screen Text</span>
-                                  <strong>{compactText(selectedReference.ocrSummary, 120)}</strong>
-                                </article>
-                              </div>
-                            </div>
-                          </div>
-                          <div className="vbs-analysis-kpi-grid">
-                            <div>
-                              <span>Composite</span>
-                              <strong>{selectedReference.scores.composite.toFixed(3)}</strong>
-                              <p
-                                className={
-                                  selectedReferenceInsights.compositeDelta >= 0 ? "vbs-delta-positive" : "vbs-delta-negative"
-                                }
-                              >
-                                {selectedReferenceInsights.compositeDelta >= 0 ? "+" : ""}
-                                {selectedReferenceInsights.compositeDelta.toFixed(3)} vs board avg{" "}
-                                {selectedReferenceInsights.avgComposite.toFixed(3)}
-                              </p>
-                            </div>
-                            <div>
-                              <span>Views</span>
-                              <strong>{formatCompactNumber(selectedReference.metrics.views)}</strong>
-                              <p>{selectedReference.metrics.likes} likes • {selectedReference.metrics.comments} comments</p>
-                            </div>
-                            <div>
-                              <span>Interaction Rate</span>
-                              <strong>{formatUnitPercent(selectedReferenceInsights.interactionRateRaw)}</strong>
-                              <p>{selectedReference.metrics.shares} shares</p>
-                            </div>
-                            <div>
-                              <span>Recency</span>
-                              <strong>
-                                {selectedReferenceInsights.postedAgeDays === null
-                                  ? "n/a"
-                                  : `${selectedReferenceInsights.postedAgeDays}d ago`}
-                              </strong>
-                              <p>{formatTimestamp(selectedReference.metrics.postedAt)}</p>
-                            </div>
-                          </div>
-                          <div className="vbs-analysis-grid">
-                            {selectedReferenceInsights.contributionRows.map(({ key, value }) => (
-                              <div key={key} className="vbs-analysis-metric">
-                                <p>{contributionLabel(key)}</p>
-                                <strong>{(Number(value) * 100).toFixed(1)} pts</strong>
-                                <div className="vbs-analysis-bar">
-                                  <span style={{ width: `${Math.max(6, Math.min(100, Number(value) * 320))}%` }} />
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                          <div className="vbs-analysis-grid vbs-normalized-grid">
-                            {selectedReferenceInsights.normalizedRows.map(({ key, value }) => (
-                              <div key={key} className="vbs-analysis-metric">
-                                <p>{normalizedMetricLabel(key)}</p>
-                                <strong>{value.toFixed(1)}%</strong>
-                                <div className="vbs-analysis-bar">
-                                  <span style={{ width: `${Math.max(6, Math.min(100, value))}%` }} />
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                          <div className="vbs-analysis-why">
-                            <h4>Why this wins</h4>
-                            <ul>
-                              {selectedReference.explainability.whyRankedHigh.map((line) => (
-                                <li key={line}>{line}</li>
-                              ))}
-                            </ul>
-                          </div>
-                          {comparedReferences.length === 2 ? (
-                            <div className="vbs-compare-panel">
-                              <div className="vbs-compare-panel-head">
-                                <h4>Compare winners</h4>
-                                <p className="vbs-meta">Two references selected for side-by-side steering.</p>
-                              </div>
-                              <div className="vbs-compare-grid">
-                                {comparedReferences.map((reference) => (
-                                  <article key={reference.id} className="vbs-compare-card">
-                                    <p className="vbs-meta">
-                                      #{reference.ranking.rank} • {toPlatformLabel(reference.sourcePlatform)}
-                                    </p>
-                                    <strong>{compactText(reference.ranking.rationaleTitle, 80)}</strong>
-                                    <p>{compactText(reference.caption || reference.transcriptSummary || "", 110)}</p>
-                                    <div className="vbs-mini-actions">
-                                      <span className="vbs-chip-toggle is-active">{reference.scores.composite.toFixed(3)}</span>
-                                      <button type="button" onClick={() => setSelectedReferenceId(reference.id)}>
-                                        Focus
-                                      </button>
-                                    </div>
-                                  </article>
-                                ))}
-                              </div>
-                            </div>
-                          ) : null}
-                          <div className="vbs-source-context">
-                            <h4>Source Context</h4>
-                            <p className="vbs-meta">{selectedReference.caption}</p>
-                            <p className="vbs-meta">{selectedReference.transcriptSummary}</p>
-                            <p className="vbs-meta">{selectedReference.ocrSummary}</p>
-                            <p className="vbs-meta">
-                              Formula {selectedReference.explainability.formulaVersion} • Shortcuts: 1 pin, 2 must-use, 3
-                              exclude, 0 clear
-                            </p>
-                          </div>
+                    <div>
+                      <span>Views</span>
+                      <strong>{formatCompactNumber(selectedReference.metrics.views)}</strong>
+                      <p>{selectedReference.metrics.likes} likes • {selectedReference.metrics.comments} comments</p>
+                    </div>
+                    <div>
+                      <span>Interaction Rate</span>
+                      <strong>{formatUnitPercent(selectedReferenceInsights.interactionRateRaw)}</strong>
+                      <p>{selectedReference.metrics.shares} shares</p>
+                    </div>
+                    <div>
+                      <span>Recency</span>
+                      <strong>
+                        {selectedReferenceInsights.postedAgeDays === null
+                          ? "n/a"
+                          : `${selectedReferenceInsights.postedAgeDays}d ago`}
+                      </strong>
+                      <p>{formatTimestamp(selectedReference.metrics.postedAt)}</p>
+                    </div>
+                  </div>
+                  <div className="vbs-top-driver-row">
+                    {selectedReference.explainability.topDrivers.map((driver) => (
+                      <span key={driver} className="vbs-driver-chip">
+                        {driver}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="vbs-analysis-grid">
+                    {selectedReferenceInsights.contributionRows.map(({ key, value }) => (
+                      <div key={key} className="vbs-analysis-metric">
+                        <p>{contributionLabel(key)}</p>
+                        <strong>{(Number(value) * 100).toFixed(1)} pts</strong>
+                        <div className="vbs-analysis-bar">
+                          <span style={{ width: `${Math.max(6, Math.min(100, Number(value) * 320))}%` }} />
                         </div>
-                      ) : (
-                        <div className="vbs-analysis-drawer vbs-analysis-empty">
-                          <p className="vbs-meta">Analysis sidecar</p>
-                          <h3>Select a reference to open its full reasoning.</h3>
-                          <p>
-                            The selected card will stay visible here with its poster, drivers, metrics, source context, and
-                            shortlist actions so curation feels continuous instead of hidden below the board.
-                          </p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="vbs-analysis-grid vbs-normalized-grid">
+                    {selectedReferenceInsights.normalizedRows.map(({ key, value }) => (
+                      <div key={key} className="vbs-analysis-metric">
+                        <p>{normalizedMetricLabel(key)}</p>
+                        <strong>{value.toFixed(1)}%</strong>
+                        <div className="vbs-analysis-bar">
+                          <span style={{ width: `${Math.max(6, Math.min(100, value))}%` }} />
                         </div>
-                      )}
-                    </aside>
+                      </div>
+                    ))}
+                  </div>
+                  <ul>
+                    {selectedReference.explainability.whyRankedHigh.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                  <div className="vbs-source-context">
+                    <h4>Source Context</h4>
+                    <p className="vbs-meta">{selectedReference.caption}</p>
+                    <p className="vbs-meta">{selectedReference.transcriptSummary}</p>
+                    <p className="vbs-meta">{selectedReference.ocrSummary}</p>
+                    <p className="vbs-meta">
+                      Formula {selectedReference.explainability.formulaVersion} • Shortcuts: 1 pin, 2 must-use, 3
+                      exclude, 0 clear
+                    </p>
                   </div>
                 </div>
+              ) : null}
               </article>
             </div>
           </article>
 
-          <article
-            className="vbs-panel vbs-section-shell vbs-chapter-shell vbs-chapter-create vbs-slide-card vbs-page-scroll"
-            id="vbs-slide-create"
-            role="tabpanel"
-            aria-label="Create and save slide"
-            data-chapter="03"
-            tabIndex={0}
-          >
+          <article className="vbs-panel vbs-section-shell" id="vbs-section-create-save">
             <div className="vbs-section-head">
               <div>
                 <p className="vbs-meta">Create & Save</p>
@@ -4927,665 +3161,335 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
               </div>
             </div>
             <div className="vbs-grid">
-              <article className="vbs-panel vbs-prompt-studio vbs-scroll-section" id="vbs-section-generation">
-                <h2 className="vbs-panel-title">Prompt Studio</h2>
-                <p className="vbs-panel-subtitle">
-                  Set the brief once, then refine only the sections that need more edge, clarity, or control.
-                </p>
-                <div className="vbs-create-overview">
-                  <div className="vbs-create-preview-board">
-                    <div className="vbs-create-preview-head">
-                      <div>
-                        <p className="vbs-meta">Campaign preview</p>
-                        <h3>{generation ? "Your pack is becoming a visual gallery" : "The first revision will populate the gallery"}</h3>
-                      </div>
-                      <div className="vbs-output-badge">
-                        {generatedSectionCount}/{PROMPT_STUDIO_SECTIONS.length} live
-                      </div>
-                    </div>
-                    <div className="vbs-create-preview-grid">
-                      {generationGalleryPreview.map((item) => {
-                        const isActive = activePromptSection === item.id;
-                        return (
-                          <button
-                            key={item.id}
-                            type="button"
-                            className={`vbs-create-preview-card ${item.count > 0 ? "is-ready" : ""} ${item.kind === "text" ? "is-script" : ""} ${isActive ? "is-active" : ""}`}
-                            aria-pressed={isActive}
-                            onClick={() => setActivePromptSection(item.id)}
-                          >
-                            <span>{item.kind === "list" ? `${Math.max(1, item.count)} variants` : "Narrative block"}</span>
-                            <strong>{item.title}</strong>
-                            <p>{item.preview}</p>
-                            <small className="vbs-create-preview-handler">
-                              {item.count > 0 ? "Open section handler" : "Waiting for first revision"}
-                            </small>
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <div className="vbs-quality-gate-strip">
-                      {qualityGateCards.map((item) => (
-                        <article key={item.label} className={`vbs-quality-gate-card is-${item.tone}`}>
-                          <span>{item.label}</span>
-                          <strong>{item.value}</strong>
-                        </article>
-                      ))}
-                    </div>
+              <article className="vbs-panel vbs-prompt-studio" id="vbs-section-generation">
+              <h2 className="vbs-panel-title">Prompt Studio</h2>
+              <p className="vbs-panel-subtitle">
+                Two-pane pack builder using Brand DNA + shortlisted references with section-level refine and regenerate controls.
+              </p>
+              <div className="vbs-prompt-two-pane">
+                <div className="vbs-prompt-controls">
+                  <div className="vbs-form-grid">
+                    <label>
+                      Template
+                      <select value={selectedTemplateId} onChange={(event) => setSelectedTemplateId(event.target.value)}>
+                        {promptTemplates.map((template) => (
+                          <option key={template.id} value={template.id}>
+                            {template.title}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Format Target
+                      <select
+                        value={generationFormatTarget}
+                        onChange={(event) => setGenerationFormatTarget(event.target.value as ViralStudioGenerationFormatTarget)}
+                      >
+                        <option value="reel-30">30s Reel</option>
+                        <option value="reel-60">60s Reel</option>
+                        <option value="shorts">YouTube Shorts</option>
+                        <option value="story">Story Sequence</option>
+                      </select>
+                    </label>
                   </div>
-                  <aside className="vbs-save-vault-card">
-                    <p className="vbs-meta">Save vault</p>
-                    <h3>{document ? document.title : generation ? "Campaign Pack Vault" : "Vault waiting for first pack"}</h3>
-                    <p>
-                      Every revision is durable here, so generation feels like a creative timeline instead of disposable output.
-                    </p>
-                    <div className="vbs-save-vault-kpis">
-                      <div>
-                        <span>Autosave</span>
-                        <strong>{autosaveLabel}</strong>
-                      </div>
-                      <div>
-                        <span>Latest</span>
-                        <strong>{latestVersion ? `v${latestVersion.versionNumber}` : generation ? `r${generation.revision}` : "None"}</strong>
-                      </div>
-                      <div>
-                        <span>Exports</span>
-                        <strong>{lastExport ? lastExport.format.toUpperCase() : "Pending"}</strong>
-                      </div>
-                    </div>
-                    <div className="vbs-save-vault-rail">
-                      {versionTimelinePreview.length > 0 ? (
-                        versionTimelinePreview.map((version) => (
-                          <button
-                            key={version.id}
-                            type="button"
-                            className={`vbs-save-vault-step ${promoteVersionId === version.id ? "is-selected" : ""}`}
-                            aria-pressed={promoteVersionId === version.id}
-                            onClick={() => setPromoteVersionId(version.id)}
-                          >
-                            <span>v{version.versionNumber}</span>
-                            <strong>{version.summary || "Snapshot"}</strong>
-                            <p>{formatTimestamp(version.createdAt)}</p>
-                          </button>
-                        ))
+                  <label>
+                    Prompt direction
+                    <textarea value={promptText} rows={4} onChange={(e) => setPromptText(e.target.value)} />
+                  </label>
+                  <p className="vbs-meta">
+                    Active template: {selectedTemplate?.title || "n/a"} • Prioritized references: {prioritizedReferenceCount} •
+                    Format: {toGenerationFormatLabel(generationFormatTarget)}
+                  </p>
+                  <p className="vbs-meta">
+                    Every generation revision is auto-saved into Document Workspace version history.
+                  </p>
+                  {generationSaveStatus ? <p className="vbs-meta">{generationSaveStatus}</p> : null}
+                  <div className="vbs-actions">
+                    <button type="button" disabled={isBusy} onClick={() => void generatePack()}>
+                      Generate Multi-Pack
+                    </button>
+                    <button type="button" disabled={isBusy || !generation} onClick={() => void sendGenerationToChat()}>
+                      Send Pack To Chat
+                    </button>
+                  </div>
+                  {generation ? (
+                    <div className="vbs-quality-report">
+                      <p className="vbs-meta">
+                        Revision {generation.revision} • Quality: {generation.qualityCheck.passed ? "pass" : "review"}
+                      </p>
+                      {qualitySignals.length > 0 ? (
+                        <ul>
+                          {qualitySignals.map((line) => (
+                            <li key={line}>{line}</li>
+                          ))}
+                        </ul>
                       ) : (
-                        <article className="vbs-save-vault-step is-empty">
-                          <span>Vault</span>
-                          <strong>Published versions will appear here.</strong>
-                          <p>Create the first version after the pack looks right.</p>
-                        </article>
+                        <p className="vbs-meta">Quality gate clear: no banned terms, tone violations, or length warnings.</p>
                       )}
+                      <p className="vbs-meta">
+                        Composer prompt: {compactText(generation.promptContext.composedPrompt, 340)}
+                      </p>
                     </div>
-                  </aside>
+                  ) : (
+                    <p className="vbs-meta">No generation yet.</p>
+                  )}
                 </div>
-                <div className="vbs-generation-shell">
-                  <div className="vbs-generation-brief">
-                    <div className="vbs-generation-hero">
-                      <div>
-                        <p className="vbs-meta">Generation brief</p>
-                        <h3>{selectedTemplate?.title || "Campaign pack setup"}</h3>
-                        <p>
-                          Brand DNA, prioritized references, and format target combine here. This should feel like setting
-                          direction, not filling a machine.
-                        </p>
-                      </div>
-                      <div className="vbs-generation-summary">
-                        <div>
-                          <span>References</span>
-                          <strong>{prioritizedReferenceCount}</strong>
-                        </div>
-                        <div>
-                          <span>Format</span>
-                          <strong>{toGenerationFormatLabel(generationFormatTarget)}</strong>
-                        </div>
-                        <div>
-                          <span>Revision</span>
-                          <strong>{generation ? generation.revision : "Draft"}</strong>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="vbs-generation-ribbon" role="status" aria-live="polite">
-                      <span>Auto-save on every revision</span>
-                      <span>{generation ? `Quality ${generation.qualityCheck.passed ? "ready" : "review"}` : "Waiting for first draft"}</span>
-                      <span>{generatedSectionCount}/{PROMPT_STUDIO_SECTIONS.length} sections ready</span>
-                    </div>
-                    <div className="vbs-generation-deliverables">
-                      {PROMPT_STUDIO_SECTIONS.map((sectionMeta) => {
-                        const ready = generation ? readGenerationSectionContent(generation, sectionMeta.id).length > 0 : false;
-                        return (
-                          <span key={sectionMeta.id} className={`vbs-deliverable-chip ${ready ? "is-ready" : ""}`}>
-                            {sectionMeta.title}
-                          </span>
-                        );
-                      })}
-                    </div>
-                    <div className="vbs-prompt-two-pane">
-                      <div className="vbs-prompt-controls vbs-scroll-column">
-                        <div className="vbs-prompt-controls-head">
-                          <div>
-                            <p className="vbs-meta">Direction setup</p>
-                            <h3>Shape the pack once</h3>
-                            <p>
-                              Pick the output frame, add one clear instruction, then let the section cards carry the rest of
-                              the iteration.
-                            </p>
-                          </div>
-                          <div className="vbs-prompt-control-stats">
-                            <div>
-                              <span>Template</span>
-                              <strong>{selectedTemplate?.title || "None"}</strong>
-                            </div>
-                            <div>
-                              <span>Save state</span>
-                              <strong>{generationSaveStatus ? "Synced" : "Ready"}</strong>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="vbs-form-grid">
-                          <label>
-                            Template
-                            <select value={selectedTemplateId} onChange={(event) => setSelectedTemplateId(event.target.value)}>
-                              {promptTemplates.map((template) => (
-                                <option key={template.id} value={template.id}>
-                                  {template.title}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                          <label>
-                            Format Target
-                            <select
-                              value={generationFormatTarget}
-                              onChange={(event) => setGenerationFormatTarget(event.target.value as ViralStudioGenerationFormatTarget)}
-                            >
-                              <option value="reel-30">30s Reel</option>
-                              <option value="reel-60">60s Reel</option>
-                              <option value="shorts">YouTube Shorts</option>
-                              <option value="story">Story Sequence</option>
-                            </select>
-                          </label>
-                        </div>
-                        <label className="vbs-prompt-direction">
-                          Prompt direction
-                          <textarea value={promptText} rows={4} onChange={(e) => setPromptText(e.target.value)} />
-                        </label>
-                        <div className="vbs-generation-actions">
-                          <button type="button" disabled={isBusy} onClick={() => void generatePack()}>
-                            Generate Multi-Pack
-                          </button>
-                          <button type="button" disabled={isBusy || !generation} onClick={() => void sendGenerationToChat()}>
-                            Send Pack To Chat
-                          </button>
-                        </div>
-                        <div className="vbs-generation-notes">
-                          <p className="vbs-meta">Every generation revision is auto-saved into Document Workspace version history.</p>
-                          <p className="vbs-meta">{generationSaveStatus || "Your next revision will appear here as soon as the pack finishes."}</p>
-                        </div>
-                        {generation ? (
-                          <div className="vbs-quality-report">
-                            <p className="vbs-meta">
-                              Revision {generation.revision} • Quality: {generation.qualityCheck.passed ? "pass" : "review"}
-                            </p>
-                            {qualitySignals.length > 0 ? (
+                <div className="vbs-prompt-output">
+                  {generation ? (
+                    PROMPT_STUDIO_SECTIONS.map((sectionMeta) => {
+                      const sectionLines = readGenerationSectionContent(generation, sectionMeta.id);
+                      const sectionInstruction = sectionInstructions[sectionMeta.id] || "";
+                      const isSectionPending = promptActionSection === sectionMeta.id;
+                      return (
+                        <article
+                          key={sectionMeta.id}
+                          className={`vbs-pack-card ${activePromptSection === sectionMeta.id ? "is-active" : ""}`}
+                          onClick={() => setActivePromptSection(sectionMeta.id)}
+                        >
+                          <header className="vbs-pack-card-head">
+                            <h3>{sectionMeta.title}</h3>
+                            <span>{sectionMeta.kind === "list" ? `${sectionLines.length} variants` : "1 block"}</span>
+                          </header>
+                          <div className="vbs-pack-card-body">
+                            {sectionMeta.kind === "list" ? (
                               <ul>
-                                {qualitySignals.map((line) => (
-                                  <li key={line}>{line}</li>
+                                {sectionLines.map((line, index) => (
+                                  <li key={`${sectionMeta.id}-${index}`}>{line}</li>
                                 ))}
                               </ul>
                             ) : (
-                              <p className="vbs-meta">Quality gate clear: no banned terms, tone violations, or length warnings.</p>
+                              <pre>{sectionLines[0] || ""}</pre>
                             )}
-                            <p className="vbs-meta">
-                              Composer prompt: {compactText(generation.promptContext.composedPrompt, 340)}
-                            </p>
                           </div>
-                        ) : (
-                          <div className="vbs-generation-empty">
-                            <p className="vbs-meta">No generation yet. Launch one run to populate the pack gallery.</p>
+                          <label className="vbs-pack-instruction">
+                            Section instruction
+                            <input
+                              value={sectionInstruction}
+                              onChange={(event) => updateSectionInstruction(sectionMeta.id, event.target.value)}
+                              placeholder="How should this section change?"
+                            />
+                          </label>
+                          <div className="vbs-mini-actions">
+                            <button
+                              type="button"
+                              disabled={isBusy}
+                              onClick={() => void runPromptSectionAction(sectionMeta.id, "refine")}
+                            >
+                              {isSectionPending ? "Working…" : "Refine Section"}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isBusy}
+                              onClick={() => void runPromptSectionAction(sectionMeta.id, "regenerate")}
+                            >
+                              {isSectionPending ? "Working…" : "Regenerate Only"}
+                            </button>
                           </div>
-                        )}
-                      </div>
-                      <div className="vbs-prompt-output vbs-scroll-column">
-                        <div className="vbs-output-head">
-                          <div>
-                            <p className="vbs-meta">Pack gallery</p>
-                            <h3>Refine card by card</h3>
-                          </div>
-                          <div className="vbs-output-badge">
-                            {generatedSectionCount}/{PROMPT_STUDIO_SECTIONS.length} live
-                          </div>
-                        </div>
-                        {generation ? (
-                          PROMPT_STUDIO_SECTIONS.map((sectionMeta) => {
-                            const sectionLines = readGenerationSectionContent(generation, sectionMeta.id);
-                            const sectionInstruction = sectionInstructions[sectionMeta.id] || "";
-                            const isSectionPending = promptActionSection === sectionMeta.id;
-                            return (
-                              <article
-                                key={sectionMeta.id}
-                                className={`vbs-pack-card ${activePromptSection === sectionMeta.id ? "is-active" : ""} ${sectionMeta.kind === "text" ? "is-script" : "is-variants"}`}
-                                onClick={() => setActivePromptSection(sectionMeta.id)}
-                              >
-                                <header className="vbs-pack-card-head">
-                                  <div>
-                                    <p className="vbs-meta">{sectionMeta.kind === "list" ? "Variant set" : "Narrative block"}</p>
-                                    <h3>{sectionMeta.title}</h3>
-                                  </div>
-                                  <span>{sectionMeta.kind === "list" ? `${sectionLines.length} variants` : "1 block"}</span>
-                                </header>
-                                <div className="vbs-pack-card-body">
-                                  {sectionMeta.kind === "list" ? (
-                                    <ul className="vbs-pack-variant-list">
-                                      {sectionLines.map((line, index) => (
-                                        <li key={`${sectionMeta.id}-${index}`}>
-                                          <span>{index + 1}</span>
-                                          <p>{line}</p>
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  ) : (
-                                    <div className="vbs-pack-script-panel">
-                                      <pre>{sectionLines[0] || ""}</pre>
-                                    </div>
-                                  )}
-                                </div>
-                                <label className="vbs-pack-instruction">
-                                  Section instruction
-                                  <input
-                                    value={sectionInstruction}
-                                    onChange={(event) => updateSectionInstruction(sectionMeta.id, event.target.value)}
-                                    placeholder="How should this section change?"
-                                  />
-                                </label>
-                                <div className="vbs-mini-actions">
-                                  <button
-                                    type="button"
-                                    disabled={isBusy}
-                                    onClick={() => void runPromptSectionAction(sectionMeta.id, "refine")}
-                                  >
-                                    {isSectionPending ? "Working…" : "Refine Section"}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={isBusy}
-                                    onClick={() => void runPromptSectionAction(sectionMeta.id, "regenerate")}
-                                  >
-                                    {isSectionPending ? "Working…" : "Regenerate Only"}
-                                  </button>
-                                </div>
-                              </article>
-                            );
-                          })
-                        ) : (
-                          <div className="vbs-output vbs-output-empty">
-                            <p className="vbs-meta">Pack gallery waiting</p>
-                            <h3>Run Generate Multi-Pack to create your first working draft</h3>
-                            <p>
-                              The studio will return hooks, scripts, captions, CTAs, and angle remixes as editable cards you
-                              can tune one section at a time.
-                            </p>
-                          </div>
-                        )}
-                      </div>
+                        </article>
+                      );
+                    })
+                  ) : (
+                    <div className="vbs-output">
+                      <p className="vbs-meta">Run Generate Multi-Pack to populate section cards.</p>
                     </div>
-                  </div>
+                  )}
                 </div>
+              </div>
               </article>
 
-              <article className="vbs-panel vbs-document-workspace vbs-scroll-section" id="vbs-section-documents">
-                <h2 className="vbs-panel-title">Document Workspace</h2>
-                <p className="vbs-panel-subtitle">
-                  Keep the winning pack as a durable working document, then publish clean versions without losing history.
-                </p>
-                <div className="vbs-document-shell">
-                  <div className="vbs-document-topline">
-                    <div className="vbs-document-hero">
-                      <div>
-                        <p className="vbs-meta">Document control</p>
-                        <h3>{document ? document.title : "No document created yet"}</h3>
-                        <p>
-                          This is the durable artifact for the campaign. Edit the content directly, then snapshot versions when
-                          the team reaches a better draft.
-                        </p>
-                      </div>
-                      <div className="vbs-document-summary">
-                        <div>
-                          <span>Versions</span>
-                          <strong>{versions.length}</strong>
-                        </div>
-                        <div>
-                          <span>Autosave</span>
-                          <strong>
-                            {autosaveState === "saving"
-                              ? "Saving"
-                              : autosaveState === "saved"
-                                ? "Saved"
-                                : autosaveState === "error"
-                                  ? "Error"
-                                  : documentDirty
-                                    ? "Pending"
-                                    : "Idle"}
-                          </strong>
-                        </div>
-                        <div>
-                          <span>Export</span>
-                          <strong>{lastExport ? lastExport.format.toUpperCase() : "None"}</strong>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="vbs-vault-summary-grid">
-                      <article className="vbs-vault-summary-card">
-                        <span>Current draft</span>
-                        <strong>{documentDraft ? `${documentDraft.sections.length} sections live` : "Not created yet"}</strong>
-                        <p>{documentDirty ? "There are unsaved edits waiting in the editor." : "The working document is in sync."}</p>
-                      </article>
-                      <article className="vbs-vault-summary-card">
-                        <span>Latest version</span>
-                        <strong>{latestVersion ? latestVersion.summary || `Version ${latestVersion.versionNumber}` : "No published version"}</strong>
-                        <p>{latestVersion ? formatTimestamp(latestVersion.createdAt) : "Create a version to lock the draft."}</p>
-                      </article>
-                      <article className="vbs-vault-summary-card">
-                        <span>Export state</span>
-                        <strong>{lastExport ? `${lastExport.format.toUpperCase()} ready` : "No export yet"}</strong>
-                        <p>{lastExport ? "A fresh export is ready from the latest saved draft." : "Markdown and JSON exports appear after the first save."}</p>
-                      </article>
-                    </div>
-                    <div className="vbs-document-action-bar">
-                      <div className="vbs-document-actions">
-                        <button
-                          type="button"
-                          disabled={isBusy || !generation || Boolean(document)}
-                          onClick={() => void createDocumentFromGeneration()}
-                        >
-                          {document ? "Document Ready" : "Create Document"}
-                        </button>
-                        <button type="button" disabled={isBusy || !documentDraft || !documentDirty} onClick={() => void saveDocumentNow()}>
-                          Save Draft
-                        </button>
-                        <button type="button" disabled={isBusy || !document} onClick={() => void snapshotVersion()}>
-                          Create Version
-                        </button>
-                      </div>
-                      <div className="vbs-document-actions vbs-document-actions-secondary">
-                        <button type="button" disabled={isBusy || !document} onClick={() => void exportDocument("markdown")}>
-                          Export MD
-                        </button>
-                        <button type="button" disabled={isBusy || !document} onClick={() => void exportDocument("json")}>
-                          Export JSON
-                        </button>
-                      </div>
-                    </div>
-                    <div className="vbs-document-ribbon" role="status" aria-live="polite">
-                      <span>Document {document ? "ready" : "not created yet"}</span>
-                      <span>{versions.length} versions</span>
-                      <span>Autosave {autosaveLabel.toLowerCase()}</span>
-                      <span>{latestVersion ? `Latest ${formatTimestamp(latestVersion.createdAt)}` : "No published version yet"}</span>
-                    </div>
-                    {generationSaveStatus ? <p className="vbs-meta">{generationSaveStatus}</p> : null}
-                  </div>
-                  {documentDraft ? (
-                    <div className="vbs-document-layout">
-                      <div className="vbs-doc-editor vbs-scroll-column">
-                        <div className="vbs-doc-editor-head">
-                          <div>
-                            <p className="vbs-meta">Editor canvas</p>
-                            <h3>Shape the durable draft</h3>
-                            <p>Reorder sections, polish the copy, and let autosave hold the working state while versions capture milestones.</p>
-                          </div>
-                          <div className="vbs-document-summary vbs-document-summary-compact">
-                            <div>
-                              <span>Sections</span>
-                              <strong>{documentDraft.sections.length}</strong>
-                            </div>
-                            <div>
-                              <span>Latest export</span>
-                              <strong>{lastExport ? lastExport.format.toUpperCase() : "None"}</strong>
-                            </div>
-                          </div>
-                        </div>
-                        <label className="vbs-doc-title-input">
-                          Document title
+              <article className="vbs-panel vbs-document-workspace" id="vbs-section-documents">
+              <h2 className="vbs-panel-title">Document Workspace</h2>
+              <p className="vbs-panel-subtitle">
+                Editable campaign artifact with autosave every 10s, version timeline, compare view, and promote/rollback workflow.
+              </p>
+              <div className="vbs-actions">
+                <button
+                  type="button"
+                  disabled={isBusy || !generation || Boolean(document)}
+                  onClick={() => void createDocumentFromGeneration()}
+                >
+                  {document ? "Document Ready" : "Create Document"}
+                </button>
+                <button type="button" disabled={isBusy || !documentDraft || !documentDirty} onClick={() => void saveDocumentNow()}>
+                  Save Draft
+                </button>
+                <button type="button" disabled={isBusy || !document} onClick={() => void snapshotVersion()}>
+                  Create Version
+                </button>
+                <button type="button" disabled={isBusy || !document} onClick={() => void exportDocument("markdown")}>
+                  Export MD
+                </button>
+                <button type="button" disabled={isBusy || !document} onClick={() => void exportDocument("json")}>
+                  Export JSON
+                </button>
+              </div>
+              <p className="vbs-meta" role="status" aria-live="polite">
+                Document: {document ? document.title : "none"} • Versions: {versions.length} • Autosave:{" "}
+                {autosaveState === "saving"
+                  ? "saving..."
+                  : autosaveState === "saved"
+                    ? "saved"
+                    : autosaveState === "error"
+                      ? "error"
+                      : documentDirty
+                        ? "pending edits"
+                        : "idle"}
+              </p>
+              {generationSaveStatus ? <p className="vbs-meta">{generationSaveStatus}</p> : null}
+              {documentDraft ? (
+                <div className="vbs-doc-editor">
+                  <label className="vbs-doc-title-input">
+                    Document title
+                    <input
+                      value={documentDraft.title}
+                      onChange={(event) => updateDocumentTitle(event.target.value)}
+                    />
+                  </label>
+
+                  <div className="vbs-doc-sections">
+                    {documentDraft.sections.map((section, index) => (
+                      <article key={section.id} className="vbs-doc-section-card">
+                        <div className="vbs-doc-section-head">
                           <input
-                            value={documentDraft.title}
-                            onChange={(event) => updateDocumentTitle(event.target.value)}
+                            value={section.title}
+                            onChange={(event) => updateDocumentSectionTitle(section.id, event.target.value)}
+                            aria-label={`Section ${index + 1} title`}
                           />
+                          <div className="vbs-mini-actions">
+                            <button
+                              type="button"
+                              disabled={isBusy || index === 0}
+                              onClick={() => reorderDocumentSection(section.id, "up")}
+                            >
+                              Move Up
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isBusy || index === documentDraft.sections.length - 1}
+                              onClick={() => reorderDocumentSection(section.id, "down")}
+                            >
+                              Move Down
+                            </button>
+                          </div>
+                        </div>
+                        <textarea
+                          rows={Array.isArray(section.content) ? Math.max(4, section.content.length + 1) : 8}
+                          value={toSectionText(section)}
+                          onChange={(event) => updateDocumentSectionContent(section.id, event.target.value)}
+                        />
+                        <p className="vbs-meta">{section.kind} section</p>
+                      </article>
+                    ))}
+                  </div>
+
+                  <div className="vbs-doc-version-tools">
+                    <div className="vbs-doc-compare-controls">
+                      <h3>Version Compare</h3>
+                      <div className="vbs-form-grid">
+                        <label>
+                          Left
+                          <select
+                            value={compareLeftVersionId}
+                            onChange={(event) => setCompareLeftVersionId(event.target.value)}
+                          >
+                            {versionOptions.map((option) => (
+                              <option key={`left-${option.id}`} value={option.id}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
                         </label>
-
-                        <div className="vbs-doc-sections">
-                          {documentDraft.sections.map((section, index) => (
-                            <article key={section.id} className="vbs-doc-section-card">
-                              <div className="vbs-doc-section-head">
-                                <input
-                                  value={section.title}
-                                  onChange={(event) => updateDocumentSectionTitle(section.id, event.target.value)}
-                                  aria-label={`Section ${index + 1} title`}
-                                />
-                                <div className="vbs-mini-actions">
-                                  <button
-                                    type="button"
-                                    disabled={isBusy || index === 0}
-                                    onClick={() => reorderDocumentSection(section.id, "up")}
-                                  >
-                                    Move Up
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={isBusy || index === documentDraft.sections.length - 1}
-                                    onClick={() => reorderDocumentSection(section.id, "down")}
-                                  >
-                                    Move Down
-                                  </button>
-                                </div>
-                              </div>
-                              <textarea
-                                rows={Array.isArray(section.content) ? Math.max(4, section.content.length + 1) : 8}
-                                value={toSectionText(section)}
-                                onChange={(event) => updateDocumentSectionContent(section.id, event.target.value)}
-                              />
-                              <p className="vbs-meta">{section.kind} section</p>
-                            </article>
-                          ))}
-                        </div>
+                        <label>
+                          Right
+                          <select
+                            value={compareRightVersionId}
+                            onChange={(event) => setCompareRightVersionId(event.target.value)}
+                          >
+                            {versionOptions.map((option) => (
+                              <option key={`right-${option.id}`} value={option.id}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
                       </div>
-
-                      <aside className="vbs-doc-sidebar vbs-scroll-column">
-                        <div className="vbs-doc-sidebar-card vbs-doc-compare-controls">
-                          <h3>Version Compare</h3>
-                          <p className="vbs-meta">Check what changed before you promote a draft into the main working version.</p>
-                          <div className="vbs-form-grid">
-                            <label>
-                              Left
-                              <select
-                                value={compareLeftVersionId}
-                                onChange={(event) => setCompareLeftVersionId(event.target.value)}
-                              >
-                                {versionOptions.map((option) => (
-                                  <option key={`left-${option.id}`} value={option.id}>
-                                    {option.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <label>
-                              Right
-                              <select
-                                value={compareRightVersionId}
-                                onChange={(event) => setCompareRightVersionId(event.target.value)}
-                              >
-                                {versionOptions.map((option) => (
-                                  <option key={`right-${option.id}`} value={option.id}>
-                                    {option.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                          </div>
-                          <div className="vbs-actions">
-                            <button type="button" disabled={compareLoading || !document} onClick={() => void runVersionCompare()}>
-                              {compareLoading ? "Comparing..." : "Compare Versions"}
-                            </button>
-                          </div>
-                          {comparison ? (
-                            <div className="vbs-doc-compare-results">
-                              <p className="vbs-meta">
-                                {comparison.changedSections} changed sections out of {comparison.totalSections}
-                              </p>
-                              <ul>
-                                {comparison.sectionDiffs.slice(0, 12).map((diff) => (
-                                  <li key={diff.sectionKey}>
-                                    <strong>{diff.title}</strong> • {diff.changed ? "changed" : "unchanged"}
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          ) : null}
-                        </div>
-
-                        <div className="vbs-doc-sidebar-card vbs-doc-timeline">
-                          <h3>Version Timeline</h3>
-                          <p className="vbs-meta">Every checkpoint stays durable, so the team can safely roll forward without losing history.</p>
-                          <div className="vbs-version-rail">
-                            {versionTimelinePreview.length > 0 ? (
-                              versionTimelinePreview.map((version) => (
-                                <button
-                                  key={version.id}
-                                  type="button"
-                                  className={`vbs-version-card ${promoteVersionId === version.id ? "is-selected" : ""}`}
-                                  onClick={() => setPromoteVersionId(version.id)}
-                                >
-                                  <span>v{version.versionNumber}</span>
-                                  <strong>{version.summary || "Snapshot"}</strong>
-                                  <p>{formatTimestamp(version.createdAt)}</p>
-                                </button>
-                              ))
-                            ) : (
-                              <div className="vbs-version-card is-empty">
-                                <span>Timeline</span>
-                                <strong>Your first published version will appear here.</strong>
-                                <p>Use Create Version once the draft is ready to lock it in.</p>
-                              </div>
-                            )}
-                          </div>
-                          <div className="vbs-form-grid">
-                            <label>
-                              Promote version
-                              <select value={promoteVersionId} onChange={(event) => setPromoteVersionId(event.target.value)}>
-                                <option value="">Select version</option>
-                                {versions
-                                  .slice()
-                                  .reverse()
-                                  .map((version) => (
-                                    <option key={version.id} value={version.id}>
-                                      {version.summary || "Snapshot"} • {new Date(version.createdAt).toLocaleString()}
-                                    </option>
-                                  ))}
-                              </select>
-                            </label>
-                          </div>
-                          <div className="vbs-actions">
-                            <button type="button" disabled={isBusy || !promoteVersionId} onClick={() => void promoteVersion()}>
-                              Promote Version
-                            </button>
-                          </div>
+                      <div className="vbs-actions">
+                        <button type="button" disabled={compareLoading || !document} onClick={() => void runVersionCompare()}>
+                          {compareLoading ? "Comparing..." : "Compare Versions"}
+                        </button>
+                      </div>
+                      {comparison ? (
+                        <div className="vbs-doc-compare-results">
+                          <p className="vbs-meta">
+                            {comparison.changedSections} changed sections out of {comparison.totalSections}
+                          </p>
                           <ul>
+                            {comparison.sectionDiffs.slice(0, 12).map((diff) => (
+                              <li key={diff.sectionKey}>
+                                <strong>{diff.title}</strong> • {diff.changed ? "changed" : "unchanged"}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="vbs-doc-timeline">
+                      <h3>Version Timeline</h3>
+                      <div className="vbs-form-grid">
+                        <label>
+                          Promote version
+                          <select value={promoteVersionId} onChange={(event) => setPromoteVersionId(event.target.value)}>
+                            <option value="">Select version</option>
                             {versions
                               .slice()
                               .reverse()
                               .map((version) => (
-                                <li key={version.id}>
-                                  <strong>{version.summary}</strong> • {version.author} • {formatTimestamp(version.createdAt)}
-                                  {version.basedOnVersionId ? ` • based on ${version.basedOnVersionId}` : ""}
-                                </li>
+                                <option key={version.id} value={version.id}>
+                                  {version.summary || "Snapshot"} • {new Date(version.createdAt).toLocaleString()}
+                                </option>
                               ))}
-                          </ul>
-                        </div>
-                      </aside>
+                          </select>
+                        </label>
+                      </div>
+                      <div className="vbs-actions">
+                        <button type="button" disabled={isBusy || !promoteVersionId} onClick={() => void promoteVersion()}>
+                          Promote Version
+                        </button>
+                      </div>
+                      <ul>
+                        {versions
+                          .slice()
+                          .reverse()
+                          .map((version) => (
+                            <li key={version.id}>
+                              <strong>{version.summary}</strong> • {version.author} • {formatTimestamp(version.createdAt)}
+                              {version.basedOnVersionId ? ` • based on ${version.basedOnVersionId}` : ""}
+                            </li>
+                          ))}
+                      </ul>
                     </div>
-                  ) : (
-                    <div className="vbs-document-empty">
-                      <p className="vbs-meta">Document workspace waiting</p>
-                      <h3>Turn the best pack into a working document</h3>
-                      <p>
-                        Once created, the document becomes the durable team artifact for edits, version snapshots, exports, and
-                        rollback.
-                      </p>
-                    </div>
-                  )}
-                  {lastExport ? (
-                    <div className="vbs-export-preview">
-                      <p className="vbs-meta">Last export ({lastExport.format})</p>
-                      <pre>{lastExport.content}</pre>
-                    </div>
-                  ) : null}
+                  </div>
                 </div>
+              ) : (
+                <p className="vbs-meta">No document created yet. Generate a pack and create a document to start editing.</p>
+              )}
+              {lastExport ? (
+                <div className="vbs-export-preview">
+                  <p className="vbs-meta">Last export ({lastExport.format})</p>
+                  <pre>{lastExport.content}</pre>
+                </div>
+              ) : null}
               </article>
             </div>
           </article>
         </>
       ) : (
-        <>
-          <article
-            className="vbs-panel vbs-slide-card vbs-page-scroll"
-            id="vbs-slide-reference"
-            role="tabpanel"
-            aria-label="Reference engine slide"
-            tabIndex={0}
-          >
-            <h2 className="vbs-panel-title">Workflow Locked Until DNA Finalization</h2>
-            <p className="vbs-panel-subtitle">Plan 2 onboarding gate is active. Complete and finalize Brand DNA to unlock extraction, generation, and document actions.</p>
-          </article>
-          <article
-            className="vbs-panel vbs-slide-card vbs-page-scroll"
-            id="vbs-slide-create"
-            role="tabpanel"
-            aria-label="Create and save slide"
-            tabIndex={0}
-          >
-            <h2 className="vbs-panel-title">Create & Save unlocks after DNA finalization</h2>
-            <p className="vbs-panel-subtitle">Finish the Brand DNA flow once and the generation + versioning workspace will unlock automatically.</p>
-          </article>
-        </>
+        <article className="vbs-panel">
+          <h2 className="vbs-panel-title">Workflow Locked Until DNA Finalization</h2>
+          <p className="vbs-panel-subtitle">Plan 2 onboarding gate is active. Complete and finalize Brand DNA to unlock extraction, generation, and document actions.</p>
+        </article>
       )}
-        </div>
-      </div>
-
-      {showGlobalActionDock ? (
-        <div className="vbs-action-dock" role="toolbar" aria-label="Viral Studio handlers">
-          <div className="vbs-action-dock-copy">
-            <p className="vbs-meta">{actionDock.eyebrow}</p>
-            <h2>{actionDock.title}</h2>
-            <p>{actionDock.note}</p>
-          </div>
-          <div className="vbs-action-dock-actions">
-            {actionDock.actions.map((action) => {
-              const Icon = action.icon;
-              return (
-                <button
-                  key={action.key}
-                  type="button"
-                  className={action.emphasis === "primary" ? "vbs-handler-button is-primary" : "vbs-handler-button"}
-                  disabled={action.disabled}
-                  onClick={() => void action.run()}
-                >
-                  <Icon className="h-4 w-4" />
-                  {action.label}
-                </button>
-              );
-            })}
-          </div>
-          <div className="vbs-action-dock-meta">
-            <div className="vbs-save-ribbon">
-              <span>Auto-save</span>
-              <strong>{actionDock.saveNote}</strong>
-            </div>
-            <div className="vbs-shortcut-chips">
-              {actionDock.shortcuts.map((shortcut) => (
-                <span key={shortcut}>{shortcut}</span>
-              ))}
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       {showExtractionModal ? (
         <div
@@ -5596,108 +3500,62 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
           onClick={() => setShowExtractionModal(false)}
         >
           <div className="vbs-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="vbs-modal-grid">
-              <div className="vbs-modal-copy">
-                <h3>Extract Best Videos</h3>
-                <p className="vbs-meta">
-                  Start from the strongest source, choose the scan depth, and let the run pipeline handle the rest.
-                </p>
-                <div className="vbs-extraction-facts">
-                  <div>
-                    <span>Recommended</span>
-                    <strong>Data max</strong>
-                  </div>
-                  <div>
-                    <span>Volume</span>
-                    <strong>{maxVideos} videos</strong>
-                  </div>
-                  <div>
-                    <span>Lookback</span>
-                    <strong>{lookbackDays} days</strong>
-                  </div>
-                </div>
-                {suggestedSources.length ? (
-                  <div className="vbs-source-suggest-list">
-                    {suggestedSources.slice(0, 3).map((source) => (
-                      <button
-                        key={`${source.platform}:${source.sourceUrl}`}
-                        type="button"
-                        className="vbs-source-suggest-row"
-                        onClick={() => {
-                          setSourcePlatform(source.platform);
-                          setSourceUrl(source.sourceUrl);
-                          applyIngestionPreset("data-max");
-                        }}
-                      >
-                        <div>
-                          <p>
-                            <strong>{source.label}</strong>
-                          </p>
-                          <p className="vbs-meta">
-                            {toPlatformLabel(source.platform)} • {Math.round((source.confidence || 0) * 100)}%
-                          </p>
-                        </div>
-                        <span className="vbs-meta">Apply</span>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="vbs-modal-form">
-                <div className="vbs-form-grid">
-                  <label>
-                    Platform
-                    <select value={sourcePlatform} onChange={(e) => setSourcePlatform(e.target.value as ViralStudioPlatform)}>
-                      <option value="instagram">Instagram</option>
-                      <option value="tiktok">TikTok</option>
-                      <option value="youtube">YouTube</option>
-                    </select>
-                  </label>
-                  <label>
-                    Source URL
-                    <input value={sourceUrl} placeholder="https://..." onChange={(e) => setSourceUrl(e.target.value)} />
-                  </label>
-                  <label>
-                    Filter Preset
-                    <select
-                      value={ingestionPreset}
-                      onChange={(e) => applyIngestionPreset(e.target.value as IngestionPreset)}
-                    >
-                      <option value="data-max">Data max (Recommended)</option>
-                      <option value="balanced">Balanced</option>
-                      <option value="quick-scan">Quick Scan</option>
-                      <option value="deep-scan">Deep Scan</option>
-                    </select>
-                  </label>
-                  <label>
-                    Volume (max videos): {maxVideos}
-                    <input
-                      type="range"
-                      min={5}
-                      max={200}
-                      value={maxVideos}
-                      onChange={(e) => setMaxVideos(Number(e.target.value))}
-                    />
-                  </label>
-                  <label>
-                    Lookback Days
-                    <input
-                      type="number"
-                      min={7}
-                      max={365}
-                      value={lookbackDays}
-                      onChange={(e) => setLookbackDays(Number(e.target.value))}
-                    />
-                  </label>
-                  <label>
-                    Sort By
-                    <select value="engagement" disabled>
-                      <option value="engagement">Engagement (default)</option>
-                    </select>
-                  </label>
-                </div>
-              </div>
+            <h3>Extract Best Videos</h3>
+            <p className="vbs-meta">
+              Configure platform, profile URL, preset, and extraction volume. Progress updates automatically while the
+              run is active.
+            </p>
+            <div className="vbs-form-grid">
+              <label>
+                Platform
+                <select value={sourcePlatform} onChange={(e) => setSourcePlatform(e.target.value as ViralStudioPlatform)}>
+                  <option value="instagram">Instagram</option>
+                  <option value="tiktok">TikTok</option>
+                  <option value="youtube">YouTube</option>
+                </select>
+              </label>
+              <label>
+                Source URL
+                <input value={sourceUrl} placeholder="https://..." onChange={(e) => setSourceUrl(e.target.value)} />
+              </label>
+              <label>
+                Filter Preset
+                <select
+                  value={ingestionPreset}
+                  onChange={(e) => applyIngestionPreset(e.target.value as IngestionPreset)}
+                >
+                  <option value="data-max">Data max (Recommended)</option>
+                  <option value="balanced">Balanced</option>
+                  <option value="quick-scan">Quick Scan</option>
+                  <option value="deep-scan">Deep Scan</option>
+                </select>
+              </label>
+              <label>
+                Volume (max videos): {maxVideos}
+                <input
+                  type="range"
+                  min={5}
+                  max={200}
+                  value={maxVideos}
+                  onChange={(e) => setMaxVideos(Number(e.target.value))}
+                />
+              </label>
+              <label>
+                Lookback Days
+                <input
+                  type="number"
+                  min={7}
+                  max={365}
+                  value={lookbackDays}
+                  onChange={(e) => setLookbackDays(Number(e.target.value))}
+                />
+              </label>
+              <label>
+                Sort By
+                <select value="engagement" disabled>
+                  <option value="engagement">Engagement (default)</option>
+                </select>
+              </label>
             </div>
             <div className="vbs-actions">
               <button type="button" onClick={() => setShowExtractionModal(false)} disabled={isBusy}>
