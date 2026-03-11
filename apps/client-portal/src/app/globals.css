@@ -233,8 +233,19 @@ select:focus-visible {
 
 .vbs-shell-slides {
   min-height: calc(100dvh - 8.5rem);
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  height: var(--vbs-shell-height, calc(100dvh - 8.5rem));
+  display: flex;
+  flex-direction: column;
+  gap: 1.15rem;
+  padding-bottom: 0;
   overflow: hidden;
+}
+
+.vbs-shell-slides > .vbs-reset-hero,
+.vbs-shell-slides > .vbs-alert,
+.vbs-shell-slides > .vbs-slide-toolbar,
+.vbs-shell-slides > .vbs-stage-handler-rail {
+  flex-shrink: 0;
 }
 
 .vbs-slide-toolbar {
@@ -314,8 +325,9 @@ select:focus-visible {
 .vbs-slide-viewport {
   position: relative;
   z-index: 1;
+  flex: 1 1 auto;
   min-height: 0;
-  height: clamp(560px, 72dvh, 1040px);
+  height: auto;
   border-radius: 1.3rem;
   overflow: hidden;
 }
@@ -400,6 +412,188 @@ select:focus-visible {
   font-family: var(--vbs-display-font);
   font-size: 1.04rem;
   color: white;
+}
+
+.vbs-shell-slides.is-compact {
+  gap: 0.85rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-reset-hero {
+  grid-template-columns: minmax(0, 1.25fr) minmax(300px, 0.95fr);
+  gap: 0.75rem;
+  padding: 0.8rem 0.95rem;
+  border-radius: 1.2rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-reset-hero::after {
+  width: 18rem;
+  height: 18rem;
+  inset: auto -6% -34% auto;
+  opacity: 0.75;
+}
+
+.vbs-shell-slides.is-compact .vbs-chip {
+  display: none;
+}
+
+.vbs-shell-slides.is-compact .vbs-title {
+  margin-top: 0;
+  font-size: clamp(1.45rem, 2vw, 2rem);
+}
+
+.vbs-shell-slides.is-compact .vbs-subtitle {
+  display: none;
+}
+
+.vbs-shell-slides.is-compact .vbs-reset-meta {
+  gap: 0.55rem;
+  align-self: stretch;
+}
+
+.vbs-shell-slides.is-compact .vbs-reset-meta > div {
+  padding: 0.52rem 0.62rem;
+  border-radius: 0.82rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-reset-meta span {
+  font-size: 0.56rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-reset-meta strong {
+  font-size: 0.82rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-slide-toolbar {
+  padding: 0.35rem;
+  border-radius: 0.82rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-slide-tab {
+  min-height: 52px;
+  min-width: 7.2rem;
+  padding: 0.28rem 0.48rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-slide-tab span {
+  font-size: 0.56rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-slide-tab strong {
+  font-size: 0.74rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-slide-tab small {
+  font-size: 0.58rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-stage-handler-rail {
+  gap: 0.45rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-stage-handler {
+  grid-template-columns: auto minmax(0, 1fr);
+  min-height: 54px;
+  padding: 0.45rem 0.52rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-stage-handler-icon {
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.62rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-stage-handler-copy strong {
+  font-size: 0.7rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-stage-handler-copy small,
+.vbs-shell-slides.is-compact .vbs-stage-handler-state {
+  display: none;
+}
+
+.vbs-shell-slides.is-compact .vbs-stage-handler-progress {
+  margin-top: 0.16rem;
+  height: 0.24rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-section-shell {
+  gap: 0.9rem;
+  padding: 1.05rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-section-head {
+  gap: 0.75rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-panel-title {
+  font-size: 1.12rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-panel-subtitle {
+  margin: 0.22rem 0 0;
+  font-size: 0.8rem;
+  line-height: 1.42;
+}
+
+.vbs-shell-slides.is-compact .vbs-status-strip {
+  gap: 0.4rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-status-strip span {
+  padding: 0.35rem 0.62rem;
+  font-size: 0.68rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-action-dock {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 1.15rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-action-dock-copy {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-action-dock-copy h2 {
+  font-size: 1.02rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-action-dock-copy .vbs-meta {
+  margin: 0;
+}
+
+.vbs-shell-slides.is-compact .vbs-action-dock-copy p:not(.vbs-meta) {
+  display: none;
+}
+
+.vbs-shell-slides.is-compact .vbs-action-dock-actions {
+  gap: 0.45rem;
+  align-content: start;
+}
+
+.vbs-shell-slides.is-compact .vbs-handler-button {
+  padding-inline: 0.82rem;
+  font-size: 0.82rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-action-dock-meta {
+  gap: 0.55rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-shortcut-chips {
+  display: none;
+}
+
+.vbs-shell-slides.is-compact .vbs-save-ribbon,
+.vbs-shell-slides.is-compact .vbs-shortcut-chips span {
+  padding: 0.26rem 0.54rem;
+  font-size: 0.64rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-save-ribbon span {
+  display: none;
 }
 
 .vbs-launchpad {
@@ -1624,6 +1818,66 @@ select:focus-visible {
   grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
   gap: 0.85rem;
   align-items: start;
+}
+
+.vbs-reference-slide {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 100%;
+  overflow: hidden;
+}
+
+.vbs-reference-slide .vbs-grid {
+  min-height: 0;
+  align-items: stretch;
+}
+
+.vbs-reference-slide .vbs-grid > .vbs-panel:first-child {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.vbs-reference-slide .vbs-grid > .vbs-panel:last-child {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.vbs-reference-slide .vbs-run-history {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 0.12rem;
+}
+
+.vbs-reference-slide .vbs-curation-shell {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.vbs-reference-slide .vbs-curation-layout {
+  min-height: 0;
+  align-items: stretch;
+  overflow: hidden;
+}
+
+.vbs-reference-slide .vbs-reference-board-shell {
+  min-height: 0;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.vbs-reference-slide .vbs-analysis-sidecar {
+  min-height: 0;
+  max-height: none;
+  overflow: hidden;
+}
+
+.vbs-reference-slide .vbs-reference-board-wrap,
+.vbs-reference-slide .vbs-analysis-sidecar .vbs-analysis-drawer {
+  min-height: 0;
+  max-height: none;
 }
 
 .vbs-reference-board-shell,

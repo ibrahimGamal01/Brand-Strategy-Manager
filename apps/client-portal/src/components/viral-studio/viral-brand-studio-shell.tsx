@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { LucideIcon } from "lucide-react";
@@ -982,6 +983,7 @@ function delay(ms: number): Promise<void> {
 export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const shellRef = useRef<HTMLElement | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
@@ -1038,6 +1040,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   const [maxVideos, setMaxVideos] = useState(120);
   const [lookbackDays, setLookbackDays] = useState(365);
   const [showExtractionModal, setShowExtractionModal] = useState(false);
+  const [shellViewportHeight, setShellViewportHeight] = useState<number | null>(null);
   const [promptText, setPromptText] = useState(
     "Generate a campaign-ready multi-pack with aggressive hooks, proof-backed scripts, and direct CTAs."
   );
@@ -1098,6 +1101,39 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       // Ignore storage failures.
     }
   }, [onboardingStepStorageKey, activeSlideStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const shellNode = shellRef.current;
+    if (!shellNode) return;
+
+    let animationFrame = 0;
+    const measure = () => {
+      window.cancelAnimationFrame(animationFrame);
+      animationFrame = window.requestAnimationFrame(() => {
+        const rect = shellNode.getBoundingClientRect();
+        const nextHeight = Math.max(520, Math.floor(window.innerHeight - rect.top - 12));
+        setShellViewportHeight((previous) => {
+          if (previous !== null && Math.abs(previous - nextHeight) < 2) return previous;
+          return nextHeight;
+        });
+      });
+    };
+
+    measure();
+    const resizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    const appHeader = window.document.querySelector("header");
+    const appMain = window.document.querySelector("main");
+    resizeObserver?.observe(shellNode);
+    if (appHeader instanceof Element) resizeObserver?.observe(appHeader);
+    if (appMain instanceof Element) resizeObserver?.observe(appMain);
+    window.addEventListener("resize", measure);
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.removeEventListener("resize", measure);
+      resizeObserver?.disconnect();
+    };
+  }, []);
 
   const refreshTelemetry = useCallback(async () => {
     try {
@@ -3336,6 +3372,13 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   const canSlideBack = activeSlideIndex > 0;
   const canSlideForward = activeSlideIndex < STUDIO_SLIDE_ORDER.length - 1;
   const slideTransform = `translateX(-${activeSlideIndex * 100}%)`;
+  const shellStyle = useMemo(
+    () =>
+      shellViewportHeight
+        ? ({ ["--vbs-shell-height" as string]: `${shellViewportHeight}px` } as CSSProperties)
+        : undefined,
+    [shellViewportHeight]
+  );
 
   if (loading) {
     return (
@@ -3348,7 +3391,13 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   }
 
   return (
-    <section className="vbs-shell vbs-shell-slides">
+    <section
+      ref={shellRef}
+      className={["vbs-shell", "vbs-shell-slides", activeSlide === "launchpad" ? "" : "is-compact"]
+        .filter(Boolean)
+        .join(" ")}
+      style={shellStyle}
+    >
       <header className="vbs-reset-hero">
         <div>
           <p className="vbs-chip">Editorial Reset</p>
@@ -4213,7 +4262,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       {!onboardingLocked ? (
         <>
           <article
-            className="vbs-panel vbs-section-shell vbs-chapter-shell vbs-chapter-reference vbs-slide-card"
+            className="vbs-panel vbs-section-shell vbs-chapter-shell vbs-chapter-reference vbs-slide-card vbs-reference-slide"
             id="vbs-slide-reference"
             role="tabpanel"
             aria-label="Reference engine slide"
