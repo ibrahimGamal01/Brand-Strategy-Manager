@@ -7,14 +7,21 @@ import {
   ViralStudioDocumentSection,
   ViralStudioDocumentVersion,
   ViralStudioDocumentVersionComparison,
+  ViralStudioFormatGenerationJob,
   ViralStudioGenerationFormatTarget,
   ViralStudioGenerationPack,
   ViralStudioGenerationRefineMode,
   ViralStudioGenerationSection,
+  ViralStudioApprovedContentDirection,
+  ViralStudioApprovedDesignDirection,
+  ViralStudioContentDirectionCandidate,
+  ViralStudioContentType,
   ViralStudioIngestionEvent,
   ViralStudioIngestionRun,
+  ViralStudioPlannerSession,
   ViralStudioPlatform,
   ViralStudioPromptTemplate,
+  ViralStudioDesignDirectionCandidate,
   ViralStudioReferenceAsset,
   ViralStudioSuggestedSource,
   ViralStudioStorageModeDiagnostics,
@@ -315,6 +322,121 @@ export async function updateViralStudioReferenceShortlist(
   return parseJson<{ ok: boolean; item: ViralStudioReferenceAsset }>(response);
 }
 
+export async function analyzeViralStudioDesignDirections(workspaceId: string) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/viral-studio/design-directions/analyze`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  return parseJson<{
+    ok: boolean;
+    session: ViralStudioPlannerSession;
+    candidates: ViralStudioDesignDirectionCandidate[];
+  }>(response);
+}
+
+export async function fetchViralStudioDesignDirections(workspaceId: string) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/viral-studio/design-directions`, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+  });
+  return parseJson<{
+    ok: boolean;
+    session: ViralStudioPlannerSession;
+    candidates: ViralStudioDesignDirectionCandidate[];
+    approved: ViralStudioApprovedDesignDirection | null;
+  }>(response);
+}
+
+export async function selectViralStudioDesignDirection(workspaceId: string, directionId: string) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/viral-studio/design-directions/select`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ directionId }),
+  });
+  return parseJson<{
+    ok: boolean;
+    session: ViralStudioPlannerSession;
+    approved: ViralStudioApprovedDesignDirection;
+  }>(response);
+}
+
+export async function analyzeViralStudioContentDirections(workspaceId: string) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/viral-studio/content-directions/analyze`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  return parseJson<{
+    ok: boolean;
+    session: ViralStudioPlannerSession;
+    approvedDesign: ViralStudioApprovedDesignDirection;
+    candidates: ViralStudioContentDirectionCandidate[];
+  }>(response);
+}
+
+export async function fetchViralStudioContentDirections(workspaceId: string) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/viral-studio/content-directions`, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+  });
+  return parseJson<{
+    ok: boolean;
+    session: ViralStudioPlannerSession;
+    approvedDesign: ViralStudioApprovedDesignDirection | null;
+    candidates: ViralStudioContentDirectionCandidate[];
+    approved: ViralStudioApprovedContentDirection | null;
+  }>(response);
+}
+
+export async function selectViralStudioContentDirection(workspaceId: string, directionId: string) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/viral-studio/content-directions/select`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ directionId }),
+  });
+  return parseJson<{
+    ok: boolean;
+    session: ViralStudioPlannerSession;
+    approvedDesign: ViralStudioApprovedDesignDirection;
+    approved: ViralStudioApprovedContentDirection;
+  }>(response);
+}
+
+export async function createViralStudioFormatGeneration(
+  workspaceId: string,
+  payload: { contentType: ViralStudioContentType }
+) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/viral-studio/format-generations`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseJson<{
+    ok: boolean;
+    session: ViralStudioPlannerSession;
+    approvedDesign: ViralStudioApprovedDesignDirection;
+    approvedContent: ViralStudioApprovedContentDirection;
+    generation: ViralStudioFormatGenerationJob;
+  }>(response);
+}
+
+export async function fetchViralStudioFormatGeneration(workspaceId: string, generationId: string) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/viral-studio/format-generations/${generationId}`, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+  });
+  return parseJson<{ ok: boolean; generation: ViralStudioFormatGenerationJob }>(response);
+}
+
 export async function createViralStudioGeneration(
   workspaceId: string,
   payload: {
@@ -365,7 +487,7 @@ export async function refineViralStudioGeneration(
 
 export async function createViralStudioDocument(
   workspaceId: string,
-  payload: { title?: string; generationId: string }
+  payload: { title?: string; generationId?: string; formatGenerationId?: string }
 ) {
   const response = await fetch(`/api/portal/workspaces/${workspaceId}/viral-studio/documents`, {
     method: "POST",

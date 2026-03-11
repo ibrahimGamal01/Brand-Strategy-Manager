@@ -3,16 +3,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
+  analyzeViralStudioContentDirections,
+  analyzeViralStudioDesignDirections,
   applyWorkspaceBrandDnaAutofill,
   compareViralStudioDocumentVersions,
   createViralStudioDocument,
+  createViralStudioFormatGeneration,
   createViralStudioDocumentVersion,
   createViralStudioGeneration,
   createViralStudioIngestion,
   createWorkspaceBrandDna,
   exportViralStudioDocument,
+  fetchViralStudioContentDirections,
   fetchViralStudioContracts,
+  fetchViralStudioDesignDirections,
   fetchViralStudioDocument,
+  fetchViralStudioFormatGeneration,
   fetchViralStudioIngestion,
   fetchViralStudioSuggestedSources,
   fetchViralStudioTelemetry,
@@ -27,6 +33,8 @@ import {
   previewWorkspaceBrandDnaAutofill,
   refineViralStudioGeneration,
   retryViralStudioIngestion,
+  selectViralStudioContentDirection,
+  selectViralStudioDesignDirection,
   updateViralStudioReferenceShortlist,
 } from "@/lib/viral-studio-api";
 import {
@@ -39,15 +47,22 @@ import {
   ViralStudioAutofillFieldKey,
   ViralStudioBrandDnaAutofillPreview,
   BrandDNAProfile,
+  ViralStudioContentDirectionCandidate,
+  ViralStudioContentType,
   ViralStudioContractSnapshot,
+  ViralStudioDesignDirectionCandidate,
   ViralStudioDocument,
   ViralStudioDocumentSection,
   ViralStudioDocumentVersionComparison,
   ViralStudioDocumentVersion,
+  ViralStudioFormatGenerationJob,
   ViralStudioGenerationFormatTarget,
   ViralStudioGenerationPack,
   ViralStudioGenerationSection,
   ViralStudioIngestionRun,
+  ViralStudioApprovedContentDirection,
+  ViralStudioApprovedDesignDirection,
+  ViralStudioPlannerSession,
   ViralStudioPlatform,
   ViralStudioPromptTemplate,
   ViralStudioReferenceAsset,
@@ -409,6 +424,25 @@ function toGenerationFormatLabel(target: ViralStudioGenerationFormatTarget): str
   return "30s Reel";
 }
 
+function toPlannerStageLabel(stage: ViralStudioPlannerSession["stage"] | undefined): string {
+  if (stage === "design_selection") return "Pick design direction";
+  if (stage === "content_strategy") return "Analyze content";
+  if (stage === "content_selection") return "Pick content direction";
+  if (stage === "format_selection") return "Pick content type";
+  if (stage === "format_generation") return "Generating format";
+  if (stage === "document_save") return "Save to document";
+  return "Analyze design directions";
+}
+
+function toContentTypeLabel(contentType: ViralStudioContentType): string {
+  if (contentType === "short_video") return "Short video";
+  if (contentType === "story_sequence") return "Story sequence";
+  if (contentType === "static_post") return "Static post";
+  if (contentType === "caption_set") return "Caption set";
+  if (contentType === "cta_set") return "CTA set";
+  return "Carousel";
+}
+
 function toPromptIntentLabel(intent: ViralStudioPromptTemplate["intent"]): string {
   if (intent === "hook-script") return "Hook-led";
   if (intent === "caption") return "Caption-first";
@@ -736,6 +770,49 @@ function buildGenerationChatBridgePayload(
   };
 }
 
+function buildFormatGenerationChatBridgePayload(
+  generation: ViralStudioFormatGenerationJob,
+  references: ViralStudioReferenceAsset[]
+): ViralStudioChatBridgePayload {
+  const referenceById = new Map(references.map((item) => [item.id, item]));
+  const source = generation.result.sourceReferenceIds
+    .map((id) => referenceById.get(id))
+    .filter((item): item is ViralStudioReferenceAsset => Boolean(item));
+  const citations = buildViralStudioCitations(source);
+  const libraryRefs = citations
+    .map((item) => String(item.libraryRef || "").trim())
+    .filter(Boolean)
+    .slice(0, 20);
+  return {
+    content: [
+      "Use this staged Viral Studio format plan as high-priority execution context.",
+      "",
+      `Format: ${toContentTypeLabel(generation.contentType)}`,
+      `Design direction: ${generation.result.designDetails.typographyTreatment}`,
+      `Summary: ${generation.result.summary}`,
+      "",
+      "Design details:",
+      ...generation.result.designDetails.layoutStructure.map((line) => `- ${line}`),
+      "",
+      "Content details:",
+      `Hook: ${generation.result.contentDetails.hook}`,
+      ...generation.result.contentDetails.narrativeBeats.map((line) => `- ${line}`),
+      generation.result.contentDetails.proofPlacement,
+      generation.result.contentDetails.cta,
+    ].join("\n"),
+    blocksJson: {
+      kind: "viral_studio_format_generation",
+      generationId: generation.id,
+      contentType: generation.contentType,
+      designDetails: generation.result.designDetails,
+      contentDetails: generation.result.contentDetails,
+      citations,
+    },
+    citationsJson: citations,
+    libraryRefs,
+  };
+}
+
 function isStepValid(step: 1 | 2 | 3 | 4, form: BrandFormState): boolean {
   if (step === 1) {
     return Boolean(form.mission && form.valueProposition && form.productOrService && form.region);
@@ -874,6 +951,17 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   const [activeIngestion, setActiveIngestion] = useState<ViralStudioIngestionRun | null>(null);
   const [references, setReferences] = useState<ViralStudioReferenceAsset[]>([]);
   const [generation, setGeneration] = useState<ViralStudioGenerationPack | null>(null);
+  const [plannerSession, setPlannerSession] = useState<ViralStudioPlannerSession | null>(null);
+  const [designDirections, setDesignDirections] = useState<ViralStudioDesignDirectionCandidate[]>([]);
+  const [approvedDesignDirection, setApprovedDesignDirection] =
+    useState<ViralStudioApprovedDesignDirection | null>(null);
+  const [contentDirections, setContentDirections] = useState<ViralStudioContentDirectionCandidate[]>([]);
+  const [approvedContentDirection, setApprovedContentDirection] =
+    useState<ViralStudioApprovedContentDirection | null>(null);
+  const [formatGeneration, setFormatGeneration] = useState<ViralStudioFormatGenerationJob | null>(null);
+  const [selectedPlannerContentType, setSelectedPlannerContentType] =
+    useState<ViralStudioContentType>("short_video");
+  const [plannerCompareIds, setPlannerCompareIds] = useState<string[]>([]);
   const [document, setDocument] = useState<ViralStudioDocument | null>(null);
   const [documentDraft, setDocumentDraft] = useState<ViralStudioDocument | null>(null);
   const [documentDirty, setDocumentDirty] = useState(false);
@@ -961,6 +1049,32 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     }
   }, [workspaceId]);
 
+  const refreshPlanner = useCallback(async () => {
+    try {
+      const [designPayload, contentPayload] = await Promise.all([
+        fetchViralStudioDesignDirections(workspaceId),
+        fetchViralStudioContentDirections(workspaceId),
+      ]);
+      setPlannerSession(designPayload.session);
+      setDesignDirections(designPayload.candidates);
+      setApprovedDesignDirection(designPayload.approved);
+      setContentDirections(contentPayload.candidates);
+      setApprovedContentDirection(contentPayload.approved);
+      setSelectedPlannerContentType(designPayload.session.selectedContentType || "short_video");
+      if (designPayload.session.latestFormatGenerationId) {
+        const formatPayload = await fetchViralStudioFormatGeneration(
+          workspaceId,
+          designPayload.session.latestFormatGenerationId
+        ).catch(() => null);
+        setFormatGeneration(formatPayload?.generation || null);
+      } else {
+        setFormatGeneration(null);
+      }
+    } catch {
+      // Keep prior staged planner snapshot when refresh fails.
+    }
+  }, [workspaceId]);
+
   const bootstrap = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -973,6 +1087,8 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         referencePayload,
         workflowPayload,
         sourcePayload,
+        designPayload,
+        contentPayload,
       ] = await Promise.all([
         fetchWorkspaceBrandDna(workspaceId),
         fetchViralStudioContracts(workspaceId),
@@ -981,6 +1097,8 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         listViralStudioReferences(workspaceId),
         fetchViralStudioWorkflowStatus(workspaceId),
         fetchViralStudioSuggestedSources(workspaceId),
+        fetchViralStudioDesignDirections(workspaceId),
+        fetchViralStudioContentDirections(workspaceId),
       ]);
       setBrandProfile(brandPayload.profile);
       setBrandForm(toFormState(brandPayload.profile));
@@ -992,6 +1110,26 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       setReferences(referencePayload.items);
       setWorkflowStatus(workflowPayload.workflow);
       setSuggestedSources(sourcePayload.items);
+      setPlannerSession(designPayload.session);
+      setDesignDirections(designPayload.candidates);
+      setApprovedDesignDirection(designPayload.approved);
+      setContentDirections(contentPayload.candidates);
+      setApprovedContentDirection(contentPayload.approved);
+      setSelectedPlannerContentType(designPayload.session.selectedContentType || "short_video");
+      setPlannerCompareIds([]);
+      if (designPayload.session.latestFormatGenerationId) {
+        try {
+          const formatPayload = await fetchViralStudioFormatGeneration(
+            workspaceId,
+            designPayload.session.latestFormatGenerationId
+          );
+          setFormatGeneration(formatPayload.generation);
+        } catch {
+          setFormatGeneration(null);
+        }
+      } else {
+        setFormatGeneration(null);
+      }
       if (brandPayload.profile?.status === "final" && brandPayload.profile?.completeness.ready) {
         setOnboardingStep(4);
       }
@@ -1008,12 +1146,12 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      void Promise.all([refreshTelemetry(), refreshWorkflow()]);
+      void Promise.all([refreshTelemetry(), refreshWorkflow(), refreshPlanner()]);
     }, 5000);
     return () => {
       window.clearInterval(timer);
     };
-  }, [refreshTelemetry, refreshWorkflow]);
+  }, [refreshPlanner, refreshTelemetry, refreshWorkflow]);
 
   useEffect(() => {
     if (!promptTemplates.length) return;
@@ -1194,6 +1332,18 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   const selectedTemplate = useMemo(() => {
     return promptTemplates.find((template) => template.id === selectedTemplateId) || promptTemplates[0] || null;
   }, [promptTemplates, selectedTemplateId]);
+
+  const comparedDesignDirections = useMemo(() => {
+    return plannerCompareIds
+      .map((id) => designDirections.find((item) => item.id === id) || null)
+      .filter(Boolean) as ViralStudioDesignDirectionCandidate[];
+  }, [designDirections, plannerCompareIds]);
+
+  const latestPlannerReferenceCards = useMemo(() => {
+    const ids = formatGeneration?.result.sourceReferenceIds || approvedDesignDirection?.sourceReferenceIds || [];
+    const map = new Map(references.map((item) => [item.id, item]));
+    return ids.map((id) => map.get(id)).filter(Boolean) as ViralStudioReferenceAsset[];
+  }, [approvedDesignDirection?.sourceReferenceIds, formatGeneration?.result.sourceReferenceIds, references]);
 
   const prioritizedReferenceCount = useMemo(() => {
     return references.filter((item) => item.shortlistState === "must-use" || item.shortlistState === "pin").length;
@@ -1499,6 +1649,128 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     };
   }, [selectedReferenceId, shortlistReference, shortlistPendingById]);
 
+  const runDesignAnalysis = useCallback(async () => {
+    if (!brandReady) return;
+    setIsBusy(true);
+    setError(null);
+    try {
+      const payload = await analyzeViralStudioDesignDirections(workspaceId);
+      setPlannerSession(payload.session);
+      setDesignDirections(payload.candidates);
+      setApprovedDesignDirection(null);
+      setContentDirections([]);
+      setApprovedContentDirection(null);
+      setFormatGeneration(null);
+      setPlannerCompareIds([]);
+      void Promise.all([refreshTelemetry(), refreshWorkflow()]);
+    } catch (plannerError: unknown) {
+      setError(String((plannerError as Error)?.message || "Failed to analyze design directions"));
+    } finally {
+      setIsBusy(false);
+    }
+  }, [workspaceId, brandReady, refreshTelemetry, refreshWorkflow]);
+
+  const toggleDesignCompare = useCallback((directionId: string) => {
+    setPlannerCompareIds((previous) => {
+      if (previous.includes(directionId)) {
+        return previous.filter((item) => item !== directionId);
+      }
+      if (previous.length >= 2) {
+        return [...previous.slice(1), directionId];
+      }
+      return [...previous, directionId];
+    });
+  }, []);
+
+  const approveDesignDirection = useCallback(
+    async (directionId: string) => {
+      setIsBusy(true);
+      setError(null);
+      try {
+        const payload = await selectViralStudioDesignDirection(workspaceId, directionId);
+        setPlannerSession(payload.session);
+        setApprovedDesignDirection(payload.approved);
+        setContentDirections([]);
+        setApprovedContentDirection(null);
+        setFormatGeneration(null);
+        setPlannerCompareIds([]);
+        await refreshPlanner();
+        await Promise.all([refreshTelemetry(), refreshWorkflow()]);
+      } catch (plannerError: unknown) {
+        setError(String((plannerError as Error)?.message || "Failed to approve design direction"));
+      } finally {
+        setIsBusy(false);
+      }
+    },
+    [workspaceId, refreshPlanner, refreshTelemetry, refreshWorkflow]
+  );
+
+  const runContentAnalysis = useCallback(async () => {
+    if (!approvedDesignDirection) return;
+    setIsBusy(true);
+    setError(null);
+    try {
+      const payload = await analyzeViralStudioContentDirections(workspaceId);
+      setPlannerSession(payload.session);
+      setContentDirections(payload.candidates);
+      setApprovedContentDirection(null);
+      setFormatGeneration(null);
+      void Promise.all([refreshTelemetry(), refreshWorkflow()]);
+    } catch (plannerError: unknown) {
+      setError(String((plannerError as Error)?.message || "Failed to analyze content directions"));
+    } finally {
+      setIsBusy(false);
+    }
+  }, [workspaceId, approvedDesignDirection, refreshTelemetry, refreshWorkflow]);
+
+  const approveContentDirection = useCallback(
+    async (directionId: string) => {
+      setIsBusy(true);
+      setError(null);
+      try {
+        const payload = await selectViralStudioContentDirection(workspaceId, directionId);
+        setPlannerSession(payload.session);
+        setApprovedDesignDirection(payload.approvedDesign);
+        setApprovedContentDirection(payload.approved);
+        setFormatGeneration(null);
+        await refreshPlanner();
+        await Promise.all([refreshTelemetry(), refreshWorkflow()]);
+      } catch (plannerError: unknown) {
+        setError(String((plannerError as Error)?.message || "Failed to approve content direction"));
+      } finally {
+        setIsBusy(false);
+      }
+    },
+    [workspaceId, refreshPlanner, refreshTelemetry, refreshWorkflow]
+  );
+
+  const generatePlannerFormat = useCallback(async () => {
+    if (!approvedDesignDirection || !approvedContentDirection) return;
+    setIsBusy(true);
+    setError(null);
+    try {
+      const payload = await createViralStudioFormatGeneration(workspaceId, {
+        contentType: selectedPlannerContentType,
+      });
+      setPlannerSession(payload.session);
+      setApprovedDesignDirection(payload.approvedDesign);
+      setApprovedContentDirection(payload.approvedContent);
+      setFormatGeneration(payload.generation);
+      void Promise.all([refreshTelemetry(), refreshWorkflow()]);
+    } catch (plannerError: unknown) {
+      setError(String((plannerError as Error)?.message || "Failed to generate format details"));
+    } finally {
+      setIsBusy(false);
+    }
+  }, [
+    workspaceId,
+    approvedContentDirection,
+    approvedDesignDirection,
+    selectedPlannerContentType,
+    refreshTelemetry,
+    refreshWorkflow,
+  ]);
+
   const generatePack = useCallback(async () => {
     if (!brandReady) return;
     setIsBusy(true);
@@ -1583,13 +1855,17 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   );
 
   const createDocumentFromGeneration = useCallback(async () => {
-    if (!generation) return;
+    if (!generation && !formatGeneration) return;
     setIsBusy(true);
     setError(null);
     try {
       const payload = await createViralStudioDocument(workspaceId, {
-        generationId: generation.id,
-        title: "Campaign Pack - Plan 6",
+        ...(formatGeneration
+          ? { formatGenerationId: formatGeneration.id }
+          : { generationId: generation?.id || "" }),
+        title: formatGeneration
+          ? `${toContentTypeLabel(formatGeneration.contentType)} Plan`
+          : "Campaign Pack - Plan 6",
       });
       const documentPayload = await fetchViralStudioDocument(workspaceId, payload.document.id);
       setDocument(documentPayload.document);
@@ -1607,7 +1883,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     } finally {
       setIsBusy(false);
     }
-  }, [workspaceId, generation, refreshTelemetry, refreshWorkflow]);
+  }, [workspaceId, formatGeneration, generation, refreshTelemetry, refreshWorkflow]);
 
   const syncGenerationToVersionHistory = useCallback(
     async (nextGeneration: ViralStudioGenerationPack) => {
@@ -1895,13 +2171,15 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   }, [workspaceId]);
 
   const sendGenerationToChat = useCallback(async () => {
-    if (!generation) return;
+    if (!generation && !formatGeneration) return;
     setIsBusy(true);
     setError(null);
     setChatBridgeStatus(null);
     try {
       const { branchId } = await resolveChatBranch();
-      const payload = buildGenerationChatBridgePayload(generation, references);
+      const payload = formatGeneration
+        ? buildFormatGenerationChatBridgePayload(formatGeneration, references)
+        : buildGenerationChatBridgePayload(generation as ViralStudioGenerationPack, references);
       await sendRuntimeMessage(workspaceId, branchId, {
         content: payload.content,
         mode: "send",
@@ -1909,13 +2187,17 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         citationsJson: payload.citationsJson,
         ...(payload.libraryRefs.length ? { libraryRefs: payload.libraryRefs } : {}),
       });
-      setChatBridgeStatus("Generation pack sent to core chat successfully.");
+      setChatBridgeStatus(
+        formatGeneration
+          ? "Staged format plan sent to core chat successfully."
+          : "Generation pack sent to core chat successfully."
+      );
     } catch (bridgeError: unknown) {
       setError(String((bridgeError as Error)?.message || "Failed to send pack to chat"));
     } finally {
       setIsBusy(false);
     }
-  }, [workspaceId, generation, references, resolveChatBranch]);
+  }, [workspaceId, formatGeneration, generation, references, resolveChatBranch]);
 
   const sendShortlistToChat = useCallback(async () => {
     if (!references.length) return;
@@ -3940,7 +4222,13 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                 </p>
               </div>
               <div className="vbs-status-strip">
-                <span>{generation ? `Revision ${generation.revision}` : "No generation yet"}</span>
+                <span>
+                  {formatGeneration
+                    ? `${toContentTypeLabel(formatGeneration.contentType)} ready`
+                    : generation
+                      ? `Revision ${generation.revision}`
+                      : "No generation yet"}
+                </span>
                 <span>{document ? "Document ready" : "Document pending"}</span>
                 <span>{versions.length} versions</span>
               </div>
@@ -3956,19 +4244,340 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
             </div>
             <div className="vbs-grid">
               <article className="vbs-panel vbs-prompt-studio" id="vbs-section-generation">
-              <h2 className="vbs-panel-title">Prompt Studio</h2>
+              <h2 className="vbs-panel-title">Staged Generation Planner</h2>
               <p className="vbs-panel-subtitle">
-                Two-pane pack builder using Brand DNA + shortlisted references with section-level refine and regenerate controls.
+                Move through one baby step at a time: pick the design pattern, lock the message, choose one format, then save the result.
               </p>
-              <div className="vbs-detail-grid vbs-detail-grid-compact">
-                {generationFocusCards.map((card) => (
-                  <article key={card.label} className={detailCardClassName(card)}>
-                    <span>{card.label}</span>
-                    <strong>{card.value}</strong>
-                  <p>{card.note}</p>
+              <div className="vbs-planner-summary-rail">
+                <article className="vbs-planner-summary-card">
+                  <span>Planner stage</span>
+                  <strong>{toPlannerStageLabel(plannerSession?.stage)}</strong>
                 </article>
-              ))}
+                <article className="vbs-planner-summary-card">
+                  <span>Design</span>
+                  <strong>{approvedDesignDirection?.archetypeName || "Not selected yet"}</strong>
+                </article>
+                <article className="vbs-planner-summary-card">
+                  <span>Content</span>
+                  <strong>{approvedContentDirection?.title || "Not selected yet"}</strong>
+                </article>
+                <article className="vbs-planner-summary-card">
+                  <span>Format</span>
+                  <strong>{formatGeneration ? toContentTypeLabel(formatGeneration.contentType) : toContentTypeLabel(selectedPlannerContentType)}</strong>
+                </article>
               </div>
+              <div className="vbs-staged-planner">
+                <section className="vbs-planner-step">
+                  <div className="vbs-planner-step-head">
+                    <div>
+                      <p className="vbs-meta">Step 1</p>
+                      <h3>Pick a design direction</h3>
+                    </div>
+                    <span>{designDirections.length} direction(s)</span>
+                  </div>
+                  <p className="vbs-meta">
+                    Analyze the shortlisted winner posts first. This turns old reference designs into visible directions you can compare before any copy is generated.
+                  </p>
+                  <div className="vbs-mini-actions">
+                    <button type="button" disabled={isBusy || !brandReady} onClick={() => void runDesignAnalysis()}>
+                      {designDirections.length > 0 ? "Re-analyze design directions" : "Analyze design directions"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={plannerCompareIds.length === 0}
+                      onClick={() => setPlannerCompareIds([])}
+                    >
+                      Clear compare
+                    </button>
+                  </div>
+                  {designDirections.length > 0 ? (
+                    <div className="vbs-planner-card-grid">
+                      {designDirections.map((direction) => (
+                        <article
+                          key={direction.id}
+                          className={[
+                            "vbs-planner-card",
+                            approvedDesignDirection?.id === direction.id ? "is-approved" : "",
+                            plannerCompareIds.includes(direction.id) ? "is-compared" : "",
+                          ]
+                            .filter(Boolean)
+                            .join(" ")}
+                        >
+                          <div className="vbs-planner-card-head">
+                            <div>
+                              <p className="vbs-meta">Design direction #{direction.orderIndex + 1}</p>
+                              <h4>{direction.archetypeName}</h4>
+                            </div>
+                            <span>{direction.sourceReferenceIds.length} refs</span>
+                          </div>
+                          <div className="vbs-design-thumbnail-row">
+                            {direction.thumbnailCluster.map((thumb) => (
+                              <div
+                                key={`${direction.id}-${thumb.referenceId}`}
+                                className="vbs-design-thumb"
+                                style={
+                                  thumb.mediaUrl
+                                    ? {
+                                        backgroundImage: `linear-gradient(180deg, rgba(11,19,43,0.16), rgba(11,19,43,0.72)), url("${thumb.mediaUrl}")`,
+                                      }
+                                    : undefined
+                                }
+                              >
+                                <small>{thumb.platform}</small>
+                                <strong>{thumb.label}</strong>
+                              </div>
+                            ))}
+                          </div>
+                          <p>{direction.summary}</p>
+                          <div className="vbs-planner-fact-list">
+                            <div>
+                              <span>Layout</span>
+                              <strong>{direction.layoutPattern}</strong>
+                            </div>
+                            <div>
+                              <span>Typography</span>
+                              <strong>{direction.typographyCharacter}</strong>
+                            </div>
+                            <div>
+                              <span>Palette</span>
+                              <strong>{direction.colorPaletteSummary}</strong>
+                            </div>
+                          </div>
+                          <div className="vbs-top-driver-row vbs-top-driver-row-compact">
+                            {direction.bestFor.map((item) => (
+                              <span key={`${direction.id}-best-${item}`} className="vbs-driver-chip">
+                                {item}
+                              </span>
+                            ))}
+                          </div>
+                          <ul className="vbs-reference-bullets">
+                            {direction.whyGrouped.slice(0, 2).map((line) => (
+                              <li key={`${direction.id}-why-${line}`}>{line}</li>
+                            ))}
+                          </ul>
+                          <div className="vbs-mini-actions">
+                            <button type="button" disabled={isBusy} onClick={() => toggleDesignCompare(direction.id)}>
+                              {plannerCompareIds.includes(direction.id) ? "Remove compare" : "Compare"}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isBusy}
+                              onClick={() => void approveDesignDirection(direction.id)}
+                            >
+                              {approvedDesignDirection?.id === direction.id ? "Approved" : "Use this design"}
+                            </button>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="vbs-meta">No design directions yet. Start by analyzing your shortlisted references.</p>
+                  )}
+                  {comparedDesignDirections.length > 0 ? (
+                    <div className="vbs-planner-compare-grid">
+                      {comparedDesignDirections.map((direction) => (
+                        <article key={`compare-${direction.id}`} className="vbs-planner-compare-card">
+                          <p className="vbs-meta">Compare view</p>
+                          <h4>{direction.archetypeName}</h4>
+                          <p>{direction.summary}</p>
+                          <ul>
+                            {direction.pros.slice(0, 2).map((line) => (
+                              <li key={`${direction.id}-pro-${line}`}>{line}</li>
+                            ))}
+                          </ul>
+                          <p className="vbs-meta">Risk watch: {direction.risks[0] || "Keep the execution tight and proof-backed."}</p>
+                        </article>
+                      ))}
+                    </div>
+                  ) : null}
+                </section>
+
+                <section className="vbs-planner-step">
+                  <div className="vbs-planner-step-head">
+                    <div>
+                      <p className="vbs-meta">Step 2</p>
+                      <h3>Pick a content direction</h3>
+                    </div>
+                    <span>{contentDirections.length} option(s)</span>
+                  </div>
+                  <p className="vbs-meta">
+                    Once the design is locked, analyze messaging directions separately so the model is only solving one strategic decision at a time.
+                  </p>
+                  <div className="vbs-mini-actions">
+                    <button
+                      type="button"
+                      disabled={isBusy || !approvedDesignDirection}
+                      onClick={() => void runContentAnalysis()}
+                    >
+                      {contentDirections.length > 0 ? "Re-analyze content directions" : "Analyze content directions"}
+                    </button>
+                  </div>
+                  {approvedDesignDirection ? (
+                    <div className="vbs-approved-pill-row">
+                      <span className="vbs-approved-pill">Design locked: {approvedDesignDirection.archetypeName}</span>
+                    </div>
+                  ) : (
+                    <p className="vbs-meta">Approve a design direction first to unlock content strategy.</p>
+                  )}
+                  {contentDirections.length > 0 ? (
+                    <div className="vbs-planner-card-grid">
+                      {contentDirections.map((direction) => (
+                        <article
+                          key={direction.id}
+                          className={[
+                            "vbs-planner-card",
+                            approvedContentDirection?.id === direction.id ? "is-approved" : "",
+                          ]
+                            .filter(Boolean)
+                            .join(" ")}
+                        >
+                          <div className="vbs-planner-card-head">
+                            <div>
+                              <p className="vbs-meta">Content direction #{direction.orderIndex + 1}</p>
+                              <h4>{direction.title}</h4>
+                            </div>
+                            <span>{direction.sourceReferenceIds.length} refs</span>
+                          </div>
+                          <div className="vbs-planner-fact-list">
+                            <div>
+                              <span>Audience</span>
+                              <strong>{direction.coreAudience}</strong>
+                            </div>
+                            <div>
+                              <span>Pain / desire</span>
+                              <strong>
+                                {direction.targetedPain} {" -> "} {direction.targetedDesire}
+                              </strong>
+                            </div>
+                            <div>
+                              <span>Big promise</span>
+                              <strong>{direction.bigPromise}</strong>
+                            </div>
+                          </div>
+                          <ul className="vbs-reference-bullets">
+                            {direction.whyFitsDesign.map((line) => (
+                              <li key={`${direction.id}-fit-${line}`}>{line}</li>
+                            ))}
+                          </ul>
+                          <p className="vbs-meta">Objection handling: {direction.objectionHandling}</p>
+                          <div className="vbs-mini-actions">
+                            <button
+                              type="button"
+                              disabled={isBusy}
+                              onClick={() => void approveContentDirection(direction.id)}
+                            >
+                              {approvedContentDirection?.id === direction.id ? "Approved" : "Use this content"}
+                            </button>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : null}
+                </section>
+
+                <section className="vbs-planner-step">
+                  <div className="vbs-planner-step-head">
+                    <div>
+                      <p className="vbs-meta">Step 3</p>
+                      <h3>Generate one format at a time</h3>
+                    </div>
+                    <span>{formatGeneration ? "Latest result ready" : "Waiting"}</span>
+                  </div>
+                  <p className="vbs-meta">
+                    Pick one content type only. The planner will return separate design details and content details so the next generation run stays focused.
+                  </p>
+                  <div className="vbs-content-type-grid">
+                    {(
+                      [
+                        "short_video",
+                        "carousel",
+                        "story_sequence",
+                        "static_post",
+                        "caption_set",
+                        "cta_set",
+                      ] as ViralStudioContentType[]
+                    ).map((contentType) => (
+                      <button
+                        key={contentType}
+                        type="button"
+                        aria-pressed={selectedPlannerContentType === contentType}
+                        className={selectedPlannerContentType === contentType ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
+                        onClick={() => setSelectedPlannerContentType(contentType)}
+                      >
+                        {toContentTypeLabel(contentType)}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="vbs-mini-actions">
+                    <button
+                      type="button"
+                      disabled={isBusy || !approvedDesignDirection || !approvedContentDirection}
+                      onClick={() => void generatePlannerFormat()}
+                    >
+                      {formatGeneration ? "Generate next format from same approved direction" : "Generate format details"}
+                    </button>
+                  </div>
+                  {formatGeneration ? (
+                    <div className="vbs-format-result-grid">
+                      <article className="vbs-planner-result-card">
+                        <p className="vbs-meta">Design details</p>
+                        <h4>{formatGeneration.result.title}</h4>
+                        <ul>
+                          {formatGeneration.result.designDetails.layoutStructure.map((line) => (
+                            <li key={`layout-${line}`}>{line}</li>
+                          ))}
+                        </ul>
+                        <p className="vbs-meta">Typography: {formatGeneration.result.designDetails.typographyTreatment}</p>
+                        <ul className="vbs-reference-bullets">
+                          {formatGeneration.result.designDetails.onScreenTextGuidance.map((line) => (
+                            <li key={`text-${line}`}>{line}</li>
+                          ))}
+                        </ul>
+                      </article>
+                      <article className="vbs-planner-result-card">
+                        <p className="vbs-meta">Content details</p>
+                        <h4>{formatGeneration.result.summary}</h4>
+                        <p><strong>Hook:</strong> {formatGeneration.result.contentDetails.hook}</p>
+                        <ul>
+                          {formatGeneration.result.contentDetails.narrativeBeats.map((line) => (
+                            <li key={`beat-${line}`}>{line}</li>
+                          ))}
+                        </ul>
+                        <p className="vbs-meta">Proof placement: {formatGeneration.result.contentDetails.proofPlacement}</p>
+                        <p className="vbs-meta">{formatGeneration.result.contentDetails.cta}</p>
+                      </article>
+                      <article className="vbs-planner-result-card">
+                        <p className="vbs-meta">Step 5</p>
+                        <h4>Save to document</h4>
+                        <p>
+                          This format run is already persisted. Save it into Document Workspace when the design and message feel locked.
+                        </p>
+                        <div className="vbs-top-driver-row vbs-top-driver-row-compact">
+                          {latestPlannerReferenceCards.map((reference) => (
+                            <span key={`ref-${reference.id}`} className="vbs-driver-chip">
+                              #{reference.ranking.rank} {toPlatformLabel(reference.sourcePlatform)}
+                            </span>
+                          ))}
+                        </div>
+                        <div className="vbs-mini-actions">
+                          <button type="button" disabled={isBusy || Boolean(document)} onClick={() => void createDocumentFromGeneration()}>
+                            {document ? "Document Ready" : "Save To Document"}
+                          </button>
+                          <button type="button" disabled={isBusy} onClick={() => void sendGenerationToChat()}>
+                            Send Context To Chat
+                          </button>
+                        </div>
+                      </article>
+                    </div>
+                  ) : (
+                    <p className="vbs-meta">
+                      No format generated yet. Once the design and content directions are approved, generate a single format and inspect the returned design/content split before saving.
+                    </p>
+                  )}
+                </section>
+              </div>
+              <details className="vbs-advanced-fallback">
+                <summary>Advanced fallback: one-shot multi-pack generator</summary>
               <div className="vbs-generation-overview">
                 <article className="vbs-generation-brief-card">
                   <div className="vbs-generation-brief-head">
@@ -4246,6 +4855,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                   )}
                 </div>
               </div>
+              </details>
               </article>
 
               <article className="vbs-panel vbs-document-workspace" id="vbs-section-documents">

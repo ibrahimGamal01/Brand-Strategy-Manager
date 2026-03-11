@@ -1061,6 +1061,205 @@ a {
   padding: 0.4rem 0.55rem;
 }
 
+.vbs-planner-summary-rail {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin-bottom: 0.85rem;
+}
+
+.vbs-planner-summary-card,
+.vbs-planner-step,
+.vbs-planner-card,
+.vbs-planner-compare-card,
+.vbs-planner-result-card,
+.vbs-advanced-fallback {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 18%, var(--bat-border));
+  border-radius: 0.9rem;
+  background: color-mix(in srgb, white 92%, var(--vbs-sand));
+}
+
+.vbs-planner-summary-card {
+  padding: 0.65rem 0.75rem;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.vbs-planner-summary-card span,
+.vbs-planner-card .vbs-planner-fact-list span,
+.vbs-planner-result-card .vbs-meta {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: color-mix(in srgb, var(--vbs-ink) 58%, #6f7488);
+}
+
+.vbs-planner-summary-card strong {
+  font-size: 0.92rem;
+  color: var(--vbs-ink);
+}
+
+.vbs-staged-planner {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.vbs-planner-step {
+  padding: 0.85rem;
+  display: grid;
+  gap: 0.7rem;
+}
+
+.vbs-planner-step-head,
+.vbs-planner-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.7rem;
+}
+
+.vbs-planner-step-head h3,
+.vbs-planner-card-head h4,
+.vbs-planner-result-card h4,
+.vbs-planner-compare-card h4 {
+  margin: 0.12rem 0 0;
+  font-family: var(--vbs-display-font);
+  color: var(--vbs-ink);
+}
+
+.vbs-planner-step-head span,
+.vbs-planner-card-head span {
+  border-radius: 999px;
+  padding: 0.22rem 0.55rem;
+  background: color-mix(in srgb, var(--vbs-cobalt) 12%, white);
+  font-size: 0.72rem;
+  color: color-mix(in srgb, var(--vbs-cobalt) 76%, var(--vbs-ink));
+}
+
+.vbs-planner-card-grid,
+.vbs-format-result-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.vbs-planner-card,
+.vbs-planner-result-card,
+.vbs-planner-compare-card {
+  padding: 0.8rem;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.vbs-planner-card.is-approved {
+  border-color: color-mix(in srgb, var(--vbs-teal) 40%, var(--bat-border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--vbs-teal) 14%, transparent);
+}
+
+.vbs-planner-card.is-compared {
+  border-color: color-mix(in srgb, var(--vbs-cobalt) 52%, var(--bat-border));
+}
+
+.vbs-design-thumbnail-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.vbs-design-thumb {
+  min-height: 7rem;
+  border-radius: 0.8rem;
+  padding: 0.55rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 0.3rem;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--vbs-cobalt) 10%, white) 0%, color-mix(in srgb, var(--vbs-ink) 18%, white) 100%);
+  color: white;
+  overflow: hidden;
+}
+
+.vbs-design-thumb small {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.88;
+}
+
+.vbs-design-thumb strong {
+  font-family: var(--vbs-editorial-font);
+  font-size: 0.92rem;
+  line-height: 1.05;
+}
+
+.vbs-planner-fact-list {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.vbs-planner-fact-list > div {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 12%, var(--bat-border));
+  border-radius: 0.7rem;
+  padding: 0.55rem;
+  display: grid;
+  gap: 0.18rem;
+  background: color-mix(in srgb, white 95%, var(--vbs-sand));
+}
+
+.vbs-planner-fact-list strong {
+  font-size: 0.84rem;
+  line-height: 1.45;
+  color: var(--vbs-ink);
+}
+
+.vbs-planner-compare-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.vbs-approved-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.vbs-approved-pill {
+  border-radius: 999px;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-teal) 28%, var(--bat-border));
+  background: color-mix(in srgb, var(--vbs-teal) 10%, white);
+  font-size: 0.75rem;
+  color: color-mix(in srgb, var(--vbs-teal) 74%, var(--vbs-ink));
+}
+
+.vbs-content-type-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.vbs-advanced-fallback {
+  margin-top: 0.9rem;
+  padding: 0.8rem;
+}
+
+.vbs-advanced-fallback summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--vbs-ink);
+  list-style: none;
+}
+
+.vbs-advanced-fallback summary::-webkit-details-marker {
+  display: none;
+}
+
+.vbs-advanced-fallback[open] summary {
+  margin-bottom: 0.8rem;
+}
+
 .vbs-ingestion-timeline {
   margin-top: 0.75rem;
   display: grid;
@@ -2361,6 +2560,28 @@ a {
 
   .vbs-analysis-kpi-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vbs-planner-summary-rail,
+  .vbs-planner-card-grid,
+  .vbs-format-result-grid,
+  .vbs-planner-compare-grid,
+  .vbs-design-thumbnail-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vbs-planner-step,
+  .vbs-planner-card,
+  .vbs-planner-result-card,
+  .vbs-planner-compare-card,
+  .vbs-advanced-fallback {
+    padding: 0.75rem;
+  }
+
+  .vbs-planner-step-head,
+  .vbs-planner-card-head {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 

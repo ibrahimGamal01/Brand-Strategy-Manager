@@ -411,6 +411,8 @@ export type StudioDocumentVersion = {
 export type CreateStudioDocumentInput = {
   title?: string;
   generationId: string;
+  sections?: StudioDocumentSection[];
+  linkedGenerationIds?: string[];
 };
 
 export type CreateStudioDocumentVersionInput = {
@@ -3262,12 +3264,19 @@ export async function createStudioDocument(
     throw new Error('Generation not found for document creation');
   }
   const now = toIsoNow();
+  const linkedGenerationIds =
+    Array.isArray(input.linkedGenerationIds) && input.linkedGenerationIds.length > 0
+      ? input.linkedGenerationIds.map((item) => cleanString(item)).filter(Boolean)
+      : [generation.id];
   const document: StudioDocument = {
     id: crypto.randomUUID(),
     workspaceId,
     title: cleanString(input.title) || 'Viral Studio Campaign Pack',
-    linkedGenerationIds: [generation.id],
-    sections: buildDocumentSectionsFromGeneration(generation),
+    linkedGenerationIds: linkedGenerationIds.length > 0 ? linkedGenerationIds : [generation.id],
+    sections:
+      Array.isArray(input.sections) && input.sections.length > 0
+        ? clone(input.sections)
+        : buildDocumentSectionsFromGeneration(generation),
     currentVersionId: null,
     createdAt: now,
     updatedAt: now,

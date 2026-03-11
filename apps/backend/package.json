@@ -73,7 +73,8 @@
         "cleanup:out-of-scope-media-analyses": "tsx -r dotenv/config scripts/cleanup-out-of-scope-media-analyses.ts",
         "backfill:scoped-media-analyses": "tsx -r dotenv/config scripts/backfill-scoped-media-analyses.ts",
         "remediate:legacy-jobs": "tsx -r dotenv/config scripts/remediate-legacy-jobs.ts",
-        "test:workflow-integrity": "tsx -r dotenv/config scripts/test-client-workflow-integrity.ts"
+        "test:workflow-integrity": "tsx -r dotenv/config scripts/test-client-workflow-integrity.ts",
+        "test:viral-studio-plan11": "tsx src/scripts/test-viral-studio-plan11.ts"
     },
     "dependencies": {
         "@aws-sdk/client-s3": "^3.995.0",

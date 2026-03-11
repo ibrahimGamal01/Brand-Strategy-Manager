@@ -36,6 +36,18 @@ import {
   upsertBrandDNAProfile,
   ViralStudioPlatform,
 } from '../services/portal/viral-studio';
+import {
+  analyzeContentDirections,
+  analyzeDesignDirections,
+  buildDocumentSectionsFromFormatGeneration,
+  createFormatGeneration,
+  getFormatGeneration,
+  listContentDirections,
+  listDesignDirections,
+  selectContentDirection,
+  selectDesignDirection,
+  type ViralStudioContentType,
+} from '../services/portal/viral-studio-planner';
 
 const router = Router({ mergeParams: true });
 const workspaceRateLimitStore = new Map<string, { count: number; resetAt: number }>();
@@ -45,6 +57,7 @@ const WORKSPACE_RATE_LIMITS = {
   ingestionCreate: { max: 12, windowMs: 10 * 60_000 },
   generationCreate: { max: 20, windowMs: 10 * 60_000 },
   generationRefine: { max: 40, windowMs: 10 * 60_000 },
+  formatGenerationCreate: { max: 20, windowMs: 10 * 60_000 },
 } as const;
 const INGESTION_RETRY_BACKOFF_MS = [0, 8_000, 20_000, 45_000] as const;
 
@@ -109,6 +122,21 @@ function parsePlatform(value: unknown): ViralStudioPlatform | null {
   const platform = safeString(value).toLowerCase();
   if (platform === 'instagram' || platform === 'tiktok' || platform === 'youtube') {
     return platform;
+  }
+  return null;
+}
+
+function parsePlannerContentType(value: unknown): ViralStudioContentType | null {
+  const normalized = safeString(value).toLowerCase();
+  if (
+    normalized === 'short_video' ||
+    normalized === 'carousel' ||
+    normalized === 'story_sequence' ||
+    normalized === 'static_post' ||
+    normalized === 'caption_set' ||
+    normalized === 'cta_set'
+  ) {
+    return normalized;
   }
   return null;
 }
@@ -695,6 +723,182 @@ router.post('/viral-studio/references/shortlist', async (req, res) => {
   }
 });
 
+router.post('/viral-studio/design-directions/analyze', async (req, res) => {
+  try {
+    const workspaceId = parseWorkspaceId(req);
+    if (!workspaceId) return res.status(400).json({ error: 'workspaceId is required' });
+    const brandProfile = await getBrandDNAProfile(workspaceId);
+    if (!brandProfile || !brandProfile.completeness.ready || brandProfile.status !== 'final') {
+      return res.status(409).json({
+        error: 'BRAND_DNA_REQUIRED',
+        details: 'Finalize Brand DNA onboarding before design analysis.',
+      });
+    }
+    const payload = await analyzeDesignDirections(workspaceId);
+    return res.status(201).json({
+      ok: true,
+      session: payload.session,
+      candidates: payload.candidates,
+    });
+  } catch (error: any) {
+    const message = String(error?.message || 'Failed to analyze design directions');
+    const status = message.toLowerCase().includes('shortlist') ? 409 : 500;
+    return res.status(status).json({ ok: false, error: 'DESIGN_DIRECTION_ANALYZE_FAILED', details: message });
+  }
+});
+
+router.get('/viral-studio/design-directions', async (req, res) => {
+  try {
+    const workspaceId = parseWorkspaceId(req);
+    if (!workspaceId) return res.status(400).json({ error: 'workspaceId is required' });
+    const payload = await listDesignDirections(workspaceId);
+    return res.json({
+      ok: true,
+      session: payload.session,
+      candidates: payload.candidates,
+      approved: payload.approved,
+    });
+  } catch (error: any) {
+    return res.status(500).json({ ok: false, error: 'DESIGN_DIRECTION_FETCH_FAILED', details: error?.message || String(error) });
+  }
+});
+
+router.post('/viral-studio/design-directions/select', async (req, res) => {
+  try {
+    const workspaceId = parseWorkspaceId(req);
+    if (!workspaceId) return res.status(400).json({ error: 'workspaceId is required' });
+    const payload =
+      req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+        ? (req.body as Record<string, unknown>)
+        : {};
+    const directionId = safeString(payload.directionId);
+    if (!directionId) return res.status(400).json({ error: 'directionId is required' });
+    const selected = await selectDesignDirection(workspaceId, directionId);
+    return res.json({
+      ok: true,
+      session: selected.session,
+      approved: selected.approved,
+    });
+  } catch (error: any) {
+    const message = String(error?.message || 'Failed to select design direction');
+    const status = message.toLowerCase().includes('not found') ? 404 : 409;
+    return res.status(status).json({ ok: false, error: 'DESIGN_DIRECTION_SELECT_FAILED', details: message });
+  }
+});
+
+router.post('/viral-studio/content-directions/analyze', async (req, res) => {
+  try {
+    const workspaceId = parseWorkspaceId(req);
+    if (!workspaceId) return res.status(400).json({ error: 'workspaceId is required' });
+    const payload = await analyzeContentDirections(workspaceId);
+    return res.status(201).json({
+      ok: true,
+      session: payload.session,
+      approvedDesign: payload.approvedDesign,
+      candidates: payload.candidates,
+    });
+  } catch (error: any) {
+    const message = String(error?.message || 'Failed to analyze content directions');
+    const status = message.toLowerCase().includes('approve') ? 409 : 500;
+    return res.status(status).json({ ok: false, error: 'CONTENT_DIRECTION_ANALYZE_FAILED', details: message });
+  }
+});
+
+router.get('/viral-studio/content-directions', async (req, res) => {
+  try {
+    const workspaceId = parseWorkspaceId(req);
+    if (!workspaceId) return res.status(400).json({ error: 'workspaceId is required' });
+    const payload = await listContentDirections(workspaceId);
+    return res.json({
+      ok: true,
+      session: payload.session,
+      approvedDesign: payload.approvedDesign,
+      candidates: payload.candidates,
+      approved: payload.approved,
+    });
+  } catch (error: any) {
+    return res.status(500).json({ ok: false, error: 'CONTENT_DIRECTION_FETCH_FAILED', details: error?.message || String(error) });
+  }
+});
+
+router.post('/viral-studio/content-directions/select', async (req, res) => {
+  try {
+    const workspaceId = parseWorkspaceId(req);
+    if (!workspaceId) return res.status(400).json({ error: 'workspaceId is required' });
+    const payload =
+      req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+        ? (req.body as Record<string, unknown>)
+        : {};
+    const directionId = safeString(payload.directionId);
+    if (!directionId) return res.status(400).json({ error: 'directionId is required' });
+    const selected = await selectContentDirection(workspaceId, directionId);
+    return res.json({
+      ok: true,
+      session: selected.session,
+      approvedDesign: selected.approvedDesign,
+      approved: selected.approved,
+    });
+  } catch (error: any) {
+    const message = String(error?.message || 'Failed to select content direction');
+    const status = message.toLowerCase().includes('not found') ? 404 : 409;
+    return res.status(status).json({ ok: false, error: 'CONTENT_DIRECTION_SELECT_FAILED', details: message });
+  }
+});
+
+router.post('/viral-studio/format-generations', async (req, res) => {
+  try {
+    const workspaceId = parseWorkspaceId(req);
+    if (!workspaceId) return res.status(400).json({ error: 'workspaceId is required' });
+    const rateLimit = consumeWorkspaceRateLimit(workspaceId, 'formatGenerationCreate');
+    if (!rateLimit.allowed) {
+      return res.status(429).json({
+        error: 'RATE_LIMITED_FORMAT_GENERATION_CREATE',
+        details: `Too many format generation requests. Retry in ${rateLimit.retryAfterSec}s.`,
+      });
+    }
+    const payload =
+      req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+        ? (req.body as Record<string, unknown>)
+        : {};
+    const contentType = parsePlannerContentType(payload.contentType);
+    if (!contentType) {
+      return res.status(400).json({ error: 'contentType must be short_video, carousel, story_sequence, static_post, caption_set, or cta_set' });
+    }
+    const generated = await createFormatGeneration(workspaceId, { contentType });
+    return res.status(201).json({
+      ok: true,
+      session: generated.session,
+      approvedDesign: generated.approvedDesign,
+      approvedContent: generated.approvedContent,
+      generation: generated.generation,
+    });
+  } catch (error: any) {
+    const message = String(error?.message || 'Failed to create format generation');
+    const status = message.toLowerCase().includes('approve') || message.toLowerCase().includes('shortlist') ? 409 : 500;
+    return res.status(status).json({ ok: false, error: 'FORMAT_GENERATION_CREATE_FAILED', details: message });
+  }
+});
+
+router.get('/viral-studio/format-generations/:generationId', async (req, res) => {
+  try {
+    const workspaceId = parseWorkspaceId(req);
+    const generationId = safeString(req.params.generationId);
+    if (!workspaceId || !generationId) {
+      return res.status(400).json({ error: 'workspaceId and generationId are required' });
+    }
+    const generation = await getFormatGeneration(workspaceId, generationId);
+    if (!generation) {
+      return res.status(404).json({ error: 'Format generation not found' });
+    }
+    return res.json({
+      ok: true,
+      generation,
+    });
+  } catch (error: any) {
+    return res.status(500).json({ ok: false, error: 'FORMAT_GENERATION_FETCH_FAILED', details: error?.message || String(error) });
+  }
+});
+
 router.post('/viral-studio/generations', async (req, res) => {
   try {
     const workspaceId = parseWorkspaceId(req);
@@ -821,11 +1025,29 @@ router.post('/viral-studio/documents', async (req, res) => {
         ? (req.body as Record<string, unknown>)
         : {};
     const generationId = safeString(payload.generationId);
-    if (!generationId) return res.status(400).json({ error: 'generationId is required' });
+    const formatGenerationId = safeString(payload.formatGenerationId);
+    if (!generationId && !formatGenerationId) {
+      return res.status(400).json({ error: 'generationId or formatGenerationId is required' });
+    }
+
+    let resolvedGenerationId = generationId;
+    let resolvedSections: StudioDocumentSection[] | undefined;
+    let linkedGenerationIds: string[] | undefined;
+    if (formatGenerationId) {
+      const formatGeneration = await getFormatGeneration(workspaceId, formatGenerationId);
+      if (!formatGeneration) {
+        return res.status(404).json({ error: 'Format generation not found' });
+      }
+      resolvedGenerationId = formatGeneration.generationPackId;
+      resolvedSections = buildDocumentSectionsFromFormatGeneration(formatGeneration);
+      linkedGenerationIds = [formatGeneration.generationPackId];
+    }
 
     const document = await createStudioDocument(workspaceId, {
       title: safeString(payload.title),
-      generationId,
+      generationId: resolvedGenerationId,
+      ...(resolvedSections ? { sections: resolvedSections } : {}),
+      ...(linkedGenerationIds ? { linkedGenerationIds } : {}),
     });
 
     return res.status(201).json({

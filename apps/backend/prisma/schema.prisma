@@ -136,6 +136,12 @@ model ResearchJob {
   viralStudioDocuments           ViralStudioDocument[]
   viralStudioDocumentVersions    ViralStudioDocumentVersion[]
   viralStudioTelemetryEvents     ViralStudioTelemetryEvent[]
+  viralStudioPlannerSessions     ViralStudioPlannerSession[]
+  viralStudioDesignDirections    ViralStudioDesignDirectionCandidate[]
+  viralStudioApprovedDesigns     ViralStudioApprovedDesignDirection[]
+  viralStudioContentDirections   ViralStudioContentDirectionCandidate[]
+  viralStudioApprovedContents    ViralStudioApprovedContentDirection[]
+  viralStudioFormatGenerations   ViralStudioFormatGenerationJob[]
 
   @@map("research_jobs")
 }
@@ -1422,6 +1428,113 @@ model ViralStudioTelemetryEvent {
   @@index([workspaceId, createdAt(sort: Desc)], map: "viral_studio_telemetry_events_workspace_created_idx")
   @@index([workspaceId, stage, createdAt(sort: Desc)], map: "viral_studio_telemetry_events_workspace_stage_created_idx")
   @@map("viral_studio_telemetry_events")
+}
+
+model ViralStudioPlannerSession {
+  id                        String      @id
+  workspaceId               String      @unique @map("workspace_id")
+  stage                     String
+  shortlistedReferenceIds   Json?       @map("shortlisted_reference_ids_json")
+  approvedDesignDirectionId String?     @map("approved_design_direction_id")
+  approvedContentDirectionId String?    @map("approved_content_direction_id")
+  selectedContentType       String?     @map("selected_content_type")
+  latestFormatGenerationId  String?     @map("latest_format_generation_id")
+  payloadJson               Json        @map("payload_json")
+  createdAt                 DateTime    @default(now()) @map("created_at")
+  updatedAt                 DateTime    @updatedAt @map("updated_at")
+  workspace                 ResearchJob @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, updatedAt(sort: Desc)], map: "viral_studio_planner_sessions_workspace_updated_idx")
+  @@index([workspaceId, stage], map: "viral_studio_planner_sessions_workspace_stage_idx")
+  @@map("viral_studio_planner_sessions")
+}
+
+model ViralStudioDesignDirectionCandidate {
+  id            String      @id
+  workspaceId   String      @map("workspace_id")
+  sessionId     String      @map("session_id")
+  orderIndex    Int         @map("order_index")
+  archetypeName String      @map("archetype_name")
+  payloadJson   Json        @map("payload_json")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+  workspace     ResearchJob @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, orderIndex], map: "viral_studio_design_directions_session_order_unique")
+  @@index([workspaceId, createdAt(sort: Desc)], map: "viral_studio_design_directions_workspace_created_idx")
+  @@index([workspaceId, sessionId], map: "viral_studio_design_directions_workspace_session_idx")
+  @@map("viral_studio_design_direction_candidates")
+}
+
+model ViralStudioApprovedDesignDirection {
+  id          String      @id
+  workspaceId String      @map("workspace_id")
+  sessionId   String      @unique @map("session_id")
+  candidateId String      @map("candidate_id")
+  payloadJson Json        @map("payload_json")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+  workspace   ResearchJob @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt(sort: Desc)], map: "viral_studio_approved_designs_workspace_created_idx")
+  @@index([workspaceId, candidateId], map: "viral_studio_approved_designs_workspace_candidate_idx")
+  @@map("viral_studio_approved_design_directions")
+}
+
+model ViralStudioContentDirectionCandidate {
+  id                        String      @id
+  workspaceId               String      @map("workspace_id")
+  sessionId                 String      @map("session_id")
+  approvedDesignDirectionId String      @map("approved_design_direction_id")
+  orderIndex                Int         @map("order_index")
+  payloadJson               Json        @map("payload_json")
+  createdAt                 DateTime    @default(now()) @map("created_at")
+  updatedAt                 DateTime    @updatedAt @map("updated_at")
+  workspace                 ResearchJob @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, orderIndex], map: "viral_studio_content_directions_session_order_unique")
+  @@index([workspaceId, createdAt(sort: Desc)], map: "viral_studio_content_directions_workspace_created_idx")
+  @@index([workspaceId, approvedDesignDirectionId], map: "viral_studio_content_directions_workspace_design_idx")
+  @@map("viral_studio_content_direction_candidates")
+}
+
+model ViralStudioApprovedContentDirection {
+  id                        String      @id
+  workspaceId               String      @map("workspace_id")
+  sessionId                 String      @unique @map("session_id")
+  candidateId               String      @map("candidate_id")
+  approvedDesignDirectionId String      @map("approved_design_direction_id")
+  payloadJson               Json        @map("payload_json")
+  createdAt                 DateTime    @default(now()) @map("created_at")
+  updatedAt                 DateTime    @updatedAt @map("updated_at")
+  workspace                 ResearchJob @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt(sort: Desc)], map: "viral_studio_approved_contents_workspace_created_idx")
+  @@index([workspaceId, approvedDesignDirectionId], map: "viral_studio_approved_contents_workspace_design_idx")
+  @@map("viral_studio_approved_content_directions")
+}
+
+model ViralStudioFormatGenerationJob {
+  id                         String      @id
+  workspaceId                String      @map("workspace_id")
+  sessionId                  String      @map("session_id")
+  approvedDesignDirectionId  String      @map("approved_design_direction_id")
+  approvedContentDirectionId String      @map("approved_content_direction_id")
+  contentType                String      @map("content_type")
+  status                     String
+  generationPackId           String      @map("generation_pack_id")
+  selectedReferenceIdsJson   Json?       @map("selected_reference_ids_json")
+  resultJson                 Json        @map("result_json")
+  payloadJson                Json        @map("payload_json")
+  createdAt                  DateTime    @default(now()) @map("created_at")
+  updatedAt                  DateTime    @updatedAt @map("updated_at")
+  workspace                  ResearchJob @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt(sort: Desc)], map: "viral_studio_format_generations_workspace_created_idx")
+  @@index([workspaceId, contentType, createdAt(sort: Desc)], map: "viral_studio_format_generations_workspace_type_created_idx")
+  @@index([workspaceId, sessionId], map: "viral_studio_format_generations_workspace_session_idx")
+  @@index([generationPackId], map: "viral_studio_format_generations_generation_idx")
+  @@map("viral_studio_format_generation_jobs")
 }
 
 model ClientAccount {

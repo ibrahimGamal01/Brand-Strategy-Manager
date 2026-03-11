@@ -209,6 +209,146 @@ export type ViralStudioGenerationSection =
 export type ViralStudioGenerationRefineMode = "refine" | "regenerate";
 export type ViralStudioGenerationFormatTarget = "reel-30" | "reel-60" | "shorts" | "story";
 
+export type ViralStudioPlannerStage =
+  | "design_analysis"
+  | "design_selection"
+  | "content_strategy"
+  | "content_selection"
+  | "format_selection"
+  | "format_generation"
+  | "document_save";
+
+export type ViralStudioContentType =
+  | "short_video"
+  | "carousel"
+  | "story_sequence"
+  | "static_post"
+  | "caption_set"
+  | "cta_set";
+
+export type ViralStudioPlannerSession = {
+  id: string;
+  workspaceId: string;
+  stage: ViralStudioPlannerStage;
+  shortlistedReferenceIds: string[];
+  approvedDesignDirectionId?: string;
+  approvedContentDirectionId?: string;
+  selectedContentType?: ViralStudioContentType;
+  latestFormatGenerationId?: string;
+  createdAt: string;
+  updatedAt: string;
+  persistedAt?: string;
+  storageMode?: "memory" | "dual" | "db";
+};
+
+export type ViralStudioDesignDirectionCandidate = {
+  id: string;
+  workspaceId: string;
+  sessionId: string;
+  orderIndex: number;
+  archetypeName: string;
+  sourceReferenceIds: string[];
+  summary: string;
+  layoutPattern: string;
+  typographyCharacter: string;
+  colorPaletteSummary: string;
+  motionPacingNotes: string;
+  hookFramingPattern: string;
+  onScreenTextStyle: string;
+  proofStructure: string;
+  ctaPresentationStyle: string;
+  bestFor: string[];
+  whyGrouped: string[];
+  pros: string[];
+  risks: string[];
+  thumbnailCluster: Array<{
+    referenceId: string;
+    platform: ViralStudioPlatform;
+    label: string;
+    mediaUrl?: string;
+  }>;
+  createdAt: string;
+  updatedAt: string;
+  persistedAt?: string;
+  storageMode?: "memory" | "dual" | "db";
+};
+
+export type ViralStudioApprovedDesignDirection = ViralStudioDesignDirectionCandidate & {
+  candidateId: string;
+  approvedAt: string;
+};
+
+export type ViralStudioContentDirectionCandidate = {
+  id: string;
+  workspaceId: string;
+  sessionId: string;
+  approvedDesignDirectionId: string;
+  orderIndex: number;
+  title: string;
+  coreAudience: string;
+  targetedPain: string;
+  targetedDesire: string;
+  bigPromise: string;
+  proofAngle: string;
+  objectionHandling: string;
+  ctaIntent: string;
+  toneStance: string;
+  recommendedUseCases: string[];
+  whyFitsDesign: string[];
+  sourceReferenceIds: string[];
+  createdAt: string;
+  updatedAt: string;
+  persistedAt?: string;
+  storageMode?: "memory" | "dual" | "db";
+};
+
+export type ViralStudioApprovedContentDirection = ViralStudioContentDirectionCandidate & {
+  candidateId: string;
+  approvedAt: string;
+};
+
+export type ViralStudioFormatGenerationResult = {
+  title: string;
+  summary: string;
+  contentType: ViralStudioContentType;
+  approvedDesignDirectionId: string;
+  approvedContentDirectionId: string;
+  sourceReferenceIds: string[];
+  designDetails: {
+    layoutStructure: string[];
+    typographyTreatment: string;
+    onScreenTextGuidance: string[];
+    pacingOrFrameStructure: string[];
+    visualCompositionNotes: string[];
+    assetSuggestions: string[];
+  };
+  contentDetails: {
+    hook: string;
+    narrativeBeats: string[];
+    proofPlacement: string;
+    cta: string;
+    captionGuidance: string[];
+    variantIdeas: string[];
+  };
+};
+
+export type ViralStudioFormatGenerationJob = {
+  id: string;
+  workspaceId: string;
+  sessionId: string;
+  approvedDesignDirectionId: string;
+  approvedContentDirectionId: string;
+  contentType: ViralStudioContentType;
+  status: "completed";
+  generationPackId: string;
+  selectedReferenceIds: string[];
+  result: ViralStudioFormatGenerationResult;
+  createdAt: string;
+  updatedAt: string;
+  persistedAt?: string;
+  storageMode?: "memory" | "dual" | "db";
+};
+
 export type ViralStudioDocumentSection = {
   id: string;
   title: string;
