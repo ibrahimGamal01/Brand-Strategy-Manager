@@ -1407,6 +1407,53 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     return versions.length > 0 ? versions[versions.length - 1] : null;
   }, [versions]);
 
+  const versionTimelinePreview = useMemo(() => {
+    return [...versions].reverse().slice(0, 4);
+  }, [versions]);
+
+  const generationGalleryPreview = useMemo(() => {
+    return PROMPT_STUDIO_SECTIONS.map((sectionMeta) => {
+      const lines = generation ? readGenerationSectionContent(generation, sectionMeta.id) : [];
+      return {
+        id: sectionMeta.id,
+        title: sectionMeta.title,
+        kind: sectionMeta.kind,
+        count: lines.length,
+        preview:
+          lines.length > 0
+            ? compactText(lines[0], sectionMeta.kind === "list" ? 72 : 108)
+            : "Waiting for first revision",
+      };
+    });
+  }, [generation]);
+
+  const qualityGateCards = useMemo(() => {
+    if (!generation) {
+      return [
+        { label: "Guardrails", value: "Waiting", tone: "neutral" },
+        { label: "Duplicates", value: "0", tone: "neutral" },
+        { label: "Warnings", value: "0", tone: "neutral" },
+      ];
+    }
+    return [
+      {
+        label: "Guardrails",
+        value: generation.qualityCheck.passed ? "Clear" : "Review",
+        tone: generation.qualityCheck.passed ? "positive" : "warning",
+      },
+      {
+        label: "Duplicates",
+        value: String(generation.qualityCheck.duplicates.length),
+        tone: generation.qualityCheck.duplicates.length > 0 ? "warning" : "positive",
+      },
+      {
+        label: "Warnings",
+        value: String(qualitySignals.length),
+        tone: qualitySignals.length > 0 ? "warning" : "positive",
+      },
+    ];
+  }, [generation, qualitySignals]);
+
   const versionOptions = useMemo(() => {
     const base = [{ id: "current", label: "Current Draft" }];
     const timeline = [...versions]
@@ -4486,6 +4533,77 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                 <p className="vbs-panel-subtitle">
                   Set the brief once, then refine only the sections that need more edge, clarity, or control.
                 </p>
+                <div className="vbs-create-overview">
+                  <div className="vbs-create-preview-board">
+                    <div className="vbs-create-preview-head">
+                      <div>
+                        <p className="vbs-meta">Campaign preview</p>
+                        <h3>{generation ? "Your pack is becoming a visual gallery" : "The first revision will populate the gallery"}</h3>
+                      </div>
+                      <div className="vbs-output-badge">
+                        {generatedSectionCount}/{PROMPT_STUDIO_SECTIONS.length} live
+                      </div>
+                    </div>
+                    <div className="vbs-create-preview-grid">
+                      {generationGalleryPreview.map((item) => (
+                        <article
+                          key={item.id}
+                          className={`vbs-create-preview-card ${item.count > 0 ? "is-ready" : ""} ${item.kind === "text" ? "is-script" : ""}`}
+                        >
+                          <span>{item.kind === "list" ? `${Math.max(1, item.count)} variants` : "Narrative block"}</span>
+                          <strong>{item.title}</strong>
+                          <p>{item.preview}</p>
+                        </article>
+                      ))}
+                    </div>
+                    <div className="vbs-quality-gate-strip">
+                      {qualityGateCards.map((item) => (
+                        <article key={item.label} className={`vbs-quality-gate-card is-${item.tone}`}>
+                          <span>{item.label}</span>
+                          <strong>{item.value}</strong>
+                        </article>
+                      ))}
+                    </div>
+                  </div>
+                  <aside className="vbs-save-vault-card">
+                    <p className="vbs-meta">Save vault</p>
+                    <h3>{document ? document.title : generation ? "Campaign Pack Vault" : "Vault waiting for first pack"}</h3>
+                    <p>
+                      Every revision is durable here, so generation feels like a creative timeline instead of disposable output.
+                    </p>
+                    <div className="vbs-save-vault-kpis">
+                      <div>
+                        <span>Autosave</span>
+                        <strong>{autosaveLabel}</strong>
+                      </div>
+                      <div>
+                        <span>Latest</span>
+                        <strong>{latestVersion ? `v${latestVersion.versionNumber}` : generation ? `r${generation.revision}` : "None"}</strong>
+                      </div>
+                      <div>
+                        <span>Exports</span>
+                        <strong>{lastExport ? lastExport.format.toUpperCase() : "Pending"}</strong>
+                      </div>
+                    </div>
+                    <div className="vbs-save-vault-rail">
+                      {versionTimelinePreview.length > 0 ? (
+                        versionTimelinePreview.map((version) => (
+                          <article key={version.id} className="vbs-save-vault-step">
+                            <span>v{version.versionNumber}</span>
+                            <strong>{version.summary || "Snapshot"}</strong>
+                            <p>{formatTimestamp(version.createdAt)}</p>
+                          </article>
+                        ))
+                      ) : (
+                        <article className="vbs-save-vault-step is-empty">
+                          <span>Vault</span>
+                          <strong>Published versions will appear here.</strong>
+                          <p>Create the first version after the pack looks right.</p>
+                        </article>
+                      )}
+                    </div>
+                  </aside>
+                </div>
                 <div className="vbs-generation-shell">
                   <div className="vbs-generation-brief">
                     <div className="vbs-generation-hero">
@@ -4631,7 +4749,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                             return (
                               <article
                                 key={sectionMeta.id}
-                                className={`vbs-pack-card ${activePromptSection === sectionMeta.id ? "is-active" : ""}`}
+                                className={`vbs-pack-card ${activePromptSection === sectionMeta.id ? "is-active" : ""} ${sectionMeta.kind === "text" ? "is-script" : "is-variants"}`}
                                 onClick={() => setActivePromptSection(sectionMeta.id)}
                               >
                                 <header className="vbs-pack-card-head">
@@ -4643,13 +4761,18 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                                 </header>
                                 <div className="vbs-pack-card-body">
                                   {sectionMeta.kind === "list" ? (
-                                    <ul>
+                                    <ul className="vbs-pack-variant-list">
                                       {sectionLines.map((line, index) => (
-                                        <li key={`${sectionMeta.id}-${index}`}>{line}</li>
+                                        <li key={`${sectionMeta.id}-${index}`}>
+                                          <span>{index + 1}</span>
+                                          <p>{line}</p>
+                                        </li>
                                       ))}
                                     </ul>
                                   ) : (
-                                    <pre>{sectionLines[0] || ""}</pre>
+                                    <div className="vbs-pack-script-panel">
+                                      <pre>{sectionLines[0] || ""}</pre>
+                                    </div>
                                   )}
                                 </div>
                                 <label className="vbs-pack-instruction">
@@ -4735,6 +4858,23 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                           <strong>{lastExport ? lastExport.format.toUpperCase() : "None"}</strong>
                         </div>
                       </div>
+                    </div>
+                    <div className="vbs-vault-summary-grid">
+                      <article className="vbs-vault-summary-card">
+                        <span>Current draft</span>
+                        <strong>{documentDraft ? `${documentDraft.sections.length} sections live` : "Not created yet"}</strong>
+                        <p>{documentDirty ? "There are unsaved edits waiting in the editor." : "The working document is in sync."}</p>
+                      </article>
+                      <article className="vbs-vault-summary-card">
+                        <span>Latest version</span>
+                        <strong>{latestVersion ? latestVersion.summary || `Version ${latestVersion.versionNumber}` : "No published version"}</strong>
+                        <p>{latestVersion ? formatTimestamp(latestVersion.createdAt) : "Create a version to lock the draft."}</p>
+                      </article>
+                      <article className="vbs-vault-summary-card">
+                        <span>Export state</span>
+                        <strong>{lastExport ? `${lastExport.format.toUpperCase()} ready` : "No export yet"}</strong>
+                        <p>{lastExport ? "A fresh export is ready from the latest saved draft." : "Markdown and JSON exports appear after the first save."}</p>
+                      </article>
                     </div>
                     <div className="vbs-document-action-bar">
                       <div className="vbs-document-actions">
@@ -4890,6 +5030,28 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                         <div className="vbs-doc-sidebar-card vbs-doc-timeline">
                           <h3>Version Timeline</h3>
                           <p className="vbs-meta">Every checkpoint stays durable, so the team can safely roll forward without losing history.</p>
+                          <div className="vbs-version-rail">
+                            {versionTimelinePreview.length > 0 ? (
+                              versionTimelinePreview.map((version) => (
+                                <button
+                                  key={version.id}
+                                  type="button"
+                                  className={`vbs-version-card ${promoteVersionId === version.id ? "is-selected" : ""}`}
+                                  onClick={() => setPromoteVersionId(version.id)}
+                                >
+                                  <span>v{version.versionNumber}</span>
+                                  <strong>{version.summary || "Snapshot"}</strong>
+                                  <p>{formatTimestamp(version.createdAt)}</p>
+                                </button>
+                              ))
+                            ) : (
+                              <div className="vbs-version-card is-empty">
+                                <span>Timeline</span>
+                                <strong>Your first published version will appear here.</strong>
+                                <p>Use Create Version once the draft is ready to lock it in.</p>
+                              </div>
+                            )}
+                          </div>
                           <div className="vbs-form-grid">
                             <label>
                               Promote version

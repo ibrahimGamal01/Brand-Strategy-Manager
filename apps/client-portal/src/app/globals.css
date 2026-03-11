@@ -3320,6 +3320,237 @@ select:focus-visible {
   gap: 0.75rem;
 }
 
+.vbs-create-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.75fr);
+  gap: 0.9rem;
+}
+
+.vbs-create-preview-board,
+.vbs-save-vault-card,
+.vbs-vault-summary-card,
+.vbs-save-vault-step,
+.vbs-version-card,
+.vbs-pack-script-panel,
+.vbs-pack-variant-list li {
+  border: 1px solid var(--vbs-line);
+  border-radius: 1.1rem;
+  background: color-mix(in srgb, var(--vbs-card-strong) 94%, transparent);
+}
+
+.vbs-create-preview-board,
+.vbs-save-vault-card {
+  padding: 0.95rem;
+  display: grid;
+  gap: 0.8rem;
+}
+
+.vbs-create-preview-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  align-items: flex-start;
+}
+
+.vbs-create-preview-head h3,
+.vbs-save-vault-card h3 {
+  margin: 0.15rem 0 0;
+  font-family: var(--vbs-display-font);
+  color: var(--vbs-copy);
+}
+
+.vbs-create-preview-grid,
+.vbs-vault-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.vbs-create-preview-card,
+.vbs-vault-summary-card {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.85rem;
+}
+
+.vbs-create-preview-card span,
+.vbs-vault-summary-card span,
+.vbs-save-vault-step span,
+.vbs-version-card span {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--vbs-copy-soft);
+}
+
+.vbs-create-preview-card strong,
+.vbs-vault-summary-card strong,
+.vbs-save-vault-step strong,
+.vbs-version-card strong {
+  color: var(--vbs-copy);
+  font-family: var(--vbs-display-font);
+  font-size: 0.94rem;
+}
+
+.vbs-create-preview-card p,
+.vbs-vault-summary-card p,
+.vbs-save-vault-card p:not(.vbs-meta),
+.vbs-save-vault-step p,
+.vbs-version-card p {
+  margin: 0;
+  color: var(--vbs-copy-soft);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.vbs-create-preview-card.is-ready {
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--bat-accent-soft) 72%, transparent) 0%, color-mix(in srgb, var(--bat-success-soft) 52%, transparent) 100%),
+    color-mix(in srgb, var(--vbs-card-strong) 94%, transparent);
+}
+
+.vbs-create-preview-card.is-script {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bat-accent) 14%, transparent);
+}
+
+.vbs-save-vault-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.vbs-quality-gate-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.vbs-quality-gate-card {
+  display: grid;
+  gap: 0.18rem;
+  padding: 0.72rem 0.78rem;
+  border-radius: 0.95rem;
+  border: 1px solid var(--vbs-line);
+  background: color-mix(in srgb, var(--vbs-card-strong) 94%, transparent);
+}
+
+.vbs-quality-gate-card.is-positive {
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--bat-success-soft) 72%, transparent) 0%, transparent 100%),
+    color-mix(in srgb, var(--vbs-card-strong) 94%, transparent);
+}
+
+.vbs-quality-gate-card.is-warning {
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--bat-warning-soft) 72%, transparent) 0%, transparent 100%),
+    color-mix(in srgb, var(--vbs-card-strong) 94%, transparent);
+}
+
+.vbs-quality-gate-card strong {
+  font-family: var(--vbs-display-font);
+}
+
+.vbs-save-vault-kpis > div {
+  display: grid;
+  gap: 0.18rem;
+  padding: 0.72rem 0.78rem;
+  border-radius: 0.95rem;
+  border: 1px solid var(--vbs-line);
+  background: color-mix(in srgb, var(--vbs-handler) 82%, transparent);
+}
+
+.vbs-save-vault-kpis strong {
+  font-family: var(--vbs-display-font);
+}
+
+.vbs-save-vault-rail,
+.vbs-version-rail {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.vbs-save-vault-step,
+.vbs-version-card {
+  padding: 0.78rem 0.82rem;
+  text-align: left;
+}
+
+.vbs-save-vault-step.is-empty,
+.vbs-version-card.is-empty {
+  border-style: dashed;
+}
+
+.vbs-version-card {
+  cursor: pointer;
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.vbs-version-card:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--bat-accent) 32%, var(--bat-border));
+}
+
+.vbs-version-card.is-selected {
+  border-color: color-mix(in srgb, var(--bat-accent) 38%, var(--bat-border));
+  box-shadow: 0 16px 30px -28px rgba(37, 99, 235, 0.36);
+  background: var(--vbs-handler-active);
+}
+
+.vbs-pack-card.is-variants {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bat-success-soft) 24%, transparent) 0%, transparent 100%),
+    var(--vbs-card);
+}
+
+.vbs-pack-card.is-script {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bat-accent-soft) 24%, transparent) 0%, transparent 100%),
+    var(--vbs-card);
+}
+
+.vbs-pack-variant-list {
+  display: grid;
+  gap: 0.48rem;
+  padding-left: 0;
+  list-style: none;
+}
+
+.vbs-pack-variant-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.55rem;
+  padding: 0.7rem;
+}
+
+.vbs-pack-variant-list li span {
+  width: 1.55rem;
+  height: 1.55rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bat-accent-soft) 72%, transparent);
+  color: var(--bat-accent);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.vbs-pack-variant-list li p {
+  margin: 0;
+  color: var(--vbs-copy);
+}
+
+.vbs-pack-script-panel {
+  padding: 0.85rem;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bat-accent-soft) 20%, transparent) 0%, transparent 100%),
+    color-mix(in srgb, var(--vbs-card-strong) 94%, transparent);
+}
+
+.vbs-pack-script-panel pre {
+  color: var(--vbs-copy);
+}
+
 .vbs-modal {
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--vbs-card-strong) 94%, transparent) 0%, color-mix(in srgb, var(--bat-bg) 86%, transparent) 100%);
@@ -3365,6 +3596,17 @@ select:focus-visible {
   .vbs-action-dock-actions {
     justify-content: flex-start;
   }
+
+  .vbs-create-overview {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vbs-create-preview-grid,
+  .vbs-vault-summary-grid,
+  .vbs-save-vault-kpis,
+  .vbs-quality-gate-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 700px) {
@@ -3397,6 +3639,23 @@ select:focus-visible {
   .vbs-action-dock-actions {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .vbs-create-preview-grid,
+  .vbs-vault-summary-grid,
+  .vbs-save-vault-kpis,
+  .vbs-quality-gate-strip,
+  .vbs-shortlist-handler-rail,
+  .vbs-action-dock-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .vbs-create-preview-head {
+    flex-direction: column;
+  }
+
+  .vbs-pack-variant-list li {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
