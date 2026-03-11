@@ -3522,7 +3522,13 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
 
       <div className="vbs-slide-viewport">
         <div className="vbs-slide-track" style={{ transform: slideTransform }}>
-      <section className="vbs-launchpad vbs-slide-card" id="vbs-slide-launchpad" role="tabpanel" aria-label="Launchpad slide">
+      <section
+        className="vbs-launchpad vbs-slide-card vbs-page-scroll"
+        id="vbs-slide-launchpad"
+        role="tabpanel"
+        aria-label="Launchpad slide"
+        tabIndex={0}
+      >
         <div className="vbs-launchpad-main">
           <div className="vbs-launchpad-copy">
             <p className="vbs-meta">Current mission</p>
@@ -3586,7 +3592,13 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         </div>
       </section>
 
-      <div className="vbs-stack vbs-slide-card" id="vbs-slide-foundation" role="tabpanel" aria-label="Brand DNA slide">
+      <div
+        className="vbs-stack vbs-slide-card vbs-page-scroll"
+        id="vbs-slide-foundation"
+        role="tabpanel"
+        aria-label="Brand DNA slide"
+        tabIndex={0}
+      >
         <article
           className={[
             "vbs-panel",
@@ -4264,11 +4276,12 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       {!onboardingLocked ? (
         <>
           <article
-            className="vbs-panel vbs-section-shell vbs-chapter-shell vbs-chapter-reference vbs-slide-card vbs-reference-slide"
+            className="vbs-panel vbs-section-shell vbs-chapter-shell vbs-chapter-reference vbs-slide-card vbs-reference-slide vbs-page-scroll"
             id="vbs-slide-reference"
             role="tabpanel"
             aria-label="Reference engine slide"
             data-chapter="02"
+            tabIndex={0}
           >
             <div className="vbs-section-head">
               <div>
@@ -4892,11 +4905,12 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
           </article>
 
           <article
-            className="vbs-panel vbs-section-shell vbs-chapter-shell vbs-chapter-create vbs-slide-card"
+            className="vbs-panel vbs-section-shell vbs-chapter-shell vbs-chapter-create vbs-slide-card vbs-page-scroll"
             id="vbs-slide-create"
             role="tabpanel"
             aria-label="Create and save slide"
             data-chapter="03"
+            tabIndex={0}
           >
             <div className="vbs-section-head">
               <div>
@@ -5510,11 +5524,23 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         </>
       ) : (
         <>
-          <article className="vbs-panel vbs-slide-card vbs-scroll-section" id="vbs-slide-reference" role="tabpanel" aria-label="Reference engine slide">
+          <article
+            className="vbs-panel vbs-slide-card vbs-page-scroll"
+            id="vbs-slide-reference"
+            role="tabpanel"
+            aria-label="Reference engine slide"
+            tabIndex={0}
+          >
             <h2 className="vbs-panel-title">Workflow Locked Until DNA Finalization</h2>
             <p className="vbs-panel-subtitle">Plan 2 onboarding gate is active. Complete and finalize Brand DNA to unlock extraction, generation, and document actions.</p>
           </article>
-          <article className="vbs-panel vbs-slide-card vbs-scroll-section" id="vbs-slide-create" role="tabpanel" aria-label="Create and save slide">
+          <article
+            className="vbs-panel vbs-slide-card vbs-page-scroll"
+            id="vbs-slide-create"
+            role="tabpanel"
+            aria-label="Create and save slide"
+            tabIndex={0}
+          >
             <h2 className="vbs-panel-title">Create & Save unlocks after DNA finalization</h2>
             <p className="vbs-panel-subtitle">Finish the Brand DNA flow once and the generation + versioning workspace will unlock automatically.</p>
           </article>

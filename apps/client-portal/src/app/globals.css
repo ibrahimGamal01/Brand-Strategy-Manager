@@ -344,13 +344,36 @@ select:focus-visible {
   flex: 0 0 100%;
   min-width: 0;
   max-width: 100%;
+  height: 100%;
   overflow-y: auto;
+  overflow-x: hidden;
   overscroll-behavior: contain;
   padding: 0.18rem 0.15rem 0.4rem;
 }
 
 .vbs-slide-card.vbs-stack {
+  grid-auto-rows: max-content;
   align-content: start;
+}
+
+.vbs-page-scroll {
+  scrollbar-gutter: stable both-edges;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--vbs-copy-soft) 38%, transparent) transparent;
+}
+
+.vbs-page-scroll::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.vbs-page-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--vbs-copy-soft) 34%, transparent);
+}
+
+.vbs-page-scroll::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .vbs-scroll-section,
@@ -387,16 +410,14 @@ select:focus-visible {
   overflow-y: auto;
 }
 
-.vbs-slide-card.vbs-stack > .vbs-scroll-section {
-  max-height: min(58dvh, 48rem);
+.vbs-page-scroll > .vbs-scroll-section,
+.vbs-page-scroll > .vbs-panel.vbs-scroll-section {
+  max-height: none;
+  overflow: visible;
 }
 
-.vbs-grid > .vbs-scroll-section {
-  height: 100%;
-}
-
-.vbs-shell-slides.is-compact .vbs-slide-card.vbs-stack > .vbs-scroll-section {
-  max-height: min(52dvh, 42rem);
+.vbs-page-scroll .vbs-scroll-column {
+  overflow: visible;
 }
 
 .vbs-reset-hero {
@@ -1870,43 +1891,29 @@ select:focus-visible {
 
 .vbs-reference-slide {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
   min-height: 100%;
-  overflow-x: hidden;
-  overflow-y: auto;
 }
 
 .vbs-reference-slide .vbs-grid {
-  height: 100%;
+  height: auto;
   min-height: 0;
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-rows: auto;
   align-items: stretch;
 }
 
 .vbs-reference-slide .vbs-grid > .vbs-panel:first-child {
-  height: 100%;
+  height: auto;
   min-height: 0;
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
-  overflow: hidden;
+  grid-template-rows: auto auto auto auto;
+  overflow: visible;
 }
 
 .vbs-reference-slide .vbs-grid > .vbs-panel:last-child {
-  height: 100%;
+  height: auto;
   min-height: 0;
-  overflow: hidden;
-}
-
-.vbs-section-shell.vbs-scroll-section,
-.vbs-reference-slide .vbs-grid > .vbs-scroll-section {
-  overflow-x: hidden;
-  overflow-y: auto;
-}
-
-.vbs-reference-slide .vbs-grid > .vbs-scroll-section:first-child,
-.vbs-reference-slide .vbs-grid > .vbs-scroll-section:last-child {
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: visible;
 }
 
 .vbs-reference-slide .vbs-run-history {
@@ -3829,6 +3836,12 @@ select:focus-visible {
 .vbs-launchpad,
 .vbs-section-shell {
   background: transparent;
+}
+
+.vbs-launchpad.vbs-page-scroll,
+.vbs-section-shell.vbs-page-scroll {
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .vbs-launchpad-card,
