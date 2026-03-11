@@ -3372,6 +3372,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   const canSlideBack = activeSlideIndex > 0;
   const canSlideForward = activeSlideIndex < STUDIO_SLIDE_ORDER.length - 1;
   const slideTransform = `translateX(-${activeSlideIndex * 100}%)`;
+  const showGlobalActionDock = activeSlide !== "reference";
   const shellStyle = useMemo(
     () =>
       shellViewportHeight
@@ -5521,41 +5522,43 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         </div>
       </div>
 
-      <div className="vbs-action-dock" role="toolbar" aria-label="Viral Studio handlers">
-        <div className="vbs-action-dock-copy">
-          <p className="vbs-meta">{actionDock.eyebrow}</p>
-          <h2>{actionDock.title}</h2>
-          <p>{actionDock.note}</p>
-        </div>
-        <div className="vbs-action-dock-actions">
-          {actionDock.actions.map((action) => {
-            const Icon = action.icon;
-            return (
-              <button
-                key={action.key}
-                type="button"
-                className={action.emphasis === "primary" ? "vbs-handler-button is-primary" : "vbs-handler-button"}
-                disabled={action.disabled}
-                onClick={() => void action.run()}
-              >
-                <Icon className="h-4 w-4" />
-                {action.label}
-              </button>
-            );
-          })}
-        </div>
-        <div className="vbs-action-dock-meta">
-          <div className="vbs-save-ribbon">
-            <span>Auto-save</span>
-            <strong>{actionDock.saveNote}</strong>
+      {showGlobalActionDock ? (
+        <div className="vbs-action-dock" role="toolbar" aria-label="Viral Studio handlers">
+          <div className="vbs-action-dock-copy">
+            <p className="vbs-meta">{actionDock.eyebrow}</p>
+            <h2>{actionDock.title}</h2>
+            <p>{actionDock.note}</p>
           </div>
-          <div className="vbs-shortcut-chips">
-            {actionDock.shortcuts.map((shortcut) => (
-              <span key={shortcut}>{shortcut}</span>
-            ))}
+          <div className="vbs-action-dock-actions">
+            {actionDock.actions.map((action) => {
+              const Icon = action.icon;
+              return (
+                <button
+                  key={action.key}
+                  type="button"
+                  className={action.emphasis === "primary" ? "vbs-handler-button is-primary" : "vbs-handler-button"}
+                  disabled={action.disabled}
+                  onClick={() => void action.run()}
+                >
+                  <Icon className="h-4 w-4" />
+                  {action.label}
+                </button>
+              );
+            })}
+          </div>
+          <div className="vbs-action-dock-meta">
+            <div className="vbs-save-ribbon">
+              <span>Auto-save</span>
+              <strong>{actionDock.saveNote}</strong>
+            </div>
+            <div className="vbs-shortcut-chips">
+              {actionDock.shortcuts.map((shortcut) => (
+                <span key={shortcut}>{shortcut}</span>
+              ))}
+            </div>
           </div>
         </div>
-      </div>
+      ) : null}
 
       {showExtractionModal ? (
         <div

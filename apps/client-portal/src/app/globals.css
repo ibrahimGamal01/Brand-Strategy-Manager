@@ -1824,15 +1824,19 @@ select:focus-visible {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   min-height: 100%;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .vbs-reference-slide .vbs-grid {
+  height: 100%;
   min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
   align-items: stretch;
 }
 
 .vbs-reference-slide .vbs-grid > .vbs-panel:first-child {
+  height: 100%;
   min-height: 0;
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr);
@@ -1840,6 +1844,7 @@ select:focus-visible {
 }
 
 .vbs-reference-slide .vbs-grid > .vbs-panel:last-child {
+  height: 100%;
   min-height: 0;
   overflow: hidden;
 }
@@ -1857,7 +1862,9 @@ select:focus-visible {
 }
 
 .vbs-reference-slide .vbs-curation-layout {
+  height: 100%;
   min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
   align-items: stretch;
   overflow: hidden;
 }
@@ -1878,6 +1885,44 @@ select:focus-visible {
 .vbs-reference-slide .vbs-analysis-sidecar .vbs-analysis-drawer {
   min-height: 0;
   max-height: none;
+}
+
+.vbs-shell-slides.is-compact .vbs-extraction-launchpad,
+.vbs-shell-slides.is-compact .vbs-extraction-source-card,
+.vbs-shell-slides.is-compact .vbs-extraction-monitor,
+.vbs-shell-slides.is-compact .vbs-curation-topline,
+.vbs-shell-slides.is-compact .vbs-curation-assist {
+  padding: 0.65rem 0.72rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-extraction-launchpad h3,
+.vbs-shell-slides.is-compact .vbs-curation-topline h2,
+.vbs-shell-slides.is-compact .vbs-extraction-source-card h4 {
+  font-size: 0.98rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-extraction-launchpad p:not(.vbs-meta),
+.vbs-shell-slides.is-compact .vbs-extraction-source-card p:not(.vbs-meta),
+.vbs-shell-slides.is-compact .vbs-curation-topline .vbs-panel-subtitle {
+  font-size: 0.78rem;
+  line-height: 1.42;
+}
+
+.vbs-shell-slides.is-compact .vbs-extraction-facts,
+.vbs-shell-slides.is-compact .vbs-curation-kpis {
+  gap: 0.45rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-extraction-facts > div,
+.vbs-shell-slides.is-compact .vbs-curation-kpis > div,
+.vbs-shell-slides.is-compact .vbs-ingestion-step {
+  padding: 0.55rem 0.62rem;
+}
+
+.vbs-shell-slides.is-compact .vbs-extraction-facts strong,
+.vbs-shell-slides.is-compact .vbs-curation-kpis strong,
+.vbs-shell-slides.is-compact .vbs-ingestion-step strong {
+  font-size: 0.9rem;
 }
 
 .vbs-reference-board-shell,
