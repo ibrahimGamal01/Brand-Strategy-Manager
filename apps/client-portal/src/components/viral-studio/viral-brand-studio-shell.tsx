@@ -2766,14 +2766,14 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
             onClick={() => setActiveSlide(STUDIO_SLIDE_ORDER[Math.max(0, activeSlideIndex - 1)])}
             disabled={!canSlideBack}
           >
-            Previous
+            Previous Slide
           </button>
           <button
             type="button"
             onClick={() => setActiveSlide(STUDIO_SLIDE_ORDER[Math.min(STUDIO_SLIDE_ORDER.length - 1, activeSlideIndex + 1)])}
             disabled={!canSlideForward}
           >
-            Next
+            Next Slide
           </button>
         </div>
       </div>
