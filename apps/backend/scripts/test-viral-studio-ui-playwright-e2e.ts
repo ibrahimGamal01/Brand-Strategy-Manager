@@ -162,6 +162,20 @@ async function waitForReferenceBoard(page: Page): Promise<void> {
   assert.ok(count > 0, 'Expected at least one reference card after extraction.');
 }
 
+async function validateLaunchpadActionsAreClickable(page: Page): Promise<void> {
+  const actionButtons = page.locator('.vbs-launchpad-foot .vbs-launchpad-action');
+  await actionButtons.first().waitFor({ timeout: 20_000 });
+  const actionCount = await actionButtons.count();
+  assert.ok(actionCount >= 3, `Expected >=3 launchpad action buttons, got ${actionCount}`);
+
+  for (let index = 0; index < Math.min(actionCount, 3); index += 1) {
+    const button = actionButtons.nth(index);
+    await button.scrollIntoViewIfNeeded();
+    // trial click validates hit-target + interactivity without mutating workflow state.
+    await button.click({ trial: true });
+  }
+}
+
 async function validateDrawerAndShortcuts(page: Page) {
   const firstReference = page.locator('.vbs-reference-card .vbs-reference-card-head').first();
   await firstReference.click();
@@ -249,6 +263,7 @@ async function runFlowAttempt(baseUrl: string): Promise<void> {
     await page.goto(`${baseUrl}/app/w/${workspaceId}/viral-studio`, { waitUntil: 'domcontentloaded' });
     await page.getByRole('heading', { name: 'Viral Brand Studio' }).waitFor({ timeout: 60_000 });
 
+    await validateLaunchpadActionsAreClickable(page);
     await finalizeBrandDna(page);
     await runExtraction(page);
     await waitForReferenceBoard(page);
@@ -266,6 +281,7 @@ async function runFlowAttempt(baseUrl: string): Promise<void> {
           checks: [
             'signup_and_login_flow',
             'viral_studio_route_loaded',
+            'launchpad_right_actions_clickable',
             'brand_dna_finalize_gate',
             'extraction_run_completed_with_references',
             'analysis_drawer_renders_extended_sections',
