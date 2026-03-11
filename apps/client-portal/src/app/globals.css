@@ -101,41 +101,59 @@ a {
 
 .vbs-shell {
   display: grid;
-  gap: 1rem;
-  padding-bottom: 1.25rem;
+  gap: 1.15rem;
+  padding-bottom: 1.5rem;
   font-family: var(--vbs-body-font);
+  position: relative;
+}
+
+.vbs-shell::before {
+  content: "";
+  position: absolute;
+  inset: -1rem 0 auto;
+  height: 28rem;
+  background:
+    radial-gradient(circle at 8% 8%, color-mix(in srgb, var(--vbs-coral) 18%, transparent) 0%, transparent 32%),
+    radial-gradient(circle at 88% 4%, color-mix(in srgb, var(--vbs-teal) 16%, transparent) 0%, transparent 30%),
+    linear-gradient(180deg, color-mix(in srgb, var(--vbs-sand) 42%, white) 0%, transparent 100%);
+  pointer-events: none;
+  z-index: 0;
 }
 
 .vbs-stack {
   display: grid;
-  gap: 1rem;
+  gap: 1.2rem;
+  position: relative;
+  z-index: 1;
 }
 
 .vbs-reset-hero {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(250px, 0.9fr);
-  gap: 1rem;
-  padding: clamp(1.15rem, 3.5vw, 2rem);
-  border-radius: 1.4rem;
+  grid-template-columns: minmax(0, 1.7fr) minmax(280px, 0.85fr);
+  gap: 1.2rem;
+  padding: clamp(1.35rem, 4vw, 2.6rem);
+  border-radius: 1.8rem;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 18%, var(--bat-border));
+  border: 1px solid color-mix(in srgb, var(--vbs-ink) 16%, var(--bat-border));
   background:
-    radial-gradient(circle at top left, color-mix(in srgb, var(--vbs-coral) 18%, transparent) 0%, transparent 24%),
-    radial-gradient(circle at 88% 22%, color-mix(in srgb, var(--vbs-teal) 16%, transparent) 0%, transparent 28%),
-    linear-gradient(135deg, color-mix(in srgb, white 78%, var(--vbs-sand)) 0%, white 48%, color-mix(in srgb, var(--vbs-cobalt) 8%, white) 100%);
-  box-shadow: 0 26px 60px -40px rgba(11, 19, 43, 0.35);
+    linear-gradient(120deg, color-mix(in srgb, var(--vbs-ink) 96%, black) 0%, color-mix(in srgb, var(--vbs-cobalt) 82%, var(--vbs-ink)) 58%, color-mix(in srgb, var(--vbs-teal) 78%, var(--vbs-ink)) 100%);
+  box-shadow: 0 32px 80px -42px rgba(11, 19, 43, 0.62);
+  color: white;
 }
 
 .vbs-reset-hero::after {
   content: "";
   position: absolute;
-  inset: auto -10% -35% auto;
-  width: 22rem;
-  height: 22rem;
-  border-radius: 999px;
-  background: radial-gradient(circle, color-mix(in srgb, var(--vbs-cobalt) 14%, transparent) 0%, transparent 66%);
+  inset: auto -8% -28% auto;
+  width: 25rem;
+  height: 25rem;
+  border-radius: 38% 62% 72% 28% / 33% 41% 59% 67%;
+  background:
+    radial-gradient(circle at 30% 30%, color-mix(in srgb, var(--vbs-coral) 40%, transparent) 0%, transparent 42%),
+    radial-gradient(circle at 60% 65%, color-mix(in srgb, white 16%, transparent) 0%, transparent 56%);
   pointer-events: none;
+  opacity: 0.95;
 }
 
 .vbs-reset-meta {
@@ -148,43 +166,60 @@ a {
 }
 
 .vbs-reset-meta > div {
-  border-radius: 1rem;
-  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 16%, var(--bat-border));
-  background: color-mix(in srgb, white 82%, var(--vbs-sand));
-  padding: 0.85rem 0.9rem;
+  border-radius: 1.1rem;
+  border: 1px solid color-mix(in srgb, white 18%, transparent);
+  background: color-mix(in srgb, white 10%, transparent);
+  backdrop-filter: blur(10px);
+  padding: 0.9rem 1rem;
   display: grid;
-  gap: 0.2rem;
+  gap: 0.25rem;
 }
 
 .vbs-reset-meta span {
   font-size: 0.66rem;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: color-mix(in srgb, var(--vbs-ink) 52%, #6a7287);
+  color: color-mix(in srgb, white 62%, #d5def3);
 }
 
 .vbs-reset-meta strong {
   font-family: var(--vbs-display-font);
-  font-size: 1rem;
-  color: var(--vbs-ink);
+  font-size: 1.04rem;
+  color: white;
 }
 
 .vbs-launchpad {
   display: grid;
-  gap: 0.9rem;
-  border-radius: 1.35rem;
-  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 14%, var(--bat-border));
+  gap: 1rem;
+  border-radius: 1.5rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-ink) 12%, var(--bat-border));
   background:
-    linear-gradient(150deg, color-mix(in srgb, var(--vbs-sand) 52%, white) 0%, white 45%, color-mix(in srgb, var(--vbs-teal) 5%, white) 100%);
-  padding: 1rem;
-  box-shadow: 0 24px 50px -42px rgba(15, 118, 110, 0.28);
+    radial-gradient(circle at 90% 18%, color-mix(in srgb, var(--vbs-coral) 18%, transparent) 0%, transparent 24%),
+    linear-gradient(155deg, color-mix(in srgb, var(--vbs-sand) 30%, white) 0%, white 38%, color-mix(in srgb, var(--vbs-cobalt) 10%, white) 100%);
+  padding: 1.15rem;
+  box-shadow: 0 28px 58px -46px rgba(15, 118, 110, 0.34);
+  position: relative;
+  overflow: hidden;
+}
+
+.vbs-launchpad::after {
+  content: "";
+  position: absolute;
+  inset: auto auto -4.5rem -2rem;
+  width: 14rem;
+  height: 14rem;
+  border-radius: 999px;
+  background: radial-gradient(circle, color-mix(in srgb, var(--vbs-cobalt) 10%, transparent) 0%, transparent 68%);
+  pointer-events: none;
 }
 
 .vbs-launchpad-main {
   display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(250px, 0.85fr);
-  gap: 1rem;
+  grid-template-columns: minmax(0, 1.5fr) minmax(260px, 0.8fr);
+  gap: 1.1rem;
   align-items: stretch;
+  position: relative;
+  z-index: 1;
 }
 
 .vbs-launchpad-copy {
@@ -196,17 +231,19 @@ a {
 .vbs-launchpad-copy h2 {
   margin: 0;
   font-family: var(--vbs-display-font);
-  font-size: clamp(1.35rem, 2.4vw, 1.85rem);
-  letter-spacing: -0.02em;
+  font-size: clamp(1.65rem, 3vw, 2.45rem);
+  line-height: 0.95;
+  letter-spacing: -0.04em;
   color: var(--vbs-ink);
+  max-width: 13ch;
 }
 
 .vbs-launchpad-copy p:not(.vbs-meta) {
   margin: 0;
-  max-width: 58ch;
-  color: color-mix(in srgb, var(--vbs-ink) 78%, #626a7e);
-  font-size: 0.95rem;
-  line-height: 1.6;
+  max-width: 60ch;
+  color: color-mix(in srgb, var(--vbs-ink) 74%, #515b72);
+  font-size: 1rem;
+  line-height: 1.7;
 }
 
 .vbs-launchpad-strip {
@@ -215,12 +252,12 @@ a {
 }
 
 .vbs-launchpad-strip > div {
-  border-radius: 1rem;
-  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 16%, var(--bat-border));
-  background: linear-gradient(160deg, color-mix(in srgb, white 92%, var(--vbs-sand)) 0%, color-mix(in srgb, var(--vbs-cobalt) 6%, white) 100%);
-  padding: 0.85rem 0.9rem;
+  border-radius: 1.15rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 20%, var(--bat-border));
+  background: linear-gradient(165deg, color-mix(in srgb, white 94%, var(--vbs-sand)) 0%, color-mix(in srgb, var(--vbs-cobalt) 8%, white) 100%);
+  padding: 0.95rem 1rem;
   display: grid;
-  gap: 0.18rem;
+  gap: 0.24rem;
 }
 
 .vbs-launchpad-strip span,
@@ -232,38 +269,66 @@ a {
 }
 
 .vbs-launchpad-strip strong {
-  font-size: 0.95rem;
+  font-size: 1.05rem;
+  font-family: var(--vbs-display-font);
   color: var(--vbs-ink);
 }
 
 .vbs-launchpad-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.8rem;
+  gap: 0.9rem;
+  position: relative;
+  z-index: 1;
 }
 
 .vbs-launchpad-card {
-  border-radius: 1rem;
-  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 16%, var(--bat-border));
-  background: color-mix(in srgb, white 92%, var(--vbs-sand));
-  padding: 0.95rem;
+  border-radius: 1.2rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-ink) 12%, var(--bat-border));
+  background: linear-gradient(180deg, color-mix(in srgb, white 92%, var(--vbs-sand)) 0%, white 100%);
+  padding: 1rem;
   display: grid;
-  gap: 0.65rem;
-  min-height: 12rem;
+  gap: 0.75rem;
+  min-height: 13rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.vbs-launchpad-card::before {
+  content: "";
+  position: absolute;
+  inset: auto -1rem -2.5rem auto;
+  width: 7.5rem;
+  height: 7.5rem;
+  border-radius: 999px;
+  background: radial-gradient(circle, color-mix(in srgb, var(--vbs-cobalt) 10%, transparent) 0%, transparent 70%);
+}
+
+.vbs-launchpad-card-foundation {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--vbs-coral) 8%, white) 0%, white 100%);
+}
+
+.vbs-launchpad-card-references {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--vbs-cobalt) 8%, white) 0%, white 100%);
+}
+
+.vbs-launchpad-card-create {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--vbs-teal) 9%, white) 0%, white 100%);
 }
 
 .vbs-launchpad-card h3 {
   margin: 0;
   font-family: var(--vbs-display-font);
-  font-size: 1rem;
+  font-size: 1.16rem;
+  line-height: 1;
   color: var(--vbs-ink);
 }
 
 .vbs-launchpad-card p:not(.vbs-meta) {
   margin: 0;
-  font-size: 0.86rem;
-  line-height: 1.55;
-  color: color-mix(in srgb, var(--vbs-ink) 78%, #646d82);
+  font-size: 0.9rem;
+  line-height: 1.65;
+  color: color-mix(in srgb, var(--vbs-ink) 74%, #5d677c);
 }
 
 .vbs-launchpad-foot {
@@ -281,8 +346,10 @@ a {
 
 .vbs-section-shell {
   display: grid;
-  gap: 1rem;
-  padding: 1.15rem;
+  gap: 1.1rem;
+  padding: 1.35rem;
+  position: relative;
+  overflow: hidden;
 }
 
 .vbs-section-head {
@@ -290,6 +357,65 @@ a {
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
+  position: relative;
+  z-index: 1;
+}
+
+.vbs-chapter-shell::before {
+  content: attr(data-chapter);
+  position: absolute;
+  top: 0.75rem;
+  right: 1rem;
+  font-family: var(--vbs-display-font);
+  font-size: clamp(4.2rem, 10vw, 8rem);
+  line-height: 0.85;
+  letter-spacing: -0.08em;
+  color: color-mix(in srgb, var(--vbs-ink) 5%, transparent);
+  pointer-events: none;
+}
+
+.vbs-chapter-foundation {
+  background:
+    radial-gradient(circle at 92% 14%, color-mix(in srgb, var(--vbs-coral) 10%, transparent) 0%, transparent 22%),
+    linear-gradient(180deg, color-mix(in srgb, var(--vbs-sand) 30%, white) 0%, white 100%);
+}
+
+.vbs-chapter-reference {
+  background:
+    radial-gradient(circle at 88% 12%, color-mix(in srgb, var(--vbs-cobalt) 10%, transparent) 0%, transparent 22%),
+    linear-gradient(180deg, color-mix(in srgb, var(--vbs-cobalt) 4%, white) 0%, white 100%);
+}
+
+.vbs-chapter-create {
+  background:
+    radial-gradient(circle at 90% 14%, color-mix(in srgb, var(--vbs-teal) 10%, transparent) 0%, transparent 22%),
+    linear-gradient(180deg, color-mix(in srgb, var(--vbs-teal) 4%, white) 0%, white 100%);
+}
+
+.vbs-chapter-foundation.is-compact > .vbs-onboarding-progress,
+.vbs-chapter-foundation.is-compact > .vbs-foundation-note,
+.vbs-chapter-foundation.is-compact > .vbs-autofill-panel,
+.vbs-chapter-foundation.is-compact > .vbs-foundation-sources {
+  display: none;
+}
+
+.vbs-chapter-foundation.is-compact .vbs-output {
+  margin-top: 0;
+}
+
+.vbs-chapter-foundation.is-compact > .vbs-output:last-of-type {
+  border-radius: 1.35rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-coral) 18%, var(--bat-border));
+  background:
+    radial-gradient(circle at 95% 15%, color-mix(in srgb, var(--vbs-coral) 14%, transparent) 0%, transparent 24%),
+    linear-gradient(155deg, color-mix(in srgb, var(--vbs-sand) 18%, white) 0%, white 100%);
+  padding: 1.15rem 1.2rem;
+}
+
+.vbs-chapter-foundation.is-compact > .vbs-output:last-of-type p:not(.vbs-meta) {
+  font-size: 0.92rem;
+  line-height: 1.75;
+  color: color-mix(in srgb, var(--vbs-ink) 74%, #566179);
 }
 
 .vbs-status-strip {
@@ -303,8 +429,8 @@ a {
 .vbs-status-strip span {
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 18%, var(--bat-border));
-  background: color-mix(in srgb, white 88%, var(--vbs-sand));
-  padding: 0.5rem 0.75rem;
+  background: color-mix(in srgb, white 92%, var(--vbs-sand));
+  padding: 0.55rem 0.85rem;
 }
 
 .vbs-foundation-note {
@@ -492,18 +618,19 @@ a {
 }
 
 .vbs-title {
-  margin: 0.55rem 0 0;
+  margin: 0.4rem 0 0;
   font-family: var(--vbs-display-font);
-  font-size: clamp(1.6rem, 4vw, 2.5rem);
-  letter-spacing: -0.02em;
+  font-size: clamp(2.2rem, 5vw, 4.5rem);
+  line-height: 0.92;
+  letter-spacing: -0.06em;
 }
 
 .vbs-subtitle {
   margin: 0.55rem 0 0;
-  max-width: 60ch;
-  font-size: 0.92rem;
-  line-height: 1.55;
-  color: color-mix(in srgb, white 85%, #d0d9ee);
+  max-width: 52ch;
+  font-size: 1rem;
+  line-height: 1.7;
+  color: color-mix(in srgb, white 82%, #d0d9ee);
 }
 
 .vbs-grid {
@@ -521,24 +648,27 @@ a {
 }
 
 .vbs-panel {
-  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 14%, var(--bat-border));
-  border-radius: 1rem;
-  background: linear-gradient(160deg, color-mix(in srgb, var(--vbs-sand) 45%, white) 0%, white 46%, color-mix(in srgb, var(--vbs-cobalt) 6%, white) 100%);
-  padding: 1rem;
-  box-shadow: 0 12px 24px rgba(16, 24, 40, 0.08);
+  border: 1px solid color-mix(in srgb, var(--vbs-ink) 12%, var(--bat-border));
+  border-radius: 1.4rem;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--vbs-sand) 24%, white) 0%, white 48%, color-mix(in srgb, var(--vbs-cobalt) 5%, white) 100%);
+  padding: 1.1rem;
+  box-shadow: 0 24px 52px -42px rgba(16, 24, 40, 0.28);
 }
 
 .vbs-panel-title {
   margin: 0;
   font-family: var(--vbs-display-font);
-  font-size: 1.1rem;
+  font-size: 1.4rem;
+  line-height: 0.98;
+  letter-spacing: -0.03em;
   color: var(--vbs-ink);
 }
 
 .vbs-panel-subtitle {
-  margin: 0.35rem 0 0.8rem;
-  color: color-mix(in srgb, var(--vbs-ink) 72%, #6f7488);
-  font-size: 0.82rem;
+  margin: 0.45rem 0 0.9rem;
+  color: color-mix(in srgb, var(--vbs-ink) 70%, #647089);
+  font-size: 0.9rem;
+  line-height: 1.6;
 }
 
 .vbs-alert {
@@ -838,19 +968,29 @@ a {
 .vbs-actions button,
 .vbs-mini-actions button {
   border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 30%, var(--bat-border));
-  background: color-mix(in srgb, var(--vbs-cobalt) 12%, white);
+  border: 1px solid color-mix(in srgb, var(--vbs-ink) 16%, var(--bat-border));
+  background: linear-gradient(180deg, white 0%, color-mix(in srgb, var(--vbs-sand) 44%, white) 100%);
   color: var(--vbs-ink);
-  padding: 0.45rem 0.85rem;
-  font-size: 0.79rem;
+  padding: 0.65rem 1rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
   cursor: pointer;
-  transition: transform 180ms ease, background 180ms ease;
+  box-shadow: 0 12px 24px -20px rgba(11, 19, 43, 0.45);
+  transition: transform 180ms ease, background 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.vbs-actions button:first-child {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--vbs-cobalt) 92%, white) 0%, color-mix(in srgb, var(--vbs-teal) 76%, white) 100%);
+  color: white;
+  border-color: transparent;
 }
 
 .vbs-actions button:hover,
 .vbs-mini-actions button:hover {
-  transform: translateY(-1px);
-  background: color-mix(in srgb, var(--vbs-cobalt) 18%, white);
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--vbs-cobalt) 26%, var(--bat-border));
+  box-shadow: 0 18px 34px -24px rgba(11, 19, 43, 0.42);
 }
 
 .vbs-actions button:disabled,
@@ -862,8 +1002,9 @@ a {
 
 .vbs-meta {
   margin-top: 0.65rem;
-  font-size: 0.76rem;
-  color: color-mix(in srgb, var(--vbs-ink) 62%, #6f7488);
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+  color: color-mix(in srgb, var(--vbs-ink) 52%, #768099);
 }
 
 .vbs-kpi-grid {

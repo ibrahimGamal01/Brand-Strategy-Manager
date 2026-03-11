@@ -2267,13 +2267,15 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
               <button type="button" disabled={isBusy || autofillBusy} onClick={() => void runWorkflowGuideAction()}>
                 {workflowGuide.cta}
               </button>
-              <button
-                type="button"
-                disabled={isBusy || autofillBusy || autopilotBusy}
-                onClick={() => void runWebsiteFirstAutopilot()}
-              >
-                {autopilotBusy ? "Running Website-First Autopilot..." : "Run Website-First Autopilot"}
-              </button>
+              {!brandReady || !activeIngestion || references.length === 0 ? (
+                <button
+                  type="button"
+                  disabled={isBusy || autofillBusy || autopilotBusy}
+                  onClick={() => void runWebsiteFirstAutopilot()}
+                >
+                  {autopilotBusy ? "Running Website-First Autopilot..." : "Run Website-First Autopilot"}
+                </button>
+              ) : null}
               <button type="button" onClick={() => router.push(`/app/w/${workspaceId}`)}>
                 Open Core Chat
               </button>
@@ -2297,7 +2299,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         </div>
         <div className="vbs-launchpad-grid">
           {launchpadCards.map((card) => (
-            <article key={card.id} className="vbs-launchpad-card">
+            <article key={card.id} className={`vbs-launchpad-card vbs-launchpad-card-${card.id}`}>
               <p className="vbs-meta">{card.eyebrow}</p>
               <h3>{card.title}</h3>
               <p>{card.body}</p>
@@ -2313,7 +2315,19 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       </section>
 
       <div className="vbs-stack">
-        <article className="vbs-panel vbs-section-shell" id="vbs-section-onboarding">
+        <article
+          className={[
+            "vbs-panel",
+            "vbs-section-shell",
+            "vbs-chapter-shell",
+            "vbs-chapter-foundation",
+            brandReady && !isEditingBrandDna ? "is-compact" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          id="vbs-section-onboarding"
+          data-chapter="01"
+        >
           <div className="vbs-section-head">
             <div>
               <p className="vbs-meta">Foundation</p>
@@ -2430,7 +2444,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
               </p>
             )}
           </div>
-          <div className="vbs-output">
+          <div className="vbs-output vbs-foundation-sources">
             <h3>Suggested Extraction Sources (Data-max)</h3>
             {suggestedSources.length ? (
               <div className="vbs-source-suggest-list">
@@ -2848,7 +2862,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
 
       {!onboardingLocked ? (
         <>
-          <article className="vbs-panel vbs-section-shell">
+          <article className="vbs-panel vbs-section-shell vbs-chapter-shell vbs-chapter-reference" data-chapter="02">
             <div className="vbs-section-head">
               <div>
                 <p className="vbs-meta">Reference Engine</p>
@@ -3266,7 +3280,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
             </div>
           </article>
 
-          <article className="vbs-panel vbs-section-shell" id="vbs-section-create-save">
+          <article className="vbs-panel vbs-section-shell vbs-chapter-shell vbs-chapter-create" id="vbs-section-create-save" data-chapter="03">
             <div className="vbs-section-head">
               <div>
                 <p className="vbs-meta">Create & Save</p>
