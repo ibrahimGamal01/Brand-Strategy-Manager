@@ -1229,15 +1229,19 @@ a {
 .vbs-reference-card {
   border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 16%, var(--bat-border));
   border-radius: 0.8rem;
-  background: color-mix(in srgb, white 88%, var(--vbs-sand));
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(248, 244, 236, 0.9) 100%);
   padding: 0.6rem;
   display: grid;
   gap: 0.45rem;
+  box-shadow: 0 20px 44px rgba(11, 19, 43, 0.08);
 }
 
 .vbs-reference-card.is-selected {
   border-color: color-mix(in srgb, var(--vbs-cobalt) 48%, var(--bat-border));
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--vbs-cobalt) 15%, transparent);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--vbs-cobalt) 15%, transparent),
+    0 24px 52px rgba(37, 99, 235, 0.16);
 }
 
 .vbs-reference-card.is-updated {
@@ -1252,13 +1256,104 @@ a {
   padding: 0;
   text-align: left;
   display: grid;
-  gap: 0.25rem;
+  gap: 0.7rem;
   cursor: pointer;
 }
 
 .vbs-reference-card-head p {
   margin: 0;
   font-size: 0.8rem;
+}
+
+.vbs-reference-poster {
+  position: relative;
+  min-height: 17rem;
+  border-radius: 1rem;
+  overflow: hidden;
+  background: #0b132b;
+  isolation: isolate;
+}
+
+.vbs-reference-poster img,
+.vbs-analysis-poster img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.vbs-reference-poster::after,
+.vbs-analysis-poster::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(11, 19, 43, 0.08) 0%, rgba(11, 19, 43, 0.68) 62%, rgba(11, 19, 43, 0.9) 100%);
+  pointer-events: none;
+}
+
+.vbs-reference-poster-top,
+.vbs-reference-poster-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  display: flex;
+  gap: 0.55rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.8rem;
+}
+
+.vbs-reference-poster-top {
+  top: 0;
+}
+
+.vbs-reference-poster-bottom {
+  bottom: 0;
+  display: grid;
+  justify-content: stretch;
+  align-items: end;
+}
+
+.vbs-reference-eyebrow {
+  font-size: 0.68rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(248, 244, 236, 0.78);
+}
+
+.vbs-reference-poster-bottom h3 {
+  margin: 0.15rem 0 0;
+  max-width: 14ch;
+  font-family: var(--vbs-editorial-font);
+  font-size: clamp(1.45rem, 2vw, 2rem);
+  line-height: 0.96;
+  color: #fff8ef;
+}
+
+.vbs-reference-poster-bottom p:last-child {
+  margin-top: 0.45rem;
+  max-width: 30ch;
+  color: rgba(248, 244, 236, 0.76);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.vbs-reference-card-summary {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.vbs-reference-card-copy {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.vbs-reference-card-copy > p:first-child {
+  font-family: var(--vbs-display-font);
+  font-size: 0.95rem;
+  color: var(--vbs-ink);
 }
 
 .vbs-rank-badge {
@@ -1275,12 +1370,110 @@ a {
   padding: 0.15rem 0.5rem;
 }
 
+.vbs-reference-state {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: rgba(11, 19, 43, 0.28);
+  color: #fff8ef;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.2rem 0.55rem;
+  backdrop-filter: blur(10px);
+}
+
+.vbs-reference-state-pin {
+  background: rgba(37, 99, 235, 0.28);
+}
+
+.vbs-reference-state-must-use {
+  background: rgba(15, 118, 110, 0.32);
+}
+
+.vbs-reference-state-exclude {
+  background: rgba(127, 29, 29, 0.34);
+}
+
 .vbs-analysis-drawer {
   margin-top: 0.75rem;
   border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 30%, var(--bat-border));
   border-radius: 0.8rem;
-  background: linear-gradient(170deg, color-mix(in srgb, white 86%, var(--vbs-sand)) 0%, white 100%);
+  background:
+    radial-gradient(circle at top right, rgba(249, 115, 22, 0.12), transparent 32%),
+    linear-gradient(170deg, color-mix(in srgb, white 86%, var(--vbs-sand)) 0%, white 100%);
+  padding: 0.95rem;
+  box-shadow: 0 28px 58px rgba(11, 19, 43, 0.08);
+}
+
+.vbs-analysis-hero {
+  margin-top: 0.55rem;
+  display: grid;
+  grid-template-columns: minmax(260px, 0.9fr) minmax(0, 1.1fr);
+  gap: 0.9rem;
+  align-items: stretch;
+}
+
+.vbs-analysis-poster {
+  position: relative;
+  min-height: 22rem;
+  border-radius: 1rem;
+  overflow: hidden;
+  background: #0b132b;
+}
+
+.vbs-analysis-story {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.vbs-analysis-story-head {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.vbs-analysis-story-head h3 {
+  margin: 0;
+  font-family: var(--vbs-editorial-font);
+  font-size: clamp(1.7rem, 2.5vw, 2.4rem);
+  line-height: 0.96;
+  color: var(--vbs-ink);
+}
+
+.vbs-analysis-story-head p {
+  margin: 0;
+  color: color-mix(in srgb, var(--vbs-ink) 72%, #677188);
+  font-size: 0.9rem;
+}
+
+.vbs-analysis-story-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.vbs-analysis-story-grid article {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 14%, var(--bat-border));
+  border-radius: 0.9rem;
+  background: rgba(255, 255, 255, 0.78);
   padding: 0.75rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.vbs-analysis-story-grid span {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: color-mix(in srgb, var(--vbs-ink) 58%, #6f7488);
+}
+
+.vbs-analysis-story-grid strong {
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: var(--vbs-ink);
 }
 
 .vbs-analysis-kpi-grid {
@@ -2234,6 +2427,11 @@ a {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .vbs-analysis-hero,
+  .vbs-analysis-story-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .vbs-analysis-grid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -2339,6 +2537,14 @@ a {
 
   .vbs-reference-toolbar {
     gap: 0.65rem;
+  }
+
+  .vbs-reference-poster {
+    min-height: 14rem;
+  }
+
+  .vbs-analysis-poster {
+    min-height: 16rem;
   }
 
   .vbs-analysis-kpi-grid {

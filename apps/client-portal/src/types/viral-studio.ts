@@ -1,5 +1,15 @@
 export type ViralStudioPlatform = "instagram" | "tiktok" | "youtube";
 
+export type ViralStudioReferenceVisual = {
+  posterUrl?: string;
+  thumbnailUrl?: string;
+  mediaKind?: "video" | "image";
+  palette?: string[];
+  eyebrow?: string;
+  headline?: string;
+  footer?: string;
+};
+
 export type BrandDNAProfile = {
   workspaceId: string;
   status: "draft" | "final";
@@ -121,6 +131,7 @@ export type ViralStudioReferenceAsset = {
     rationaleTitle: string;
     rationaleBullets: string[];
   };
+  visual?: ViralStudioReferenceVisual;
   shortlistState: "none" | "pin" | "exclude" | "must-use";
   createdAt: string;
   updatedAt: string;

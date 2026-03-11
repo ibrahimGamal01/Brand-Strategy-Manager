@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -494,6 +495,127 @@ function normalizedMetricLabel(key: keyof ViralStudioReferenceAsset["normalizedM
 function formatCompactNumber(value: number): string {
   if (!Number.isFinite(value)) return "0";
   return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(value);
+}
+
+function encodeSvgDataUri(svg: string): string {
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function escapeSvgText(value: string): string {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function splitPosterText(value: string, maxLineLength: number, maxLines: number): string[] {
+  const words = compactText(value, 120).split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [];
+  const lines: string[] = [];
+  let current = "";
+  while (words.length > 0 && lines.length < maxLines) {
+    const word = words.shift()!;
+    const next = current ? `${current} ${word}` : word;
+    if (next.length <= maxLineLength || !current) {
+      current = next;
+      continue;
+    }
+    lines.push(current);
+    current = word;
+  }
+  if (lines.length < maxLines && current) lines.push(current);
+  if (words.length > 0 && lines.length > 0) lines[lines.length - 1] = `${lines[lines.length - 1].replace(/[.,;:!?-]+$/g, "")}…`;
+  return lines;
+}
+
+function platformVisualPalette(platform: ViralStudioPlatform): string[] {
+  if (platform === "instagram") return ["#18181B", "#F97316", "#F8F4EC"];
+  if (platform === "tiktok") return ["#07111F", "#14B8A6", "#F4FEFF"];
+  return ["#190B0F", "#DC2626", "#FFF1E8"];
+}
+
+function buildReferencePosterFallback(reference: ViralStudioReferenceAsset, palette: string[]): string {
+  const [ink, accent, paper] = palette;
+  const eyebrow = `${toPlatformLabel(reference.sourcePlatform)} reference`;
+  const headline = compactText(
+    reference.visual?.headline ||
+      reference.caption.replace(/^High-performing\s+\w+\s+angle\s+\d+:\s*/i, "") ||
+      reference.ranking.rationaleTitle,
+    68
+  );
+  const footer = compactText(
+    reference.visual?.footer || reference.transcriptSummary || reference.ocrSummary || reference.ranking.rationaleBullets[0] || "",
+    96
+  );
+  const headlineLines = splitPosterText(headline, 16, 3);
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1500" viewBox="0 0 1200 1500" role="img" aria-label="${escapeSvgText(
+      headline
+    )}">
+      <defs>
+        <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="${ink}"/>
+          <stop offset="55%" stop-color="${accent}"/>
+          <stop offset="100%" stop-color="${paper}"/>
+        </linearGradient>
+      </defs>
+      <rect width="1200" height="1500" rx="72" fill="url(#bg)"/>
+      <circle cx="1004" cy="224" r="250" fill="${paper}" opacity="0.12"/>
+      <circle cx="210" cy="1210" r="340" fill="${accent}" opacity="0.18"/>
+      <rect x="76" y="76" width="1048" height="1348" rx="48" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.22)"/>
+      <text x="112" y="164" fill="${paper}" opacity="0.8" font-family="Arial, sans-serif" font-size="38" font-weight="700" letter-spacing="7">${escapeSvgText(
+        eyebrow.toUpperCase()
+      )}</text>
+      ${headlineLines
+        .map(
+          (line, index) =>
+            `<text x="112" y="${360 + index * 132}" fill="${paper}" font-family="Georgia, serif" font-size="104" font-weight="700">${escapeSvgText(
+              line
+            )}</text>`
+        )
+        .join("")}
+      <text x="112" y="1170" fill="${paper}" font-family="Arial, sans-serif" font-size="58" font-weight="700">${escapeSvgText(
+        `${formatCompactNumber(reference.metrics.views)} views`
+      )}</text>
+      <text x="112" y="1262" fill="${paper}" opacity="0.76" font-family="Arial, sans-serif" font-size="34">${escapeSvgText(
+        footer
+      )}</text>
+      <rect x="888" y="1162" width="224" height="184" rx="34" fill="rgba(11,19,43,0.35)" stroke="rgba(255,255,255,0.22)"/>
+      <text x="930" y="1238" fill="${paper}" opacity="0.72" font-family="Arial, sans-serif" font-size="28" letter-spacing="4">SCORE</text>
+      <text x="930" y="1320" fill="${paper}" font-family="Arial, sans-serif" font-size="74" font-weight="700">${escapeSvgText(
+        String(Math.round(reference.scores.composite * 100))
+      )}</text>
+    </svg>
+  `;
+  return encodeSvgDataUri(svg);
+}
+
+function resolveReferenceVisual(reference: ViralStudioReferenceAsset) {
+  const palette = reference.visual?.palette?.length ? reference.visual.palette : platformVisualPalette(reference.sourcePlatform);
+  return {
+    palette,
+    eyebrow:
+      reference.visual?.eyebrow ||
+      `${toPlatformLabel(reference.sourcePlatform)} • ${shortlistLabel(reference.shortlistState)}`,
+    headline:
+      compactText(
+        reference.visual?.headline ||
+          reference.caption.replace(/^High-performing\s+\w+\s+angle\s+\d+:\s*/i, "") ||
+          reference.ranking.rationaleTitle,
+        78
+      ) || reference.ranking.rationaleTitle,
+    footer:
+      compactText(
+        reference.visual?.footer || reference.transcriptSummary || reference.ocrSummary || reference.ranking.rationaleBullets[0] || "",
+        120
+      ) || reference.ranking.rationaleBullets[0],
+    posterUrl:
+      reference.visual?.posterUrl ||
+      reference.visual?.thumbnailUrl ||
+      buildReferencePosterFallback(reference, palette),
+  };
 }
 
 function formatUnitPercent(value: number): string {
@@ -3113,166 +3235,223 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                   </div>
 
                   <div className={referenceViewMode === "grid" ? "vbs-reference-board-grid" : "vbs-reference-board-list"}>
-                {filteredReferences.map((reference) => (
-                  <div
-                    key={reference.id}
-                    className={[
-                      "vbs-reference-card",
-                      selectedReference?.id === reference.id ? "is-selected" : "",
-                      recentShortlistReferenceId === reference.id ? "is-updated" : "",
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
-                  >
-                    <button
-                      type="button"
-                      className="vbs-reference-card-head"
-                      onClick={() => setSelectedReferenceId(reference.id)}
-                    >
-                      <span className="vbs-rank-badge">#{reference.ranking.rank}</span>
-                      <p>{reference.ranking.rationaleTitle}</p>
-                      <p className="vbs-meta">
-                        {toPlatformLabel(reference.sourcePlatform)} • score {reference.scores.composite.toFixed(3)} •{" "}
-                        {shortlistLabel(reference.shortlistState)}
-                      </p>
-                      <p className="vbs-meta">
-                        {formatCompactNumber(reference.metrics.views)} views • {formatTimestamp(reference.metrics.postedAt)}
-                      </p>
-                      <div className="vbs-top-driver-row">
-                        {reference.explainability.topDrivers.slice(0, 2).map((driver) => (
-                          <span key={driver} className="vbs-driver-chip">
-                            {driver}
-                          </span>
-                        ))}
-                      </div>
-                      <p className="vbs-meta">
-                        {reference.explainability.topDrivers[0] || reference.ranking.rationaleBullets[0]}
-                      </p>
-                    </button>
-                    <div className="vbs-mini-actions vbs-shortlist-actions">
-                      {(
-                        [
-                          { key: "pin", label: "Pin" },
-                          { key: "must-use", label: "Must-use" },
-                          { key: "exclude", label: "Exclude" },
-                          { key: "clear", label: "Clear" },
-                        ] as Array<{ key: ReferenceShortlistAction; label: string }>
-                      ).map((item) => {
-                        const pendingAction = shortlistPendingById[reference.id];
-                        const isPending = pendingAction === item.key;
-                        const isActive =
-                          item.key === "clear"
-                            ? reference.shortlistState === "none"
-                            : reference.shortlistState === item.key;
-                        return (
+                    {filteredReferences.map((reference) => {
+                      const visual = resolveReferenceVisual(reference);
+                      return (
+                        <div
+                          key={reference.id}
+                          className={[
+                            "vbs-reference-card",
+                            selectedReference?.id === reference.id ? "is-selected" : "",
+                            recentShortlistReferenceId === reference.id ? "is-updated" : "",
+                          ]
+                            .filter(Boolean)
+                            .join(" ")}
+                        >
                           <button
-                            key={item.key}
                             type="button"
-                            aria-pressed={isActive}
-                            className={[
-                              "vbs-action-chip",
-                              `vbs-action-${item.key}`,
-                              isActive ? "is-active" : "",
-                            ]
-                              .filter(Boolean)
-                              .join(" ")}
-                            onClick={() => void shortlistReference(reference.id, item.key)}
-                            disabled={Boolean(pendingAction)}
+                            className="vbs-reference-card-head"
+                            onClick={() => setSelectedReferenceId(reference.id)}
                           >
-                            {isPending ? `${item.label}…` : item.label}
+                              <div className="vbs-reference-poster">
+                              <Image
+                                src={visual.posterUrl}
+                                alt={`${toPlatformLabel(reference.sourcePlatform)} reference preview`}
+                                fill
+                                unoptimized
+                                sizes="(max-width: 1100px) 100vw, 33vw"
+                              />
+                              <div className="vbs-reference-poster-top">
+                                <span className="vbs-rank-badge">#{reference.ranking.rank}</span>
+                                <span className={`vbs-reference-state vbs-reference-state-${reference.shortlistState}`}>
+                                  {shortlistLabel(reference.shortlistState)}
+                                </span>
+                              </div>
+                              <div className="vbs-reference-poster-bottom">
+                                <p className="vbs-reference-eyebrow">{visual.eyebrow}</p>
+                                <h3>{visual.headline}</h3>
+                                <p>{visual.footer}</p>
+                              </div>
+                            </div>
+                            <div className="vbs-reference-card-summary">
+                              <div className="vbs-reference-card-copy">
+                                <p>{reference.ranking.rationaleTitle}</p>
+                                <p className="vbs-meta">
+                                  {toPlatformLabel(reference.sourcePlatform)} • score {reference.scores.composite.toFixed(3)} •{" "}
+                                  {formatCompactNumber(reference.metrics.views)} views
+                                </p>
+                              </div>
+                              <div className="vbs-top-driver-row">
+                                {reference.explainability.topDrivers.slice(0, 2).map((driver) => (
+                                  <span key={driver} className="vbs-driver-chip">
+                                    {driver}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
                           </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
+                          <div className="vbs-mini-actions vbs-shortlist-actions">
+                            {(
+                              [
+                                { key: "pin", label: "Pin" },
+                                { key: "must-use", label: "Must-use" },
+                                { key: "exclude", label: "Exclude" },
+                                { key: "clear", label: "Clear" },
+                              ] as Array<{ key: ReferenceShortlistAction; label: string }>
+                            ).map((item) => {
+                              const pendingAction = shortlistPendingById[reference.id];
+                              const isPending = pendingAction === item.key;
+                              const isActive =
+                                item.key === "clear"
+                                  ? reference.shortlistState === "none"
+                                  : reference.shortlistState === item.key;
+                              return (
+                                <button
+                                  key={item.key}
+                                  type="button"
+                                  aria-pressed={isActive}
+                                  className={[
+                                    "vbs-action-chip",
+                                    `vbs-action-${item.key}`,
+                                    isActive ? "is-active" : "",
+                                  ]
+                                    .filter(Boolean)
+                                    .join(" ")}
+                                  onClick={() => void shortlistReference(reference.id, item.key)}
+                                  disabled={Boolean(pendingAction)}
+                                >
+                                  {isPending ? `${item.label}…` : item.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                   {filteredReferences.length === 0 ? <p className="vbs-meta">No references match current filters.</p> : null}
                   {selectedReference && selectedReferenceInsights ? (
                     <div className="vbs-analysis-drawer">
-                  <p className="vbs-meta">
-                    Analysis Drawer • #{selectedReference.ranking.rank} • {toPlatformLabel(selectedReference.sourcePlatform)} •{" "}
-                    {shortlistLabel(selectedReference.shortlistState)}
-                  </p>
-                  <h3>{selectedReference.ranking.rationaleTitle}</h3>
-                  <div className="vbs-analysis-kpi-grid">
-                    <div>
-                      <span>Composite</span>
-                      <strong>{selectedReference.scores.composite.toFixed(3)}</strong>
-                      <p
-                        className={
-                          selectedReferenceInsights.compositeDelta >= 0 ? "vbs-delta-positive" : "vbs-delta-negative"
-                        }
-                      >
-                        {selectedReferenceInsights.compositeDelta >= 0 ? "+" : ""}
-                        {selectedReferenceInsights.compositeDelta.toFixed(3)} vs board avg{" "}
-                        {selectedReferenceInsights.avgComposite.toFixed(3)}
-                      </p>
-                    </div>
-                    <div>
-                      <span>Views</span>
-                      <strong>{formatCompactNumber(selectedReference.metrics.views)}</strong>
-                      <p>{selectedReference.metrics.likes} likes • {selectedReference.metrics.comments} comments</p>
-                    </div>
-                    <div>
-                      <span>Interaction Rate</span>
-                      <strong>{formatUnitPercent(selectedReferenceInsights.interactionRateRaw)}</strong>
-                      <p>{selectedReference.metrics.shares} shares</p>
-                    </div>
-                    <div>
-                      <span>Recency</span>
-                      <strong>
-                        {selectedReferenceInsights.postedAgeDays === null
-                          ? "n/a"
-                          : `${selectedReferenceInsights.postedAgeDays}d ago`}
-                      </strong>
-                      <p>{formatTimestamp(selectedReference.metrics.postedAt)}</p>
-                    </div>
-                  </div>
-                  <div className="vbs-top-driver-row">
-                    {selectedReference.explainability.topDrivers.map((driver) => (
-                      <span key={driver} className="vbs-driver-chip">
-                        {driver}
-                      </span>
-                    ))}
-                  </div>
-                  <div className="vbs-analysis-grid">
-                    {selectedReferenceInsights.contributionRows.map(({ key, value }) => (
-                      <div key={key} className="vbs-analysis-metric">
-                        <p>{contributionLabel(key)}</p>
-                        <strong>{(Number(value) * 100).toFixed(1)} pts</strong>
-                        <div className="vbs-analysis-bar">
-                          <span style={{ width: `${Math.max(6, Math.min(100, Number(value) * 320))}%` }} />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="vbs-analysis-grid vbs-normalized-grid">
-                    {selectedReferenceInsights.normalizedRows.map(({ key, value }) => (
-                      <div key={key} className="vbs-analysis-metric">
-                        <p>{normalizedMetricLabel(key)}</p>
-                        <strong>{value.toFixed(1)}%</strong>
-                        <div className="vbs-analysis-bar">
-                          <span style={{ width: `${Math.max(6, Math.min(100, value))}%` }} />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <ul>
-                    {selectedReference.explainability.whyRankedHigh.map((line) => (
-                      <li key={line}>{line}</li>
-                    ))}
-                  </ul>
-                  <div className="vbs-source-context">
-                    <h4>Source Context</h4>
-                    <p className="vbs-meta">{selectedReference.caption}</p>
-                    <p className="vbs-meta">{selectedReference.transcriptSummary}</p>
-                    <p className="vbs-meta">{selectedReference.ocrSummary}</p>
-                    <p className="vbs-meta">
-                      Formula {selectedReference.explainability.formulaVersion} • Shortcuts: 1 pin, 2 must-use, 3
-                      exclude, 0 clear
-                    </p>
-                  </div>
+                      {(() => {
+                        const visual = resolveReferenceVisual(selectedReference);
+                        return (
+                          <>
+                            <p className="vbs-meta">
+                              Analysis Drawer • #{selectedReference.ranking.rank} • {toPlatformLabel(selectedReference.sourcePlatform)} •{" "}
+                              {shortlistLabel(selectedReference.shortlistState)}
+                            </p>
+                            <div className="vbs-analysis-hero">
+                              <div className="vbs-analysis-poster">
+                                <Image
+                                  src={visual.posterUrl}
+                                  alt={`${toPlatformLabel(selectedReference.sourcePlatform)} reference analysis preview`}
+                                  fill
+                                  unoptimized
+                                  sizes="(max-width: 1100px) 100vw, 40vw"
+                                />
+                              </div>
+                              <div className="vbs-analysis-story">
+                                <div className="vbs-analysis-story-head">
+                                  <h3>{visual.headline}</h3>
+                                  <p>{selectedReference.ranking.rationaleTitle}</p>
+                                </div>
+                                <div className="vbs-top-driver-row">
+                                  {selectedReference.explainability.topDrivers.map((driver) => (
+                                    <span key={driver} className="vbs-driver-chip">
+                                      {driver}
+                                    </span>
+                                  ))}
+                                </div>
+                                <div className="vbs-analysis-story-grid">
+                                  <article>
+                                    <span>Hook</span>
+                                    <strong>{compactText(selectedReference.caption, 120)}</strong>
+                                  </article>
+                                  <article>
+                                    <span>Narrative Beat</span>
+                                    <strong>{compactText(selectedReference.transcriptSummary, 120)}</strong>
+                                  </article>
+                                  <article>
+                                    <span>On-screen Text</span>
+                                    <strong>{compactText(selectedReference.ocrSummary, 120)}</strong>
+                                  </article>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="vbs-analysis-kpi-grid">
+                              <div>
+                                <span>Composite</span>
+                                <strong>{selectedReference.scores.composite.toFixed(3)}</strong>
+                                <p
+                                  className={
+                                    selectedReferenceInsights.compositeDelta >= 0 ? "vbs-delta-positive" : "vbs-delta-negative"
+                                  }
+                                >
+                                  {selectedReferenceInsights.compositeDelta >= 0 ? "+" : ""}
+                                  {selectedReferenceInsights.compositeDelta.toFixed(3)} vs board avg{" "}
+                                  {selectedReferenceInsights.avgComposite.toFixed(3)}
+                                </p>
+                              </div>
+                              <div>
+                                <span>Views</span>
+                                <strong>{formatCompactNumber(selectedReference.metrics.views)}</strong>
+                                <p>{selectedReference.metrics.likes} likes • {selectedReference.metrics.comments} comments</p>
+                              </div>
+                              <div>
+                                <span>Interaction Rate</span>
+                                <strong>{formatUnitPercent(selectedReferenceInsights.interactionRateRaw)}</strong>
+                                <p>{selectedReference.metrics.shares} shares</p>
+                              </div>
+                              <div>
+                                <span>Recency</span>
+                                <strong>
+                                  {selectedReferenceInsights.postedAgeDays === null
+                                    ? "n/a"
+                                    : `${selectedReferenceInsights.postedAgeDays}d ago`}
+                                </strong>
+                                <p>{formatTimestamp(selectedReference.metrics.postedAt)}</p>
+                              </div>
+                            </div>
+                            <div className="vbs-analysis-grid">
+                              {selectedReferenceInsights.contributionRows.map(({ key, value }) => (
+                                <div key={key} className="vbs-analysis-metric">
+                                  <p>{contributionLabel(key)}</p>
+                                  <strong>{(Number(value) * 100).toFixed(1)} pts</strong>
+                                  <div className="vbs-analysis-bar">
+                                    <span style={{ width: `${Math.max(6, Math.min(100, Number(value) * 320))}%` }} />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                            <div className="vbs-analysis-grid vbs-normalized-grid">
+                              {selectedReferenceInsights.normalizedRows.map(({ key, value }) => (
+                                <div key={key} className="vbs-analysis-metric">
+                                  <p>{normalizedMetricLabel(key)}</p>
+                                  <strong>{value.toFixed(1)}%</strong>
+                                  <div className="vbs-analysis-bar">
+                                    <span style={{ width: `${Math.max(6, Math.min(100, value))}%` }} />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                            <ul>
+                              {selectedReference.explainability.whyRankedHigh.map((line) => (
+                                <li key={line}>{line}</li>
+                              ))}
+                            </ul>
+                            <div className="vbs-source-context">
+                              <h4>Source Context</h4>
+                              <p className="vbs-meta">{selectedReference.caption}</p>
+                              <p className="vbs-meta">{selectedReference.transcriptSummary}</p>
+                              <p className="vbs-meta">{selectedReference.ocrSummary}</p>
+                              <p className="vbs-meta">
+                                Formula {selectedReference.explainability.formulaVersion} • Shortcuts: 1 pin, 2 must-use, 3
+                                exclude, 0 clear
+                              </p>
+                            </div>
+                          </>
+                        );
+                      })()}
                     </div>
                   ) : null}
                 </div>

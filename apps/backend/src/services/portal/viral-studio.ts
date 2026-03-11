@@ -254,6 +254,15 @@ export type ReferenceAsset = {
     rationaleTitle: string;
     rationaleBullets: string[];
   };
+  visual?: {
+    posterUrl?: string;
+    thumbnailUrl?: string;
+    mediaKind?: 'video' | 'image';
+    palette?: string[];
+    eyebrow?: string;
+    headline?: string;
+    footer?: string;
+  };
   shortlistState: ShortlistState;
   createdAt: string;
   updatedAt: string;
@@ -1499,6 +1508,150 @@ function toPct(value: number): number {
   return Number((clamp(value, 0, 1) * 100).toFixed(1));
 }
 
+function escapeSvgText(value: string): string {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function chunkPosterLines(value: string, maxLineLength: number, maxLines: number): string[] {
+  const words = cleanString(value).split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [];
+  const fullText = words.join(' ');
+  const lines: string[] = [];
+  let current = '';
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word;
+    if (next.length <= maxLineLength || !current) {
+      current = next;
+      continue;
+    }
+    lines.push(current);
+    current = word;
+    if (lines.length >= maxLines) break;
+  }
+  if (lines.length < maxLines && current) lines.push(current);
+  return lines.slice(0, maxLines).map((line, index, array) => {
+    if (index === array.length - 1 && fullText.length > array.join(' ').length) {
+      return `${line.replace(/[.,;:!?-]+$/g, '')}…`;
+    }
+    return line;
+  });
+}
+
+function buildReferencePalette(platform: ViralStudioPlatform, seed: number): string[] {
+  const themes: Record<ViralStudioPlatform, string[][]> = {
+    instagram: [
+      ['#18181B', '#F97316', '#F8F4EC'],
+      ['#0B132B', '#2563EB', '#F8F4EC'],
+      ['#0F172A', '#FB7185', '#FFF7ED'],
+    ],
+    tiktok: [
+      ['#040816', '#14B8A6', '#F8FAFC'],
+      ['#0F172A', '#22D3EE', '#ECFEFF'],
+      ['#111827', '#F43F5E', '#FDF2F8'],
+    ],
+    youtube: [
+      ['#190B0F', '#DC2626', '#FEF2F2'],
+      ['#111827', '#EF4444', '#FFF7ED'],
+      ['#0B132B', '#EA580C', '#FFF7ED'],
+    ],
+  };
+  const options = themes[platform] || themes.instagram;
+  return options[Math.abs(seed) % options.length];
+}
+
+function buildReferencePosterDataUri(input: {
+  palette: string[];
+  eyebrow: string;
+  headline: string;
+  footer: string;
+  score: number;
+  metric: string;
+}): string {
+  const [ink, accent, paper] = input.palette;
+  const headlineLines = chunkPosterLines(input.headline, 18, 3);
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1500" viewBox="0 0 1200 1500" role="img" aria-label="${escapeSvgText(
+      input.headline
+    )}">
+      <defs>
+        <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="${ink}"/>
+          <stop offset="55%" stop-color="${accent}"/>
+          <stop offset="100%" stop-color="${paper}"/>
+        </linearGradient>
+        <linearGradient id="wash" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="rgba(255,255,255,0.14)"/>
+          <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
+        </linearGradient>
+      </defs>
+      <rect width="1200" height="1500" rx="72" fill="url(#bg)"/>
+      <circle cx="1010" cy="220" r="240" fill="${paper}" opacity="0.13"/>
+      <circle cx="210" cy="1210" r="340" fill="${accent}" opacity="0.18"/>
+      <rect x="72" y="72" width="1056" height="1356" rx="52" fill="url(#wash)" stroke="rgba(255,255,255,0.22)"/>
+      <text x="104" y="166" fill="${paper}" opacity="0.82" font-family="Arial, sans-serif" font-size="40" font-weight="700" letter-spacing="8">${escapeSvgText(
+        input.eyebrow.toUpperCase()
+      )}</text>
+      ${headlineLines
+        .map(
+          (line, index) =>
+            `<text x="104" y="${360 + index * 132}" fill="${paper}" font-family="Georgia, serif" font-size="104" font-weight="700">${escapeSvgText(
+              line
+            )}</text>`
+        )
+        .join('')}
+      <text x="104" y="1166" fill="${paper}" opacity="0.9" font-family="Arial, sans-serif" font-size="58" font-weight="700">${escapeSvgText(
+        input.metric
+      )}</text>
+      <text x="104" y="1260" fill="${paper}" opacity="0.72" font-family="Arial, sans-serif" font-size="36">${escapeSvgText(
+        input.footer
+      )}</text>
+      <rect x="884" y="1168" width="228" height="180" rx="36" fill="rgba(11,19,43,0.35)" stroke="rgba(255,255,255,0.24)"/>
+      <text x="926" y="1240" fill="${paper}" opacity="0.72" font-family="Arial, sans-serif" font-size="28" letter-spacing="4">VIRAL SCORE</text>
+      <text x="926" y="1320" fill="${paper}" font-family="Arial, sans-serif" font-size="72" font-weight="700">${escapeSvgText(
+        `${Math.round(input.score * 100)}`
+      )}</text>
+    </svg>
+  `;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function buildSyntheticReferenceVisual(input: {
+  platform: ViralStudioPlatform;
+  seed: number;
+  rank: number;
+  composite: number;
+  caption: string;
+  transcriptSummary: string;
+  metricLabel: string;
+}): NonNullable<ReferenceAsset['visual']> {
+  const palette = buildReferencePalette(input.platform, input.seed);
+  const headline = cleanString(input.caption)
+    .replace(/^High-performing\s+\w+\s+angle\s+\d+:\s*/i, '')
+    .replace(/\.$/, '');
+  const footer = cleanString(input.transcriptSummary).replace(/\.$/, '');
+  const eyebrow = `${input.platform} ref #${input.rank}`;
+  return {
+    mediaKind: 'video',
+    palette,
+    eyebrow,
+    headline,
+    footer,
+    posterUrl: buildReferencePosterDataUri({
+      palette,
+      eyebrow,
+      headline,
+      footer,
+      score: input.composite,
+      metric: input.metricLabel,
+    }),
+  };
+}
+
 function buildReferenceExplainability(input: {
   engagementRate: number;
   recency: number;
@@ -1603,6 +1756,20 @@ function buildSyntheticReference(input: {
     captionClarity,
     composite,
   });
+  const rank = input.total - input.index;
+  const caption = `High-performing ${input.run.sourcePlatform} angle ${input.index + 1}: lead with an audience pain, then promise a measurable transformation in under 15 seconds.`;
+  const transcriptSummary =
+    'Opens with a direct hook, names one concrete pain, demonstrates a quick before/after contrast, closes with action.';
+  const ocrSummary = 'On-screen text emphasizes urgency, social proof, and a clear CTA.';
+  const visual = buildSyntheticReferenceVisual({
+    platform: input.run.sourcePlatform,
+    seed,
+    rank,
+    composite,
+    caption,
+    transcriptSummary,
+    metricLabel: `${Math.round(views / 1000)}K views`,
+  });
 
   return {
     id: referenceId,
@@ -1610,10 +1777,9 @@ function buildSyntheticReference(input: {
     ingestionRunId: input.run.id,
     sourcePlatform: input.run.sourcePlatform,
     sourceUrl: `${input.run.sourceUrl}/video-${input.index + 1}`,
-    caption: `High-performing ${input.run.sourcePlatform} angle ${input.index + 1}: lead with an audience pain, then promise a measurable transformation in under 15 seconds.`,
-    transcriptSummary:
-      'Opens with a direct hook, names one concrete pain, demonstrates a quick before/after contrast, closes with action.',
-    ocrSummary: 'On-screen text emphasizes urgency, social proof, and a clear CTA.',
+    caption,
+    transcriptSummary,
+    ocrSummary,
     metrics: {
       views,
       likes,
@@ -1632,13 +1798,14 @@ function buildSyntheticReference(input: {
     normalizedMetrics: explanation.normalizedMetrics,
     explainability: explanation.explainability,
     ranking: {
-      rank: input.total - input.index,
+      rank,
       rationaleTitle: explanation.rationaleTitle,
       rationaleBullets: [
         ...explanation.rationaleBullets,
         `Recency window: ${recencyDays} days from publish date.`,
       ],
     },
+    visual,
     shortlistState: 'none',
     createdAt: toIsoNow(),
     updatedAt: toIsoNow(),
