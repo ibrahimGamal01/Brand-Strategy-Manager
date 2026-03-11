@@ -16,6 +16,8 @@
   --bat-accent: #2563eb;
   --bat-accent-strong: #1d4ed8;
   --bat-accent-soft: rgba(37, 99, 235, 0.12);
+  --bat-handler: rgba(37, 99, 235, 0.1);
+  --bat-handler-active: rgba(37, 99, 235, 0.14);
   --bat-focus-ring: rgba(37, 99, 235, 0.26);
   --bat-success: #0f8b65;
   --bat-success-soft: rgba(15, 139, 101, 0.13);
@@ -77,6 +79,8 @@
   --bat-accent: #79a9ff;
   --bat-accent-strong: #a4c4ff;
   --bat-accent-soft: rgba(121, 169, 255, 0.15);
+  --bat-handler: rgba(121, 169, 255, 0.16);
+  --bat-handler-active: rgba(121, 169, 255, 0.22);
   --bat-focus-ring: rgba(121, 169, 255, 0.32);
   --bat-success: #6de2b4;
   --bat-success-soft: rgba(109, 226, 180, 0.14);

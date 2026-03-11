@@ -3373,6 +3373,18 @@ select:focus-visible {
   padding: 0.85rem;
 }
 
+.vbs-create-preview-card {
+  width: 100%;
+  text-align: left;
+  appearance: none;
+  cursor: pointer;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease;
+}
+
 .vbs-create-preview-card span,
 .vbs-vault-summary-card span,
 .vbs-save-vault-step span,
@@ -3411,6 +3423,27 @@ select:focus-visible {
 
 .vbs-create-preview-card.is-script {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bat-accent) 14%, transparent);
+}
+
+.vbs-create-preview-card:hover,
+.vbs-create-preview-card:focus-visible {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--bat-accent) 30%, var(--vbs-line));
+  box-shadow: 0 18px 36px -32px rgba(15, 23, 42, 0.42);
+}
+
+.vbs-create-preview-card.is-active {
+  border-color: color-mix(in srgb, var(--bat-accent) 38%, var(--vbs-line));
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--bat-accent-soft) 82%, transparent) 0%, color-mix(in srgb, var(--bat-success-soft) 38%, transparent) 100%),
+    color-mix(in srgb, var(--vbs-card-strong) 94%, transparent);
+  box-shadow: 0 18px 36px -30px rgba(37, 99, 235, 0.36);
+}
+
+.vbs-create-preview-handler {
+  color: var(--bat-accent);
+  font-size: 0.72rem;
+  font-weight: 600;
 }
 
 .vbs-save-vault-kpis {
@@ -3475,21 +3508,30 @@ select:focus-visible {
   text-align: left;
 }
 
+.vbs-save-vault-step {
+  width: 100%;
+  appearance: none;
+}
+
 .vbs-save-vault-step.is-empty,
 .vbs-version-card.is-empty {
   border-style: dashed;
 }
 
+.vbs-save-vault-step:not(.is-empty),
 .vbs-version-card {
   cursor: pointer;
   transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
 }
 
+.vbs-save-vault-step:not(.is-empty):hover,
+.vbs-save-vault-step:not(.is-empty):focus-visible,
 .vbs-version-card:hover {
   transform: translateY(-1px);
   border-color: color-mix(in srgb, var(--bat-accent) 32%, var(--bat-border));
 }
 
+.vbs-save-vault-step.is-selected,
 .vbs-version-card.is-selected {
   border-color: color-mix(in srgb, var(--bat-accent) 38%, var(--bat-border));
   box-shadow: 0 16px 30px -28px rgba(37, 99, 235, 0.36);
@@ -3783,8 +3825,16 @@ select:focus-visible {
 .bat-right-rail-toggle-button,
 .bat-viral-bridge-button,
 .bat-viral-bridge-advanced-button,
-.bat-thread-icon-button {
-  min-height: 40px;
+.bat-thread-icon-button,
+.bat-composer-queue-toggle,
+.bat-composer-queue-icon-button,
+.bat-composer-queue-steer-button,
+.bat-composer-steer-action,
+.bat-branch-quick-action,
+.bat-branch-clear,
+.bat-doc-toggle {
+  min-width: 44px;
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3797,6 +3847,12 @@ select:focus-visible {
     background-color 180ms ease,
     border-color 180ms ease,
     transform 180ms ease;
+}
+
+.bat-thread-icon-button,
+.bat-branch-clear {
+  width: 44px;
+  height: 44px;
 }
 
 .bat-right-rail-toggle-button {
@@ -3813,7 +3869,14 @@ select:focus-visible {
 .bat-viral-bridge-button,
 .bat-viral-bridge-advanced-button,
 .bat-right-rail-toggle-button,
-.bat-thread-icon-button {
+.bat-thread-icon-button,
+.bat-composer-queue-toggle,
+.bat-composer-queue-icon-button,
+.bat-composer-queue-steer-button,
+.bat-composer-steer-action,
+.bat-branch-quick-action,
+.bat-branch-clear,
+.bat-doc-toggle {
   cursor: pointer;
 }
 
@@ -3821,6 +3884,13 @@ select:focus-visible {
 .bat-viral-bridge-advanced-button:hover,
 .bat-right-rail-toggle-button:hover,
 .bat-thread-icon-button:hover,
+.bat-composer-queue-toggle:hover,
+.bat-composer-queue-icon-button:hover,
+.bat-composer-queue-steer-button:hover,
+.bat-composer-steer-action:hover,
+.bat-branch-quick-action:hover,
+.bat-branch-clear:hover,
+.bat-doc-toggle:hover,
 .bat-composer-slash-pill:hover {
   transform: translateY(-1px);
   border-color: color-mix(in srgb, var(--bat-accent) 26%, var(--bat-border));
@@ -3875,6 +3945,139 @@ select:focus-visible {
 .bat-thread-menu,
 .bat-viral-context-subcard {
   box-shadow: 0 18px 36px -28px rgba(15, 23, 42, 0.42);
+}
+
+.bat-thread-menu-toggle,
+.bat-composer-queue-toggle,
+.bat-composer-queue-icon-button,
+.bat-composer-queue-steer-button,
+.bat-composer-steer-action,
+.bat-branch-quick-action,
+.bat-branch-clear,
+.bat-doc-toggle,
+.bat-thread-menu-item {
+  color: var(--bat-text-muted);
+}
+
+.bat-thread-menu-item {
+  min-height: 44px;
+}
+
+.bat-thread-menu-item:hover,
+.bat-thread-menu-item:focus-visible {
+  background: color-mix(in srgb, var(--bat-handler) 70%, transparent);
+  color: var(--bat-text);
+}
+
+.bat-composer-status-row,
+.bat-doc-count,
+.bat-doc-subtitle {
+  color: var(--bat-text-muted);
+}
+
+.bat-composer-status-chip {
+  border-radius: 999px;
+  padding: 0.25rem 0.6rem;
+  background: color-mix(in srgb, var(--bat-surface-elevated) 90%, transparent);
+  color: var(--bat-text-muted);
+}
+
+.bat-composer-status-chip.is-streaming {
+  background: color-mix(in srgb, var(--bat-success-soft) 84%, transparent);
+  color: var(--bat-success);
+}
+
+.bat-composer-queue-badge,
+.bat-doc-list-chip,
+.bat-branch-pill {
+  border-color: var(--bat-border);
+  background: color-mix(in srgb, var(--bat-surface-elevated) 92%, transparent);
+  color: var(--bat-text-muted);
+}
+
+.bat-branch-pill.is-primary,
+.bat-doc-toggle.is-active {
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--bat-accent) 0%, var(--bat-success) 100%);
+  color: var(--bat-text-inverse);
+}
+
+.bat-composer-steer-panel {
+  border-color: var(--bat-border);
+  background: color-mix(in srgb, var(--bat-surface-muted) 84%, transparent);
+}
+
+.bat-composer-steer-input {
+  border-color: color-mix(in srgb, var(--bat-accent) 18%, var(--bat-border));
+  background: color-mix(in srgb, var(--bat-surface-elevated) 94%, transparent);
+  color: var(--bat-text);
+}
+
+.bat-composer-steer-input::placeholder {
+  color: var(--bat-text-soft);
+}
+
+.bat-composer-steer-action.is-primary {
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--bat-accent) 0%, var(--bat-success) 100%);
+  color: var(--bat-text-inverse);
+}
+
+.bat-branch-marker {
+  background: linear-gradient(135deg, var(--bat-accent) 0%, var(--bat-success) 100%);
+}
+
+.bat-branch-connector {
+  background: color-mix(in srgb, var(--bat-accent) 24%, var(--bat-border));
+}
+
+.bat-branch-icon,
+.bat-doc-list-item,
+.bat-composer-upload-remove {
+  border-color: var(--bat-border);
+  background: color-mix(in srgb, var(--bat-surface-elevated) 92%, transparent);
+  color: var(--bat-text-muted);
+}
+
+.bat-branch-title,
+.bat-doc-title,
+.bat-doc-item-title {
+  color: var(--bat-text);
+}
+
+.bat-branch-subtitle,
+.bat-doc-empty {
+  color: var(--bat-text-muted);
+}
+
+.bat-branch-quote {
+  border-left-color: color-mix(in srgb, var(--bat-accent) 24%, var(--bat-border));
+  color: var(--bat-text-muted);
+}
+
+.bat-doc-list-item {
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    background-color 180ms ease;
+}
+
+.bat-doc-list-item:hover,
+.bat-doc-list-item:focus-visible {
+  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--bat-handler) 72%, transparent);
+  border-color: color-mix(in srgb, var(--bat-accent) 24%, var(--bat-border));
+}
+
+.bat-doc-list-item.is-active {
+  background: color-mix(in srgb, var(--bat-handler-active) 92%, transparent);
+  border-color: color-mix(in srgb, var(--bat-accent) 24%, var(--bat-border));
+}
+
+.bat-composer-upload-remove:hover,
+.bat-composer-upload-remove:focus-visible {
+  background: color-mix(in srgb, var(--bat-handler) 70%, transparent);
+  color: var(--bat-text);
 }
 
 .bat-viral-context-card {

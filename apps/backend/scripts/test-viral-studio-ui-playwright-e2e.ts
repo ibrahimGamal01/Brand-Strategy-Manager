@@ -44,6 +44,18 @@ async function waitForTextContains(
   throw new Error(`Timed out waiting for "${selector}" to include "${expectedFragment}"`);
 }
 
+async function waitForCountAtLeast(page: Page, selector: string, minimum: number, timeoutMs = 20_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const count = await page.locator(selector).count().catch(() => 0);
+    if (count >= minimum) {
+      return count;
+    }
+    await page.waitForTimeout(160);
+  }
+  throw new Error(`Timed out waiting for "${selector}" to reach count ${minimum}`);
+}
+
 async function waitForSelectedShortlistState(page: Page, label: string, timeoutMs = 12_000) {
   const button = page
     .locator('.vbs-reference-card.is-selected .vbs-shortlist-actions button', { hasText: label })
@@ -215,6 +227,40 @@ async function validateDrawerAndShortcuts(page: Page) {
   );
 }
 
+async function validateCreateAndSaveFlow(page: Page) {
+  await page.getByRole('tab', { name: /Create & Save/i }).click();
+  const createSlide = page.locator('#vbs-slide-create');
+  await createSlide.waitFor({ timeout: 20_000 });
+
+  await createSlide.getByRole('button', { name: 'Generate Multi-Pack', exact: true }).click();
+  await waitForTextContains(page, '#vbs-slide-create .vbs-status-strip', 'Revision', 80_000);
+  await page.locator('.vbs-create-preview-board').waitFor({ timeout: 20_000 });
+  await waitForCountAtLeast(page, '.vbs-create-preview-card.is-ready', 1, 80_000);
+  await waitForCountAtLeast(page, '.vbs-pack-card', 4, 20_000);
+  await waitForCountAtLeast(page, '.vbs-quality-gate-card', 3, 20_000);
+  await waitForCountAtLeast(page, '.vbs-save-vault-step:not(.is-empty)', 1, 80_000);
+  await waitForTextContains(page, '#vbs-slide-create .vbs-status-strip', 'Document ready', 80_000);
+
+  const firstPreviewCard = page.locator('.vbs-create-preview-card.is-ready').first();
+  await firstPreviewCard.click();
+  await page.waitForTimeout(250);
+  const pressed = await firstPreviewCard.getAttribute('aria-pressed');
+  assert.equal(pressed, 'true', 'Expected gallery preview handler to become active after click.');
+
+  const versionHandler = page.locator('.vbs-save-vault-step:not(.is-empty)').first();
+  await versionHandler.click();
+  const versionPressed = await versionHandler.getAttribute('aria-pressed');
+  assert.equal(versionPressed, 'true', 'Expected save vault step to become active after click.');
+
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.getByRole('heading', { name: 'Viral Brand Studio' }).waitFor({ timeout: 60_000 });
+  await page.getByRole('tab', { name: /Create & Save/i }).click();
+  await page.locator('.vbs-create-preview-board').waitFor({ timeout: 20_000 });
+  await waitForTextContains(page, '#vbs-slide-create .vbs-status-strip', 'Revision', 20_000);
+  await waitForCountAtLeast(page, '.vbs-create-preview-card.is-ready', 1, 20_000);
+  await waitForCountAtLeast(page, '.vbs-save-vault-step:not(.is-empty)', 1, 20_000);
+}
+
 async function collectDiagnostics(
   page: Page,
   consoleErrors: string[],
@@ -268,6 +314,7 @@ async function runFlowAttempt(baseUrl: string): Promise<void> {
     await runExtraction(page);
     await waitForReferenceBoard(page);
     await validateDrawerAndShortcuts(page);
+    await validateCreateAndSaveFlow(page);
 
     const cookiesAfterLogin = await context.cookies();
     const cookieHeader = cookieHeaderFrom(cookiesAfterLogin);
@@ -287,6 +334,9 @@ async function runFlowAttempt(baseUrl: string): Promise<void> {
             'analysis_drawer_renders_extended_sections',
             'shortlist_keyboard_shortcuts_1_2_3_0',
             'shortlist_notice_and_active_state_feedback',
+            'generation_gallery_and_save_vault_render',
+            'create_and_save_handlers_are_clickable',
+            'generation_and_document_survive_reload',
           ],
         },
         null,

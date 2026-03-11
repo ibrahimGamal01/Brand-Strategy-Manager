@@ -590,9 +590,11 @@ export function ChatComposer({
     <section className="bat-composer-shell sticky bottom-0 z-20 border-t border-zinc-200/80 bg-white/96 px-0 pb-2 pt-2 backdrop-blur-xl">
       <div className={`mx-auto w-full ${contentWidthClassName} px-2 sm:px-3 xl:px-4`}>
         {showComposerStatusRow ? (
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] text-zinc-500">
+          <div className="bat-composer-status-row mb-2 flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] text-zinc-500">
             <div className="flex items-center gap-2">
-              <span className={`inline-flex items-center gap-1.5 ${isStreaming ? "text-emerald-700" : "text-zinc-500"}`}>
+              <span
+                className={`bat-composer-status-chip inline-flex items-center gap-1.5 ${isStreaming ? "is-streaming text-emerald-700" : "text-zinc-500"}`}
+              >
                 <span className={`h-2 w-2 rounded-full ${isStreaming ? "bg-emerald-500" : "bg-zinc-300"}`} />
                 {isStreaming ? "Generating response" : "Ready"}
               </span>
@@ -602,7 +604,7 @@ export function ChatComposer({
               <button
                 type="button"
                 onClick={() => setShowQueue((previous) => !previous)}
-                className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-zinc-600 shadow-sm hover:bg-zinc-50"
+                className="bat-composer-queue-toggle inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-zinc-600 shadow-sm hover:bg-zinc-50"
               >
                 <ListOrdered className="h-3.5 w-3.5" />
                 Queue {queuedMessages.length}
@@ -626,24 +628,27 @@ export function ChatComposer({
                         <p className="mb-1 text-[11px] uppercase tracking-wide text-zinc-400">Queued {item.position || index + 1}</p>
                         <p className="text-sm text-zinc-700">{item.content}</p>
                         <div className="mt-1.5 flex flex-wrap gap-1">
-                          <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-600">
+                          <span className="bat-composer-queue-badge rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-600">
                             {options.modeLabel}
                           </span>
-                          <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-600">
+                          <span className="bat-composer-queue-badge rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-600">
                             {options.targetLength}
                           </span>
                           {item.documentIds?.length ? (
-                            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-600">
+                            <span className="bat-composer-queue-badge rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-600">
                               Docs {item.documentIds.length}
                             </span>
                           ) : null}
                           {item.attachmentIds?.length ? (
-                            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-600">
+                            <span className="bat-composer-queue-badge rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-600">
                               Files {item.attachmentIds.length}
                             </span>
                           ) : null}
                           {badges.map((badge) => (
-                            <span key={`${item.id}-${badge}`} className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-600">
+                            <span
+                              key={`${item.id}-${badge}`}
+                              className="bat-composer-queue-badge rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-600"
+                            >
                               {badge}
                             </span>
                           ))}
@@ -655,7 +660,7 @@ export function ChatComposer({
                           type="button"
                           aria-label="Move up"
                           onClick={() => onReorderQueue(index, index - 1)}
-                          className="rounded-md border border-zinc-200 p-1 text-zinc-600 hover:bg-zinc-100"
+                          className="bat-composer-queue-icon-button rounded-md border border-zinc-200 p-1 text-zinc-600 hover:bg-zinc-100"
                         >
                           <ArrowUp className="h-3 w-3" />
                         </button>
@@ -663,7 +668,7 @@ export function ChatComposer({
                           type="button"
                           aria-label="Move down"
                           onClick={() => onReorderQueue(index, index + 1)}
-                          className="rounded-md border border-zinc-200 p-1 text-zinc-600 hover:bg-zinc-100"
+                          className="bat-composer-queue-icon-button rounded-md border border-zinc-200 p-1 text-zinc-600 hover:bg-zinc-100"
                         >
                           <ArrowDown className="h-3 w-3" />
                         </button>
@@ -671,7 +676,7 @@ export function ChatComposer({
                           type="button"
                           aria-label="Remove"
                           onClick={() => onDeleteQueued(item.id)}
-                          className="rounded-md border border-zinc-200 p-1 text-zinc-600 hover:bg-zinc-100"
+                          className="bat-composer-queue-icon-button rounded-md border border-zinc-200 p-1 text-zinc-600 hover:bg-zinc-100"
                         >
                           <X className="h-3 w-3" />
                         </button>
@@ -687,7 +692,7 @@ export function ChatComposer({
                               }));
                             }
                           }}
-                          className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
+                          className="bat-composer-queue-steer-button rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
                         >
                           Steer
                         </button>
@@ -695,7 +700,7 @@ export function ChatComposer({
                     </div>
 
                     {showSteerEditor ? (
-                      <div className="mt-2 rounded-xl border border-zinc-200 bg-zinc-50 p-2">
+                      <div className="bat-composer-steer-panel mt-2 rounded-xl border border-zinc-200 bg-zinc-50 p-2">
                         <textarea
                           value={steerDraft}
                           onChange={(event) =>
@@ -705,7 +710,7 @@ export function ChatComposer({
                             }))
                           }
                           placeholder="Add steer note for this queued message"
-                          className="min-h-16 w-full resize-y rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800 outline-none focus:border-zinc-400 focus:ring-2 focus:ring-zinc-200"
+                          className="bat-composer-steer-input min-h-16 w-full resize-y rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800 outline-none focus:border-zinc-400 focus:ring-2 focus:ring-zinc-200"
                         />
                         <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
                           <button
@@ -716,7 +721,7 @@ export function ChatComposer({
                                 inputOptions: options,
                               })
                             }
-                            className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
+                            className="bat-composer-steer-action rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
                           >
                             Save steer
                           </button>
@@ -729,7 +734,7 @@ export function ChatComposer({
                                 runNow: true,
                               })
                             }
-                            className="rounded-full bg-zinc-900 px-3 py-1.5 text-xs text-white hover:bg-zinc-800"
+                            className="bat-composer-steer-action is-primary rounded-full bg-zinc-900 px-3 py-1.5 text-xs text-white hover:bg-zinc-800"
                           >
                             Steer + run now
                           </button>
@@ -771,30 +776,30 @@ export function ChatComposer({
               <div className="bat-composer-branch border-b border-zinc-200/90 bg-[linear-gradient(180deg,#fafafa_0%,#f4f5f6_100%)] px-3 py-2.5">
                 <div className="flex items-start gap-2.5">
                   <div className="flex shrink-0 flex-col items-center">
-                    <span className="mt-1 h-2.5 w-2.5 rounded-full bg-zinc-900" />
-                    <span className="mt-1 h-8 w-px bg-zinc-300" />
+                    <span className="bat-branch-marker mt-1 h-2.5 w-2.5 rounded-full bg-zinc-900" />
+                    <span className="bat-branch-connector mt-1 h-8 w-px bg-zinc-300" />
                   </div>
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-zinc-700 shadow-sm">
+                  <div className="bat-branch-icon flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-zinc-700 shadow-sm">
                     {branchContext.kind === "document_edit" ? <Sparkles className="h-4 w-4" /> : <GitBranch className="h-4 w-4" />}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-full border border-zinc-200 bg-zinc-900 px-2.5 py-1 text-[11px] font-medium text-white">
+                      <span className="bat-branch-pill is-primary rounded-full border border-zinc-200 bg-zinc-900 px-2.5 py-1 text-[11px] font-medium text-white">
                         {branchKindLabel(branchContext)}
                       </span>
-                      <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-medium text-zinc-700">
+                      <span className="bat-branch-pill rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-medium text-zinc-700">
                         {branchContext.commandHint || (branchContext.kind === "document_edit" ? "/edit-doc" : "/quote-doc")}
                       </span>
                       {typeof branchContext.versionNumber === "number" && branchContext.versionNumber > 0 ? (
-                        <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[11px] text-zinc-500">
+                        <span className="bat-branch-pill rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[11px] text-zinc-500">
                           v{branchContext.versionNumber}
                         </span>
                       ) : null}
                     </div>
-                    <p className="mt-1 text-sm font-semibold text-zinc-900">{branchContext.title}</p>
-                    {branchContext.subtitle ? <p className="text-xs text-zinc-500">{branchContext.subtitle}</p> : null}
+                    <p className="bat-branch-title mt-1 text-sm font-semibold text-zinc-900">{branchContext.title}</p>
+                    {branchContext.subtitle ? <p className="bat-branch-subtitle text-xs text-zinc-500">{branchContext.subtitle}</p> : null}
                     {branchContext.quotedText ? (
-                      <p className="mt-1 line-clamp-2 border-l-2 border-zinc-300 pl-2 text-xs text-zinc-600">
+                      <p className="bat-branch-quote mt-1 line-clamp-2 border-l-2 border-zinc-300 pl-2 text-xs text-zinc-600">
                         {branchContext.quotedText}
                       </p>
                     ) : null}
@@ -805,7 +810,7 @@ export function ChatComposer({
                             key={action.label}
                             type="button"
                             onClick={() => onDraftChange(action.value)}
-                            className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[11px] text-zinc-600 hover:bg-zinc-100"
+                            className="bat-branch-quick-action rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[11px] text-zinc-600 hover:bg-zinc-100"
                           >
                             {action.label}
                           </button>
@@ -816,7 +821,7 @@ export function ChatComposer({
                   <button
                     type="button"
                     onClick={onClearBranchContext}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-500 hover:bg-zinc-100"
+                    className="bat-branch-clear inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-500 hover:bg-zinc-100"
                     aria-label="Clear scoped document context"
                   >
                     <X className="h-4 w-4" />
@@ -867,7 +872,7 @@ export function ChatComposer({
                       <button
                         type="button"
                         onClick={() => setUploadedDocs((previous) => previous.filter((item) => item.id !== doc.id))}
-                        className="rounded-full p-0.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
+                        className="bat-composer-upload-remove rounded-full p-0.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
                         aria-label="Remove attached document"
                       >
                         <X className="h-3 w-3" />

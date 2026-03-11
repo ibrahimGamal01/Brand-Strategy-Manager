@@ -4545,16 +4545,25 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                       </div>
                     </div>
                     <div className="vbs-create-preview-grid">
-                      {generationGalleryPreview.map((item) => (
-                        <article
-                          key={item.id}
-                          className={`vbs-create-preview-card ${item.count > 0 ? "is-ready" : ""} ${item.kind === "text" ? "is-script" : ""}`}
-                        >
-                          <span>{item.kind === "list" ? `${Math.max(1, item.count)} variants` : "Narrative block"}</span>
-                          <strong>{item.title}</strong>
-                          <p>{item.preview}</p>
-                        </article>
-                      ))}
+                      {generationGalleryPreview.map((item) => {
+                        const isActive = activePromptSection === item.id;
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            className={`vbs-create-preview-card ${item.count > 0 ? "is-ready" : ""} ${item.kind === "text" ? "is-script" : ""} ${isActive ? "is-active" : ""}`}
+                            aria-pressed={isActive}
+                            onClick={() => setActivePromptSection(item.id)}
+                          >
+                            <span>{item.kind === "list" ? `${Math.max(1, item.count)} variants` : "Narrative block"}</span>
+                            <strong>{item.title}</strong>
+                            <p>{item.preview}</p>
+                            <small className="vbs-create-preview-handler">
+                              {item.count > 0 ? "Open section handler" : "Waiting for first revision"}
+                            </small>
+                          </button>
+                        );
+                      })}
                     </div>
                     <div className="vbs-quality-gate-strip">
                       {qualityGateCards.map((item) => (
@@ -4588,11 +4597,17 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                     <div className="vbs-save-vault-rail">
                       {versionTimelinePreview.length > 0 ? (
                         versionTimelinePreview.map((version) => (
-                          <article key={version.id} className="vbs-save-vault-step">
+                          <button
+                            key={version.id}
+                            type="button"
+                            className={`vbs-save-vault-step ${promoteVersionId === version.id ? "is-selected" : ""}`}
+                            aria-pressed={promoteVersionId === version.id}
+                            onClick={() => setPromoteVersionId(version.id)}
+                          >
                             <span>v{version.versionNumber}</span>
                             <strong>{version.summary || "Snapshot"}</strong>
                             <p>{formatTimestamp(version.createdAt)}</p>
-                          </article>
+                          </button>
                         ))
                       ) : (
                         <article className="vbs-save-vault-step is-empty">

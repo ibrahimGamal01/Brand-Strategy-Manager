@@ -199,7 +199,7 @@ function OverflowActionsMenu({ actions }: { actions: OverflowAction[] }) {
       <button
         type="button"
         onClick={() => setOpen((previous) => !previous)}
-        className="bat-thread-icon-button inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-100"
+        className="bat-thread-icon-button bat-thread-menu-toggle inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-100"
         aria-label="More actions"
       >
         <MoreHorizontal className="h-4 w-4" />
@@ -213,7 +213,7 @@ function OverflowActionsMenu({ actions }: { actions: OverflowAction[] }) {
                 href={action.href}
                 target="_blank"
                 rel="noreferrer"
-                className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs text-zinc-700 hover:bg-zinc-100"
+                className="bat-thread-menu-item flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs text-zinc-700 hover:bg-zinc-100"
               >
                 {action.label}
               </a>
@@ -225,7 +225,7 @@ function OverflowActionsMenu({ actions }: { actions: OverflowAction[] }) {
                   setOpen(false);
                   action.onSelect();
                 }}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-zinc-700 hover:bg-zinc-100"
+                className="bat-thread-menu-item flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-zinc-700 hover:bg-zinc-100"
               >
                 {action.label}
               </button>

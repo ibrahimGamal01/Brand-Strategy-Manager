@@ -361,13 +361,13 @@ export function DocumentWorkspacePanel({
         <button
           type="button"
           onClick={() => setShowAllDocuments((previous) => !previous)}
-          className={`rounded-md border px-2 py-1 text-xs ${
-            showAllDocuments ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 text-zinc-700 hover:bg-zinc-100"
+          className={`bat-doc-toggle rounded-md border px-2 py-1 text-xs ${
+            showAllDocuments ? "is-active border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 text-zinc-700 hover:bg-zinc-100"
           }`}
         >
           {showAllDocuments ? "Branch docs" : "Show all"}
         </button>
-        <p className="text-[11px] text-zinc-500">{filteredDocuments.length} doc{filteredDocuments.length === 1 ? "" : "s"}</p>
+        <p className="bat-doc-count text-[11px] text-zinc-500">{filteredDocuments.length} doc{filteredDocuments.length === 1 ? "" : "s"}</p>
       </div>
 
       <div className="bat-doc-list bat-scrollbar min-h-0 flex-1 space-y-0.5 overflow-y-auto rounded-md border border-zinc-200 bg-white p-1">
@@ -378,17 +378,17 @@ export function DocumentWorkspacePanel({
               key={document.id}
               type="button"
               onClick={() => selectDocument(document.id)}
-              className={`w-full rounded-md px-2 py-1.5 text-left ${active ? "bg-zinc-100" : "hover:bg-zinc-50"}`}
+              className={`bat-doc-list-item w-full rounded-md px-2 py-1.5 text-left ${active ? "is-active bg-zinc-100" : "hover:bg-zinc-50"}`}
             >
-              <p className="line-clamp-1 text-xs font-semibold text-zinc-900">{document.title || document.originalFileName}</p>
+              <p className="bat-doc-item-title line-clamp-1 text-xs font-semibold text-zinc-900">{document.title || document.originalFileName}</p>
               <div className="mt-0.5 flex flex-wrap gap-1">
-                <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] uppercase text-zinc-600">
+                <span className="bat-doc-list-chip rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] uppercase text-zinc-600">
                   {document.parserStatus || "unknown"}
                 </span>
-                <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-600">
+                <span className="bat-doc-list-chip rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-600">
                   v{document.latestVersion?.versionNumber || 0}
                 </span>
-                <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-600">
+                <span className="bat-doc-list-chip rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-600">
                   {formatFreshness(document.latestVersion?.createdAt)}
                 </span>
               </div>
@@ -396,7 +396,7 @@ export function DocumentWorkspacePanel({
           );
         })}
         {!filteredDocuments.length ? (
-          <p className="px-2 py-2 text-xs text-zinc-500">
+          <p className="bat-doc-empty px-2 py-2 text-xs text-zinc-500">
             {showAllDocuments
               ? "No documents matched this filter."
               : "No document versions found on this branch. Toggle “Show all” to inspect workspace-wide docs."}
@@ -411,8 +411,8 @@ export function DocumentWorkspacePanel({
       <div ref={headerRef} className="bat-doc-header relative border-b border-zinc-200 px-3 py-2">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <h2 className="text-sm font-semibold text-zinc-900">Docs</h2>
-            <p className="truncate text-[11px] text-zinc-500">
+            <h2 className="bat-doc-title text-sm font-semibold text-zinc-900">Docs</h2>
+            <p className="bat-doc-subtitle truncate text-[11px] text-zinc-500">
               {selectedDocument
                 ? [
                     selectedDocument.title || selectedDocument.originalFileName,
