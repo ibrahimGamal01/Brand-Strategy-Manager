@@ -2452,6 +2452,85 @@ a {
   color: var(--vbs-ink);
 }
 
+.vbs-doc-timeline-rail {
+  margin-top: 0.55rem;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.vbs-doc-version-card {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 16%, var(--bat-border));
+  border-radius: 0.82rem;
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--vbs-cobalt) 10%, transparent) 0%, transparent 34%),
+    color-mix(in srgb, white 97%, var(--vbs-sand));
+  padding: 0.72rem;
+  display: grid;
+  gap: 0.55rem;
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.vbs-doc-version-card:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--vbs-cobalt) 30%, var(--bat-border));
+  box-shadow: 0 10px 22px rgba(11, 19, 43, 0.08);
+}
+
+.vbs-doc-version-card.is-current {
+  border-color: color-mix(in srgb, var(--vbs-teal) 34%, var(--bat-border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--vbs-teal) 14%, transparent);
+}
+
+.vbs-doc-version-card.is-target {
+  border-color: color-mix(in srgb, var(--vbs-cobalt) 38%, var(--bat-border));
+}
+
+.vbs-doc-version-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.65rem;
+}
+
+.vbs-doc-version-head h4 {
+  margin: 0.12rem 0 0;
+  font-family: var(--vbs-display-font);
+  font-size: 0.92rem;
+  color: var(--vbs-ink);
+}
+
+.vbs-doc-version-fact-grid,
+.vbs-doc-version-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.vbs-doc-version-fact-grid > div,
+.vbs-doc-version-preview-card {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 12%, var(--bat-border));
+  border-radius: 0.72rem;
+  background: color-mix(in srgb, white 93%, var(--vbs-sand));
+  padding: 0.58rem 0.62rem;
+  display: grid;
+  gap: 0.22rem;
+}
+
+.vbs-doc-version-fact-grid span,
+.vbs-doc-version-preview-card span {
+  font-size: 0.64rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--vbs-ink) 56%, #6f7488);
+}
+
+.vbs-doc-version-fact-grid strong,
+.vbs-doc-version-preview-card strong {
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--vbs-ink);
+}
+
 .vbs-doc-compare-results ul,
 .vbs-doc-timeline ul {
   margin: 0.45rem 0 0;
@@ -2812,6 +2891,11 @@ a {
   .vbs-doc-version-tools {
     grid-template-columns: minmax(0, 1fr);
   }
+
+  .vbs-doc-version-fact-grid,
+  .vbs-doc-version-preview-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 700px) {
@@ -2878,6 +2962,10 @@ a {
   .vbs-doc-section-head {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .vbs-doc-version-head {
+    flex-direction: column;
   }
 
   .vbs-kpi-grid {

@@ -2040,15 +2040,16 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     }
   }, [documentDraft, documentDirty, persistDocumentDraft]);
 
-  const promoteVersion = useCallback(async () => {
-    if (!document || !promoteVersionId) return;
+  const promoteVersion = useCallback(async (overrideVersionId?: string) => {
+    const targetVersionId = overrideVersionId || promoteVersionId;
+    if (!document || !targetVersionId) return;
     setIsBusy(true);
     setError(null);
     try {
       if (documentDraft && documentDirty) {
         await persistDocumentDraft(false);
       }
-      const payload = await promoteViralStudioDocumentVersion(workspaceId, document.id, promoteVersionId, {
+      const payload = await promoteViralStudioDocumentVersion(workspaceId, document.id, targetVersionId, {
         author: "viral-studio-plan6",
         summary: "Promoted from version timeline",
       });
@@ -2060,6 +2061,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         if (previous.some((version) => version.id === payload.version.id)) return previous;
         return [...previous, payload.version];
       });
+      setPromoteVersionId(targetVersionId);
       setCompareLeftVersionId(payload.promotedFromVersionId);
       setCompareRightVersionId(payload.version.id);
       void Promise.all([refreshTelemetry(), refreshWorkflow()]);
@@ -5314,17 +5316,78 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                           Promote Version
                         </button>
                       </div>
-                      <ul>
+                      <div className="vbs-doc-timeline-rail">
                         {versions
                           .slice()
                           .reverse()
-                          .map((version) => (
-                            <li key={version.id}>
-                              <strong>{version.summary}</strong> • {version.author} • {formatTimestamp(version.createdAt)}
-                              {version.basedOnVersionId ? ` • based on ${version.basedOnVersionId}` : ""}
-                            </li>
-                          ))}
-                      </ul>
+                          .map((version, index) => {
+                            const isCurrent = document?.currentVersionId === version.id;
+                            const isTarget = promoteVersionId === version.id;
+                            const versionLabel = version.versionNumber || versions.length - index;
+                            const previewSections = version.snapshotSections.slice(0, 3);
+                            return (
+                              <article
+                                key={version.id}
+                                className={[
+                                  "vbs-doc-version-card",
+                                  isCurrent ? "is-current" : "",
+                                  isTarget ? "is-target" : "",
+                                ]
+                                  .filter(Boolean)
+                                  .join(" ")}
+                              >
+                                <div className="vbs-doc-version-head">
+                                  <div>
+                                    <p className="vbs-meta">Version {versionLabel}</p>
+                                    <h4>{version.summary || "Snapshot"}</h4>
+                                  </div>
+                                  <div className="vbs-top-driver-row vbs-top-driver-row-compact">
+                                    {isCurrent ? <span className="vbs-driver-chip">Current</span> : null}
+                                    {isTarget ? <span className="vbs-driver-chip">Promotion target</span> : null}
+                                    {version.basedOnVersionId ? <span className="vbs-driver-chip">Derived</span> : null}
+                                  </div>
+                                </div>
+                                <div className="vbs-doc-version-fact-grid">
+                                  <div>
+                                    <span>Author</span>
+                                    <strong>{version.author}</strong>
+                                  </div>
+                                  <div>
+                                    <span>Sections</span>
+                                    <strong>{version.snapshotSections.length}</strong>
+                                  </div>
+                                  <div>
+                                    <span>Created</span>
+                                    <strong>{formatTimestamp(version.createdAt)}</strong>
+                                  </div>
+                                </div>
+                                <div className="vbs-doc-version-preview-grid">
+                                  {previewSections.map((section) => (
+                                    <article key={`${version.id}-${section.id}`} className="vbs-doc-version-preview-card">
+                                      <span>{section.title}</span>
+                                      <strong>{compactText(toSectionText(section), 88) || "No preview yet"}</strong>
+                                    </article>
+                                  ))}
+                                </div>
+                                <div className="vbs-mini-actions">
+                                  <button type="button" disabled={isBusy} onClick={() => setPromoteVersionId(version.id)}>
+                                    {isTarget ? "Target Selected" : "Target This Version"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={isBusy || isCurrent}
+                                    onClick={() => {
+                                      setPromoteVersionId(version.id);
+                                      void promoteVersion(version.id);
+                                    }}
+                                  >
+                                    {isCurrent ? "Current Version" : "Promote Now"}
+                                  </button>
+                                </div>
+                              </article>
+                            );
+                          })}
+                      </div>
                     </div>
                   </div>
                 </div>
