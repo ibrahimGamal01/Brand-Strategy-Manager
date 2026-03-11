@@ -376,8 +376,9 @@ function compactText(value: string, maxChars = 180): string {
 function sanitizeHttpUrl(value: string): string | undefined {
   const raw = String(value || "").trim();
   if (!raw) return undefined;
+  const withProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`;
   try {
-    const parsed = new URL(raw);
+    const parsed = new URL(withProtocol);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return undefined;
     return parsed.toString();
   } catch {
@@ -385,24 +386,53 @@ function sanitizeHttpUrl(value: string): string | undefined {
   }
 }
 
+function isLikelySocialPageUrl(value: string | undefined): boolean {
+  const normalized = sanitizeHttpUrl(value || "");
+  if (!normalized) return true;
+  try {
+    const parsed = new URL(normalized);
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+    const isKnownMediaHost =
+      host.includes("fbcdn.net") ||
+      host.includes("cdninstagram.com") ||
+      host.includes("googlevideo.com") ||
+      host.includes("ytimg.com");
+    if (isKnownMediaHost) return false;
+    if (host === "instagram.com" || host === "instagr.am") return true;
+    if (host.endsWith(".instagram.com") || host.endsWith(".tiktok.com") || host.endsWith(".youtube.com")) return true;
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+function sanitizeMediaAssetUrl(value: string): string | undefined {
+  const normalized = sanitizeHttpUrl(value);
+  if (!normalized) return undefined;
+  if (isLikelySocialPageUrl(normalized)) return undefined;
+  return normalized;
+}
+
 function sanitizeVisualBackgroundUrl(value: string): string | undefined {
   const raw = String(value || "").trim();
   if (!raw) return undefined;
   if (/^data:image\//i.test(raw)) return raw;
-  return sanitizeHttpUrl(raw);
+  return sanitizeMediaAssetUrl(raw);
 }
 
 function isLikelyVideoUrl(value: string | undefined): boolean {
-  const raw = String(value || "").trim().toLowerCase();
-  if (!raw) return false;
-  if (raw.startsWith("data:image/")) return false;
+  const normalized = sanitizeMediaAssetUrl(value || "");
+  if (!normalized) return false;
+  const raw = normalized.toLowerCase();
   return (
     raw.includes(".mp4") ||
     raw.includes(".webm") ||
     raw.includes(".mov") ||
     raw.includes(".m4v") ||
     raw.includes(".m3u8") ||
-    raw.includes("video")
+    raw.includes("mime_type=video") ||
+    raw.includes("video/mp4") ||
+    raw.includes("video/")
   );
 }
 
@@ -1020,8 +1050,8 @@ function buildReferenceCardDetail(reference: ViralStudioReferenceAsset): Referen
   const sourceUrl = sourceResolution.url;
   const rawPosterUrl = String(reference.visual?.posterUrl || "").trim();
   const rawThumbnailUrl = String(reference.visual?.thumbnailUrl || "").trim();
-  const posterHttpUrl = sanitizeHttpUrl(rawPosterUrl);
-  const thumbnailHttpUrl = sanitizeHttpUrl(rawThumbnailUrl);
+  const posterHttpUrl = sanitizeMediaAssetUrl(rawPosterUrl);
+  const thumbnailHttpUrl = sanitizeMediaAssetUrl(rawThumbnailUrl);
   const previewVideoUrl = [posterHttpUrl, thumbnailHttpUrl].find((candidate) => isLikelyVideoUrl(candidate));
   const downloadableImageUrl = [posterHttpUrl, thumbnailHttpUrl].find((candidate) => Boolean(candidate) && !isLikelyVideoUrl(candidate));
   const visualBackgroundUrl = [rawPosterUrl, rawThumbnailUrl]
@@ -3065,6 +3095,14 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     return next;
   }, [filteredReferences]);
 
+  const downloadedPreviewCount = useMemo(() => {
+    let count = 0;
+    for (const detail of referenceCardDetails.values()) {
+      if (detail.mediaUrl) count += 1;
+    }
+    return count;
+  }, [referenceCardDetails]);
+
   const selectedReferenceCardDetail = useMemo(() => {
     if (!selectedReference) return null;
     return referenceCardDetails.get(selectedReference.id) || buildReferenceCardDetail(selectedReference);
@@ -4177,6 +4215,12 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
               {curationNotice ? (
                 <p className="vbs-curation-notice" role="status" aria-live="polite">
                   {curationNotice}
+                </p>
+              ) : null}
+              {filteredReferences.length > 0 && downloadedPreviewCount === 0 ? (
+                <p className="vbs-curation-warning" role="status" aria-live="polite">
+                  No downloadable media URLs were returned for this extraction run. Showing generated preview samples until
+                  real post media is available.
                 </p>
               ) : null}
               <div className="vbs-mini-actions" style={{ marginTop: "0.45rem" }}>

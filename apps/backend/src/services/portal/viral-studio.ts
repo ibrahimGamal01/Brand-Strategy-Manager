@@ -1737,16 +1737,92 @@ function buildReferenceExplainability(input: {
 }
 
 function isLikelyVideoAssetUrl(value: string | undefined): boolean {
-  const raw = cleanString(value).toLowerCase();
+  const raw = cleanString(value);
   if (!raw) return false;
+  const normalized = normalizeHttpAssetUrl(raw);
+  if (!normalized) return false;
+  if (isLikelySocialPageUrl(normalized)) return false;
+  const lower = normalized.toLowerCase();
   return (
-    raw.includes('.mp4') ||
-    raw.includes('.webm') ||
-    raw.includes('.mov') ||
-    raw.includes('.m4v') ||
-    raw.includes('.m3u8') ||
-    raw.includes('video')
+    lower.includes('.mp4') ||
+    lower.includes('.webm') ||
+    lower.includes('.mov') ||
+    lower.includes('.m4v') ||
+    lower.includes('.m3u8') ||
+    lower.includes('mime_type=video') ||
+    lower.includes('video/mp4') ||
+    lower.includes('video/')
   );
+}
+
+function normalizeHttpAssetUrl(value: string): string | null {
+  const raw = cleanString(value);
+  if (!raw) return null;
+  const withProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`;
+  try {
+    const parsed = new URL(withProtocol);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function isLikelySocialPageUrl(value: string): boolean {
+  const normalized = normalizeHttpAssetUrl(value);
+  if (!normalized) return true;
+  try {
+    const parsed = new URL(normalized);
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+    const isKnownMediaHost =
+      host.includes('fbcdn.net') ||
+      host.includes('cdninstagram.com') ||
+      host.includes('googlevideo.com') ||
+      host.includes('ytimg.com');
+    if (isKnownMediaHost) return false;
+    if (host === 'instagram.com' || host === 'instagr.am') return true;
+    if (host.endsWith('.instagram.com') || host.endsWith('.tiktok.com') || host.endsWith('.youtube.com')) {
+      return true;
+    }
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+function isLikelyImageAssetUrl(value: string | undefined): boolean {
+  const raw = cleanString(value);
+  if (!raw) return false;
+  const normalized = normalizeHttpAssetUrl(raw);
+  if (!normalized) return false;
+  if (isLikelySocialPageUrl(normalized)) return false;
+  const lower = normalized.toLowerCase();
+  return (
+    lower.includes('.jpg') ||
+    lower.includes('.jpeg') ||
+    lower.includes('.png') ||
+    lower.includes('.webp') ||
+    lower.includes('.gif') ||
+    lower.includes('image/')
+  );
+}
+
+function toInstagramPostSourceUrl(
+  post: {
+    post_url?: string;
+    url?: string;
+    permalink?: string;
+    shortcode?: string;
+  },
+  fallback: string
+): string {
+  const candidates = [post.post_url, post.url, post.permalink]
+    .map((candidate) => normalizeHttpAssetUrl(candidate || ''))
+    .filter((candidate): candidate is string => Boolean(candidate));
+  if (candidates.length > 0) return candidates[0];
+  const shortcode = cleanString(post.shortcode);
+  if (shortcode) return `https://www.instagram.com/p/${shortcode}/`;
+  return fallback;
 }
 
 function extractInstagramHandleFromUrl(value: string): string | null {
@@ -1784,14 +1860,23 @@ function buildInstagramReferenceFromPost(input: {
   post: {
     external_post_id?: string;
     post_url?: string;
+    url?: string;
+    permalink?: string;
+    shortcode?: string;
     caption?: string;
     likes?: number;
     comments?: number;
     timestamp?: string;
     media_url?: string;
+    thumbnail_url?: string;
+    display_url?: string;
+    image_url?: string;
     is_video?: boolean;
     video_url?: string | null;
+    videoUrl?: string | null;
+    thumbnailUrl?: string;
     media_urls?: string[];
+    mediaUrls?: string[];
   };
   index: number;
   total: number;
@@ -1837,14 +1922,26 @@ function buildInstagramReferenceFromPost(input: {
   const ocrSummary = 'On-screen text extraction pending. Using caption and engagement profile for ranking.';
   const mediaCandidates = Array.from(
     new Set(
-      [cleanString(input.post.video_url || ''), cleanString(input.post.media_url || ''), ...((input.post.media_urls || []).map((item) => cleanString(item)))]
-        .filter(Boolean)
+      [
+        cleanString(input.post.video_url || ''),
+        cleanString(input.post.videoUrl || ''),
+        cleanString(input.post.media_url || ''),
+        cleanString(input.post.thumbnail_url || ''),
+        cleanString(input.post.thumbnailUrl || ''),
+        cleanString(input.post.display_url || ''),
+        cleanString(input.post.image_url || ''),
+        ...((input.post.media_urls || []).map((item) => cleanString(item))),
+        ...((input.post.mediaUrls || []).map((item) => cleanString(item))),
+      ]
+        .map((candidate) => normalizeHttpAssetUrl(candidate))
+        .filter((candidate): candidate is string => Boolean(candidate))
+        .filter((candidate) => !isLikelySocialPageUrl(candidate))
     )
   );
   const videoUrl = mediaCandidates.find((candidate) => isLikelyVideoAssetUrl(candidate));
-  const imageUrl = mediaCandidates.find((candidate) => !isLikelyVideoAssetUrl(candidate));
+  const imageUrl = mediaCandidates.find((candidate) => isLikelyImageAssetUrl(candidate));
   const rank = input.total - input.index;
-  const sourceUrl = cleanString(input.post.post_url) || input.run.sourceUrl;
+  const sourceUrl = toInstagramPostSourceUrl(input.post, input.run.sourceUrl);
 
   return {
     id: referenceId,
@@ -1911,7 +2008,9 @@ async function tryBuildRealReferences(input: {
   const scrapePromise = scrapeInstagramProfile(handle, Math.max(target, 12))
     .then((result) => {
       if (!result.success || !result.data?.posts?.length) return null;
-      const usablePosts = result.data.posts.filter((post) => cleanString((post as any).post_url || '')).slice(0, target);
+      const usablePosts = result.data.posts
+        .filter((post) => Boolean(toInstagramPostSourceUrl(post as any, '')))
+        .slice(0, target);
       if (usablePosts.length === 0) return null;
       const references = usablePosts.map((post, index) =>
         buildInstagramReferenceFromPost({
@@ -2039,6 +2138,18 @@ function sortReferencesForOutput(references: ReferenceAsset[]): ReferenceAsset[]
       rank: index + 1,
     },
   }));
+}
+
+function countReferencesWithUsableMedia(references: ReferenceAsset[]): number {
+  let count = 0;
+  for (const reference of references) {
+    const mediaCandidates = [reference.visual?.posterUrl, reference.visual?.thumbnailUrl]
+      .map((candidate) => normalizeHttpAssetUrl(candidate || ''))
+      .filter((candidate): candidate is string => Boolean(candidate))
+      .filter((candidate) => !isLikelySocialPageUrl(candidate));
+    if (mediaCandidates.length > 0) count += 1;
+  }
+  return count;
 }
 
 function runQualityGate(outputs: GenerationPack['outputs'], profile: BrandDNAProfile | null): GenerationPack['qualityCheck'] {
@@ -2853,14 +2964,26 @@ function startIngestionSimulation(workspaceId: string, runId: string) {
       updateStoredReferencesWithSortedOrder(store, generatedReferences);
     }
 
+    const rankedFromReferences = generatedReferences.length;
+    const downloadedFromReferences = countReferencesWithUsableMedia(generatedReferences);
+    const finalizedProgress =
+      rankedFromReferences > 0
+        ? {
+            found: Math.max(outcome.found, rankedFromReferences),
+            downloaded: downloadedFromReferences,
+            analyzed: rankedFromReferences,
+            ranked: rankedFromReferences,
+          }
+        : {
+            found: outcome.found,
+            downloaded: outcome.downloaded,
+            analyzed: outcome.analyzed,
+            ranked: outcome.ranked,
+          };
+
     const finalized = refreshIngestionRun(active, {
       status: outcome.status,
-      progress: {
-        found: outcome.found,
-        downloaded: outcome.downloaded,
-        analyzed: outcome.analyzed,
-        ranked: outcome.ranked,
-      },
+      progress: finalizedProgress,
       endedAt: toIsoNow(),
       error: outcome.error,
     });
