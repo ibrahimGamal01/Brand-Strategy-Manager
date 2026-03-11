@@ -38,7 +38,7 @@ function matchesWorkspaceGate(workspaceId: string, gate: Set<string>): boolean {
 }
 
 export function resolveViralStudioWorkspaceStorageMode(workspaceId: string): ViralStudioWorkspaceStorageMode {
-  const mode = parseMode(normalize(process.env.VIRAL_STUDIO_PERSISTENCE_MODE) || 'memory');
+  const mode = parseMode(normalize(process.env.VIRAL_STUDIO_PERSISTENCE_MODE) || 'dual');
   if (mode === 'memory') {
     return {
       mode,
@@ -59,7 +59,7 @@ export function resolveViralStudioWorkspaceStorageMode(workspaceId: string): Vir
       gatedDbRead: true,
     };
   }
-  const gate = parseWorkspaceGate(normalize(process.env.VIRAL_STUDIO_DB_READ_WORKSPACES));
+  const gate = parseWorkspaceGate(normalize(process.env.VIRAL_STUDIO_DB_READ_WORKSPACES) || '*');
   const gatedDbRead = matchesWorkspaceGate(workspaceId, gate);
   return {
     mode,
@@ -94,8 +94,8 @@ export function getViralStudioStorageModeDiagnostics(workspaceId: string): {
     writesToMemory: resolved.writesToMemory,
     gatedDbRead: resolved.gatedDbRead,
     env: {
-      VIRAL_STUDIO_PERSISTENCE_MODE: normalize(process.env.VIRAL_STUDIO_PERSISTENCE_MODE) || 'memory',
-      VIRAL_STUDIO_DB_READ_WORKSPACES: normalize(process.env.VIRAL_STUDIO_DB_READ_WORKSPACES),
+      VIRAL_STUDIO_PERSISTENCE_MODE: normalize(process.env.VIRAL_STUDIO_PERSISTENCE_MODE) || 'dual',
+      VIRAL_STUDIO_DB_READ_WORKSPACES: normalize(process.env.VIRAL_STUDIO_DB_READ_WORKSPACES) || '*',
     },
   };
 }

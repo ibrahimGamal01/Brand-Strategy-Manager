@@ -11,6 +11,7 @@ import {
   createViralStudioGeneration,
   createViralStudioIngestion,
   createWorkspaceBrandDna,
+  fetchViralStudioGeneration,
   exportViralStudioDocument,
   fetchViralStudioContracts,
   fetchViralStudioDocument,
@@ -154,6 +155,16 @@ const WORKFLOW_STAGE_ORDER: Array<ViralStudioWorkflowStatus["workflowStage"]> = 
   "chat_execution",
 ];
 
+const STUDIO_SLIDE_ORDER = ["launchpad", "foundation", "reference", "create"] as const;
+type StudioSlideId = (typeof STUDIO_SLIDE_ORDER)[number];
+
+const STUDIO_SLIDE_META: Array<{ id: StudioSlideId; label: string; chapter: string }> = [
+  { id: "launchpad", label: "Launchpad", chapter: "00" },
+  { id: "foundation", label: "Brand DNA", chapter: "01" },
+  { id: "reference", label: "Reference Engine", chapter: "02" },
+  { id: "create", label: "Create & Save", chapter: "03" },
+];
+
 const ONBOARDING_STEP_META: Array<{
   step: 1 | 2 | 3 | 4;
   title: string;
@@ -215,6 +226,10 @@ type WorkflowGuideAction =
   | "curate_references"
   | "generate_pack"
   | "handoff_chat";
+
+function isStudioSlideId(value: string): value is StudioSlideId {
+  return STUDIO_SLIDE_ORDER.includes(value as StudioSlideId);
+}
 
 function workflowStageOrderIndex(stage: ViralStudioWorkflowStatus["workflowStage"] | undefined): number {
   if (!stage) return 0;
@@ -870,6 +885,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   const [autofillBusy, setAutofillBusy] = useState(false);
   const [brandForm, setBrandForm] = useState<BrandFormState>({ ...DEFAULT_FORM_STATE });
   const [onboardingStep, setOnboardingStep] = useState<1 | 2 | 3 | 4>(1);
+  const [activeSlide, setActiveSlide] = useState<StudioSlideId>("launchpad");
   const [isEditingBrandDna, setIsEditingBrandDna] = useState(false);
   const [brandAutosaveState, setBrandAutosaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [brandAutosavedAt, setBrandAutosavedAt] = useState<string | null>(null);
@@ -931,6 +947,8 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   const onboardingLocked = !brandReady || isEditingBrandDna;
   const autopilotQuery = searchParams.get("autopilot");
   const diagnosticsQuery = searchParams.get("devtools");
+  const onboardingStepStorageKey = useMemo(() => `viral-studio:onboarding-step:${workspaceId}`, [workspaceId]);
+  const activeSlideStorageKey = useMemo(() => `viral-studio:active-slide:${workspaceId}`, [workspaceId]);
 
   useEffect(() => {
     const hostname = typeof window !== "undefined" ? window.location.hostname : "";
@@ -947,6 +965,24 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         setCanAccessDiagnostics(false);
       });
   }, [diagnosticsQuery]);
+
+  useEffect(() => {
+    try {
+      const storedStep = window.localStorage.getItem(onboardingStepStorageKey);
+      if (storedStep) {
+        const parsed = Number(storedStep);
+        if (parsed >= 1 && parsed <= 4) {
+          setOnboardingStep(parsed as 1 | 2 | 3 | 4);
+        }
+      }
+      const storedSlide = window.localStorage.getItem(activeSlideStorageKey);
+      if (storedSlide && isStudioSlideId(storedSlide)) {
+        setActiveSlide(storedSlide);
+      }
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [onboardingStepStorageKey, activeSlideStorageKey]);
 
   const refreshTelemetry = useCallback(async () => {
     try {
@@ -991,6 +1027,16 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         fetchViralStudioWorkflowStatus(workspaceId),
         fetchViralStudioSuggestedSources(workspaceId),
       ]);
+      const latestGenerationId = workflowPayload.workflow.latest?.generationId;
+      const latestDocumentId = workflowPayload.workflow.latest?.documentId;
+      const [generationPayload, documentPayload] = await Promise.all([
+        latestGenerationId
+          ? fetchViralStudioGeneration(workspaceId, latestGenerationId).catch(() => null)
+          : Promise.resolve(null),
+        latestDocumentId
+          ? fetchViralStudioDocument(workspaceId, latestDocumentId).catch(() => null)
+          : Promise.resolve(null),
+      ]);
       setBrandProfile(brandPayload.profile);
       setBrandForm(toFormState(brandPayload.profile));
       setContracts(contractPayload.contract);
@@ -1001,6 +1047,29 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       setReferences(referencePayload.items);
       setWorkflowStatus(workflowPayload.workflow);
       setSuggestedSources(sourcePayload.items);
+      setGeneration(generationPayload?.generation || null);
+      if (generationPayload?.generation) {
+        generationSnapshotKeysRef.current.add(
+          `${generationPayload.generation.id}:${generationPayload.generation.revision}`
+        );
+      }
+      if (documentPayload) {
+        setDocument(documentPayload.document);
+        setDocumentDraft(documentPayload.document);
+        setVersions(documentPayload.versions);
+        setComparison(null);
+        setCompareLeftVersionId("current");
+        setCompareRightVersionId("current");
+        setPromoteVersionId(documentPayload.versions[documentPayload.versions.length - 1]?.id || "");
+      } else {
+        setDocument(null);
+        setDocumentDraft(null);
+        setVersions([]);
+        setComparison(null);
+        setCompareLeftVersionId("current");
+        setCompareRightVersionId("current");
+        setPromoteVersionId("");
+      }
       if (brandPayload.profile?.status === "final" && brandPayload.profile?.completeness.ready) {
         setOnboardingStep(4);
       }
@@ -1449,6 +1518,35 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     if (stage !== "studio_autofill_review" && stage !== "intake_complete") return;
     void previewAutofill();
   }, [brandReady, autofillBusy, autofillPreview, previewAutofill, workflowStatus?.workflowStage]);
+
+  useEffect(() => {
+    const latestGenerationId = workflowStatus?.latest?.generationId;
+    if (!latestGenerationId) return;
+    if (generation?.id === latestGenerationId) return;
+    void fetchViralStudioGeneration(workspaceId, latestGenerationId)
+      .then((payload) => {
+        setGeneration(payload.generation);
+        generationSnapshotKeysRef.current.add(`${payload.generation.id}:${payload.generation.revision}`);
+      })
+      .catch(() => undefined);
+  }, [workspaceId, workflowStatus?.latest?.generationId, generation?.id]);
+
+  useEffect(() => {
+    const latestDocumentId = workflowStatus?.latest?.documentId;
+    if (!latestDocumentId) return;
+    if (document?.id === latestDocumentId && versions.length > 0) return;
+    void fetchViralStudioDocument(workspaceId, latestDocumentId)
+      .then((payload) => {
+        setDocument(payload.document);
+        setDocumentDraft(payload.document);
+        setVersions(payload.versions);
+        setComparison(null);
+        setCompareLeftVersionId("current");
+        setCompareRightVersionId("current");
+        setPromoteVersionId(payload.versions[payload.versions.length - 1]?.id || "");
+      })
+      .catch(() => undefined);
+  }, [workspaceId, workflowStatus?.latest?.documentId, document?.id, versions.length]);
 
   const brandDraftSignature = useMemo(
     () =>
@@ -2288,6 +2386,52 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
 
   useEffect(() => {
     if (loading) return;
+    try {
+      window.localStorage.setItem(onboardingStepStorageKey, String(onboardingStep));
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [loading, onboardingStepStorageKey, onboardingStep]);
+
+  useEffect(() => {
+    if (loading) return;
+    try {
+      window.localStorage.setItem(activeSlideStorageKey, activeSlide);
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [loading, activeSlideStorageKey, activeSlide]);
+
+  useEffect(() => {
+    if (loading) return;
+    const handler = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      const target = event.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName.toLowerCase();
+        const isTypingTarget =
+          tag === "input" || tag === "textarea" || tag === "select" || target.isContentEditable;
+        if (isTypingTarget) return;
+      }
+      const currentIndex = STUDIO_SLIDE_ORDER.indexOf(activeSlide);
+      if (currentIndex < 0) return;
+      if (event.key === "ArrowLeft" && currentIndex > 0) {
+        event.preventDefault();
+        setActiveSlide(STUDIO_SLIDE_ORDER[currentIndex - 1]);
+      } else if (event.key === "ArrowRight" && currentIndex < STUDIO_SLIDE_ORDER.length - 1) {
+        event.preventDefault();
+        setActiveSlide(STUDIO_SLIDE_ORDER[currentIndex + 1]);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => {
+      window.removeEventListener("keydown", handler);
+    };
+  }, [loading, activeSlide]);
+
+  useEffect(() => {
+    if (loading) return;
     if (autopilotQuery !== "website-first") return;
     const triggerKey = `${workspaceId}:${autopilotQuery}`;
     if (autopilotTriggerRef.current === triggerKey) return;
@@ -2394,7 +2538,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       saveNote: foundationAutosaveNote,
       actionLabel: brandReady ? "Edit DNA" : workflowGuide.cta,
       action: () => {
-        window.document.getElementById("vbs-section-onboarding")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        setActiveSlide("foundation");
         if (brandReady) {
           setIsEditingBrandDna(true);
           return;
@@ -2414,7 +2558,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       saveNote: `${extractionAutosaveNote} ${curationAutosaveNote}`,
       actionLabel: activeIngestion ? "Open reference engine" : "Start extraction",
       action: async () => {
-        window.document.getElementById("vbs-section-extraction")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        setActiveSlide("reference");
         if (activeIngestion) {
           await openIngestionResults(activeIngestion);
           return;
@@ -2453,7 +2597,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       saveNote: generationAutosaveNote,
       actionLabel: generation ? "Open create & save" : "Generate pack",
       action: async () => {
-        window.document.getElementById("vbs-section-create-save")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        setActiveSlide("create");
         if (generation) {
           return;
         }
@@ -2478,10 +2622,12 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       return;
     }
     if (workflowGuide.action === "run_autofill") {
+      setActiveSlide("foundation");
       await runAutofillFinalize();
       return;
     }
     if (workflowGuide.action === "start_extraction") {
+      setActiveSlide("reference");
       if (!brandReady) {
         setError("Finalize Brand DNA before starting extraction.");
         setOnboardingStep(4);
@@ -2505,6 +2651,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       return;
     }
     if (workflowGuide.action === "curate_references") {
+      setActiveSlide("reference");
       setIsBusy(true);
       setError(null);
       try {
@@ -2517,6 +2664,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       return;
     }
     if (workflowGuide.action === "generate_pack") {
+      setActiveSlide("create");
       if (generation) {
         await sendGenerationToChat();
         return;
@@ -2551,6 +2699,11 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     autoCurateTopReferences,
   ]);
 
+  const activeSlideIndex = Math.max(0, STUDIO_SLIDE_ORDER.indexOf(activeSlide));
+  const canSlideBack = activeSlideIndex > 0;
+  const canSlideForward = activeSlideIndex < STUDIO_SLIDE_ORDER.length - 1;
+  const slideTransform = `translateX(-${activeSlideIndex * 100}%)`;
+
   if (loading) {
     return (
       <section className="vbs-shell vbs-panel">
@@ -2562,7 +2715,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   }
 
   return (
-    <section className="vbs-shell">
+    <section className="vbs-shell vbs-shell-slides">
       <header className="vbs-reset-hero">
         <div>
           <p className="vbs-chip">Editorial Reset</p>
@@ -2590,7 +2743,44 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       {error ? <div className="vbs-alert">{error}</div> : null}
       {chatBridgeStatus ? <div className="vbs-alert" style={{ borderColor: "#b6f0d4", background: "#f2fff7", color: "#11643f" }}>{chatBridgeStatus}</div> : null}
 
-      <section className="vbs-launchpad">
+      <div className="vbs-slide-toolbar">
+        <div className="vbs-slide-tabs" role="tablist" aria-label="Viral Studio workflow slides">
+          {STUDIO_SLIDE_META.map((slide) => (
+            <button
+              key={slide.id}
+              type="button"
+              role="tab"
+              aria-selected={activeSlide === slide.id}
+              aria-controls={`vbs-slide-${slide.id}`}
+              className={activeSlide === slide.id ? "vbs-slide-tab is-active" : "vbs-slide-tab"}
+              onClick={() => setActiveSlide(slide.id)}
+            >
+              <span>{slide.chapter}</span>
+              <strong>{slide.label}</strong>
+            </button>
+          ))}
+        </div>
+        <div className="vbs-slide-arrows">
+          <button
+            type="button"
+            onClick={() => setActiveSlide(STUDIO_SLIDE_ORDER[Math.max(0, activeSlideIndex - 1)])}
+            disabled={!canSlideBack}
+          >
+            Previous
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveSlide(STUDIO_SLIDE_ORDER[Math.min(STUDIO_SLIDE_ORDER.length - 1, activeSlideIndex + 1)])}
+            disabled={!canSlideForward}
+          >
+            Next
+          </button>
+        </div>
+      </div>
+
+      <div className="vbs-slide-viewport">
+        <div className="vbs-slide-track" style={{ transform: slideTransform }}>
+      <section className="vbs-launchpad vbs-slide-card" id="vbs-slide-launchpad" role="tabpanel" aria-label="Launchpad slide">
         <div className="vbs-launchpad-main">
           <div className="vbs-launchpad-copy">
             <p className="vbs-meta">Current mission</p>
@@ -2653,7 +2843,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         </div>
       </section>
 
-      <div className="vbs-stack">
+      <div className="vbs-stack vbs-slide-card" id="vbs-slide-foundation" role="tabpanel" aria-label="Brand DNA slide">
         <article
           className={[
             "vbs-panel",
@@ -3202,7 +3392,13 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
 
       {!onboardingLocked ? (
         <>
-          <article className="vbs-panel vbs-section-shell vbs-chapter-shell vbs-chapter-reference" data-chapter="02">
+          <article
+            className="vbs-panel vbs-section-shell vbs-chapter-shell vbs-chapter-reference vbs-slide-card"
+            id="vbs-slide-reference"
+            role="tabpanel"
+            aria-label="Reference engine slide"
+            data-chapter="02"
+          >
             <div className="vbs-section-head">
               <div>
                 <p className="vbs-meta">Reference Engine</p>
@@ -3677,7 +3873,13 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
             </div>
           </article>
 
-          <article className="vbs-panel vbs-section-shell vbs-chapter-shell vbs-chapter-create" id="vbs-section-create-save" data-chapter="03">
+          <article
+            className="vbs-panel vbs-section-shell vbs-chapter-shell vbs-chapter-create vbs-slide-card"
+            id="vbs-slide-create"
+            role="tabpanel"
+            aria-label="Create and save slide"
+            data-chapter="03"
+          >
             <div className="vbs-section-head">
               <div>
                 <p className="vbs-meta">Create & Save</p>
@@ -4159,11 +4361,19 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
           </article>
         </>
       ) : (
-        <article className="vbs-panel">
-          <h2 className="vbs-panel-title">Workflow Locked Until DNA Finalization</h2>
-          <p className="vbs-panel-subtitle">Plan 2 onboarding gate is active. Complete and finalize Brand DNA to unlock extraction, generation, and document actions.</p>
-        </article>
+        <>
+          <article className="vbs-panel vbs-slide-card" id="vbs-slide-reference" role="tabpanel" aria-label="Reference engine slide">
+            <h2 className="vbs-panel-title">Workflow Locked Until DNA Finalization</h2>
+            <p className="vbs-panel-subtitle">Plan 2 onboarding gate is active. Complete and finalize Brand DNA to unlock extraction, generation, and document actions.</p>
+          </article>
+          <article className="vbs-panel vbs-slide-card" id="vbs-slide-create" role="tabpanel" aria-label="Create and save slide">
+            <h2 className="vbs-panel-title">Create & Save unlocks after DNA finalization</h2>
+            <p className="vbs-panel-subtitle">Finish the Brand DNA flow once and the generation + versioning workspace will unlock automatically.</p>
+          </article>
+        </>
       )}
+        </div>
+      </div>
 
       {showExtractionModal ? (
         <div
