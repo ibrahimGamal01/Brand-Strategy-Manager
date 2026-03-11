@@ -215,6 +215,13 @@ type WorkflowGuideAction =
   | "generate_pack"
   | "handoff_chat";
 
+type StudioDetailCard = {
+  label: string;
+  value: string;
+  note: string;
+  tone?: "info" | "success" | "warning";
+};
+
 function workflowStageOrderIndex(stage: ViralStudioWorkflowStatus["workflowStage"] | undefined): number {
   if (!stage) return 0;
   const index = WORKFLOW_STAGE_ORDER.indexOf(stage);
@@ -702,6 +709,10 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
   });
+}
+
+function detailCardClassName(card: StudioDetailCard): string {
+  return ["vbs-detail-card", card.tone ? `is-${card.tone}` : ""].filter(Boolean).join(" ");
 }
 
 export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) {
@@ -2193,8 +2204,8 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     brandForm,
   ]);
 
-  const foundationDetailCards = useMemo(() => {
-    const cardsByStep = {
+  const foundationDetailCards = useMemo<StudioDetailCard[]>(() => {
+    const cardsByStep: Record<1 | 2 | 3 | 4, StudioDetailCard[]> = {
       1: [
         {
           label: "What you are defining",
@@ -2263,11 +2274,11 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
           note: "Once finalized, the rest of Viral Studio can move without asking the brand questions again.",
         },
       ],
-    } as const;
+    };
     return cardsByStep[onboardingStep];
   }, [onboardingStep]);
 
-  const referenceDetailCards = useMemo(() => {
+  const referenceDetailCards = useMemo<StudioDetailCard[]>(() => {
     const activeSource = latestSuggestedSource ? `${latestSuggestedSource.label} • ${toPlatformLabel(latestSuggestedSource.platform)}` : "No source selected yet";
     return [
       {
@@ -2288,7 +2299,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     ];
   }, [activeIngestion, latestSuggestedSource, prioritizedReferenceCount, references.length]);
 
-  const createDetailCards = useMemo(() => {
+  const createDetailCards = useMemo<StudioDetailCard[]>(() => {
     return [
       {
         label: "Before you generate",
@@ -2311,6 +2322,244 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       },
     ];
   }, [document, generation, generationFormatTarget, prioritizedReferenceCount, selectedTemplate, versions.length]);
+
+  const extractionFocusCards = useMemo<StudioDetailCard[]>(() => {
+    const sourceLabel = latestSuggestedSource
+      ? `${latestSuggestedSource.label} • ${toPlatformLabel(latestSuggestedSource.platform)}`
+      : sourceUrl.trim()
+        ? `${toPlatformLabel(sourcePlatform)} • ${compactText(sourceUrl.trim(), 44)}`
+        : "Choose the cleanest source first";
+    const sourceNote = latestSuggestedSource
+      ? `${Math.round((latestSuggestedSource.confidence || 0) * 100)}% confidence • ${compactText(
+          latestSuggestedSource.sourceUrl,
+          110
+        )}`
+      : "Use one strong social/profile URL before expanding the search.";
+    const rankedTarget = activeIngestion
+      ? `${activeIngestion.progress.ranked}/${Math.max(activeIngestion.progress.found || 0, activeIngestion.maxVideos)} ranked`
+      : ingestions.length > 0
+        ? `${ingestions.length} run(s) in history`
+        : "No run started yet";
+    const progressNote = activeIngestion
+      ? `Downloaded ${activeIngestion.progress.downloaded}, analyzed ${activeIngestion.progress.analyzed}, ranked ${activeIngestion.progress.ranked}.`
+      : "Once the run starts, this panel will show found, downloaded, analyzed, and ranked counts.";
+    const nextCheckValue = activeIngestion
+      ? activeIngestion.status === "completed" || activeIngestion.status === "partial"
+        ? "Inspect the top 5 cards for real fit"
+        : "Wait for the ranked count to stabilize"
+      : "Confirm the URL matches the exact account";
+    return [
+      {
+        label: "Source in focus",
+        value: sourceLabel,
+        note: sourceNote,
+        tone: latestSuggestedSource ? "info" : "warning",
+      },
+      {
+        label: "Run recipe",
+        value: `${toPresetLabel(ingestionPreset)} • ${maxVideos} videos • ${lookbackDays} days`,
+        note: "Keep Data max for the first pass unless the source is noisy or very inactive.",
+      },
+      {
+        label: "Current progress",
+        value: activeIngestion ? `${statusLabel(activeIngestion.status)} • ${rankedTarget}` : rankedTarget,
+        note: activeIngestion?.error ? `Warning: ${activeIngestion.error}` : progressNote,
+        tone:
+          activeIngestion?.status === "completed" || activeIngestion?.status === "partial"
+            ? "success"
+            : activeIngestion?.status === "failed"
+              ? "warning"
+              : "info",
+      },
+      {
+        label: "What to verify next",
+        value: nextCheckValue,
+        note: "You want relevance before volume. If the first winners feel wrong, change the source or preset before curating.",
+      },
+    ];
+  }, [
+    activeIngestion,
+    ingestions.length,
+    ingestionPreset,
+    latestSuggestedSource,
+    lookbackDays,
+    maxVideos,
+    sourcePlatform,
+    sourceUrl,
+  ]);
+
+  const curationFocusCards = useMemo<StudioDetailCard[]>(() => {
+    const selectedTitle = selectedReference
+      ? compactText(selectedReference.ranking.rationaleTitle || selectedReference.caption || "Selected reference", 72)
+      : "Select a reference card to inspect it";
+    const driverLine = selectedReference
+      ? selectedReference.explainability.topDrivers.slice(0, 2).join(" • ") ||
+        compactText(selectedReference.ranking.rationaleBullets[0] || "No explainability available yet.", 110)
+      : "Top drivers will appear here";
+    const actionValue = !selectedReference
+      ? "No shortlist decision yet"
+      : selectedReference.shortlistState === "must-use"
+        ? "Must-use anchor for generation"
+        : selectedReference.shortlistState === "pin"
+          ? "Pinned as a strong supporting example"
+          : selectedReference.shortlistState === "exclude"
+            ? "Excluded from the influence set"
+            : "Decide whether this should steer the pack";
+    const actionNote = !selectedReference
+      ? "Pick one card, then decide whether it is an anchor, a supporting example, or noise."
+      : selectedReference.shortlistState === "must-use"
+        ? "Keep must-use for the references that define the angle or proof structure of the pack."
+        : selectedReference.shortlistState === "pin"
+          ? "Pinned references support generation without dominating every section."
+          : selectedReference.shortlistState === "exclude"
+            ? "Excluded references stay visible for audit, but they should not influence the pack."
+            : "Use must-use for anchors, pin for support, and exclude for off-brand or misleading winners.";
+    const boardScope = `${filteredReferences.length} visible • ${referenceCounts.prioritized} prioritized • ${
+      referencePlatformFilter === "all" ? "All platforms" : toPlatformLabel(referencePlatformFilter)
+    }`;
+    return [
+      {
+        label: "Selected reference",
+        value: selectedTitle,
+        note: selectedReference
+          ? `${toPlatformLabel(selectedReference.sourcePlatform)} • score ${selectedReference.scores.composite.toFixed(
+              3
+            )} • ${formatCompactNumber(selectedReference.metrics.views)} views`
+          : "The board will reveal full metrics after you choose a card.",
+        tone: selectedReference ? "info" : "warning",
+      },
+      {
+        label: "Why it ranks high",
+        value: driverLine,
+        note: selectedReferenceInsights
+          ? `${selectedReferenceInsights.compositeDelta >= 0 ? "+" : ""}${selectedReferenceInsights.compositeDelta.toFixed(
+              3
+            )} vs board average • ${formatUnitPercent(selectedReferenceInsights.interactionRateRaw)} interaction rate`
+          : "Look for hook strength, recency, retention proxy, and clarity before trusting a high view count.",
+      },
+      {
+        label: "Editorial decision",
+        value: actionValue,
+        note: actionNote,
+        tone:
+          selectedReference?.shortlistState === "must-use"
+            ? "success"
+            : selectedReference?.shortlistState === "exclude"
+              ? "warning"
+              : "info",
+      },
+      {
+        label: "Board scope",
+        value: boardScope,
+        note: `View mode: ${referenceViewMode}. Shortcut keys: 1 pin, 2 must-use, 3 exclude, 0 clear.`,
+      },
+    ];
+  }, [
+    filteredReferences.length,
+    referenceCounts.prioritized,
+    referencePlatformFilter,
+    referenceViewMode,
+    selectedReference,
+    selectedReferenceInsights,
+  ]);
+
+  const generationFocusCards = useMemo<StudioDetailCard[]>(() => {
+    const influenceCount = prioritizedReferenceCount > 0 ? prioritizedReferenceCount : selectedReferenceIds.length;
+    const qualityValue = generation
+      ? qualitySignals.length > 0
+        ? `${qualitySignals.length} review signal(s)`
+        : "Quality gate clear"
+      : "No quality report yet";
+    const saveTarget = documentDraft
+      ? `${documentDraft.sections.length} section(s) in the working draft`
+      : document
+        ? `${document.sections.length} section(s) saved`
+        : "Create a document after the first strong pack";
+    return [
+      {
+        label: "Current setup",
+        value: `${selectedTemplate?.title || "Select template"} • ${toGenerationFormatLabel(generationFormatTarget)}`,
+        note: "Keep the prompt direction tight. Use section-level refinement after the first full pass instead of rewriting everything.",
+        tone: selectedTemplate ? "info" : "warning",
+      },
+      {
+        label: "Influence set",
+        value: `${influenceCount} reference(s) steering the pack`,
+        note:
+          prioritizedReferenceCount > 0
+            ? "Generation will prefer must-use and pinned references before it falls back to the board."
+            : "If you do not prioritize references, the studio will fall back to the top non-excluded winners.",
+      },
+      {
+        label: "Quality gate",
+        value: qualityValue,
+        note: generation
+          ? qualitySignals.length > 0
+            ? compactText(qualitySignals.join(" • "), 130)
+            : "No banned terms, tone mismatches, duplicates, or length warnings were detected in this revision."
+          : "Generate once to inspect guardrails, then refine only the sections that need work.",
+        tone: generation ? (qualitySignals.length > 0 ? "warning" : "success") : "info",
+      },
+      {
+        label: "What gets preserved",
+        value: saveTarget,
+        note: "Generation creates the creative raw material. Document Workspace turns it into a durable, editable artifact for the team.",
+      },
+    ];
+  }, [
+    document,
+    documentDraft,
+    generation,
+    generationFormatTarget,
+    prioritizedReferenceCount,
+    qualitySignals,
+    selectedReferenceIds.length,
+    selectedTemplate,
+  ]);
+
+  const documentFocusCards = useMemo<StudioDetailCard[]>(() => {
+    const latestVersion = versions[versions.length - 1] || null;
+    const autosaveValue =
+      autosaveState === "saving"
+        ? "Saving now"
+        : autosaveState === "saved"
+          ? "Draft saved"
+          : autosaveState === "error"
+            ? "Autosave needs attention"
+            : documentDirty
+              ? "Unsaved edits are pending"
+              : "No pending edits";
+    return [
+      {
+        label: "Current draft",
+        value: documentDraft ? `${documentDraft.title} • ${documentDraft.sections.length} section(s)` : "No document draft yet",
+        note: documentDraft
+          ? "Edit section titles and content directly here, then snapshot the best state into version history."
+          : "Create the document from a generation pack to start editing and versioning.",
+        tone: documentDraft ? "info" : "warning",
+      },
+      {
+        label: "Autosave health",
+        value: autosaveValue,
+        note: "Draft edits autosave every 10 seconds while you work, but you can still force a manual save whenever you want.",
+        tone: autosaveState === "error" ? "warning" : autosaveState === "saved" ? "success" : "info",
+      },
+      {
+        label: "Version timeline",
+        value: latestVersion ? `${versions.length} snapshot(s) • latest ${formatTimestamp(latestVersion.createdAt)}` : "No immutable snapshots yet",
+        note: latestVersion
+          ? `${latestVersion.summary || "Snapshot"} by ${latestVersion.author}. Promote any version when it should become the working draft.`
+          : "Use Create Version when the draft reaches a reviewable milestone.",
+      },
+      {
+        label: "Export vault",
+        value: lastExport ? `Last export: ${lastExport.format.toUpperCase()}` : "Markdown and JSON exports are ready",
+        note: lastExport
+          ? compactText(lastExport.content, 130)
+          : "Exports let the pack leave the studio without losing the structure you built here.",
+      },
+    ];
+  }, [autosaveState, documentDirty, documentDraft, lastExport, versions]);
 
   const runWorkflowGuideAction = useCallback(async () => {
     if (workflowGuide.action === "open_intake") {
@@ -2572,7 +2821,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
           </div>
           <div className="vbs-detail-grid">
             {foundationDetailCards.map((card) => (
-              <article key={card.label} className="vbs-detail-card">
+              <article key={card.label} className={detailCardClassName(card)}>
                 <span>{card.label}</span>
                 <strong>{card.value}</strong>
                 <p>{card.note}</p>
@@ -3073,7 +3322,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
             </div>
             <div className="vbs-detail-grid vbs-detail-grid-compact">
               {referenceDetailCards.map((card) => (
-                <article key={card.label} className="vbs-detail-card">
+                <article key={card.label} className={detailCardClassName(card)}>
                   <span>{card.label}</span>
                   <strong>{card.value}</strong>
                   <p>{card.note}</p>
@@ -3083,6 +3332,35 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
             <div className="vbs-grid">
               <article className="vbs-panel" id="vbs-section-extraction">
               <h2 className="vbs-panel-title">Competitor Extraction</h2>
+              <div className="vbs-detail-grid vbs-detail-grid-compact">
+                {extractionFocusCards.map((card) => (
+                  <article key={card.label} className={detailCardClassName(card)}>
+                    <span>{card.label}</span>
+                    <strong>{card.value}</strong>
+                    <p>{card.note}</p>
+                  </article>
+                ))}
+              </div>
+              {suggestedSources.length ? (
+                <div className="vbs-source-suggest-list">
+                  {suggestedSources.slice(0, 3).map((source) => (
+                    <div key={`${source.platform}:${source.sourceUrl}:reference-engine`} className="vbs-source-suggest-row">
+                      <div>
+                        <p>
+                          <strong>{source.label}</strong>
+                        </p>
+                        <p className="vbs-meta">
+                          {toPlatformLabel(source.platform)} • {Math.round((source.confidence || 0) * 100)}% confidence •{" "}
+                          {compactText(source.sourceUrl, 96)}
+                        </p>
+                      </div>
+                      <button type="button" disabled={isBusy} onClick={() => selectSuggestedSource(source)}>
+                        Use Source
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
               <div className="vbs-actions">
                 <button type="button" onClick={() => setShowExtractionModal(true)} disabled={isBusy}>
                   Extract Best Videos
@@ -3153,6 +3431,15 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
               <article className="vbs-panel">
               <h2 className="vbs-panel-title">Reference Curation</h2>
               <p className="vbs-panel-subtitle">Ranked board with explainability, filter chips, and expandable analysis drawer.</p>
+              <div className="vbs-detail-grid vbs-detail-grid-compact">
+                {curationFocusCards.map((card) => (
+                  <article key={card.label} className={detailCardClassName(card)}>
+                    <span>{card.label}</span>
+                    <strong>{card.value}</strong>
+                    <p>{card.note}</p>
+                  </article>
+                ))}
+              </div>
               <div className="vbs-reference-toolbar">
                 <div className="vbs-mini-actions">
                   <button
@@ -3398,7 +3685,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
             </div>
             <div className="vbs-detail-grid vbs-detail-grid-compact">
               {createDetailCards.map((card) => (
-                <article key={card.label} className="vbs-detail-card">
+                <article key={card.label} className={detailCardClassName(card)}>
                   <span>{card.label}</span>
                   <strong>{card.value}</strong>
                   <p>{card.note}</p>
@@ -3411,6 +3698,15 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
               <p className="vbs-panel-subtitle">
                 Two-pane pack builder using Brand DNA + shortlisted references with section-level refine and regenerate controls.
               </p>
+              <div className="vbs-detail-grid vbs-detail-grid-compact">
+                {generationFocusCards.map((card) => (
+                  <article key={card.label} className={detailCardClassName(card)}>
+                    <span>{card.label}</span>
+                    <strong>{card.value}</strong>
+                    <p>{card.note}</p>
+                  </article>
+                ))}
+              </div>
               <div className="vbs-prompt-two-pane">
                 <div className="vbs-prompt-controls">
                   <div className="vbs-form-grid">
@@ -3580,6 +3876,15 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                         ? "pending edits"
                         : "idle"}
               </p>
+              <div className="vbs-detail-grid vbs-detail-grid-compact">
+                {documentFocusCards.map((card) => (
+                  <article key={card.label} className={detailCardClassName(card)}>
+                    <span>{card.label}</span>
+                    <strong>{card.value}</strong>
+                    <p>{card.note}</p>
+                  </article>
+                ))}
+              </div>
               {generationSaveStatus ? <p className="vbs-meta">{generationSaveStatus}</p> : null}
               {documentDraft ? (
                 <div className="vbs-doc-editor">

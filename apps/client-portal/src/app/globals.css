@@ -308,6 +308,33 @@ a {
   color: color-mix(in srgb, var(--vbs-ink) 78%, #646d82);
 }
 
+.vbs-detail-card.is-info {
+  border-color: color-mix(in srgb, var(--vbs-cobalt) 26%, var(--bat-border));
+  background: linear-gradient(
+    155deg,
+    color-mix(in srgb, white 90%, var(--vbs-cobalt)) 0%,
+    color-mix(in srgb, white 97%, var(--vbs-sand)) 100%
+  );
+}
+
+.vbs-detail-card.is-success {
+  border-color: color-mix(in srgb, var(--vbs-teal) 28%, var(--bat-border));
+  background: linear-gradient(
+    155deg,
+    color-mix(in srgb, white 90%, var(--vbs-teal)) 0%,
+    color-mix(in srgb, white 97%, var(--vbs-sand)) 100%
+  );
+}
+
+.vbs-detail-card.is-warning {
+  border-color: color-mix(in srgb, var(--vbs-coral) 28%, var(--bat-border));
+  background: linear-gradient(
+    155deg,
+    color-mix(in srgb, white 90%, var(--vbs-coral)) 0%,
+    color-mix(in srgb, white 97%, var(--vbs-sand)) 100%
+  );
+}
+
 .vbs-process-card-grid,
 .vbs-detail-grid {
   display: grid;
@@ -341,6 +368,11 @@ a {
 
 .vbs-detail-grid-compact {
   margin-top: -0.15rem;
+}
+
+.vbs-panel > .vbs-detail-grid,
+.vbs-panel > .vbs-source-suggest-list {
+  margin-top: 0.7rem;
 }
 
 .vbs-launchpad-card {
