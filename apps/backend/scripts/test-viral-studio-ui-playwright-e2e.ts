@@ -121,27 +121,28 @@ async function completeAuthAndResolveWorkspace(page: Page, baseUrl: string): Pro
 }
 
 async function finalizeBrandDna(page: Page) {
-  await page.getByLabel('Mission').fill('Scale high-converting short-form content with consistent brand narrative.');
-  await page.getByLabel('Value Proposition').fill('We blend strategy and creative systems to drive measurable demand.');
-  await page.getByLabel('Product / Service').fill('Viral content strategy and production.');
-  await page.getByLabel('Region').fill('MENA');
-  await clickButtonByText(page, 'Next');
+  const foundationSlide = page.locator('#vbs-slide-foundation');
+  await foundationSlide.getByLabel('Mission').fill('Scale high-converting short-form content with consistent brand narrative.');
+  await foundationSlide.getByLabel('Value Proposition').fill('We blend strategy and creative systems to drive measurable demand.');
+  await foundationSlide.getByLabel('Product / Service').fill('Viral content strategy and production.');
+  await foundationSlide.getByLabel('Region').fill('MENA');
+  await foundationSlide.getByRole('button', { name: 'Next', exact: true }).click();
 
-  await page.getByLabel('Audience Personas').fill('Founders, Growth marketers');
-  await page.getByLabel('Pains').fill('Inconsistent content performance');
-  await page.getByLabel('Desires').fill('Predictable pipeline growth');
-  await page.getByLabel('Objections').fill('Not sure what angle works');
-  await clickButtonByText(page, 'Next');
+  await foundationSlide.getByLabel('Audience Personas').fill('Founders, Growth marketers');
+  await foundationSlide.getByLabel('Pains').fill('Inconsistent content performance');
+  await foundationSlide.getByLabel('Desires').fill('Predictable pipeline growth');
+  await foundationSlide.getByLabel('Objections').fill('Not sure what angle works');
+  await foundationSlide.getByRole('button', { name: 'Next', exact: true }).click();
 
-  await page.getByLabel('Banned Phrases').fill('guaranteed overnight success');
-  await page.getByLabel('Required Claims').fill('results depend on execution');
-  await clickButtonByText(page, 'Next');
+  await foundationSlide.getByLabel('Banned Phrases').fill('guaranteed overnight success');
+  await foundationSlide.getByLabel('Required Claims').fill('results depend on execution');
+  await foundationSlide.getByRole('button', { name: 'Next', exact: true }).click();
 
-  await page.getByLabel('Exemplar Inputs').fill('Strong hook + proof + CTA');
-  await page
+  await foundationSlide.getByLabel('Exemplar Inputs').fill('Strong hook + proof + CTA');
+  await foundationSlide
     .getByLabel('Brand DNA Summary')
     .fill('Direct, strategic, and execution-focused messaging for growth-minded teams.');
-  await clickButtonByText(page, 'Finalize DNA');
+  await foundationSlide.getByRole('button', { name: 'Finalize DNA', exact: true }).click();
   await page.getByText('Brand DNA is finalized and active.').waitFor({ timeout: 60_000 });
 }
 
@@ -186,6 +187,14 @@ async function validateLaunchpadActionsAreClickable(page: Page): Promise<void> {
     // trial click validates hit-target + interactivity without mutating workflow state.
     await button.click({ trial: true });
   }
+}
+
+async function validateFoundationGuidance(page: Page) {
+  await page.getByRole('tab', { name: /Brand DNA/i }).click();
+  await page.locator('#vbs-slide-foundation .vbs-foundation-pulse-grid').waitFor({ timeout: 20_000 });
+  await waitForCountAtLeast(page, '#vbs-slide-foundation .vbs-foundation-pulse-card', 4, 20_000);
+  await page.locator('#vbs-slide-foundation .vbs-dna-spotlight').waitFor({ timeout: 20_000 });
+  await waitForCountAtLeast(page, '#vbs-slide-foundation .vbs-dna-spotlight-stat', 3, 20_000);
 }
 
 async function validateDrawerAndShortcuts(page: Page) {
@@ -310,7 +319,9 @@ async function runFlowAttempt(baseUrl: string): Promise<void> {
     await page.getByRole('heading', { name: 'Viral Brand Studio' }).waitFor({ timeout: 60_000 });
 
     await validateLaunchpadActionsAreClickable(page);
+    await validateFoundationGuidance(page);
     await finalizeBrandDna(page);
+    await page.locator('#vbs-slide-foundation .vbs-dna-summary-shell').waitFor({ timeout: 20_000 });
     await runExtraction(page);
     await waitForReferenceBoard(page);
     await validateDrawerAndShortcuts(page);
@@ -329,7 +340,9 @@ async function runFlowAttempt(baseUrl: string): Promise<void> {
             'signup_and_login_flow',
             'viral_studio_route_loaded',
             'launchpad_right_actions_clickable',
+            'brand_dna_guidance_surface_rendered',
             'brand_dna_finalize_gate',
+            'brand_dna_summary_surface_rendered',
             'extraction_run_completed_with_references',
             'analysis_drawer_renders_extended_sections',
             'shortlist_keyboard_shortcuts_1_2_3_0',

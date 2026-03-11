@@ -694,7 +694,115 @@ select:focus-visible {
 }
 
 .vbs-foundation-note {
-  background: linear-gradient(150deg, color-mix(in srgb, var(--vbs-teal) 10%, white) 0%, color-mix(in srgb, var(--vbs-sand) 52%, white) 100%);
+  display: grid;
+  gap: 0.9rem;
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--vbs-coral) 10%, transparent) 0%, transparent 34%),
+    linear-gradient(150deg, color-mix(in srgb, var(--vbs-teal) 10%, white) 0%, color-mix(in srgb, var(--vbs-sand) 52%, white) 100%);
+}
+
+.vbs-foundation-note-copy {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.vbs-foundation-note-copy h3 {
+  margin: 0;
+  font-family: var(--vbs-display-font);
+  font-size: 1.05rem;
+  color: var(--vbs-copy);
+}
+
+.vbs-foundation-note-copy p:last-child {
+  margin: 0;
+  color: var(--vbs-copy-soft);
+  line-height: 1.6;
+}
+
+.vbs-foundation-pulse-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.vbs-foundation-pulse-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+  padding: 0.85rem;
+  border-radius: 1rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-line) 88%, transparent);
+  background: color-mix(in srgb, var(--vbs-card-strong) 92%, transparent);
+}
+
+.vbs-foundation-pulse-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  border-radius: 0.9rem;
+  background: color-mix(in srgb, var(--bat-accent-soft) 74%, transparent);
+  color: var(--bat-accent);
+}
+
+.vbs-foundation-pulse-card strong {
+  display: block;
+  margin-top: 0.12rem;
+  color: var(--vbs-copy);
+  font-family: var(--vbs-display-font);
+  font-size: 0.95rem;
+}
+
+.vbs-foundation-pulse-card p:last-child {
+  margin: 0.25rem 0 0;
+  color: var(--vbs-copy-soft);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.vbs-autofill-panel-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  align-items: flex-start;
+}
+
+.vbs-autofill-panel-head h3 {
+  margin: 0.12rem 0 0;
+  font-family: var(--vbs-display-font);
+  font-size: 1rem;
+  color: var(--vbs-copy);
+}
+
+.vbs-autofill-panel-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+  min-width: min(16rem, 100%);
+}
+
+.vbs-autofill-panel-stats > div {
+  display: grid;
+  gap: 0.18rem;
+  padding: 0.7rem 0.78rem;
+  border-radius: 0.95rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-line) 88%, transparent);
+  background: color-mix(in srgb, var(--vbs-card-strong) 94%, transparent);
+}
+
+.vbs-autofill-panel-stats span,
+.vbs-autofill-item-footer {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--vbs-copy-soft);
+}
+
+.vbs-autofill-panel-stats strong {
+  color: var(--vbs-copy);
+  font-family: var(--vbs-display-font);
 }
 
 .vbs-dna-flow {
@@ -725,14 +833,55 @@ select:focus-visible {
   margin: 0;
   font-family: var(--vbs-display-font);
   font-size: 1.1rem;
-  color: var(--vbs-ink);
+  color: var(--vbs-copy);
 }
 
 .vbs-dna-step-card p:not(.vbs-meta) {
   margin: 0.45rem 0 0;
-  color: color-mix(in srgb, var(--vbs-ink) 76%, #656f85);
+  color: var(--vbs-copy-soft);
   line-height: 1.6;
   font-size: 0.88rem;
+}
+
+.vbs-dna-step-meter {
+  height: 0.48rem;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bat-accent-soft) 56%, transparent);
+}
+
+.vbs-dna-step-meter > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--vbs-progress);
+}
+
+.vbs-dna-step-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.vbs-dna-step-stats > div {
+  display: grid;
+  gap: 0.18rem;
+  padding: 0.72rem 0.76rem;
+  border-radius: 0.95rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-line) 86%, transparent);
+  background: color-mix(in srgb, var(--vbs-card-strong) 92%, transparent);
+}
+
+.vbs-dna-step-stats span {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--vbs-copy-soft);
+}
+
+.vbs-dna-step-stats strong {
+  color: var(--vbs-copy);
+  font-family: var(--vbs-display-font);
 }
 
 .vbs-dna-prompt-list {
@@ -743,17 +892,76 @@ select:focus-visible {
 .vbs-dna-prompt-chip {
   border-radius: 0.9rem;
   border: 1px solid color-mix(in srgb, var(--vbs-teal) 20%, var(--bat-border));
-  background: color-mix(in srgb, white 90%, var(--vbs-teal));
+  background: color-mix(in srgb, var(--vbs-card-strong) 90%, var(--vbs-teal));
   padding: 0.8rem 0.9rem;
   font-size: 0.8rem;
   line-height: 1.5;
-  color: color-mix(in srgb, var(--vbs-ink) 82%, #556071);
+  color: var(--vbs-copy);
 }
 
 .vbs-dna-step-tabs {
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;
+}
+
+.vbs-dna-spotlight {
+  display: grid;
+  gap: 0.85rem;
+  padding: 0.95rem 1rem;
+  border-radius: 1.1rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-line) 88%, transparent);
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--bat-accent-soft) 42%, transparent) 0%, transparent 36%),
+    color-mix(in srgb, var(--vbs-card-strong) 94%, transparent);
+}
+
+.vbs-dna-spotlight h3 {
+  margin: 0.12rem 0 0;
+  font-family: var(--vbs-display-font);
+  font-size: 1.02rem;
+  color: var(--vbs-copy);
+}
+
+.vbs-dna-spotlight > div > p:last-child {
+  margin: 0.28rem 0 0;
+  color: var(--vbs-copy-soft);
+  line-height: 1.58;
+}
+
+.vbs-dna-spotlight-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.vbs-dna-spotlight-stat {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.82rem;
+  border-radius: 1rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-line) 84%, transparent);
+  background: color-mix(in srgb, var(--vbs-handler) 78%, transparent);
+}
+
+.vbs-dna-spotlight-stat span {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--vbs-copy-soft);
+}
+
+.vbs-dna-spotlight-stat strong {
+  color: var(--vbs-copy);
+  font-family: var(--vbs-display-font);
+  font-size: 0.92rem;
+}
+
+.vbs-dna-spotlight-stat p {
+  margin: 0;
+  color: var(--vbs-copy-soft);
+  font-size: 0.76rem;
+  line-height: 1.5;
 }
 
 .vbs-dna-form-card {
@@ -782,7 +990,7 @@ select:focus-visible {
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: color-mix(in srgb, var(--vbs-ink) 60%, #6a7287);
+  color: var(--vbs-copy-soft);
 }
 
 .vbs-dna-field input,
@@ -790,9 +998,9 @@ select:focus-visible {
   width: 100%;
   border-radius: 0.9rem;
   border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 18%, var(--bat-border));
-  background: white;
+  background: color-mix(in srgb, var(--vbs-card-strong) 94%, transparent);
   padding: 0.85rem 0.95rem;
-  color: var(--vbs-ink);
+  color: var(--vbs-copy);
   resize: vertical;
   font: inherit;
   line-height: 1.55;
@@ -800,7 +1008,7 @@ select:focus-visible {
 
 .vbs-dna-field input::placeholder,
 .vbs-dna-field textarea::placeholder {
-  color: color-mix(in srgb, var(--vbs-ink) 40%, #8a93a9);
+  color: var(--vbs-copy-soft);
 }
 
 .vbs-dna-slider-card {
@@ -808,14 +1016,14 @@ select:focus-visible {
   gap: 0.45rem;
   border-radius: 0.95rem;
   border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 18%, var(--bat-border));
-  background: color-mix(in srgb, white 90%, var(--vbs-sand));
+  background: color-mix(in srgb, var(--vbs-card-strong) 90%, var(--vbs-sand));
   padding: 0.8rem 0.9rem;
 }
 
 .vbs-dna-slider-card strong {
   font-family: var(--vbs-display-font);
   font-size: 1rem;
-  color: var(--vbs-ink);
+  color: var(--vbs-copy);
 }
 
 .vbs-dna-slider-card input[type="range"] {
@@ -824,6 +1032,67 @@ select:focus-visible {
 
 .vbs-dna-tone-card {
   min-height: 100%;
+}
+
+.vbs-dna-summary-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
+  gap: 0.9rem;
+}
+
+.vbs-dna-summary-card,
+.vbs-dna-summary-sidecar {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.vbs-dna-summary-card h3 {
+  margin: 0.1rem 0 0;
+  font-family: var(--vbs-editorial-font);
+  font-size: clamp(1.15rem, 1vw + 0.95rem, 1.45rem);
+  line-height: 1.25;
+  color: var(--vbs-copy);
+}
+
+.vbs-dna-summary-card > p:last-child {
+  margin: 0;
+  color: var(--vbs-copy-soft);
+  line-height: 1.58;
+}
+
+.vbs-dna-summary-highlights {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.vbs-dna-summary-highlight {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.82rem;
+  border-radius: 1rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-line) 88%, transparent);
+  background: color-mix(in srgb, var(--vbs-card-strong) 92%, transparent);
+}
+
+.vbs-dna-summary-highlight span {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--vbs-copy-soft);
+}
+
+.vbs-dna-summary-highlight strong {
+  color: var(--vbs-copy);
+  font-family: var(--vbs-display-font);
+  font-size: 0.92rem;
+}
+
+.vbs-dna-summary-highlight p {
+  margin: 0;
+  color: var(--vbs-copy-soft);
+  font-size: 0.76rem;
+  line-height: 1.5;
 }
 
 .vbs-dev-drawer {
@@ -2628,6 +2897,16 @@ select:focus-visible {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .vbs-foundation-pulse-grid,
+  .vbs-dna-spotlight-stats,
+  .vbs-dna-summary-highlights {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .vbs-dna-summary-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .vbs-reset-hero,
   .vbs-launchpad-main,
   .vbs-launchpad-grid {
@@ -2749,6 +3028,18 @@ select:focus-visible {
   .vbs-dev-drawer,
   .vbs-dna-step-card {
     padding: 0.85rem;
+  }
+
+  .vbs-foundation-pulse-grid,
+  .vbs-dna-step-stats,
+  .vbs-dna-spotlight-stats,
+  .vbs-dna-summary-highlights,
+  .vbs-autofill-panel-stats {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vbs-autofill-panel-head {
+    flex-direction: column;
   }
 
   .vbs-reset-meta {
@@ -3312,6 +3603,23 @@ select:focus-visible {
   font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+}
+
+.vbs-stage-handler-progress {
+  display: block;
+  margin-top: 0.22rem;
+  width: 100%;
+  height: 0.32rem;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bat-accent-soft) 54%, transparent);
+}
+
+.vbs-stage-handler-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--vbs-progress);
 }
 
 .vbs-reference-toolbar,

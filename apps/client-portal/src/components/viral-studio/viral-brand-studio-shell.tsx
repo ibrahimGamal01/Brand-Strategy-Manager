@@ -936,6 +936,43 @@ function onboardingCoveragePercent(form: BrandFormState): number {
   return Math.round((currentSignals / totalSignals) * 100);
 }
 
+function onboardingStepFieldStats(
+  step: 1 | 2 | 3 | 4,
+  form: BrandFormState
+): { filled: number; total: number } {
+  if (step === 1) {
+    const fields = [form.mission, form.valueProposition, form.productOrService, form.region];
+    return { filled: fields.filter((value) => String(value || "").trim().length > 0).length, total: fields.length };
+  }
+  if (step === 2) {
+    const fields = [form.audiencePersonas, form.pains, form.desires, form.objections];
+    return { filled: fields.filter((value) => String(value || "").trim().length > 0).length, total: fields.length };
+  }
+  if (step === 3) {
+    const toneSignal = 1;
+    const guardrails = [form.bannedPhrases, form.requiredClaims];
+    return {
+      filled: toneSignal + guardrails.filter((value) => String(value || "").trim().length > 0).length,
+      total: 3,
+    };
+  }
+  const fields = [form.exemplars, form.summary];
+  return { filled: fields.filter((value) => String(value || "").trim().length > 0).length, total: fields.length };
+}
+
+function voiceSignature(form: BrandFormState): string {
+  const signals = [
+    { label: "Bold", value: form.voiceBold },
+    { label: "Formal", value: form.voiceFormal },
+    { label: "Playful", value: form.voicePlayful },
+    { label: "Direct", value: form.voiceDirect },
+  ].sort((a, b) => b.value - a.value);
+  if (signals[0].value - signals[signals.length - 1].value < 12) {
+    return "Balanced studio mix";
+  }
+  return `${signals[0].label} + ${signals[1].label.toLowerCase()} voice`;
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
@@ -1475,6 +1512,104 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     if (!autofillPreview) return 0;
     return autofillPreview.suggestedFields.filter((field) => autofillSelection[field] !== false).length;
   }, [autofillPreview, autofillSelection]);
+
+  const activeStepStats = useMemo(() => onboardingStepFieldStats(onboardingStep, brandForm), [onboardingStep, brandForm]);
+
+  const foundationPulseCards = useMemo(
+    () => [
+      {
+        id: "intake",
+        icon: Compass,
+        label: "Workspace evidence",
+        value: workflowStatus?.intakeCompleted ? "Ready to use" : "Needs intake",
+        note: workflowStatus?.intakeCompleted
+          ? "Website and workspace context can now support smarter autofill."
+          : "Complete intake first so the studio has real business evidence to work from.",
+      },
+      {
+        id: "autofill",
+        icon: WandSparkles,
+        label: "Autofill preview",
+        value: autofillPreview ? `${autofillPreview.coverage.suggestedCount} field hints` : "Preview not loaded",
+        note: autofillPreview
+          ? `${selectedAutofillCount} suggestion(s) selected for apply.`
+          : "Pull website and social evidence into the form before you type everything yourself.",
+      },
+      {
+        id: "voice",
+        icon: Sparkles,
+        label: "Voice direction",
+        value: voiceSignature(brandForm),
+        note: `Bold ${brandForm.voiceBold} • Formal ${brandForm.voiceFormal} • Playful ${brandForm.voicePlayful} • Direct ${brandForm.voiceDirect}`,
+      },
+      {
+        id: "save",
+        icon: CheckCircle2,
+        label: "Save ribbon",
+        value: brandReady
+          ? "Finalized"
+          : brandAutosaveState === "saving"
+            ? "Saving"
+            : brandAutosaveState === "saved"
+              ? "Saved"
+            : brandAutosaveState === "error"
+                ? "Needs retry"
+                : "Ready",
+        note: brandReady
+          ? `Finalized and saved at ${formatShortTime(brandProfile?.updatedAt)}`
+          : brandAutosaveState === "saving"
+            ? "Auto-saving foundation..."
+            : brandAutosaveState === "saved"
+              ? `Foundation auto-saved at ${formatShortTime(brandAutosavedAt)}`
+              : brandAutosaveState === "error"
+                ? "Auto-save failed. Keep editing and retry finalize."
+                : "Auto-save activates as soon as inputs are added.",
+      },
+    ],
+    [
+      autofillPreview,
+      brandAutosaveState,
+      brandAutosavedAt,
+      brandForm,
+      brandProfile?.updatedAt,
+      brandReady,
+      selectedAutofillCount,
+      workflowStatus?.intakeCompleted,
+    ]
+  );
+
+  const dnaSummaryHighlights = useMemo(
+    () => [
+      {
+        id: "mission",
+        label: "Mission",
+        value: compactText(brandForm.mission || "Add a sharper mission", 52),
+        note: compactText(brandForm.valueProposition || "Value proposition stays editable as the brand evolves.", 92),
+      },
+      {
+        id: "audience",
+        label: "Audience",
+        value: `${Math.max(0, csvToArray(brandForm.audiencePersonas).length)} persona signal(s)`,
+        note: compactText(brandForm.audiencePersonas || brandForm.pains || "Audience pains and desires can still be refined later.", 92),
+      },
+      {
+        id: "voice",
+        label: "Voice",
+        value: voiceSignature(brandForm),
+        note: `B ${brandForm.voiceBold} • F ${brandForm.voiceFormal} • P ${brandForm.voicePlayful} • D ${brandForm.voiceDirect}`,
+      },
+      {
+        id: "guardrails",
+        label: "Guardrails",
+        value: `${csvToArray(brandForm.bannedPhrases).length + csvToArray(brandForm.requiredClaims).length} rule(s)`,
+        note: compactText(
+          brandForm.requiredClaims || brandForm.bannedPhrases || "Add banned phrases or required claims whenever the brand needs tighter rules.",
+          92
+        ),
+      },
+    ],
+    [brandForm]
+  );
 
   const buildBrandDnaPayload = useCallback(
     (mode: "draft" | "final") => ({
@@ -3317,6 +3452,13 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
               <span className="vbs-stage-handler-copy">
                 <strong>{item.label}</strong>
                 <small>{item.caption}</small>
+                <span className="vbs-stage-handler-progress" aria-hidden="true">
+                  <span
+                    style={{
+                      width: item.state === "done" ? "100%" : isCurrent ? "68%" : "18%",
+                    }}
+                  />
+                </span>
               </span>
               <span className="vbs-stage-handler-state">{item.state === "done" ? "Done" : isCurrent ? "Now" : "Queued"}</span>
             </button>
@@ -3456,12 +3598,49 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
             </div>
           </div>
           <div className="vbs-output vbs-foundation-note">
-            <p className="vbs-meta">
-              Viral Studio now behaves like one continuous system: approve foundation once, let references inherit that
-              context, then generate and save without re-explaining the brand every step.
-            </p>
+            <div className="vbs-foundation-note-copy">
+              <p className="vbs-meta">Foundation cockpit</p>
+              <h3>Approve the brand once, then let the rest of the workflow inherit it.</h3>
+              <p>
+                Viral Studio now behaves like one continuous system: lock the brand, let references inherit that context,
+                then generate and save without re-explaining the business every step.
+              </p>
+            </div>
+            <div className="vbs-foundation-pulse-grid">
+              {foundationPulseCards.map((card) => {
+                const Icon = card.icon;
+                return (
+                  <article key={card.id} className="vbs-foundation-pulse-card">
+                    <span className="vbs-foundation-pulse-icon">
+                      <Icon className="h-4 w-4" />
+                    </span>
+                    <div>
+                      <p className="vbs-meta">{card.label}</p>
+                      <strong>{card.value}</strong>
+                      <p>{card.note}</p>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
           </div>
           <div className="vbs-output vbs-autofill-panel">
+            <div className="vbs-autofill-panel-head">
+              <div>
+                <p className="vbs-meta">Website-first autofill</p>
+                <h3>Preview the evidence before it touches the form</h3>
+              </div>
+              <div className="vbs-autofill-panel-stats">
+                <div>
+                  <span>Confidence</span>
+                  <strong>{autofillPreview ? `${Math.round((autofillPreview.suggestionConfidence || 0) * 100)}%` : "n/a"}</strong>
+                </div>
+                <div>
+                  <span>Coverage</span>
+                  <strong>{autofillPreview?.coverage.suggestedCount || 0} field(s)</strong>
+                </div>
+              </div>
+            </div>
             <div className="vbs-mini-actions">
               <button type="button" disabled={autofillBusy || isBusy} onClick={() => void previewAutofill()}>
                 {autofillBusy ? "Loading preview..." : "Preview Autofill"}
@@ -3511,6 +3690,9 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                           </span>
                         ))}
                       </span>
+                      <small className="vbs-autofill-item-footer">
+                        {autofillSelection[field] !== false ? "Selected for apply" : "Skipped for now"}
+                      </small>
                     </label>
                   );
                 })}
@@ -3547,12 +3729,41 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
           </div>
 
           {brandReady && !isEditingBrandDna ? (
-            <div className="vbs-output">
-              <p className="vbs-meta">Brand DNA is finalized and active.</p>
-              <p>{brandProfile?.summary}</p>
-              <div className="vbs-actions">
-                <button type="button" onClick={() => setIsEditingBrandDna(true)}>Edit Brand DNA</button>
+            <div className="vbs-output vbs-dna-summary-shell">
+              <div className="vbs-dna-summary-card">
+                <p className="vbs-meta">Brand DNA is finalized and active.</p>
+                <h3>{brandProfile?.summary || tonePreview(brandForm)}</h3>
+                <p>
+                  This summary now drives extraction choices, reference weighting, generation, and chat handoff without
+                  forcing the team to restate the business.
+                </p>
+                <div className="vbs-dna-summary-highlights">
+                  {dnaSummaryHighlights.map((item) => (
+                    <article key={item.id} className="vbs-dna-summary-highlight">
+                      <span>{item.label}</span>
+                      <strong>{item.value}</strong>
+                      <p>{item.note}</p>
+                    </article>
+                  ))}
+                </div>
               </div>
+              <aside className="vbs-dna-summary-sidecar">
+                <div className="vbs-output vbs-dna-tone-card">
+                  <p className="vbs-meta">Live tone preview</p>
+                  <p>{tonePreview(brandForm)}</p>
+                  <div className="vbs-tone-preview-grid">
+                    {toneCards.map((card) => (
+                      <article key={card.id} className="vbs-tone-preview-card">
+                        <p className="vbs-meta">{card.eyebrow}</p>
+                        <strong>{card.sample}</strong>
+                      </article>
+                    ))}
+                  </div>
+                </div>
+                <div className="vbs-actions">
+                  <button type="button" onClick={() => setIsEditingBrandDna(true)}>Edit Brand DNA</button>
+                </div>
+              </aside>
             </div>
           ) : (
             <div className="vbs-dna-flow">
@@ -3561,6 +3772,21 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                   <p className="vbs-meta">Step {activeOnboardingMeta.step} of 4</p>
                   <h3>{activeOnboardingMeta.title}</h3>
                   <p>{activeOnboardingMeta.helper}</p>
+                  <div className="vbs-dna-step-meter" aria-hidden="true">
+                    <span style={{ width: `${Math.max(16, Math.round((activeStepStats.filled / activeStepStats.total) * 100))}%` }} />
+                  </div>
+                  <div className="vbs-dna-step-stats">
+                    <div>
+                      <span>Step fill</span>
+                      <strong>
+                        {activeStepStats.filled}/{activeStepStats.total}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Workflow unlock</span>
+                      <strong>{onboardingStep === 4 ? "Finalize DNA" : `Step ${onboardingStep + 1}`}</strong>
+                    </div>
+                  </div>
                 </div>
                 <div className="vbs-dna-prompt-list">
                   {activeOnboardingMeta.prompts.map((prompt) => (
@@ -3584,6 +3810,40 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
               </aside>
 
               <div className="vbs-dna-main">
+                <div className="vbs-dna-spotlight">
+                  <div>
+                    <p className="vbs-meta">Current question cluster</p>
+                    <h3>{activeOnboardingMeta.title}</h3>
+                    <p>{activeOnboardingMeta.helper}</p>
+                  </div>
+                  <div className="vbs-dna-spotlight-stats">
+                    <article className="vbs-dna-spotlight-stat">
+                      <span>Step health</span>
+                      <strong>
+                        {activeStepStats.filled}/{activeStepStats.total} signals
+                      </strong>
+                      <p>{activeStepStats.filled === activeStepStats.total ? "This step is ready to move on." : "Add the missing signals so the next step inherits stronger context."}</p>
+                    </article>
+                    <article className="vbs-dna-spotlight-stat">
+                      <span>Save state</span>
+                      <strong>
+                        {brandAutosaveState === "saving"
+                          ? "Saving"
+                          : brandAutosaveState === "saved"
+                            ? "Saved"
+                            : brandAutosaveState === "error"
+                              ? "Needs retry"
+                              : "Ready"}
+                      </strong>
+                      <p>{foundationAutosaveNote}</p>
+                    </article>
+                    <article className="vbs-dna-spotlight-stat">
+                      <span>Next unlock</span>
+                      <strong>{onboardingStep === 4 ? "Finalize DNA" : ONBOARDING_STEP_META[onboardingStep]?.title || "Next step"}</strong>
+                      <p>{onboardingStep === 4 ? "Finalizing opens extraction, generation, and the save vault." : "Finish this cluster so the next part of the brand story can open."}</p>
+                    </article>
+                  </div>
+                </div>
                 <div className="vbs-dna-step-tabs">
                   {ONBOARDING_STEP_META.map((item) => (
                     <button
