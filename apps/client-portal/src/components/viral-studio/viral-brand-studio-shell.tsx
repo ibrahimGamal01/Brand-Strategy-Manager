@@ -34,6 +34,7 @@ import {
   listRuntimeThreads,
   sendRuntimeMessage,
 } from "@/lib/runtime-api";
+import { getPortalMe } from "@/lib/auth-api";
 import {
   ViralStudioAutofillFieldKey,
   ViralStudioBrandDnaAutofillPreview,
@@ -152,11 +153,57 @@ const WORKFLOW_STAGE_ORDER: Array<ViralStudioWorkflowStatus["workflowStage"]> = 
   "chat_execution",
 ];
 
-const ONBOARDING_STEP_META: Array<{ step: 1 | 2 | 3 | 4; title: string; subtitle: string }> = [
-  { step: 1, title: "Brand Core", subtitle: "Mission, value, offer, region" },
-  { step: 2, title: "Audience", subtitle: "Personas, pains, desires, objections" },
-  { step: 3, title: "Voice Guardrails", subtitle: "Sliders, banned terms, required claims" },
-  { step: 4, title: "Proof + Summary", subtitle: "Exemplars and AI-ready narrative" },
+const ONBOARDING_STEP_META: Array<{
+  step: 1 | 2 | 3 | 4;
+  title: string;
+  subtitle: string;
+  helper: string;
+  prompts: string[];
+}> = [
+  {
+    step: 1,
+    title: "Brand Core",
+    subtitle: "Mission, value, offer, region",
+    helper: "Start with the one-sentence truth of the business. This should feel crisp enough to reuse everywhere.",
+    prompts: [
+      "What do you actually help people achieve?",
+      "Why is your offer meaningfully better?",
+      "What market or region shapes your positioning?",
+    ],
+  },
+  {
+    step: 2,
+    title: "Audience",
+    subtitle: "Personas, pains, desires, objections",
+    helper: "Name the people, pressure, and payoff. Good audience inputs make the later generation feel much smarter.",
+    prompts: [
+      "Who is most likely to buy first?",
+      "What frustrates them before they find you?",
+      "What belief or objection slows them down?",
+    ],
+  },
+  {
+    step: 3,
+    title: "Voice Guardrails",
+    subtitle: "Sliders, banned terms, required claims",
+    helper: "Turn taste into rules. This is where the product stops sounding generic and starts sounding like your team.",
+    prompts: [
+      "What tone should always come through?",
+      "What phrases feel cheap, vague, or off-brand?",
+      "What claims or qualifiers must always stay intact?",
+    ],
+  },
+  {
+    step: 4,
+    title: "Proof + Summary",
+    subtitle: "Exemplars and AI-ready narrative",
+    helper: "Give the system a few examples and a final summary so generation can stay anchored to real brand texture.",
+    prompts: [
+      "What content already feels like the best version of your brand?",
+      "What should the AI remember even after the form is closed?",
+      "What should never be lost in translation?",
+    ],
+  },
 ];
 
 type WorkflowGuideAction =
@@ -664,6 +711,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   const [error, setError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [canAccessDiagnostics, setCanAccessDiagnostics] = useState(false);
 
   const [contracts, setContracts] = useState<ViralStudioContractSnapshot | null>(null);
   const [telemetry, setTelemetry] = useState<ViralStudioTelemetrySnapshot | null>(null);
@@ -729,6 +777,23 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   const brandReady = Boolean(brandProfile?.status === "final" && brandProfile?.completeness.ready);
   const onboardingLocked = !brandReady || isEditingBrandDna;
   const autopilotQuery = searchParams.get("autopilot");
+  const diagnosticsQuery = searchParams.get("devtools");
+
+  useEffect(() => {
+    const hostname = typeof window !== "undefined" ? window.location.hostname : "";
+    const isLocalHost = hostname === "localhost" || hostname === "127.0.0.1";
+    if (isLocalHost || diagnosticsQuery === "1") {
+      setCanAccessDiagnostics(true);
+      return;
+    }
+    void getPortalMe()
+      .then((payload) => {
+        setCanAccessDiagnostics(Boolean(payload.user.isAdmin));
+      })
+      .catch(() => {
+        setCanAccessDiagnostics(false);
+      });
+  }, [diagnosticsQuery]);
 
   const refreshTelemetry = useCallback(async () => {
     try {
@@ -1994,6 +2059,8 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     };
   }, [workflowStage]);
   const onboardingCoveragePct = useMemo(() => onboardingCoveragePercent(brandForm), [brandForm]);
+  const activeOnboardingMeta =
+    ONBOARDING_STEP_META.find((item) => item.step === onboardingStep) || ONBOARDING_STEP_META[0];
   const latestSuggestedSource = suggestedSources[0] || null;
   const latestReferenceSummary = activeIngestion
     ? `${activeIngestion.progress.ranked}/${activeIngestion.progress.found || activeIngestion.maxVideos} ranked`
@@ -2378,72 +2445,256 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
               </div>
             </div>
           ) : (
-            <>
-              <div className="vbs-actions">
-                {ONBOARDING_STEP_META.map((item) => (
-                  <button key={item.step} type="button" onClick={() => setOnboardingStep(item.step)}>
-                    {item.step}. {item.title}
-                  </button>
-                ))}
-              </div>
+            <div className="vbs-dna-flow">
+              <aside className="vbs-dna-sidecar">
+                <div className="vbs-dna-step-card">
+                  <p className="vbs-meta">Step {activeOnboardingMeta.step} of 4</p>
+                  <h3>{activeOnboardingMeta.title}</h3>
+                  <p>{activeOnboardingMeta.helper}</p>
+                </div>
+                <div className="vbs-dna-prompt-list">
+                  {activeOnboardingMeta.prompts.map((prompt) => (
+                    <div key={prompt} className="vbs-dna-prompt-chip">
+                      {prompt}
+                    </div>
+                  ))}
+                </div>
+                <div className="vbs-output vbs-dna-tone-card">
+                  <p className="vbs-meta">Live tone preview</p>
+                  <p>{tonePreview(brandForm)}</p>
+                </div>
+              </aside>
 
-              <div className="vbs-form-grid">
+              <div className="vbs-dna-main">
+                <div className="vbs-dna-step-tabs">
+                  {ONBOARDING_STEP_META.map((item) => (
+                    <button
+                      key={item.step}
+                      type="button"
+                      className={item.step === onboardingStep ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
+                      onClick={() => setOnboardingStep(item.step)}
+                    >
+                      {item.step}. {item.title}
+                    </button>
+                  ))}
+                </div>
+
                 {onboardingStep === 1 ? (
-                  <>
-                    <label>Mission<input value={brandForm.mission} onChange={(e) => setBrandForm((p) => ({ ...p, mission: e.target.value }))} /></label>
-                    <label>Value Proposition<input value={brandForm.valueProposition} onChange={(e) => setBrandForm((p) => ({ ...p, valueProposition: e.target.value }))} /></label>
-                    <label>Product / Service<input value={brandForm.productOrService} onChange={(e) => setBrandForm((p) => ({ ...p, productOrService: e.target.value }))} /></label>
-                    <label>Region<input value={brandForm.region} onChange={(e) => setBrandForm((p) => ({ ...p, region: e.target.value }))} /></label>
-                  </>
+                  <div className="vbs-dna-form-card">
+                    <div className="vbs-dna-inline-grid">
+                      <label className="vbs-dna-field">
+                        <span>Mission</span>
+                        <textarea
+                          rows={3}
+                          placeholder="We help premium skincare brands turn social attention into repeatable sales."
+                          value={brandForm.mission}
+                          onChange={(e) => setBrandForm((p) => ({ ...p, mission: e.target.value }))}
+                        />
+                      </label>
+                      <label className="vbs-dna-field">
+                        <span>Value proposition</span>
+                        <textarea
+                          rows={3}
+                          placeholder="Fast, strategy-led creative systems that turn research into campaign-ready content."
+                          value={brandForm.valueProposition}
+                          onChange={(e) => setBrandForm((p) => ({ ...p, valueProposition: e.target.value }))}
+                        />
+                      </label>
+                    </div>
+                    <div className="vbs-dna-inline-grid">
+                      <label className="vbs-dna-field">
+                        <span>Product or service</span>
+                        <input
+                          placeholder="Brand strategy, viral content systems, creative production"
+                          value={brandForm.productOrService}
+                          onChange={(e) => setBrandForm((p) => ({ ...p, productOrService: e.target.value }))}
+                        />
+                      </label>
+                      <label className="vbs-dna-field">
+                        <span>Region</span>
+                        <input
+                          placeholder="GCC, MENA, global ecommerce, United States"
+                          value={brandForm.region}
+                          onChange={(e) => setBrandForm((p) => ({ ...p, region: e.target.value }))}
+                        />
+                      </label>
+                    </div>
+                  </div>
                 ) : null}
 
                 {onboardingStep === 2 ? (
-                  <>
-                    <label>Audience Personas<input value={brandForm.audiencePersonas} onChange={(e) => setBrandForm((p) => ({ ...p, audiencePersonas: e.target.value }))} /></label>
-                    <label>Pains<input value={brandForm.pains} onChange={(e) => setBrandForm((p) => ({ ...p, pains: e.target.value }))} /></label>
-                    <label>Desires<input value={brandForm.desires} onChange={(e) => setBrandForm((p) => ({ ...p, desires: e.target.value }))} /></label>
-                    <label>Objections<input value={brandForm.objections} onChange={(e) => setBrandForm((p) => ({ ...p, objections: e.target.value }))} /></label>
-                  </>
+                  <div className="vbs-dna-form-card">
+                    <div className="vbs-dna-inline-grid">
+                      <label className="vbs-dna-field">
+                        <span>Audience personas</span>
+                        <textarea
+                          rows={4}
+                          placeholder="Founders, growth leads, brand managers, clinic owners"
+                          value={brandForm.audiencePersonas}
+                          onChange={(e) => setBrandForm((p) => ({ ...p, audiencePersonas: e.target.value }))}
+                        />
+                      </label>
+                      <label className="vbs-dna-field">
+                        <span>Pains</span>
+                        <textarea
+                          rows={4}
+                          placeholder="Inconsistent content, low converting traffic, unclear brand message"
+                          value={brandForm.pains}
+                          onChange={(e) => setBrandForm((p) => ({ ...p, pains: e.target.value }))}
+                        />
+                      </label>
+                    </div>
+                    <div className="vbs-dna-inline-grid">
+                      <label className="vbs-dna-field">
+                        <span>Desires</span>
+                        <textarea
+                          rows={4}
+                          placeholder="Higher trust, sharper positioning, campaign ideas that actually perform"
+                          value={brandForm.desires}
+                          onChange={(e) => setBrandForm((p) => ({ ...p, desires: e.target.value }))}
+                        />
+                      </label>
+                      <label className="vbs-dna-field">
+                        <span>Objections</span>
+                        <textarea
+                          rows={4}
+                          placeholder="Too expensive, not sure it fits our market, unclear proof"
+                          value={brandForm.objections}
+                          onChange={(e) => setBrandForm((p) => ({ ...p, objections: e.target.value }))}
+                        />
+                      </label>
+                    </div>
+                  </div>
                 ) : null}
 
                 {onboardingStep === 3 ? (
-                  <>
-                    <label>Banned Phrases<input value={brandForm.bannedPhrases} onChange={(e) => setBrandForm((p) => ({ ...p, bannedPhrases: e.target.value }))} /></label>
-                    <label>Required Claims<input value={brandForm.requiredClaims} onChange={(e) => setBrandForm((p) => ({ ...p, requiredClaims: e.target.value }))} /></label>
-                  </>
+                  <div className="vbs-dna-form-card">
+                    <div className="vbs-slider-grid">
+                      <label className="vbs-dna-slider-card">
+                        <span>Bold</span>
+                        <strong>{brandForm.voiceBold}</strong>
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          value={brandForm.voiceBold}
+                          onChange={(e) => setBrandForm((p) => ({ ...p, voiceBold: Number(e.target.value) }))}
+                        />
+                      </label>
+                      <label className="vbs-dna-slider-card">
+                        <span>Formal</span>
+                        <strong>{brandForm.voiceFormal}</strong>
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          value={brandForm.voiceFormal}
+                          onChange={(e) => setBrandForm((p) => ({ ...p, voiceFormal: Number(e.target.value) }))}
+                        />
+                      </label>
+                      <label className="vbs-dna-slider-card">
+                        <span>Playful</span>
+                        <strong>{brandForm.voicePlayful}</strong>
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          value={brandForm.voicePlayful}
+                          onChange={(e) => setBrandForm((p) => ({ ...p, voicePlayful: Number(e.target.value) }))}
+                        />
+                      </label>
+                      <label className="vbs-dna-slider-card">
+                        <span>Direct</span>
+                        <strong>{brandForm.voiceDirect}</strong>
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          value={brandForm.voiceDirect}
+                          onChange={(e) => setBrandForm((p) => ({ ...p, voiceDirect: Number(e.target.value) }))}
+                        />
+                      </label>
+                    </div>
+                    <div className="vbs-dna-inline-grid">
+                      <label className="vbs-dna-field">
+                        <span>Banned phrases</span>
+                        <textarea
+                          rows={4}
+                          placeholder="best in class, disrupt, game-changing"
+                          value={brandForm.bannedPhrases}
+                          onChange={(e) => setBrandForm((p) => ({ ...p, bannedPhrases: e.target.value }))}
+                        />
+                      </label>
+                      <label className="vbs-dna-field">
+                        <span>Required claims</span>
+                        <textarea
+                          rows={4}
+                          placeholder="Doctor-led, evidence-backed, cruelty-free, available across GCC"
+                          value={brandForm.requiredClaims}
+                          onChange={(e) => setBrandForm((p) => ({ ...p, requiredClaims: e.target.value }))}
+                        />
+                      </label>
+                    </div>
+                  </div>
                 ) : null}
 
                 {onboardingStep === 4 ? (
-                  <>
-                    <label>Exemplar Inputs<input value={brandForm.exemplars} onChange={(e) => setBrandForm((p) => ({ ...p, exemplars: e.target.value }))} /></label>
-                    <label>Brand DNA Summary<input value={brandForm.summary} onChange={(e) => setBrandForm((p) => ({ ...p, summary: e.target.value }))} /></label>
-                  </>
+                  <div className="vbs-dna-form-card">
+                    <label className="vbs-dna-field">
+                      <span>Exemplar inputs</span>
+                      <textarea
+                        rows={4}
+                        placeholder="Paste strong posts, brand lines, landing page copy, or campaign examples"
+                        value={brandForm.exemplars}
+                        onChange={(e) => setBrandForm((p) => ({ ...p, exemplars: e.target.value }))}
+                      />
+                    </label>
+                    <label className="vbs-dna-field">
+                      <span>Brand DNA summary</span>
+                      <textarea
+                        rows={6}
+                        placeholder="Summarize the brand in a way the generation system can reuse across outputs"
+                        value={brandForm.summary}
+                        onChange={(e) => setBrandForm((p) => ({ ...p, summary: e.target.value }))}
+                      />
+                    </label>
+                    <div className="vbs-mini-actions">
+                      <button type="button" disabled={onboardingStep !== 4 || isBusy} onClick={() => void generateSummary()}>
+                        Generate AI Summary
+                      </button>
+                    </div>
+                  </div>
                 ) : null}
-              </div>
 
-              <div className="vbs-slider-grid">
-                <label>Bold {brandForm.voiceBold}<input type="range" min={0} max={100} value={brandForm.voiceBold} onChange={(e) => setBrandForm((p) => ({ ...p, voiceBold: Number(e.target.value) }))} /></label>
-                <label>Formal {brandForm.voiceFormal}<input type="range" min={0} max={100} value={brandForm.voiceFormal} onChange={(e) => setBrandForm((p) => ({ ...p, voiceFormal: Number(e.target.value) }))} /></label>
-                <label>Playful {brandForm.voicePlayful}<input type="range" min={0} max={100} value={brandForm.voicePlayful} onChange={(e) => setBrandForm((p) => ({ ...p, voicePlayful: Number(e.target.value) }))} /></label>
-                <label>Direct {brandForm.voiceDirect}<input type="range" min={0} max={100} value={brandForm.voiceDirect} onChange={(e) => setBrandForm((p) => ({ ...p, voiceDirect: Number(e.target.value) }))} /></label>
+                <div className="vbs-actions">
+                  <button
+                    type="button"
+                    disabled={onboardingStep === 1 || isBusy}
+                    onClick={() => setOnboardingStep((Math.max(1, onboardingStep - 1) as 1 | 2 | 3 | 4))}
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    disabled={onboardingStep === 4 || !isStepValid(onboardingStep, brandForm) || isBusy}
+                    onClick={() => setOnboardingStep((Math.min(4, onboardingStep + 1) as 1 | 2 | 3 | 4))}
+                  >
+                    Continue
+                  </button>
+                  <button type="button" disabled={isBusy} onClick={() => void saveBrandDna("draft")}>
+                    Save Draft
+                  </button>
+                  <button type="button" disabled={!isStepValid(4, brandForm) || isBusy} onClick={() => void saveBrandDna("final")}>
+                    Finalize DNA
+                  </button>
+                  {brandProfile ? (
+                    <button type="button" disabled={isBusy} onClick={() => setBrandForm(toFormState(brandProfile))}>
+                      Reset Draft
+                    </button>
+                  ) : null}
+                </div>
               </div>
-
-              <div className="vbs-output">
-                <p className="vbs-meta">Live tone preview</p>
-                <p>{tonePreview(brandForm)}</p>
-              </div>
-
-              <div className="vbs-actions">
-                <button type="button" disabled={onboardingStep === 1 || isBusy} onClick={() => setOnboardingStep((Math.max(1, onboardingStep - 1) as 1 | 2 | 3 | 4))}>Back</button>
-                <button type="button" disabled={onboardingStep === 4 || !isStepValid(onboardingStep, brandForm) || isBusy} onClick={() => setOnboardingStep((Math.min(4, onboardingStep + 1) as 1 | 2 | 3 | 4))}>Next</button>
-                <button type="button" disabled={isBusy} onClick={() => void saveBrandDna("draft")}>Save Draft</button>
-                <button type="button" disabled={onboardingStep !== 4 || isBusy} onClick={() => void generateSummary()}>Generate AI Summary</button>
-                <button type="button" disabled={!isStepValid(4, brandForm) || isBusy} onClick={() => void saveBrandDna("final")}>Finalize DNA</button>
-                {brandProfile ? (
-                  <button type="button" disabled={isBusy} onClick={() => setBrandForm(toFormState(brandProfile))}>Reset Draft</button>
-                ) : null}
-              </div>
-            </>
+            </div>
           )}
 
           <p className="vbs-meta">
@@ -2451,115 +2702,117 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
           </p>
         </article>
 
-        <article className="vbs-panel" id="vbs-section-diagnostics">
-          <div className="vbs-diagnostics-head">
-            <div>
-              <h2 className="vbs-panel-title">System Contract</h2>
-              <p className="vbs-panel-subtitle">Operational diagnostics and state machine references.</p>
-            </div>
-            <button type="button" onClick={() => setShowDiagnostics((previous) => !previous)}>
-              {showDiagnostics ? "Hide Diagnostics" : "Show Diagnostics"}
-            </button>
-          </div>
-          {showDiagnostics ? (
-            <>
-              <div className="vbs-contract-grid">
-                <div>
-                  <h3>State Machines</h3>
-                  <ul>
-                    <li>Onboarding: {contracts?.stateMachines.onboarding.states.join(" → ") || "n/a"}</li>
-                    <li>Ingestion: {contracts?.stateMachines.ingestion.states.join(" → ") || "n/a"}</li>
-                    <li>Generation: {contracts?.stateMachines.generation.states.join(" → ") || "n/a"}</li>
-                    <li>Document: {contracts?.stateMachines.document.states.join(" → ") || "n/a"}</li>
-                  </ul>
-                </div>
-                <div>
-                  <h3>Telemetry</h3>
-                  <ul>
-                    {(contracts?.telemetryEvents || []).slice(0, 7).map((event) => <li key={event.name}>{event.name}</li>)}
-                  </ul>
-                </div>
+        {canAccessDiagnostics ? (
+          <article className="vbs-panel vbs-dev-drawer" id="vbs-section-diagnostics">
+            <div className="vbs-diagnostics-head">
+              <div>
+                <p className="vbs-meta">Developer Access</p>
+                <h2 className="vbs-panel-title">Diagnostics Drawer</h2>
+                <p className="vbs-panel-subtitle">State contracts, telemetry, and runtime health for admin or local debugging only.</p>
               </div>
-              <div className="vbs-telemetry-grid">
-                <div className="vbs-output">
-                  <h3>Runtime Funnel</h3>
-                  <ul>
-                    <li>Onboarding finalized: {telemetry?.funnel.onboardingFinalized ? "yes" : "no"}</li>
-                    <li>Ingestions started: {telemetry?.funnel.ingestionsStarted ?? 0}</li>
-                    <li>Ingestions completed: {telemetry?.funnel.ingestionsCompleted ?? 0}</li>
-                    <li>Ingestions failed: {telemetry?.funnel.ingestionsFailed ?? 0}</li>
-                    <li>Generations completed: {telemetry?.funnel.generationsCompleted ?? 0}</li>
-                    <li>Documents versioned: {telemetry?.funnel.documentsVersioned ?? 0}</li>
-                    <li>Exports: {telemetry?.funnel.exports ?? 0}</li>
-                  </ul>
-                </div>
-                <div className="vbs-output">
-                  <h3>Latency (Avg)</h3>
-                  <div className="vbs-telemetry-kpi">
-                    <div>
-                      <span>Ingestion</span>
-                      <strong>{formatDurationMs(telemetry?.latencyMs.ingestionAvg ?? 0)}</strong>
-                    </div>
-                    <div>
-                      <span>Generation</span>
-                      <strong>{formatDurationMs(telemetry?.latencyMs.generationAvg ?? 0)}</strong>
-                    </div>
-                    <div>
-                      <span>Document</span>
-                      <strong>{formatDurationMs(telemetry?.latencyMs.documentAvg ?? 0)}</strong>
-                    </div>
+              <button type="button" onClick={() => setShowDiagnostics((previous) => !previous)}>
+                {showDiagnostics ? "Hide Drawer" : "Open Drawer"}
+              </button>
+            </div>
+            {showDiagnostics ? (
+              <>
+                <div className="vbs-contract-grid">
+                  <div>
+                    <h3>State Machines</h3>
+                    <ul>
+                      <li>Onboarding: {contracts?.stateMachines.onboarding.states.join(" → ") || "n/a"}</li>
+                      <li>Ingestion: {contracts?.stateMachines.ingestion.states.join(" → ") || "n/a"}</li>
+                      <li>Generation: {contracts?.stateMachines.generation.states.join(" → ") || "n/a"}</li>
+                      <li>Document: {contracts?.stateMachines.document.states.join(" → ") || "n/a"}</li>
+                    </ul>
                   </div>
-                  <p className="vbs-meta">Recent runtime events: {telemetry?.recent.length ?? 0}</p>
-                </div>
-              </div>
-              <div className="vbs-telemetry-grid">
-                <div className="vbs-output">
-                  <h3>Error Classes</h3>
-                  {telemetry && Object.keys(telemetry.errorClasses).length > 0 ? (
+                  <div>
+                    <h3>Telemetry</h3>
                     <ul>
-                      {Object.entries(telemetry.errorClasses)
-                        .sort((a, b) => b[1] - a[1])
-                        .slice(0, 8)
-                        .map(([name, count]) => (
-                          <li key={name}>
-                            {name}: {count}
-                          </li>
-                        ))}
+                      {(contracts?.telemetryEvents || []).slice(0, 7).map((event) => <li key={event.name}>{event.name}</li>)}
                     </ul>
-                  ) : (
-                    <p className="vbs-meta">No runtime errors recorded in this telemetry window.</p>
-                  )}
+                  </div>
                 </div>
-                <div className="vbs-output">
-                  <h3>Recent Events</h3>
-                  {telemetry?.recent.length ? (
+                <div className="vbs-telemetry-grid">
+                  <div className="vbs-output">
+                    <h3>Runtime Funnel</h3>
                     <ul>
-                      {telemetry.recent
-                        .slice()
-                        .reverse()
-                        .slice(0, 8)
-                        .map((event) => (
-                          <li key={`${event.at}-${event.name}`}>
-                            [{event.status}] {event.name} ({event.stage}) • {formatDurationMs(event.durationMs)} •{" "}
-                            {formatTimestamp(event.at)}
-                          </li>
-                        ))}
+                      <li>Onboarding finalized: {telemetry?.funnel.onboardingFinalized ? "yes" : "no"}</li>
+                      <li>Ingestions started: {telemetry?.funnel.ingestionsStarted ?? 0}</li>
+                      <li>Ingestions completed: {telemetry?.funnel.ingestionsCompleted ?? 0}</li>
+                      <li>Ingestions failed: {telemetry?.funnel.ingestionsFailed ?? 0}</li>
+                      <li>Generations completed: {telemetry?.funnel.generationsCompleted ?? 0}</li>
+                      <li>Documents versioned: {telemetry?.funnel.documentsVersioned ?? 0}</li>
+                      <li>Exports: {telemetry?.funnel.exports ?? 0}</li>
                     </ul>
-                  ) : (
-                    <p className="vbs-meta">No events yet.</p>
-                  )}
+                  </div>
+                  <div className="vbs-output">
+                    <h3>Latency (Avg)</h3>
+                    <div className="vbs-telemetry-kpi">
+                      <div>
+                        <span>Ingestion</span>
+                        <strong>{formatDurationMs(telemetry?.latencyMs.ingestionAvg ?? 0)}</strong>
+                      </div>
+                      <div>
+                        <span>Generation</span>
+                        <strong>{formatDurationMs(telemetry?.latencyMs.generationAvg ?? 0)}</strong>
+                      </div>
+                      <div>
+                        <span>Document</span>
+                        <strong>{formatDurationMs(telemetry?.latencyMs.documentAvg ?? 0)}</strong>
+                      </div>
+                    </div>
+                    <p className="vbs-meta">Recent runtime events: {telemetry?.recent.length ?? 0}</p>
+                  </div>
                 </div>
+                <div className="vbs-telemetry-grid">
+                  <div className="vbs-output">
+                    <h3>Error Classes</h3>
+                    {telemetry && Object.keys(telemetry.errorClasses).length > 0 ? (
+                      <ul>
+                        {Object.entries(telemetry.errorClasses)
+                          .sort((a, b) => b[1] - a[1])
+                          .slice(0, 8)
+                          .map(([name, count]) => (
+                            <li key={name}>
+                              {name}: {count}
+                            </li>
+                          ))}
+                      </ul>
+                    ) : (
+                      <p className="vbs-meta">No runtime errors recorded in this telemetry window.</p>
+                    )}
+                  </div>
+                  <div className="vbs-output">
+                    <h3>Recent Events</h3>
+                    {telemetry?.recent.length ? (
+                      <ul>
+                        {telemetry.recent
+                          .slice()
+                          .reverse()
+                          .slice(0, 8)
+                          .map((event) => (
+                            <li key={`${event.at}-${event.name}`}>
+                              [{event.status}] {event.name} ({event.stage}) • {formatDurationMs(event.durationMs)} •{" "}
+                              {formatTimestamp(event.at)}
+                            </li>
+                          ))}
+                      </ul>
+                    ) : (
+                      <p className="vbs-meta">No events yet.</p>
+                    )}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="vbs-output">
+                <p className="vbs-meta">
+                  Diagnostics stay out of the main product flow. Open this drawer only when you need to debug runtime behavior.
+                </p>
               </div>
-            </>
-          ) : (
-            <div className="vbs-output">
-              <p className="vbs-meta">
-                Diagnostics are hidden to keep the workflow focused. Open this panel when you need state contract,
-                telemetry, or latency details.
-              </p>
-            </div>
-          )}
-        </article>
+            )}
+          </article>
+        ) : null}
       </div>
 
       {!onboardingLocked ? (

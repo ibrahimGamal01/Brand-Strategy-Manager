@@ -311,6 +311,139 @@ a {
   background: linear-gradient(150deg, color-mix(in srgb, var(--vbs-teal) 10%, white) 0%, color-mix(in srgb, var(--vbs-sand) 52%, white) 100%);
 }
 
+.vbs-dna-flow {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.72fr) minmax(0, 1.28fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.vbs-dna-sidecar,
+.vbs-dna-main {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.vbs-dna-step-card,
+.vbs-dev-drawer {
+  border-radius: 1rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 16%, var(--bat-border));
+  background: linear-gradient(155deg, color-mix(in srgb, white 92%, var(--vbs-sand)) 0%, color-mix(in srgb, var(--vbs-cobalt) 4%, white) 100%);
+}
+
+.vbs-dna-step-card {
+  padding: 1rem;
+}
+
+.vbs-dna-step-card h3 {
+  margin: 0;
+  font-family: var(--vbs-display-font);
+  font-size: 1.1rem;
+  color: var(--vbs-ink);
+}
+
+.vbs-dna-step-card p:not(.vbs-meta) {
+  margin: 0.45rem 0 0;
+  color: color-mix(in srgb, var(--vbs-ink) 76%, #656f85);
+  line-height: 1.6;
+  font-size: 0.88rem;
+}
+
+.vbs-dna-prompt-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.vbs-dna-prompt-chip {
+  border-radius: 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-teal) 20%, var(--bat-border));
+  background: color-mix(in srgb, white 90%, var(--vbs-teal));
+  padding: 0.8rem 0.9rem;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--vbs-ink) 82%, #556071);
+}
+
+.vbs-dna-step-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.vbs-dna-form-card {
+  display: grid;
+  gap: 0.9rem;
+  border-radius: 1rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 16%, var(--bat-border));
+  background: color-mix(in srgb, white 94%, var(--vbs-sand));
+  padding: 1rem;
+}
+
+.vbs-dna-inline-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.vbs-dna-field {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.vbs-dna-field > span,
+.vbs-dna-slider-card > span {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--vbs-ink) 60%, #6a7287);
+}
+
+.vbs-dna-field input,
+.vbs-dna-field textarea {
+  width: 100%;
+  border-radius: 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 18%, var(--bat-border));
+  background: white;
+  padding: 0.85rem 0.95rem;
+  color: var(--vbs-ink);
+  resize: vertical;
+  font: inherit;
+  line-height: 1.55;
+}
+
+.vbs-dna-field input::placeholder,
+.vbs-dna-field textarea::placeholder {
+  color: color-mix(in srgb, var(--vbs-ink) 40%, #8a93a9);
+}
+
+.vbs-dna-slider-card {
+  display: grid;
+  gap: 0.45rem;
+  border-radius: 0.95rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 18%, var(--bat-border));
+  background: color-mix(in srgb, white 90%, var(--vbs-sand));
+  padding: 0.8rem 0.9rem;
+}
+
+.vbs-dna-slider-card strong {
+  font-family: var(--vbs-display-font);
+  font-size: 1rem;
+  color: var(--vbs-ink);
+}
+
+.vbs-dna-slider-card input[type="range"] {
+  width: 100%;
+}
+
+.vbs-dna-tone-card {
+  min-height: 100%;
+}
+
+.vbs-dev-drawer {
+  padding: 1rem;
+}
+
 @keyframes vbs-hero-enter {
   from {
     opacity: 0;
@@ -1544,6 +1677,11 @@ a {
 }
 
 @media (max-width: 1100px) {
+  .vbs-dna-flow,
+  .vbs-dna-inline-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .vbs-reset-hero,
   .vbs-launchpad-main,
   .vbs-launchpad-grid {
@@ -1619,6 +1757,12 @@ a {
 }
 
 @media (max-width: 700px) {
+  .vbs-dna-form-card,
+  .vbs-dev-drawer,
+  .vbs-dna-step-card {
+    padding: 0.85rem;
+  }
+
   .vbs-reset-meta {
     grid-template-columns: minmax(0, 1fr);
   }
