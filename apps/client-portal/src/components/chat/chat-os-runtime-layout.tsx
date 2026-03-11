@@ -489,29 +489,6 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
 
   const viralStageIndex = viralWorkflowStageIndex(viralWorkflow?.workflowStage || "intake_pending");
   const viralProgressPct = Math.round(((viralStageIndex + 1) / VIRAL_WORKFLOW_ORDER.length) * 100);
-  const viralStageRail = useMemo(() => {
-    if (!viralWorkflow) return [] as Array<{
-      stage: ViralStudioWorkflowStatus["workflowStage"];
-      label: string;
-      state: "done" | "active" | "upcoming";
-    }>;
-    const flow: Array<ViralStudioWorkflowStatus["workflowStage"]> = [
-      "intake_pending",
-      ...(viralWorkflow.flow || []),
-    ];
-    const deduped = Array.from(new Set(flow));
-    const currentIndex = deduped.indexOf(viralWorkflow.workflowStage);
-    return deduped.map((stage, index) => ({
-      stage,
-      label: formatViralWorkflowStage(stage),
-      state:
-        index < currentIndex
-          ? ("done" as const)
-          : index === currentIndex
-            ? ("active" as const)
-            : ("upcoming" as const),
-    }));
-  }, [viralWorkflow]);
   const viralPrimaryAction = useMemo(
     () => (viralWorkflow ? resolveViralBridgePrimaryAction(viralWorkflow) : null),
     [viralWorkflow]
@@ -1979,99 +1956,60 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
             >
               <div className="flex min-h-0 flex-col border-zinc-200 xl:border-r xl:border-zinc-200/80">
                 {viralWorkflow ? (
-                  <div className="mx-3 mt-3 rounded-[1.5rem] border border-sky-200 bg-gradient-to-br from-sky-50 via-cyan-50 to-white p-3 shadow-[0_20px_45px_-35px_rgba(14,165,233,0.55)] sm:mx-4 xl:mx-5">
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div>
+                  <div className="mx-3 mt-3 rounded-[1.35rem] border border-sky-200 bg-gradient-to-br from-sky-50 via-white to-cyan-50 p-3 shadow-[0_20px_45px_-35px_rgba(14,165,233,0.45)] sm:mx-4 xl:mx-5">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="max-w-3xl">
                         <p className="text-xs font-semibold uppercase tracking-[0.08em] text-sky-700">
-                          Viral Studio Workflow Bridge
+                          Viral Studio
                         </p>
-                        <p className="mt-1 text-xs text-zinc-700">
-                          Intake {viralWorkflow.intakeCompleted ? "complete" : "pending"} • Brand DNA{" "}
-                          {viralWorkflow.brandDnaReady ? "ready" : "not ready"} • Prioritized refs{" "}
-                          {viralWorkflow.counts.prioritizedReferences}
-                        </p>
-                        <p className="mt-1 text-xs text-zinc-700">
-                          Stage: <strong>{formatViralWorkflowStage(viralWorkflow.workflowStage)}</strong>
+                        <h2 className="mt-1 text-lg font-semibold tracking-[-0.02em] text-zinc-950">
+                          {viralPrimaryAction?.title || "Studio context is ready"}
+                        </h2>
+                        <p className="mt-1 text-sm leading-6 text-zinc-700">
+                          {viralPrimaryAction?.body ||
+                            "Use Viral Studio context from this workspace to keep strategy, generation, and delivery connected."}
                         </p>
                       </div>
-                      <div className="rounded-lg border border-sky-200 bg-white px-2.5 py-1.5 text-right">
+                      <div className="rounded-2xl border border-sky-200 bg-white px-3 py-2 text-right">
                         <p className="text-[10px] uppercase tracking-[0.08em] text-sky-700">Progress</p>
                         <strong className="text-sm text-sky-800">{viralProgressPct}%</strong>
                       </div>
                     </div>
-                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-sky-100">
-                      <span
-                        className="block h-full rounded-full bg-gradient-to-r from-blue-500 to-teal-500 transition-all"
-                        style={{ width: `${viralProgressPct}%` }}
-                      />
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <span className="rounded-full border border-sky-200 bg-white px-2.5 py-1 text-xs text-zinc-700">
+                        Stage: {formatViralWorkflowStage(viralWorkflow.workflowStage)}
+                      </span>
+                      <span className="rounded-full border border-sky-200 bg-white px-2.5 py-1 text-xs text-zinc-700">
+                        Brand DNA: {viralWorkflow.brandDnaReady ? "ready" : "needs review"}
+                      </span>
+                      <span className="rounded-full border border-sky-200 bg-white px-2.5 py-1 text-xs text-zinc-700">
+                        Prioritized refs: {viralWorkflow.counts.prioritizedReferences}
+                      </span>
                     </div>
-                    <div className="mt-2 grid grid-cols-2 gap-1 sm:grid-cols-4 xl:grid-cols-7">
-                      {(viralStageRail.length
-                        ? viralStageRail
-                        : VIRAL_WORKFLOW_ORDER.map((stage, index) => ({
-                            stage,
-                            label: formatViralWorkflowStage(stage),
-                            state:
-                              index < viralStageIndex
-                                ? ("done" as const)
-                                : index === viralStageIndex
-                                  ? ("active" as const)
-                                  : ("upcoming" as const),
-                          }))
-                      ).map((entry) => (
-                        <div
-                          key={entry.stage}
-                          className={`rounded-md border px-2 py-1 ${
-                            entry.state === "active"
-                              ? "border-blue-300 bg-blue-50"
-                              : entry.state === "done"
-                                ? "border-teal-200 bg-teal-50"
-                                : "border-sky-100 bg-white"
-                          }`}
-                        >
-                          <p className="truncate text-[10px] font-semibold uppercase tracking-[0.06em] text-zinc-600">
-                            {entry.label}
-                          </p>
-                          <span className="text-[10px] text-zinc-500">
-                            {entry.state === "done" ? "Done" : entry.state === "active" ? "Now" : "Queued"}
-                          </span>
-                        </div>
-                      ))}
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={runViralBridgePrimaryAction}
+                        disabled={viralBridgeBusy}
+                        className="rounded-full border border-sky-200 bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-60"
+                      >
+                        {viralBridgeBusy ? "Working..." : viralPrimaryAction?.cta || "Continue"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => router.push(`/app/w/${workspaceId}/viral-studio`)}
+                        className="rounded-full border border-sky-200 bg-white px-4 py-2 text-sm text-sky-700 hover:bg-sky-100"
+                      >
+                        Open Studio
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowViralBridgeAdvanced((previous) => !previous)}
+                        className="rounded-full border border-sky-200 bg-white px-4 py-2 text-sm text-sky-700 hover:bg-sky-100"
+                      >
+                        {showViralBridgeAdvanced ? "Hide advanced" : "Advanced"}
+                      </button>
                     </div>
-
-                    {viralPrimaryAction ? (
-                      <div className="mt-3 rounded-xl border border-sky-200 bg-white/90 p-2.5">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-sky-700">
-                          Recommended Next Step
-                        </p>
-                        <p className="mt-1 text-sm font-semibold text-zinc-900">{viralPrimaryAction.title}</p>
-                        <p className="mt-1 text-xs text-zinc-700">{viralPrimaryAction.body}</p>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={runViralBridgePrimaryAction}
-                            disabled={viralBridgeBusy}
-                            className="rounded-md border border-sky-200 bg-sky-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-sky-700 disabled:opacity-60"
-                          >
-                            {viralBridgeBusy ? "Working..." : viralPrimaryAction.cta}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => router.push(`/app/w/${workspaceId}/viral-studio`)}
-                            className="rounded-md border border-sky-200 bg-white px-2.5 py-1 text-xs text-sky-700 hover:bg-sky-100"
-                          >
-                            Open Viral Studio
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setShowViralBridgeAdvanced((previous) => !previous)}
-                            className="rounded-md border border-sky-200 bg-white px-2.5 py-1 text-xs text-sky-700 hover:bg-sky-100"
-                          >
-                            {showViralBridgeAdvanced ? "Hide advanced controls" : "Show advanced controls"}
-                          </button>
-                        </div>
-                      </div>
-                    ) : null}
 
                     {viralBridgeError ? (
                       <p className="mt-1 text-xs text-red-700">{viralBridgeError}</p>

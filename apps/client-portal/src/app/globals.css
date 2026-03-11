@@ -106,6 +106,211 @@ a {
   font-family: var(--vbs-body-font);
 }
 
+.vbs-stack {
+  display: grid;
+  gap: 1rem;
+}
+
+.vbs-reset-hero {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(250px, 0.9fr);
+  gap: 1rem;
+  padding: clamp(1.15rem, 3.5vw, 2rem);
+  border-radius: 1.4rem;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 18%, var(--bat-border));
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--vbs-coral) 18%, transparent) 0%, transparent 24%),
+    radial-gradient(circle at 88% 22%, color-mix(in srgb, var(--vbs-teal) 16%, transparent) 0%, transparent 28%),
+    linear-gradient(135deg, color-mix(in srgb, white 78%, var(--vbs-sand)) 0%, white 48%, color-mix(in srgb, var(--vbs-cobalt) 8%, white) 100%);
+  box-shadow: 0 26px 60px -40px rgba(11, 19, 43, 0.35);
+}
+
+.vbs-reset-hero::after {
+  content: "";
+  position: absolute;
+  inset: auto -10% -35% auto;
+  width: 22rem;
+  height: 22rem;
+  border-radius: 999px;
+  background: radial-gradient(circle, color-mix(in srgb, var(--vbs-cobalt) 14%, transparent) 0%, transparent 66%);
+  pointer-events: none;
+}
+
+.vbs-reset-meta {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  align-self: end;
+}
+
+.vbs-reset-meta > div {
+  border-radius: 1rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 16%, var(--bat-border));
+  background: color-mix(in srgb, white 82%, var(--vbs-sand));
+  padding: 0.85rem 0.9rem;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.vbs-reset-meta span {
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--vbs-ink) 52%, #6a7287);
+}
+
+.vbs-reset-meta strong {
+  font-family: var(--vbs-display-font);
+  font-size: 1rem;
+  color: var(--vbs-ink);
+}
+
+.vbs-launchpad {
+  display: grid;
+  gap: 0.9rem;
+  border-radius: 1.35rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 14%, var(--bat-border));
+  background:
+    linear-gradient(150deg, color-mix(in srgb, var(--vbs-sand) 52%, white) 0%, white 45%, color-mix(in srgb, var(--vbs-teal) 5%, white) 100%);
+  padding: 1rem;
+  box-shadow: 0 24px 50px -42px rgba(15, 118, 110, 0.28);
+}
+
+.vbs-launchpad-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(250px, 0.85fr);
+  gap: 1rem;
+  align-items: stretch;
+}
+
+.vbs-launchpad-copy {
+  display: grid;
+  gap: 0.75rem;
+  align-content: start;
+}
+
+.vbs-launchpad-copy h2 {
+  margin: 0;
+  font-family: var(--vbs-display-font);
+  font-size: clamp(1.35rem, 2.4vw, 1.85rem);
+  letter-spacing: -0.02em;
+  color: var(--vbs-ink);
+}
+
+.vbs-launchpad-copy p:not(.vbs-meta) {
+  margin: 0;
+  max-width: 58ch;
+  color: color-mix(in srgb, var(--vbs-ink) 78%, #626a7e);
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.vbs-launchpad-strip {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.vbs-launchpad-strip > div {
+  border-radius: 1rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 16%, var(--bat-border));
+  background: linear-gradient(160deg, color-mix(in srgb, white 92%, var(--vbs-sand)) 0%, color-mix(in srgb, var(--vbs-cobalt) 6%, white) 100%);
+  padding: 0.85rem 0.9rem;
+  display: grid;
+  gap: 0.18rem;
+}
+
+.vbs-launchpad-strip span,
+.vbs-status-strip span {
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--vbs-ink) 52%, #6a7287);
+}
+
+.vbs-launchpad-strip strong {
+  font-size: 0.95rem;
+  color: var(--vbs-ink);
+}
+
+.vbs-launchpad-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.vbs-launchpad-card {
+  border-radius: 1rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 16%, var(--bat-border));
+  background: color-mix(in srgb, white 92%, var(--vbs-sand));
+  padding: 0.95rem;
+  display: grid;
+  gap: 0.65rem;
+  min-height: 12rem;
+}
+
+.vbs-launchpad-card h3 {
+  margin: 0;
+  font-family: var(--vbs-display-font);
+  font-size: 1rem;
+  color: var(--vbs-ink);
+}
+
+.vbs-launchpad-card p:not(.vbs-meta) {
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.55;
+  color: color-mix(in srgb, var(--vbs-ink) 78%, #646d82);
+}
+
+.vbs-launchpad-foot {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.vbs-launchpad-foot strong {
+  font-size: 0.8rem;
+  color: color-mix(in srgb, var(--vbs-cobalt) 76%, var(--vbs-ink));
+}
+
+.vbs-section-shell {
+  display: grid;
+  gap: 1rem;
+  padding: 1.15rem;
+}
+
+.vbs-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.vbs-status-strip {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  max-width: 28rem;
+}
+
+.vbs-status-strip span {
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 18%, var(--bat-border));
+  background: color-mix(in srgb, white 88%, var(--vbs-sand));
+  padding: 0.5rem 0.75rem;
+}
+
+.vbs-foundation-note {
+  background: linear-gradient(150deg, color-mix(in srgb, var(--vbs-teal) 10%, white) 0%, color-mix(in srgb, var(--vbs-sand) 52%, white) 100%);
+}
+
 @keyframes vbs-hero-enter {
   from {
     opacity: 0;
@@ -1339,6 +1544,24 @@ a {
 }
 
 @media (max-width: 1100px) {
+  .vbs-reset-hero,
+  .vbs-launchpad-main,
+  .vbs-launchpad-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vbs-reset-meta {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .vbs-section-head {
+    flex-direction: column;
+  }
+
+  .vbs-status-strip {
+    justify-content: flex-start;
+  }
+
   .vbs-command-deck {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1396,6 +1619,20 @@ a {
 }
 
 @media (max-width: 700px) {
+  .vbs-reset-meta {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vbs-launchpad,
+  .vbs-section-shell {
+    padding: 0.85rem;
+  }
+
+  .vbs-launchpad-foot {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
   .vbs-title {
     font-size: 1.45rem;
   }

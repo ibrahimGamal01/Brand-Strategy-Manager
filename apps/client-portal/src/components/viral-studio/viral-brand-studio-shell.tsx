@@ -159,16 +159,6 @@ const ONBOARDING_STEP_META: Array<{ step: 1 | 2 | 3 | 4; title: string; subtitle
   { step: 4, title: "Proof + Summary", subtitle: "Exemplars and AI-ready narrative" },
 ];
 
-const WORKFLOW_STAGE_SECTION_MAP: Record<ViralStudioWorkflowStatus["workflowStage"], string> = {
-  intake_pending: "#vbs-section-onboarding",
-  intake_complete: "#vbs-section-onboarding",
-  studio_autofill_review: "#vbs-section-onboarding",
-  extraction: "#vbs-section-extraction",
-  curation: "#vbs-section-extraction",
-  generation: "#vbs-section-generation",
-  chat_execution: "#vbs-section-documents",
-};
-
 type WorkflowGuideAction =
   | "open_intake"
   | "run_autofill"
@@ -177,8 +167,6 @@ type WorkflowGuideAction =
   | "curate_references"
   | "generate_pack"
   | "handoff_chat";
-
-type StudioSurfaceMode = "guided" | "power";
 
 function workflowStageOrderIndex(stage: ViralStudioWorkflowStatus["workflowStage"] | undefined): number {
   if (!stage) return 0;
@@ -676,7 +664,6 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   const [error, setError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
-  const [surfaceMode, setSurfaceMode] = useState<StudioSurfaceMode>("guided");
 
   const [contracts, setContracts] = useState<ViralStudioContractSnapshot | null>(null);
   const [telemetry, setTelemetry] = useState<ViralStudioTelemetrySnapshot | null>(null);
@@ -1884,7 +1871,6 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       ]);
       setWorkflowStatus(workflowPayload.workflow);
       setSuggestedSources(sourcePayload.items || []);
-      setSurfaceMode("guided");
 
       if (!workflowPayload.workflow.intakeCompleted) {
         setAutopilotStatus("Intake is still required. Complete intake first, then rerun autopilot.");
@@ -1958,29 +1944,6 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
 
   const workflowStage = workflowStatus?.workflowStage || "intake_pending";
   const workflowStepIndex = workflowStageOrderIndex(workflowStage);
-  const workflowRail = useMemo(() => {
-    const fallbackFlow: ViralStudioWorkflowStatus["flow"] = [
-      "intake_complete",
-      "studio_autofill_review",
-      "extraction",
-      "curation",
-      "generation",
-      "chat_execution",
-    ];
-    const stageFlow = workflowStatus?.flow || fallbackFlow;
-    const withIntake = ["intake_pending", ...stageFlow] as Array<ViralStudioWorkflowStatus["workflowStage"]>;
-    const deduped = Array.from(new Set(withIntake));
-    return deduped.map((stage, index) => ({
-      stage,
-      label: toWorkflowStageLabel(stage),
-      state:
-        index < workflowStepIndex
-          ? ("done" as const)
-          : index === workflowStepIndex
-            ? ("active" as const)
-            : ("upcoming" as const),
-    }));
-  }, [workflowStatus?.flow, workflowStepIndex]);
   const workflowProgressPct = Math.round(((workflowStepIndex + 1) / WORKFLOW_STAGE_ORDER.length) * 100);
   const workflowGuide = useMemo(() => {
     if (workflowStage === "intake_pending") {
@@ -2031,96 +1994,64 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     };
   }, [workflowStage]);
   const onboardingCoveragePct = useMemo(() => onboardingCoveragePercent(brandForm), [brandForm]);
-  const workflowJourneyCards = useMemo(
-    () =>
-      WORKFLOW_STAGE_ORDER.map((stage, index) => {
-        const state =
-          index < workflowStepIndex ? ("done" as const) : index === workflowStepIndex ? ("active" as const) : ("upcoming" as const);
-        const sectionHref = WORKFLOW_STAGE_SECTION_MAP[stage];
-        if (stage === "intake_pending") {
-          return {
-            stage,
-            state,
-            sectionHref,
-            title: "Intake Context",
-            description: "Website, socials, and baseline business context.",
-            stat: workflowStatus?.intakeCompleted ? "Completed" : "Pending",
-          };
+  const latestSuggestedSource = suggestedSources[0] || null;
+  const latestReferenceSummary = activeIngestion
+    ? `${activeIngestion.progress.ranked}/${activeIngestion.progress.found || activeIngestion.maxVideos} ranked`
+    : `${references.length} references loaded`;
+  const launchpadCards = [
+    {
+      id: "foundation",
+      eyebrow: "01 Foundation",
+      title: brandReady ? "Brand DNA is ready" : "Brand DNA needs one clean pass",
+      body: brandReady
+        ? compactText(brandProfile?.summary || "Brand DNA is finalized and ready to drive generation.", 170)
+        : "Use one website-first autofill pass, confirm the summary, and finalize voice guardrails.",
+      stat: `${onboardingCoveragePct}% coverage`,
+      actionLabel: brandReady ? "Edit DNA" : workflowGuide.cta,
+      action: () => {
+        window.document.getElementById("vbs-section-onboarding")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        if (brandReady) {
+          setIsEditingBrandDna(true);
+          return;
         }
-        if (stage === "intake_complete" || stage === "studio_autofill_review") {
-          return {
-            stage,
-            state,
-            sectionHref,
-            title: "Brand DNA",
-            description: "Autofill, approve evidence, finalize voice guardrails.",
-            stat: workflowStatus?.brandDnaReady ? "Finalized" : `${Math.max(0, onboardingCoveragePct)}% coverage`,
-          };
+        void runWorkflowGuideAction();
+      },
+    },
+    {
+      id: "references",
+      eyebrow: "02 Reference Engine",
+      title: activeIngestion ? "Reference engine is active" : "Reference engine is ready to run",
+      body: latestSuggestedSource
+        ? `${latestSuggestedSource.label} is the top website/social source. Run data-max extraction and curate only the winners.`
+        : "We will use suggested website and social evidence as soon as intake is complete.",
+      stat: latestReferenceSummary,
+      actionLabel: activeIngestion ? "Open reference engine" : "Start extraction",
+      action: () => {
+        window.document.getElementById("vbs-section-extraction")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        if (activeIngestion) {
+          void openIngestionResults(activeIngestion);
+          return;
         }
-        if (stage === "extraction") {
-          return {
-            stage,
-            state,
-            sectionHref,
-            title: "Data-Max Extraction",
-            description: "Deep scan top channels to build a stronger reference set.",
-            stat: `${ingestions.length} run(s)`,
-          };
+        setShowExtractionModal(true);
+      },
+    },
+    {
+      id: "create",
+      eyebrow: "03 Create & Save",
+      title: generation ? "Generation and version history are live" : "Create one campaign pack",
+      body: generation
+        ? `Revision ${generation.revision} is available and every revision now saves into document history automatically.`
+        : "Generate one multi-pack and let the studio save each revision into the document timeline.",
+      stat: document ? `${versions.length} saved version(s)` : "No document yet",
+      actionLabel: generation ? "Open create & save" : "Generate pack",
+      action: () => {
+        window.document.getElementById("vbs-section-create-save")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        if (!generation) {
+          void generatePack();
         }
-        if (stage === "curation") {
-          return {
-            stage,
-            state,
-            sectionHref,
-            title: "Viral Curation",
-            description: "Pin and must-use top references with explainability.",
-            stat: `${prioritizedReferenceCount} prioritized`,
-          };
-        }
-        if (stage === "generation") {
-          return {
-            stage,
-            state,
-            sectionHref,
-            title: "Multi-Pack Generation",
-            description: "Produce hooks, scripts, captions, and CTA variants.",
-            stat: generation ? `Revision ${generation.revision}` : "Not generated",
-          };
-        }
-        return {
-          stage,
-          state,
-          sectionHref,
-          title: "Chat Execution",
-          description: "Ship durable context to chat and execute plans.",
-          stat: chatBridgeStatus ? "Synced" : "Awaiting handoff",
-        };
-      }),
-    [
-      workflowStepIndex,
-      workflowStatus?.intakeCompleted,
-      workflowStatus?.brandDnaReady,
-      onboardingCoveragePct,
-      ingestions.length,
-      prioritizedReferenceCount,
-      generation,
-      chatBridgeStatus,
-    ]
-  );
-  const showExtractionSection =
-    surfaceMode === "power" ||
-    brandReady ||
-    workflowStepIndex >= workflowStageOrderIndex("extraction") ||
-    Boolean(activeIngestion);
-  const showCurationSection =
-    surfaceMode === "power" ||
-    workflowStepIndex >= workflowStageOrderIndex("curation") ||
-    references.length > 0;
-  const showGenerationSection =
-    surfaceMode === "power" ||
-    workflowStepIndex >= workflowStageOrderIndex("generation") ||
-    Boolean(generation);
-  const showDocumentSection = surfaceMode === "power" || Boolean(documentDraft) || Boolean(document) || Boolean(lastExport);
+      },
+    },
+  ];
 
   const runWorkflowGuideAction = useCallback(async () => {
     if (workflowGuide.action === "open_intake") {
@@ -2213,127 +2144,102 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
 
   return (
     <section className="vbs-shell">
-      <header className="vbs-hero">
-        <p className="vbs-chip">Workflow Redesign Active</p>
-        <h1 className="vbs-title">Viral Brand Studio</h1>
-        <p className="vbs-subtitle">
-          Website-first Brand DNA, data-max extraction, explainable curation, and durable campaign outputs wired directly into core chat execution.
-        </p>
+      <header className="vbs-reset-hero">
+        <div>
+          <p className="vbs-chip">Editorial Reset</p>
+          <h1 className="vbs-title">Viral Brand Studio</h1>
+          <p className="vbs-subtitle">
+            One website-first creative system: define the brand, extract winners, generate a pack, and keep every revision saved.
+          </p>
+        </div>
+        <div className="vbs-reset-meta">
+          <div>
+            <span>Stage</span>
+            <strong>{toWorkflowStageLabel(workflowStage)}</strong>
+          </div>
+          <div>
+            <span>Prioritized refs</span>
+            <strong>{prioritizedReferenceCount}</strong>
+          </div>
+          <div>
+            <span>Saved versions</span>
+            <strong>{versions.length}</strong>
+          </div>
+        </div>
       </header>
 
       {error ? <div className="vbs-alert">{error}</div> : null}
       {chatBridgeStatus ? <div className="vbs-alert" style={{ borderColor: "#b6f0d4", background: "#f2fff7", color: "#11643f" }}>{chatBridgeStatus}</div> : null}
 
-      <section className="vbs-command-deck">
-        <div className="vbs-command-main">
-          <p className="vbs-meta">Unified Workflow Progress</p>
-          <div className="vbs-command-header">
-            <h2>Chat-First Workflow Command Deck</h2>
-            <strong>{workflowProgressPct}% complete</strong>
-          </div>
-          <div className="vbs-command-modes" role="radiogroup" aria-label="Workflow surface mode">
-            <button
-              type="button"
-              role="radio"
-              aria-checked={surfaceMode === "guided"}
-              className={surfaceMode === "guided" ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
-              onClick={() => setSurfaceMode("guided")}
-            >
-              Guided Surface
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={surfaceMode === "power"}
-              className={surfaceMode === "power" ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
-              onClick={() => setSurfaceMode("power")}
-            >
-              Power Surface
-            </button>
-          </div>
-          <div className="vbs-progress-track" aria-hidden="true">
-            <span style={{ width: `${workflowProgressPct}%` }} />
-          </div>
-          <div className="vbs-stage-rail">
-            {workflowRail.map((item) => (
-              <div
-                key={item.stage}
-                className={`vbs-stage-card ${
-                  item.state === "active" ? "is-active" : item.state === "done" ? "is-done" : ""
-                }`}
+      <section className="vbs-launchpad">
+        <div className="vbs-launchpad-main">
+          <div className="vbs-launchpad-copy">
+            <p className="vbs-meta">Current mission</p>
+            <h2>{workflowGuide.title}</h2>
+            <p>{workflowGuide.body}</p>
+            <div className="vbs-actions">
+              <button type="button" disabled={isBusy || autofillBusy} onClick={() => void runWorkflowGuideAction()}>
+                {workflowGuide.cta}
+              </button>
+              <button
+                type="button"
+                disabled={isBusy || autofillBusy || autopilotBusy}
+                onClick={() => void runWebsiteFirstAutopilot()}
               >
-                <p>{item.label}</p>
-                <span>{item.state === "done" ? "Done" : item.state === "active" ? "Now" : "Queued"}</span>
-              </div>
-            ))}
+                {autopilotBusy ? "Running Website-First Autopilot..." : "Run Website-First Autopilot"}
+              </button>
+              <button type="button" onClick={() => router.push(`/app/w/${workspaceId}`)}>
+                Open Core Chat
+              </button>
+            </div>
+            {autopilotStatus ? <p className="vbs-meta">{autopilotStatus}</p> : null}
           </div>
-          <div className="vbs-command-links">
-            <a href="#vbs-section-onboarding">Brand DNA</a>
-            <a href="#vbs-section-extraction">Extraction + Curation</a>
-            <a href="#vbs-section-generation">Generation</a>
-            <a href="#vbs-section-documents">Documents</a>
-            <a href="#vbs-section-diagnostics">Diagnostics</a>
-          </div>
-          <div className="vbs-journey-lanes">
-            {workflowJourneyCards.map((card) => (
-              <article
-                key={card.stage}
-                className={[
-                  "vbs-journey-card",
-                  card.state === "active" ? "is-active" : "",
-                  card.state === "done" ? "is-done" : "",
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-              >
-                <p className="vbs-meta">{toWorkflowStageLabel(card.stage)}</p>
-                <h4>{card.title}</h4>
-                <p>{card.description}</p>
-                <div className="vbs-journey-foot">
-                  <strong>{card.stat}</strong>
-                  <a href={card.sectionHref}>Jump</a>
-                </div>
-              </article>
-            ))}
+          <div className="vbs-launchpad-strip">
+            <div>
+              <span>Workflow</span>
+              <strong>{workflowProgressPct}% complete</strong>
+            </div>
+            <div>
+              <span>Suggested source</span>
+              <strong>{latestSuggestedSource ? latestSuggestedSource.label : "Waiting for evidence"}</strong>
+            </div>
+            <div>
+              <span>Generation vault</span>
+              <strong>{generation ? `Revision ${generation.revision}` : "No pack yet"}</strong>
+            </div>
           </div>
         </div>
-        <aside className="vbs-command-next">
-          <p className="vbs-meta">Recommended Next Action</p>
-          <h3>{workflowGuide.title}</h3>
-          <p>{workflowGuide.body}</p>
-          <div className="vbs-actions">
-            <button type="button" disabled={isBusy || autofillBusy} onClick={() => void runWorkflowGuideAction()}>
-              {workflowGuide.cta}
-            </button>
-            <button type="button" onClick={() => router.push(`/app/w/${workspaceId}`)}>
-              Open Core Chat
-            </button>
-            <button
-              type="button"
-              disabled={isBusy || autofillBusy || autopilotBusy}
-              onClick={() => void runWebsiteFirstAutopilot()}
-            >
-              {autopilotBusy ? "Running Website-First Autopilot..." : "Run Website-First Autopilot"}
-            </button>
-          </div>
-          <p className="vbs-meta">
-            Autopilot: Brand DNA autofill + data-max extraction + top-reference curation from intake website/social evidence.
-          </p>
-          {autopilotStatus ? <p className="vbs-meta">{autopilotStatus}</p> : null}
-          <p className="vbs-meta">
-            Stage now: <strong>{toWorkflowStageLabel(workflowStage)}</strong> • Prioritized references:{" "}
-            <strong>{prioritizedReferenceCount}</strong>
-          </p>
-          <p className="vbs-meta">
-            Surface mode: <strong>{surfaceMode === "guided" ? "Guided (focus)" : "Power (full workspace)"}</strong>
-          </p>
-        </aside>
+        <div className="vbs-launchpad-grid">
+          {launchpadCards.map((card) => (
+            <article key={card.id} className="vbs-launchpad-card">
+              <p className="vbs-meta">{card.eyebrow}</p>
+              <h3>{card.title}</h3>
+              <p>{card.body}</p>
+              <div className="vbs-launchpad-foot">
+                <strong>{card.stat}</strong>
+                <button type="button" onClick={card.action}>
+                  {card.actionLabel}
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
       </section>
 
-      <div className="vbs-grid">
-        <article className="vbs-panel" id="vbs-section-onboarding">
-          <h2 className="vbs-panel-title">Brand DNA Onboarding</h2>
-          <p className="vbs-panel-subtitle">Complete all 4 steps and finalize to unlock generation workflow.</p>
+      <div className="vbs-stack">
+        <article className="vbs-panel vbs-section-shell" id="vbs-section-onboarding">
+          <div className="vbs-section-head">
+            <div>
+              <p className="vbs-meta">Foundation</p>
+              <h2 className="vbs-panel-title">Brand DNA</h2>
+              <p className="vbs-panel-subtitle">Define the brand once, then let the rest of the workflow inherit it.</p>
+            </div>
+            <div className="vbs-status-strip">
+              <span>Intake {workflowStatus?.intakeCompleted ? "ready" : "pending"}</span>
+              <span>DNA {brandReady ? "finalized" : "in progress"}</span>
+              <span>{onboardingCoveragePct}% filled</span>
+            </div>
+          </div>
           <div className="vbs-output vbs-onboarding-progress">
             <p className="vbs-meta">
               Coverage <strong>{onboardingCoveragePct}%</strong> • Active step <strong>{onboardingStep}</strong>/4
@@ -2373,36 +2279,11 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
               })}
             </div>
           </div>
-          <div className="vbs-output vbs-workflow-status">
+          <div className="vbs-output vbs-foundation-note">
             <p className="vbs-meta">
-              Unified workflow stage:{" "}
-              <strong>{toWorkflowStageLabel(workflowStatus?.workflowStage || "intake_pending")}</strong>
-              {" • "}
-              Intake complete: <strong>{workflowStatus?.intakeCompleted ? "yes" : "no"}</strong>
-              {" • "}
-              Brand DNA ready: <strong>{workflowStatus?.brandDnaReady ? "yes" : "no"}</strong>
+              Viral Studio now behaves like one continuous system: approve foundation once, let references inherit that
+              context, then generate and save without re-explaining the brand every step.
             </p>
-            <div className="vbs-mini-actions">
-              {(workflowStatus?.flow || [
-                "intake_complete",
-                "studio_autofill_review",
-                "extraction",
-                "curation",
-                "generation",
-                "chat_execution",
-              ]).map((step) => (
-                <span
-                  key={step}
-                  className={
-                    workflowStatus?.workflowStage === step
-                      ? "vbs-chip-toggle is-active"
-                      : "vbs-chip-toggle"
-                  }
-                >
-                  {toWorkflowStageLabel(step)}
-                </span>
-              ))}
-            </div>
           </div>
           <div className="vbs-output vbs-autofill-panel">
             <div className="vbs-mini-actions">
@@ -2683,8 +2564,22 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
 
       {!onboardingLocked ? (
         <>
-          <div className="vbs-grid">
-            {showExtractionSection ? (
+          <article className="vbs-panel vbs-section-shell">
+            <div className="vbs-section-head">
+              <div>
+                <p className="vbs-meta">Reference Engine</p>
+                <h2 className="vbs-panel-title">Extract, rank, and curate</h2>
+                <p className="vbs-panel-subtitle">
+                  Pull the strongest source, monitor the run, and shortlist only what should influence generation.
+                </p>
+              </div>
+              <div className="vbs-status-strip">
+                <span>{activeIngestion ? statusLabel(activeIngestion.status) : "No run yet"}</span>
+                <span>{references.length} references</span>
+                <span>{prioritizedReferenceCount} prioritized</span>
+              </div>
+            </div>
+            <div className="vbs-grid">
               <article className="vbs-panel" id="vbs-section-extraction">
               <h2 className="vbs-panel-title">Competitor Extraction</h2>
               <div className="vbs-actions">
@@ -2753,9 +2648,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                 {ingestions.length === 0 ? <p className="vbs-meta">No extraction history yet.</p> : null}
               </div>
               </article>
-            ) : null}
 
-            {showCurationSection ? (
               <article className="vbs-panel">
               <h2 className="vbs-panel-title">Reference Curation</h2>
               <p className="vbs-panel-subtitle">Ranked board with explainability, filter chips, and expandable analysis drawer.</p>
@@ -2984,24 +2877,25 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                 </div>
               ) : null}
               </article>
-            ) : null}
-            {!showExtractionSection && !showCurationSection ? (
-              <article className="vbs-panel">
-                <h2 className="vbs-panel-title">Workflow Focus Mode</h2>
-                <p className="vbs-panel-subtitle">
-                  Extraction and curation panels are hidden in guided mode until the workflow reaches that stage.
-                </p>
-                <div className="vbs-actions">
-                  <button type="button" onClick={() => setSurfaceMode("power")}>
-                    Switch To Power Surface
-                  </button>
-                </div>
-              </article>
-            ) : null}
-          </div>
+            </div>
+          </article>
 
-          <div className="vbs-grid">
-            {showGenerationSection ? (
+          <article className="vbs-panel vbs-section-shell" id="vbs-section-create-save">
+            <div className="vbs-section-head">
+              <div>
+                <p className="vbs-meta">Create & Save</p>
+                <h2 className="vbs-panel-title">Generate, refine, and keep every revision</h2>
+                <p className="vbs-panel-subtitle">
+                  Build the pack, edit the durable document, and let the studio keep version history automatically.
+                </p>
+              </div>
+              <div className="vbs-status-strip">
+                <span>{generation ? `Revision ${generation.revision}` : "No generation yet"}</span>
+                <span>{document ? "Document ready" : "Document pending"}</span>
+                <span>{versions.length} versions</span>
+              </div>
+            </div>
+            <div className="vbs-grid">
               <article className="vbs-panel vbs-prompt-studio" id="vbs-section-generation">
               <h2 className="vbs-panel-title">Prompt Studio</h2>
               <p className="vbs-panel-subtitle">
@@ -3137,9 +3031,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                 </div>
               </div>
               </article>
-            ) : null}
 
-            {showDocumentSection ? (
               <article className="vbs-panel vbs-document-workspace" id="vbs-section-documents">
               <h2 className="vbs-panel-title">Document Workspace</h2>
               <p className="vbs-panel-subtitle">
@@ -3324,21 +3216,8 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                 </div>
               ) : null}
               </article>
-            ) : null}
-            {!showGenerationSection && !showDocumentSection ? (
-              <article className="vbs-panel">
-                <h2 className="vbs-panel-title">Generation Workspace Locked</h2>
-                <p className="vbs-panel-subtitle">
-                  Guided mode keeps prompt and document workspaces hidden until extraction and curation complete.
-                </p>
-                <div className="vbs-actions">
-                  <button type="button" onClick={() => setSurfaceMode("power")}>
-                    Open Full Workspace
-                  </button>
-                </div>
-              </article>
-            ) : null}
-          </div>
+            </div>
+          </article>
         </>
       ) : (
         <article className="vbs-panel">
