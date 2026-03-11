@@ -439,31 +439,43 @@ function isLikelyVideoUrl(value: string | undefined): boolean {
 function normalizeReferenceSourceUrl(
   value: string,
   platform: ViralStudioPlatform
-): { url?: string; isSyntheticPath: boolean } {
+): { url?: string; isSyntheticPath: boolean; isProfilePath: boolean } {
   const raw = String(value || "").trim();
-  if (!raw) return { url: undefined, isSyntheticPath: false };
+  if (!raw) return { url: undefined, isSyntheticPath: false, isProfilePath: false };
   const withProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`;
   try {
     const parsed = new URL(withProtocol);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      return { url: undefined, isSyntheticPath: false };
+      return { url: undefined, isSyntheticPath: false, isProfilePath: false };
     }
     const syntheticPath = /\/video-\d+\/?$/i.test(parsed.pathname);
+    const pathParts = parsed.pathname
+      .split("/")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const blockedPathRoots = new Set(["p", "reel", "reels", "tv", "stories", "explore", "accounts", "api", "graphql"]);
+    const profilePath =
+      platform === "instagram" &&
+      pathParts.length === 1 &&
+      !blockedPathRoots.has(pathParts[0].toLowerCase().replace(/^@/, ""));
     if (syntheticPath) {
       parsed.pathname = parsed.pathname.replace(/\/video-\d+\/?$/i, "/");
       parsed.search = "";
       parsed.hash = "";
+    }
+    if (profilePath) {
+      parsed.pathname = `/${pathParts[0].replace(/^@/, "")}/`;
     }
     if (
       platform === "instagram" &&
       !parsed.hostname.toLowerCase().includes("instagram.com") &&
       !parsed.hostname.toLowerCase().includes("instagr.am")
     ) {
-      return { url: undefined, isSyntheticPath: syntheticPath };
+      return { url: undefined, isSyntheticPath: syntheticPath, isProfilePath: profilePath };
     }
-    return { url: parsed.toString(), isSyntheticPath: syntheticPath };
+    return { url: parsed.toString(), isSyntheticPath: syntheticPath, isProfilePath: profilePath };
   } catch {
-    return { url: undefined, isSyntheticPath: false };
+    return { url: undefined, isSyntheticPath: false, isProfilePath: false };
   }
 }
 
@@ -1086,8 +1098,8 @@ function buildReferenceCardDetail(reference: ViralStudioReferenceAsset): Referen
       .map((line) => compactText(line, 120)),
     palette,
     sourceUrl,
-    sourceSurfaceLabel: sourceResolution.isSyntheticPath ? "Source profile" : "Original post",
-    sourceActionLabel: sourceResolution.isSyntheticPath ? "Open source profile" : "Open original post",
+    sourceSurfaceLabel: sourceResolution.isSyntheticPath || sourceResolution.isProfilePath ? "Source profile" : "Original post",
+    sourceActionLabel: sourceResolution.isSyntheticPath || sourceResolution.isProfilePath ? "Open source profile" : "Open original post",
     sourceHostLabel: toSourceHostLabel(sourceUrl, reference.sourcePlatform),
     sourcePathLabel: sourceResolution.isSyntheticPath
       ? `${toSourcePathLabel(sourceUrl)} • synthetic ref id`
