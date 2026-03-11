@@ -302,6 +302,13 @@ a {
   height: 7.5rem;
   border-radius: 999px;
   background: radial-gradient(circle, color-mix(in srgb, var(--vbs-cobalt) 10%, transparent) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.vbs-launchpad-card > * {
+  position: relative;
+  z-index: 1;
 }
 
 .vbs-launchpad-card-foundation {
@@ -342,6 +349,38 @@ a {
 .vbs-launchpad-foot strong {
   font-size: 0.8rem;
   color: color-mix(in srgb, var(--vbs-cobalt) 76%, var(--vbs-ink));
+}
+
+.vbs-launchpad-action {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 44%, var(--bat-border));
+  background: color-mix(in srgb, white 72%, var(--vbs-sand));
+  color: var(--vbs-ink);
+  border-radius: 999px;
+  padding: 0.38rem 0.8rem;
+  font-size: 0.88rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, background 180ms ease;
+}
+
+.vbs-launchpad-action:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--vbs-cobalt) 64%, var(--bat-border));
+  background: color-mix(in srgb, white 58%, var(--vbs-cobalt));
+  box-shadow: 0 12px 26px rgba(37, 99, 235, 0.16);
+}
+
+.vbs-launchpad-action:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--vbs-cobalt) 65%, white);
+  outline-offset: 2px;
+}
+
+.vbs-launchpad-action:disabled {
+  opacity: 0.58;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
 .vbs-section-shell {

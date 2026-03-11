@@ -2206,7 +2206,16 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   const latestReferenceSummary = activeIngestion
     ? `${activeIngestion.progress.ranked}/${activeIngestion.progress.found || activeIngestion.maxVideos} ranked`
     : `${references.length} references loaded`;
-  const launchpadCards = [
+  const launchpadCards: Array<{
+    id: "foundation" | "references" | "create";
+    eyebrow: string;
+    title: string;
+    body: string;
+    stat: string;
+    actionLabel: string;
+    action: () => void | Promise<void>;
+    disabled?: boolean;
+  }> = [
     {
       id: "foundation",
       eyebrow: "01 Foundation",
@@ -2224,6 +2233,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         }
         void runWorkflowGuideAction();
       },
+      disabled: isBusy || autofillBusy,
     },
     {
       id: "references",
@@ -2234,14 +2244,34 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         : "We will use suggested website and social evidence as soon as intake is complete.",
       stat: latestReferenceSummary,
       actionLabel: activeIngestion ? "Open reference engine" : "Start extraction",
-      action: () => {
+      action: async () => {
         window.document.getElementById("vbs-section-extraction")?.scrollIntoView({ behavior: "smooth", block: "start" });
         if (activeIngestion) {
-          void openIngestionResults(activeIngestion);
+          await openIngestionResults(activeIngestion);
           return;
         }
-        setShowExtractionModal(true);
+        if (!brandReady) {
+          setError("Finalize Brand DNA before extraction.");
+          setOnboardingStep(4);
+          setIsEditingBrandDna(true);
+          return;
+        }
+        setIsBusy(true);
+        setError(null);
+        try {
+          await startGuidedDataMaxExtraction();
+        } catch (ingestionError: unknown) {
+          const message = String((ingestionError as Error)?.message || "Failed to start extraction");
+          if (message.includes("No source URL available")) {
+            setShowExtractionModal(true);
+          } else {
+            setError(message);
+          }
+        } finally {
+          setIsBusy(false);
+        }
       },
+      disabled: isBusy || autofillBusy || autopilotBusy,
     },
     {
       id: "create",
@@ -2252,12 +2282,23 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         : "Generate one multi-pack and let the studio save each revision into the document timeline.",
       stat: document ? `${versions.length} saved version(s)` : "No document yet",
       actionLabel: generation ? "Open create & save" : "Generate pack",
-      action: () => {
+      action: async () => {
         window.document.getElementById("vbs-section-create-save")?.scrollIntoView({ behavior: "smooth", block: "start" });
-        if (!generation) {
-          void generatePack();
+        if (generation) {
+          return;
         }
+        if (!brandReady) {
+          setError("Finalize Brand DNA before generation.");
+          setOnboardingStep(4);
+          setIsEditingBrandDna(true);
+          return;
+        }
+        if (prioritizedReferenceCount === 0 && references.length > 0) {
+          await autoCurateTopReferences(references);
+        }
+        await generatePack();
       },
+      disabled: isBusy || autofillBusy || autopilotBusy,
     },
   ];
 
@@ -2427,7 +2468,12 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
               <p>{card.body}</p>
               <div className="vbs-launchpad-foot">
                 <strong>{card.stat}</strong>
-                <button type="button" onClick={card.action}>
+                <button
+                  type="button"
+                  className="vbs-launchpad-action"
+                  onClick={() => void card.action()}
+                  disabled={Boolean(card.disabled)}
+                >
                   {card.actionLabel}
                 </button>
               </div>
