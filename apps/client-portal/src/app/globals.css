@@ -904,6 +904,21 @@ a {
   gap: 0.45rem;
 }
 
+.vbs-curation-topline {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(250px, 0.8fr);
+  gap: 0.8rem;
+  align-items: start;
+}
+
+.vbs-curation-assist {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+}
+
 .vbs-chip-toggle {
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 24%, var(--bat-border));
@@ -926,6 +941,84 @@ a {
   border-radius: 0.65rem;
   font-size: 0.76rem;
   padding: 0.4rem 0.55rem;
+}
+
+.vbs-extraction-stage,
+.vbs-curation-shell {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.vbs-extraction-stage {
+  grid-template-columns: minmax(0, 1.15fr) minmax(260px, 0.85fr);
+}
+
+.vbs-extraction-launchpad,
+.vbs-extraction-source-card,
+.vbs-extraction-monitor,
+.vbs-curation-topline,
+.vbs-curation-assist {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 16%, var(--bat-border));
+  border-radius: 0.95rem;
+  background: color-mix(in srgb, white 95%, var(--vbs-sand));
+  padding: 0.8rem 0.85rem;
+}
+
+.vbs-extraction-launchpad h3,
+.vbs-extraction-source-card h4 {
+  margin: 0;
+  font-family: var(--vbs-display-font);
+  color: var(--vbs-ink);
+}
+
+.vbs-extraction-launchpad p:not(.vbs-meta),
+.vbs-extraction-source-card p:not(.vbs-meta) {
+  margin: 0.4rem 0 0;
+  color: color-mix(in srgb, var(--vbs-ink) 76%, #636d81);
+  line-height: 1.55;
+  font-size: 0.84rem;
+}
+
+.vbs-extraction-facts,
+.vbs-curation-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.65rem;
+}
+
+.vbs-extraction-facts > div,
+.vbs-curation-kpis > div {
+  border-radius: 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 14%, var(--bat-border));
+  background: color-mix(in srgb, white 88%, var(--vbs-sand));
+  padding: 0.55rem 0.65rem;
+  display: grid;
+  gap: 0.16rem;
+}
+
+.vbs-extraction-facts span,
+.vbs-curation-kpis span {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: color-mix(in srgb, var(--vbs-ink) 56%, #677188);
+}
+
+.vbs-extraction-facts strong,
+.vbs-curation-kpis strong {
+  font-size: 0.92rem;
+  color: var(--vbs-ink);
+}
+
+.vbs-extraction-source-grid {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.vbs-extraction-source-card {
+  display: grid;
+  gap: 0.45rem;
 }
 
 .vbs-ingestion-timeline {
@@ -1611,6 +1704,18 @@ a {
   padding: 1rem;
 }
 
+.vbs-modal-grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.85fr) minmax(0, 1.15fr);
+  gap: 0.9rem;
+}
+
+.vbs-modal-copy,
+.vbs-modal-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
 .vbs-modal h3 {
   margin: 0;
   font-family: var(--vbs-display-font);
@@ -1677,6 +1782,17 @@ a {
 }
 
 @media (max-width: 1100px) {
+  .vbs-extraction-stage,
+  .vbs-curation-topline,
+  .vbs-modal-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vbs-extraction-facts,
+  .vbs-curation-kpis {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .vbs-dna-flow,
   .vbs-dna-inline-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -1757,6 +1873,15 @@ a {
 }
 
 @media (max-width: 700px) {
+  .vbs-extraction-facts,
+  .vbs-curation-kpis {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vbs-curation-assist {
+    align-items: stretch;
+  }
+
   .vbs-dna-form-card,
   .vbs-dev-drawer,
   .vbs-dna-step-card {

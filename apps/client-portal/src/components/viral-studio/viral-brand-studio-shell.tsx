@@ -2846,146 +2846,240 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
             </div>
             <div className="vbs-grid">
               <article className="vbs-panel" id="vbs-section-extraction">
-              <h2 className="vbs-panel-title">Competitor Extraction</h2>
-              <div className="vbs-actions">
-                <button type="button" onClick={() => setShowExtractionModal(true)} disabled={isBusy}>
-                  Extract Best Videos
-                </button>
-                <button
-                  type="button"
-                  disabled={
-                    isBusy ||
-                    !activeIngestion ||
-                    (activeIngestion.status !== "failed" && activeIngestion.status !== "partial")
-                  }
-                  onClick={() => activeIngestion && void retryExtraction(activeIngestion.id)}
-                >
-                  Retry Active Run
-                </button>
-              </div>
-              {activeIngestion ? (
-                <div className="vbs-output">
-                  <p className="vbs-meta">
-                    Active run: {toPlatformLabel(activeIngestion.sourcePlatform)} • {statusLabel(activeIngestion.status)} • Attempt{" "}
-                    {activeIngestion.attempt || 1}
-                  </p>
-                  <p className="vbs-meta">
-                    Preset {toPresetLabel(activeIngestion.preset)} • {activeIngestion.maxVideos} videos •{" "}
-                    {activeIngestion.lookbackDays} days • Auto-refresh every 0.9s
-                  </p>
-                  <div className="vbs-ingestion-timeline">
-                    {ingestionTimeline.map((item) => (
-                      <div key={item.key} className="vbs-ingestion-step">
-                        <span>{item.label}</span>
-                        <strong>{item.value}</strong>
+                <div className="vbs-extraction-stage">
+                  <div className="vbs-extraction-launchpad">
+                    <p className="vbs-meta">Launch</p>
+                    <h3>Start with the strongest source, not a blank form</h3>
+                    <p>
+                      Viral Studio can start from suggested social sources immediately. Open the setup sheet when you need to
+                      adjust platform, preset, or volume.
+                    </p>
+                    <div className="vbs-extraction-facts">
+                      <div>
+                        <span>Top source</span>
+                        <strong>{latestSuggestedSource ? latestSuggestedSource.label : "Awaiting intake evidence"}</strong>
                       </div>
-                    ))}
-                  </div>
-                  {activeIngestion.error ? <p className="vbs-meta">Last warning: {activeIngestion.error}</p> : null}
-                </div>
-              ) : <p className="vbs-meta">No run yet.</p>}
-              <p className="vbs-meta">Run history ({ingestions.length})</p>
-              <div className="vbs-run-history">
-                {ingestions.slice(0, 6).map((run) => (
-                  <div key={run.id} className="vbs-run-row">
-                    <div>
-                      <p>
-                        {toPlatformLabel(run.sourcePlatform)} • {statusLabel(run.status)} • Attempt {run.attempt || 1}
-                      </p>
-                      <p className="vbs-meta">
-                        {run.progress.ranked}/{run.progress.found || run.maxVideos} ranked • {formatTimestamp(run.createdAt)}
-                      </p>
+                      <div>
+                        <span>Preset</span>
+                        <strong>{toPresetLabel(ingestionPreset)}</strong>
+                      </div>
+                      <div>
+                        <span>Depth</span>
+                        <strong>{maxVideos} videos</strong>
+                      </div>
                     </div>
-                    <div className="vbs-mini-actions">
-                      <button type="button" onClick={() => void openIngestionResults(run)} disabled={isBusy}>
-                        View Results
+                    <div className="vbs-actions">
+                      <button type="button" onClick={() => setShowExtractionModal(true)} disabled={isBusy}>
+                        Extract Best Videos
                       </button>
                       <button
                         type="button"
-                        onClick={() => void retryExtraction(run.id)}
-                        disabled={isBusy || (run.status !== "failed" && run.status !== "partial")}
+                        disabled={
+                          isBusy ||
+                          !activeIngestion ||
+                          (activeIngestion.status !== "failed" && activeIngestion.status !== "partial")
+                        }
+                        onClick={() => activeIngestion && void retryExtraction(activeIngestion.id)}
                       >
-                        Retry
+                        Retry Active Run
                       </button>
                     </div>
                   </div>
-                ))}
-                {ingestions.length === 0 ? <p className="vbs-meta">No extraction history yet.</p> : null}
-              </div>
+
+                  <div className="vbs-extraction-source-grid">
+                    {(suggestedSources.length ? suggestedSources.slice(0, 3) : [null]).map((source, index) =>
+                      source ? (
+                        <article key={`${source.platform}:${source.sourceUrl}`} className="vbs-extraction-source-card">
+                          <p className="vbs-meta">Suggested source {index + 1}</p>
+                          <h4>{source.label}</h4>
+                          <p>{source.sourceUrl}</p>
+                          <div className="vbs-mini-actions">
+                            <span className="vbs-chip-toggle is-active">
+                              {toPlatformLabel(source.platform)} • {Math.round((source.confidence || 0) * 100)}%
+                            </span>
+                            <button type="button" disabled={isBusy} onClick={() => selectSuggestedSource(source)}>
+                              Use Source
+                            </button>
+                          </div>
+                        </article>
+                      ) : (
+                        <article key="empty-source" className="vbs-extraction-source-card">
+                          <p className="vbs-meta">Suggested source</p>
+                          <h4>Need more intake evidence</h4>
+                          <p>Add or improve website and social inputs so the extraction setup can prefill high-confidence sources.</p>
+                        </article>
+                      )
+                    )}
+                  </div>
+                </div>
+
+                <div className="vbs-output vbs-extraction-monitor">
+                  <div className="vbs-curation-kpis">
+                    <div>
+                      <span>Status</span>
+                      <strong>{activeIngestion ? statusLabel(activeIngestion.status) : "Idle"}</strong>
+                    </div>
+                    <div>
+                      <span>Ranked</span>
+                      <strong>{activeIngestion ? activeIngestion.progress.ranked : 0}</strong>
+                    </div>
+                    <div>
+                      <span>Window</span>
+                      <strong>{activeIngestion ? `${activeIngestion.lookbackDays}d` : `${lookbackDays}d`}</strong>
+                    </div>
+                  </div>
+                  {activeIngestion ? (
+                    <>
+                      <p className="vbs-meta">
+                        Active run: {toPlatformLabel(activeIngestion.sourcePlatform)} • Attempt {activeIngestion.attempt || 1} •
+                        Preset {toPresetLabel(activeIngestion.preset)}
+                      </p>
+                      <div className="vbs-ingestion-timeline">
+                        {ingestionTimeline.map((item) => (
+                          <div key={item.key} className="vbs-ingestion-step">
+                            <span>{item.label}</span>
+                            <strong>{item.value}</strong>
+                          </div>
+                        ))}
+                      </div>
+                      {activeIngestion.error ? <p className="vbs-meta">Last warning: {activeIngestion.error}</p> : null}
+                    </>
+                  ) : (
+                    <p className="vbs-meta">No active run yet. Start with the suggested source or open the extraction sheet.</p>
+                  )}
+                </div>
+
+                <p className="vbs-meta">Run history ({ingestions.length})</p>
+                <div className="vbs-run-history">
+                  {ingestions.slice(0, 6).map((run) => (
+                    <div key={run.id} className="vbs-run-row">
+                      <div>
+                        <p>
+                          {toPlatformLabel(run.sourcePlatform)} • {statusLabel(run.status)} • Attempt {run.attempt || 1}
+                        </p>
+                        <p className="vbs-meta">
+                          {run.progress.ranked}/{run.progress.found || run.maxVideos} ranked • {formatTimestamp(run.createdAt)}
+                        </p>
+                      </div>
+                      <div className="vbs-mini-actions">
+                        <button type="button" onClick={() => void openIngestionResults(run)} disabled={isBusy}>
+                          View Results
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void retryExtraction(run.id)}
+                          disabled={isBusy || (run.status !== "failed" && run.status !== "partial")}
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {ingestions.length === 0 ? <p className="vbs-meta">No extraction history yet.</p> : null}
+                </div>
               </article>
 
               <article className="vbs-panel">
-              <h2 className="vbs-panel-title">Reference Curation</h2>
-              <p className="vbs-panel-subtitle">Ranked board with explainability, filter chips, and expandable analysis drawer.</p>
-              <div className="vbs-reference-toolbar">
-                <div className="vbs-mini-actions">
-                  <button
-                    type="button"
-                    aria-pressed={referenceViewMode === "grid"}
-                    className={referenceViewMode === "grid" ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
-                    onClick={() => setReferenceViewMode("grid")}
-                  >
-                    Grid
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={referenceViewMode === "list"}
-                    className={referenceViewMode === "list" ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
-                    onClick={() => setReferenceViewMode("list")}
-                  >
-                    List
-                  </button>
-                </div>
-                <div className="vbs-mini-actions">
-                  {[
-                    { key: "all", label: "All" },
-                    { key: "prioritized", label: "Prioritized" },
-                    { key: "must-use", label: "Must-use" },
-                    { key: "pin", label: "Pinned" },
-                    { key: "exclude", label: "Excluded" },
-                  ].map((chip) => (
+                <div className="vbs-curation-shell">
+                  <div className="vbs-curation-topline">
+                    <div>
+                      <h2 className="vbs-panel-title">Reference Curation</h2>
+                      <p className="vbs-panel-subtitle">Review the ranking, pick winners, and keep only what deserves to steer generation.</p>
+                    </div>
+                    <div className="vbs-curation-kpis">
+                      <div>
+                        <span>Must-use</span>
+                        <strong>{referenceCounts["must-use"]}</strong>
+                      </div>
+                      <div>
+                        <span>Pinned</span>
+                        <strong>{referenceCounts.pin}</strong>
+                      </div>
+                      <div>
+                        <span>Excluded</span>
+                        <strong>{referenceCounts.exclude}</strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="vbs-reference-toolbar">
+                    <div className="vbs-mini-actions">
+                      <button
+                        type="button"
+                        aria-pressed={referenceViewMode === "grid"}
+                        className={referenceViewMode === "grid" ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
+                        onClick={() => setReferenceViewMode("grid")}
+                      >
+                        Grid
+                      </button>
+                      <button
+                        type="button"
+                        aria-pressed={referenceViewMode === "list"}
+                        className={referenceViewMode === "list" ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
+                        onClick={() => setReferenceViewMode("list")}
+                      >
+                        List
+                      </button>
+                      <button type="button" disabled={isBusy || references.length === 0} onClick={() => void autoCurateTopReferences(references)}>
+                        Auto-Curate Top 3
+                      </button>
+                    </div>
+                    <div className="vbs-mini-actions">
+                      {[
+                        { key: "all", label: "All" },
+                        { key: "prioritized", label: "Prioritized" },
+                        { key: "must-use", label: "Must-use" },
+                        { key: "pin", label: "Pinned" },
+                        { key: "exclude", label: "Excluded" },
+                      ].map((chip) => (
+                        <button
+                          key={chip.key}
+                          type="button"
+                          aria-pressed={referenceFilter === chip.key}
+                          className={referenceFilter === chip.key ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
+                          onClick={() =>
+                            setReferenceFilter(
+                              chip.key as "all" | "prioritized" | "must-use" | "pin" | "exclude"
+                            )
+                          }
+                        >
+                          {chip.label} ({referenceCounts[chip.key as keyof typeof referenceCounts]})
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {curationNotice ? (
+                    <p className="vbs-curation-notice" role="status" aria-live="polite">
+                      {curationNotice}
+                    </p>
+                  ) : null}
+
+                  <div className="vbs-curation-assist">
+                    <div className="vbs-mini-actions">
+                      {(["all", "instagram", "tiktok", "youtube"] as const).map((platform) => (
+                        <button
+                          key={platform}
+                          type="button"
+                          aria-pressed={referencePlatformFilter === platform}
+                          className={referencePlatformFilter === platform ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
+                          onClick={() => setReferencePlatformFilter(platform)}
+                        >
+                          {platform === "all" ? "All Platforms" : toPlatformLabel(platform)}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="vbs-meta">Shortcuts: `1` pin, `2` must-use, `3` exclude, `0` clear.</p>
                     <button
-                      key={chip.key}
                       type="button"
-                      aria-pressed={referenceFilter === chip.key}
-                      className={referenceFilter === chip.key ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
-                      onClick={() =>
-                        setReferenceFilter(
-                          chip.key as "all" | "prioritized" | "must-use" | "pin" | "exclude"
-                        )
-                      }
+                      onClick={() => void sendShortlistToChat()}
+                      disabled={isBusy || filteredReferences.length === 0}
                     >
-                      {chip.label} ({referenceCounts[chip.key as keyof typeof referenceCounts]})
+                      Send Filtered Shortlist To Chat
                     </button>
-                  ))}
-                </div>
-              </div>
-              {curationNotice ? (
-                <p className="vbs-curation-notice" role="status" aria-live="polite">
-                  {curationNotice}
-                </p>
-              ) : null}
-              <div className="vbs-mini-actions" style={{ marginTop: "0.45rem" }}>
-                {(["all", "instagram", "tiktok", "youtube"] as const).map((platform) => (
-                  <button
-                    key={platform}
-                    type="button"
-                    aria-pressed={referencePlatformFilter === platform}
-                    className={referencePlatformFilter === platform ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
-                    onClick={() => setReferencePlatformFilter(platform)}
-                  >
-                    {platform === "all" ? "All Platforms" : toPlatformLabel(platform)}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => void sendShortlistToChat()}
-                  disabled={isBusy || filteredReferences.length === 0}
-                >
-                  Send Filtered Shortlist To Chat
-                </button>
-              </div>
-              <div className={referenceViewMode === "grid" ? "vbs-reference-board-grid" : "vbs-reference-board-list"}>
+                  </div>
+
+                  <div className={referenceViewMode === "grid" ? "vbs-reference-board-grid" : "vbs-reference-board-list"}>
                 {filteredReferences.map((reference) => (
                   <div
                     key={reference.id}
@@ -3011,6 +3105,13 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                       <p className="vbs-meta">
                         {formatCompactNumber(reference.metrics.views)} views • {formatTimestamp(reference.metrics.postedAt)}
                       </p>
+                      <div className="vbs-top-driver-row">
+                        {reference.explainability.topDrivers.slice(0, 2).map((driver) => (
+                          <span key={driver} className="vbs-driver-chip">
+                            {driver}
+                          </span>
+                        ))}
+                      </div>
                       <p className="vbs-meta">
                         {reference.explainability.topDrivers[0] || reference.ranking.rationaleBullets[0]}
                       </p>
@@ -3052,10 +3153,10 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                     </div>
                   </div>
                 ))}
-              </div>
-              {filteredReferences.length === 0 ? <p className="vbs-meta">No references match current filters.</p> : null}
-              {selectedReference && selectedReferenceInsights ? (
-                <div className="vbs-analysis-drawer">
+                  </div>
+                  {filteredReferences.length === 0 ? <p className="vbs-meta">No references match current filters.</p> : null}
+                  {selectedReference && selectedReferenceInsights ? (
+                    <div className="vbs-analysis-drawer">
                   <p className="vbs-meta">
                     Analysis Drawer • #{selectedReference.ranking.rank} • {toPlatformLabel(selectedReference.sourcePlatform)} •{" "}
                     {shortlistLabel(selectedReference.shortlistState)}
@@ -3139,8 +3240,9 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                       exclude, 0 clear
                     </p>
                   </div>
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
               </article>
             </div>
           </article>
@@ -3500,62 +3602,108 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
           onClick={() => setShowExtractionModal(false)}
         >
           <div className="vbs-modal" onClick={(event) => event.stopPropagation()}>
-            <h3>Extract Best Videos</h3>
-            <p className="vbs-meta">
-              Configure platform, profile URL, preset, and extraction volume. Progress updates automatically while the
-              run is active.
-            </p>
-            <div className="vbs-form-grid">
-              <label>
-                Platform
-                <select value={sourcePlatform} onChange={(e) => setSourcePlatform(e.target.value as ViralStudioPlatform)}>
-                  <option value="instagram">Instagram</option>
-                  <option value="tiktok">TikTok</option>
-                  <option value="youtube">YouTube</option>
-                </select>
-              </label>
-              <label>
-                Source URL
-                <input value={sourceUrl} placeholder="https://..." onChange={(e) => setSourceUrl(e.target.value)} />
-              </label>
-              <label>
-                Filter Preset
-                <select
-                  value={ingestionPreset}
-                  onChange={(e) => applyIngestionPreset(e.target.value as IngestionPreset)}
-                >
-                  <option value="data-max">Data max (Recommended)</option>
-                  <option value="balanced">Balanced</option>
-                  <option value="quick-scan">Quick Scan</option>
-                  <option value="deep-scan">Deep Scan</option>
-                </select>
-              </label>
-              <label>
-                Volume (max videos): {maxVideos}
-                <input
-                  type="range"
-                  min={5}
-                  max={200}
-                  value={maxVideos}
-                  onChange={(e) => setMaxVideos(Number(e.target.value))}
-                />
-              </label>
-              <label>
-                Lookback Days
-                <input
-                  type="number"
-                  min={7}
-                  max={365}
-                  value={lookbackDays}
-                  onChange={(e) => setLookbackDays(Number(e.target.value))}
-                />
-              </label>
-              <label>
-                Sort By
-                <select value="engagement" disabled>
-                  <option value="engagement">Engagement (default)</option>
-                </select>
-              </label>
+            <div className="vbs-modal-grid">
+              <div className="vbs-modal-copy">
+                <h3>Extract Best Videos</h3>
+                <p className="vbs-meta">
+                  Start from the strongest source, choose the scan depth, and let the run pipeline handle the rest.
+                </p>
+                <div className="vbs-extraction-facts">
+                  <div>
+                    <span>Recommended</span>
+                    <strong>Data max</strong>
+                  </div>
+                  <div>
+                    <span>Volume</span>
+                    <strong>{maxVideos} videos</strong>
+                  </div>
+                  <div>
+                    <span>Lookback</span>
+                    <strong>{lookbackDays} days</strong>
+                  </div>
+                </div>
+                {suggestedSources.length ? (
+                  <div className="vbs-source-suggest-list">
+                    {suggestedSources.slice(0, 3).map((source) => (
+                      <button
+                        key={`${source.platform}:${source.sourceUrl}`}
+                        type="button"
+                        className="vbs-source-suggest-row"
+                        onClick={() => {
+                          setSourcePlatform(source.platform);
+                          setSourceUrl(source.sourceUrl);
+                          applyIngestionPreset("data-max");
+                        }}
+                      >
+                        <div>
+                          <p>
+                            <strong>{source.label}</strong>
+                          </p>
+                          <p className="vbs-meta">
+                            {toPlatformLabel(source.platform)} • {Math.round((source.confidence || 0) * 100)}%
+                          </p>
+                        </div>
+                        <span className="vbs-meta">Apply</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="vbs-modal-form">
+                <div className="vbs-form-grid">
+                  <label>
+                    Platform
+                    <select value={sourcePlatform} onChange={(e) => setSourcePlatform(e.target.value as ViralStudioPlatform)}>
+                      <option value="instagram">Instagram</option>
+                      <option value="tiktok">TikTok</option>
+                      <option value="youtube">YouTube</option>
+                    </select>
+                  </label>
+                  <label>
+                    Source URL
+                    <input value={sourceUrl} placeholder="https://..." onChange={(e) => setSourceUrl(e.target.value)} />
+                  </label>
+                  <label>
+                    Filter Preset
+                    <select
+                      value={ingestionPreset}
+                      onChange={(e) => applyIngestionPreset(e.target.value as IngestionPreset)}
+                    >
+                      <option value="data-max">Data max (Recommended)</option>
+                      <option value="balanced">Balanced</option>
+                      <option value="quick-scan">Quick Scan</option>
+                      <option value="deep-scan">Deep Scan</option>
+                    </select>
+                  </label>
+                  <label>
+                    Volume (max videos): {maxVideos}
+                    <input
+                      type="range"
+                      min={5}
+                      max={200}
+                      value={maxVideos}
+                      onChange={(e) => setMaxVideos(Number(e.target.value))}
+                    />
+                  </label>
+                  <label>
+                    Lookback Days
+                    <input
+                      type="number"
+                      min={7}
+                      max={365}
+                      value={lookbackDays}
+                      onChange={(e) => setLookbackDays(Number(e.target.value))}
+                    />
+                  </label>
+                  <label>
+                    Sort By
+                    <select value="engagement" disabled>
+                      <option value="engagement">Engagement (default)</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
             </div>
             <div className="vbs-actions">
               <button type="button" onClick={() => setShowExtractionModal(false)} disabled={isBusy}>
