@@ -1619,6 +1619,101 @@ select:focus-visible {
   gap: 0.8rem;
 }
 
+.vbs-curation-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+  gap: 0.85rem;
+  align-items: start;
+}
+
+.vbs-reference-board-shell,
+.vbs-analysis-sidecar {
+  min-width: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.vbs-reference-workspace-head {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.vbs-reference-focus-card {
+  display: grid;
+  grid-template-columns: minmax(168px, 0.62fr) minmax(0, 1.38fr);
+  gap: 0.8rem;
+  padding: 0.85rem;
+  border-radius: 1rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-line) 86%, transparent);
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--bat-accent-soft) 34%, transparent) 0%, transparent 34%),
+    color-mix(in srgb, var(--vbs-card-strong) 94%, transparent);
+}
+
+.vbs-reference-focus-poster {
+  position: relative;
+  min-height: 13rem;
+  border-radius: 0.95rem;
+  overflow: hidden;
+  background: var(--vbs-media-frame);
+}
+
+.vbs-reference-focus-copy {
+  display: grid;
+  gap: 0.45rem;
+  align-content: start;
+}
+
+.vbs-reference-focus-copy h3 {
+  margin: 0;
+  font-family: var(--vbs-editorial-font);
+  font-size: clamp(1.15rem, 1.4vw, 1.55rem);
+  line-height: 1.04;
+  color: var(--vbs-copy);
+}
+
+.vbs-reference-focus-copy > p:last-of-type {
+  margin: 0;
+  color: var(--vbs-copy-soft);
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.vbs-reference-focus-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.vbs-reference-focus-metrics > div {
+  display: grid;
+  gap: 0.16rem;
+  padding: 0.68rem 0.74rem;
+  border-radius: 0.92rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-line) 84%, transparent);
+  background: color-mix(in srgb, var(--vbs-handler) 78%, transparent);
+}
+
+.vbs-reference-focus-metrics span,
+.vbs-reference-card-metrics span {
+  font-size: 0.67rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--vbs-copy-soft);
+}
+
+.vbs-reference-focus-metrics strong {
+  color: var(--vbs-copy);
+  font-family: var(--vbs-display-font);
+}
+
+.vbs-reference-board-wrap,
+.vbs-analysis-sidecar {
+  max-height: min(54dvh, 48rem);
+  overflow-y: auto;
+  padding-right: 0.18rem;
+}
+
 .vbs-extraction-stage {
   grid-template-columns: minmax(0, 1.15fr) minmax(260px, 0.85fr);
 }
@@ -1742,14 +1837,12 @@ select:focus-visible {
 }
 
 .vbs-reference-board-grid {
-  margin-top: 0.6rem;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.55rem;
 }
 
 .vbs-reference-board-list {
-  margin-top: 0.6rem;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 0.55rem;
@@ -1874,6 +1967,21 @@ select:focus-visible {
   gap: 0.45rem;
 }
 
+.vbs-reference-card-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.vbs-reference-card-metrics span {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--vbs-line) 84%, transparent);
+  background: color-mix(in srgb, var(--vbs-card-strong) 92%, transparent);
+  padding: 0.28rem 0.56rem;
+}
+
 .vbs-reference-card-copy {
   display: grid;
   gap: 0.2rem;
@@ -1927,7 +2035,7 @@ select:focus-visible {
 }
 
 .vbs-analysis-drawer {
-  margin-top: 0.75rem;
+  margin-top: 0;
   border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 30%, var(--bat-border));
   border-radius: 0.8rem;
   background:
@@ -1945,12 +2053,20 @@ select:focus-visible {
   align-items: stretch;
 }
 
+.vbs-analysis-sidecar .vbs-analysis-hero {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .vbs-analysis-poster {
   position: relative;
   min-height: 22rem;
   border-radius: 1rem;
   overflow: hidden;
   background: #0b132b;
+}
+
+.vbs-analysis-sidecar .vbs-analysis-poster {
+  min-height: 16rem;
 }
 
 .vbs-analysis-story {
@@ -2109,6 +2225,44 @@ select:focus-visible {
   margin-top: 0.65rem;
   border-top: 1px dashed color-mix(in srgb, var(--vbs-cobalt) 24%, var(--bat-border));
   padding-top: 0.55rem;
+}
+
+.vbs-analysis-why {
+  display: grid;
+  gap: 0.42rem;
+}
+
+.vbs-analysis-why h4 {
+  margin: 0;
+  font-size: 0.84rem;
+  font-family: var(--vbs-display-font);
+  color: var(--vbs-copy);
+}
+
+.vbs-analysis-why ul {
+  margin: 0;
+  padding-left: 1rem;
+  display: grid;
+  gap: 0.28rem;
+}
+
+.vbs-analysis-why li {
+  color: var(--vbs-copy-soft);
+  font-size: 0.8rem;
+  line-height: 1.48;
+}
+
+.vbs-analysis-empty h3 {
+  margin: 0;
+  font-family: var(--vbs-display-font);
+  font-size: 1rem;
+  color: var(--vbs-copy);
+}
+
+.vbs-analysis-empty p:last-child {
+  margin: 0;
+  color: var(--vbs-copy-soft);
+  line-height: 1.58;
 }
 
 .vbs-source-context h4 {
@@ -2983,6 +3137,18 @@ select:focus-visible {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .vbs-curation-layout,
+  .vbs-reference-focus-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vbs-reference-board-wrap,
+  .vbs-analysis-sidecar {
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+  }
+
   .vbs-analysis-hero,
   .vbs-analysis-story-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -3022,6 +3188,10 @@ select:focus-visible {
 
   .vbs-curation-assist {
     align-items: stretch;
+  }
+
+  .vbs-reference-focus-metrics {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .vbs-dna-form-card,

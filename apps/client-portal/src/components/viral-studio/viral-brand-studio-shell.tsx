@@ -1358,6 +1358,10 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     );
   }, [filteredReferences, references, selectedReferenceId]);
 
+  const selectedReferenceVisual = useMemo(() => {
+    return selectedReference ? resolveReferenceVisual(selectedReference) : null;
+  }, [selectedReference]);
+
   const comparedReferences = useMemo(() => {
     return compareReferenceIds
       .map((id) => references.find((item) => item.id === id))
@@ -4387,380 +4391,450 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                     </div>
                   </div>
 
-                  <div className="vbs-reference-toolbar">
-                    <div className="vbs-mini-actions">
-                      <button
-                        type="button"
-                        aria-pressed={referenceViewMode === "grid"}
-                        className={referenceViewMode === "grid" ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
-                        onClick={() => setReferenceViewMode("grid")}
-                      >
-                        Grid
-                      </button>
-                      <button
-                        type="button"
-                        aria-pressed={referenceViewMode === "list"}
-                        className={referenceViewMode === "list" ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
-                        onClick={() => setReferenceViewMode("list")}
-                      >
-                        List
-                      </button>
-                      <button type="button" disabled={isBusy || references.length === 0} onClick={() => void autoCurateTopReferences(references)}>
-                        Auto-Curate Top 3
-                      </button>
-                    </div>
-                    <div className="vbs-mini-actions">
-                      {[
-                        { key: "all", label: "All" },
-                        { key: "prioritized", label: "Prioritized" },
-                        { key: "must-use", label: "Must-use" },
-                        { key: "pin", label: "Pinned" },
-                        { key: "exclude", label: "Excluded" },
-                      ].map((chip) => (
-                        <button
-                          key={chip.key}
-                          type="button"
-                          aria-pressed={referenceFilter === chip.key}
-                          className={referenceFilter === chip.key ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
-                          onClick={() =>
-                            setReferenceFilter(
-                              chip.key as "all" | "prioritized" | "must-use" | "pin" | "exclude"
-                            )
-                          }
-                        >
-                          {chip.label} ({referenceCounts[chip.key as keyof typeof referenceCounts]})
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                  <div className="vbs-curation-layout">
+                    <div className="vbs-reference-board-shell">
+                      <div className="vbs-reference-workspace-head">
+                        <div className="vbs-reference-toolbar">
+                          <div className="vbs-mini-actions">
+                            <button
+                              type="button"
+                              aria-pressed={referenceViewMode === "grid"}
+                              className={referenceViewMode === "grid" ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
+                              onClick={() => setReferenceViewMode("grid")}
+                            >
+                              Grid
+                            </button>
+                            <button
+                              type="button"
+                              aria-pressed={referenceViewMode === "list"}
+                              className={referenceViewMode === "list" ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
+                              onClick={() => setReferenceViewMode("list")}
+                            >
+                              List
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isBusy || references.length === 0}
+                              onClick={() => void autoCurateTopReferences(references)}
+                            >
+                              Auto-Curate Top 3
+                            </button>
+                          </div>
+                          <div className="vbs-mini-actions">
+                            {[
+                              { key: "all", label: "All" },
+                              { key: "prioritized", label: "Prioritized" },
+                              { key: "must-use", label: "Must-use" },
+                              { key: "pin", label: "Pinned" },
+                              { key: "exclude", label: "Excluded" },
+                            ].map((chip) => (
+                              <button
+                                key={chip.key}
+                                type="button"
+                                aria-pressed={referenceFilter === chip.key}
+                                className={referenceFilter === chip.key ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
+                                onClick={() =>
+                                  setReferenceFilter(chip.key as "all" | "prioritized" | "must-use" | "pin" | "exclude")
+                                }
+                              >
+                                {chip.label} ({referenceCounts[chip.key as keyof typeof referenceCounts]})
+                              </button>
+                            ))}
+                          </div>
+                        </div>
 
-                  {curationNotice ? (
-                    <p className="vbs-curation-notice" role="status" aria-live="polite">
-                      {curationNotice}
-                    </p>
-                  ) : null}
+                        {curationNotice ? (
+                          <p className="vbs-curation-notice" role="status" aria-live="polite">
+                            {curationNotice}
+                          </p>
+                        ) : null}
 
-                  <div className="vbs-curation-assist">
-                    <div className="vbs-mini-actions">
-                      {(["all", "instagram", "tiktok", "youtube"] as const).map((platform) => (
-                        <button
-                          key={platform}
-                          type="button"
-                          aria-pressed={referencePlatformFilter === platform}
-                          className={referencePlatformFilter === platform ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
-                          onClick={() => setReferencePlatformFilter(platform)}
-                        >
-                          {platform === "all" ? "All Platforms" : toPlatformLabel(platform)}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="vbs-shortlist-handler-rail">
-                      <button
-                        type="button"
-                        disabled={!selectedReference || Boolean(selectedReference && shortlistPendingById[selectedReference.id])}
-                        onClick={() => selectedReference && void shortlistReference(selectedReference.id, "pin")}
-                      >
-                        <Pin className="h-4 w-4" />
-                        Pin
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!selectedReference || Boolean(selectedReference && shortlistPendingById[selectedReference.id])}
-                        onClick={() => selectedReference && void shortlistReference(selectedReference.id, "must-use")}
-                      >
-                        <CheckCircle2 className="h-4 w-4" />
-                        Must-use
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!selectedReference || Boolean(selectedReference && shortlistPendingById[selectedReference.id])}
-                        onClick={() => selectedReference && void shortlistReference(selectedReference.id, "exclude")}
-                      >
-                        <CircleOff className="h-4 w-4" />
-                        Exclude
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!selectedReference || Boolean(selectedReference && shortlistPendingById[selectedReference.id])}
-                        onClick={() => selectedReference && void shortlistReference(selectedReference.id, "clear")}
-                      >
-                        <ArrowLeft className="h-4 w-4" />
-                        Clear
-                      </button>
-                      <button
-                        type="button"
-                        aria-pressed={selectedReference ? compareReferenceIds.includes(selectedReference.id) : false}
-                        disabled={!selectedReference}
-                        onClick={() => selectedReference && toggleCompareReference(selectedReference.id)}
-                      >
-                        <Layers3 className="h-4 w-4" />
-                        Compare
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void sendShortlistToChat()}
-                        disabled={isBusy || filteredReferences.length === 0}
-                      >
-                        <Send className="h-4 w-4" />
-                        Send to chat
-                      </button>
-                    </div>
-                    <div className="vbs-shortcut-chips" aria-label="Keyboard shortcuts">
-                      <span>1 Pin</span>
-                      <span>2 Must-use</span>
-                      <span>3 Exclude</span>
-                      <span>0 Clear</span>
-                    </div>
-                  </div>
+                        <div className="vbs-curation-assist">
+                          <div className="vbs-mini-actions">
+                            {(["all", "instagram", "tiktok", "youtube"] as const).map((platform) => (
+                              <button
+                                key={platform}
+                                type="button"
+                                aria-pressed={referencePlatformFilter === platform}
+                                className={referencePlatformFilter === platform ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
+                                onClick={() => setReferencePlatformFilter(platform)}
+                              >
+                                {platform === "all" ? "All Platforms" : toPlatformLabel(platform)}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="vbs-shortlist-handler-rail">
+                            <button
+                              type="button"
+                              disabled={!selectedReference || Boolean(selectedReference && shortlistPendingById[selectedReference.id])}
+                              onClick={() => selectedReference && void shortlistReference(selectedReference.id, "pin")}
+                            >
+                              <Pin className="h-4 w-4" />
+                              Pin
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!selectedReference || Boolean(selectedReference && shortlistPendingById[selectedReference.id])}
+                              onClick={() => selectedReference && void shortlistReference(selectedReference.id, "must-use")}
+                            >
+                              <CheckCircle2 className="h-4 w-4" />
+                              Must-use
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!selectedReference || Boolean(selectedReference && shortlistPendingById[selectedReference.id])}
+                              onClick={() => selectedReference && void shortlistReference(selectedReference.id, "exclude")}
+                            >
+                              <CircleOff className="h-4 w-4" />
+                              Exclude
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!selectedReference || Boolean(selectedReference && shortlistPendingById[selectedReference.id])}
+                              onClick={() => selectedReference && void shortlistReference(selectedReference.id, "clear")}
+                            >
+                              <ArrowLeft className="h-4 w-4" />
+                              Clear
+                            </button>
+                            <button
+                              type="button"
+                              aria-pressed={selectedReference ? compareReferenceIds.includes(selectedReference.id) : false}
+                              disabled={!selectedReference}
+                              onClick={() => selectedReference && toggleCompareReference(selectedReference.id)}
+                            >
+                              <Layers3 className="h-4 w-4" />
+                              Compare
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void sendShortlistToChat()}
+                              disabled={isBusy || filteredReferences.length === 0}
+                            >
+                              <Send className="h-4 w-4" />
+                              Send to chat
+                            </button>
+                          </div>
+                          <div className="vbs-shortcut-chips" aria-label="Keyboard shortcuts">
+                            <span>1 Pin</span>
+                            <span>2 Must-use</span>
+                            <span>3 Exclude</span>
+                            <span>0 Clear</span>
+                          </div>
+                        </div>
+                      </div>
 
-                  <div className={referenceViewMode === "grid" ? "vbs-reference-board-grid" : "vbs-reference-board-list"}>
-                    {filteredReferences.map((reference) => {
-                      const visual = resolveReferenceVisual(reference);
-                      return (
-                        <div
-                          key={reference.id}
-                          className={[
-                            "vbs-reference-card",
-                            selectedReference?.id === reference.id ? "is-selected" : "",
-                            compareReferenceIds.includes(reference.id) ? "is-compare" : "",
-                            recentShortlistReferenceId === reference.id ? "is-updated" : "",
-                          ]
-                            .filter(Boolean)
-                            .join(" ")}
-                        >
-                          <button
-                            type="button"
-                            className="vbs-reference-card-head"
-                            onClick={() => setSelectedReferenceId(reference.id)}
-                          >
-                              <div className="vbs-reference-poster">
-                              <Image
-                                src={visual.posterUrl}
-                                alt={`${toPlatformLabel(reference.sourcePlatform)} reference preview`}
-                                fill
-                                unoptimized
-                                sizes="(max-width: 1100px) 100vw, 33vw"
-                              />
-                              <div className="vbs-reference-poster-top">
-                                <span className="vbs-rank-badge">#{reference.ranking.rank}</span>
-                                <span className={`vbs-reference-state vbs-reference-state-${reference.shortlistState}`}>
-                                  {shortlistLabel(reference.shortlistState)}
-                                </span>
+                      {selectedReference && selectedReferenceInsights && selectedReferenceVisual ? (
+                        <div className="vbs-reference-focus-card">
+                          <div className="vbs-reference-focus-poster">
+                            <Image
+                              src={selectedReferenceVisual.posterUrl}
+                              alt={`${toPlatformLabel(selectedReference.sourcePlatform)} selected reference poster`}
+                              fill
+                              unoptimized
+                              sizes="(max-width: 1100px) 100vw, 28vw"
+                            />
+                          </div>
+                          <div className="vbs-reference-focus-copy">
+                            <p className="vbs-meta">Selected winner</p>
+                            <h3>{selectedReferenceVisual.headline}</h3>
+                            <p>{selectedReference.ranking.rationaleTitle}</p>
+                            <div className="vbs-reference-focus-metrics">
+                              <div>
+                                <span>Score</span>
+                                <strong>{selectedReference.scores.composite.toFixed(3)}</strong>
                               </div>
-                              <div className="vbs-reference-poster-bottom">
-                                <p className="vbs-reference-eyebrow">{visual.eyebrow}</p>
-                                <h3>{visual.headline}</h3>
-                                <p>{visual.footer}</p>
+                              <div>
+                                <span>Views</span>
+                                <strong>{formatCompactNumber(selectedReference.metrics.views)}</strong>
+                              </div>
+                              <div>
+                                <span>Age</span>
+                                <strong>
+                                  {selectedReferenceInsights.postedAgeDays === null
+                                    ? "n/a"
+                                    : `${selectedReferenceInsights.postedAgeDays}d`}
+                                </strong>
                               </div>
                             </div>
-                            <div className="vbs-reference-card-summary">
-                              <div className="vbs-reference-card-copy">
-                                <p>{reference.ranking.rationaleTitle}</p>
-                                <p className="vbs-meta">
-                                  {toPlatformLabel(reference.sourcePlatform)} • score {reference.scores.composite.toFixed(3)} •{" "}
-                                  {formatCompactNumber(reference.metrics.views)} views
-                                </p>
+                            <div className="vbs-top-driver-row">
+                              {selectedReference.explainability.topDrivers.map((driver) => (
+                                <span key={driver} className="vbs-driver-chip">
+                                  {driver}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      <div className="vbs-reference-board-wrap">
+                        <div className={referenceViewMode === "grid" ? "vbs-reference-board-grid" : "vbs-reference-board-list"}>
+                          {filteredReferences.map((reference) => {
+                            const visual = resolveReferenceVisual(reference);
+                            const interactionRate =
+                              ((reference.metrics.likes + reference.metrics.comments + reference.metrics.shares) /
+                                Math.max(1, reference.metrics.views)) *
+                              100;
+                            const postedAgeDays = daysSinceIso(reference.metrics.postedAt);
+                            return (
+                              <div
+                                key={reference.id}
+                                className={[
+                                  "vbs-reference-card",
+                                  selectedReference?.id === reference.id ? "is-selected" : "",
+                                  compareReferenceIds.includes(reference.id) ? "is-compare" : "",
+                                  recentShortlistReferenceId === reference.id ? "is-updated" : "",
+                                ]
+                                  .filter(Boolean)
+                                  .join(" ")}
+                              >
+                                <button
+                                  type="button"
+                                  className="vbs-reference-card-head"
+                                  onClick={() => setSelectedReferenceId(reference.id)}
+                                >
+                                  <div className="vbs-reference-poster">
+                                    <Image
+                                      src={visual.posterUrl}
+                                      alt={`${toPlatformLabel(reference.sourcePlatform)} reference preview`}
+                                      fill
+                                      unoptimized
+                                      sizes="(max-width: 1100px) 100vw, 33vw"
+                                    />
+                                    <div className="vbs-reference-poster-top">
+                                      <span className="vbs-rank-badge">#{reference.ranking.rank}</span>
+                                      <span className={`vbs-reference-state vbs-reference-state-${reference.shortlistState}`}>
+                                        {shortlistLabel(reference.shortlistState)}
+                                      </span>
+                                    </div>
+                                    <div className="vbs-reference-poster-bottom">
+                                      <p className="vbs-reference-eyebrow">{visual.eyebrow}</p>
+                                      <h3>{visual.headline}</h3>
+                                      <p>{visual.footer}</p>
+                                    </div>
+                                  </div>
+                                  <div className="vbs-reference-card-summary">
+                                    <div className="vbs-reference-card-copy">
+                                      <p>{reference.ranking.rationaleTitle}</p>
+                                      <p className="vbs-meta">
+                                        {toPlatformLabel(reference.sourcePlatform)} • score {reference.scores.composite.toFixed(3)} •{" "}
+                                        {formatCompactNumber(reference.metrics.views)} views
+                                      </p>
+                                    </div>
+                                    <div className="vbs-reference-card-metrics">
+                                      <span>{interactionRate.toFixed(1)}% interaction</span>
+                                      <span>{postedAgeDays === null ? "n/a" : `${postedAgeDays}d old`}</span>
+                                      <span>{reference.explainability.formulaVersion}</span>
+                                    </div>
+                                    <div className="vbs-top-driver-row">
+                                      {reference.explainability.topDrivers.slice(0, 3).map((driver) => (
+                                        <span key={driver} className="vbs-driver-chip">
+                                          {driver}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </button>
+                                <div className="vbs-mini-actions vbs-shortlist-actions">
+                                  {(
+                                    [
+                                      { key: "pin", label: "Pin" },
+                                      { key: "must-use", label: "Must-use" },
+                                      { key: "exclude", label: "Exclude" },
+                                      { key: "clear", label: "Clear" },
+                                    ] as Array<{ key: ReferenceShortlistAction; label: string }>
+                                  ).map((item) => {
+                                    const pendingAction = shortlistPendingById[reference.id];
+                                    const isPending = pendingAction === item.key;
+                                    const isActive =
+                                      item.key === "clear"
+                                        ? reference.shortlistState === "none"
+                                        : reference.shortlistState === item.key;
+                                    return (
+                                      <button
+                                        key={item.key}
+                                        type="button"
+                                        aria-pressed={isActive}
+                                        className={[
+                                          "vbs-action-chip",
+                                          `vbs-action-${item.key}`,
+                                          isActive ? "is-active" : "",
+                                        ]
+                                          .filter(Boolean)
+                                          .join(" ")}
+                                        onClick={() => void shortlistReference(reference.id, item.key)}
+                                        disabled={Boolean(pendingAction)}
+                                      >
+                                        {isPending ? `${item.label}…` : item.label}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        {filteredReferences.length === 0 ? <p className="vbs-meta">No references match current filters.</p> : null}
+                      </div>
+                    </div>
+
+                    <aside className="vbs-analysis-sidecar">
+                      {selectedReference && selectedReferenceInsights && selectedReferenceVisual ? (
+                        <div className="vbs-analysis-drawer">
+                          <p className="vbs-meta">
+                            Analysis Drawer • #{selectedReference.ranking.rank} • {toPlatformLabel(selectedReference.sourcePlatform)} •{" "}
+                            {shortlistLabel(selectedReference.shortlistState)}
+                          </p>
+                          <div className="vbs-analysis-hero">
+                            <div className="vbs-analysis-poster">
+                              <Image
+                                src={selectedReferenceVisual.posterUrl}
+                                alt={`${toPlatformLabel(selectedReference.sourcePlatform)} reference analysis preview`}
+                                fill
+                                unoptimized
+                                sizes="(max-width: 1100px) 100vw, 40vw"
+                              />
+                            </div>
+                            <div className="vbs-analysis-story">
+                              <div className="vbs-analysis-story-head">
+                                <h3>{selectedReferenceVisual.headline}</h3>
+                                <p>{selectedReference.ranking.rationaleTitle}</p>
                               </div>
                               <div className="vbs-top-driver-row">
-                                {reference.explainability.topDrivers.slice(0, 2).map((driver) => (
+                                {selectedReference.explainability.topDrivers.map((driver) => (
                                   <span key={driver} className="vbs-driver-chip">
                                     {driver}
                                   </span>
                                 ))}
                               </div>
+                              <div className="vbs-analysis-story-grid">
+                                <article>
+                                  <span>Hook</span>
+                                  <strong>{compactText(selectedReference.caption, 120)}</strong>
+                                </article>
+                                <article>
+                                  <span>Narrative Beat</span>
+                                  <strong>{compactText(selectedReference.transcriptSummary, 120)}</strong>
+                                </article>
+                                <article>
+                                  <span>On-screen Text</span>
+                                  <strong>{compactText(selectedReference.ocrSummary, 120)}</strong>
+                                </article>
+                              </div>
                             </div>
-                          </button>
-                          <div className="vbs-mini-actions vbs-shortlist-actions">
-                            {(
-                              [
-                                { key: "pin", label: "Pin" },
-                                { key: "must-use", label: "Must-use" },
-                                { key: "exclude", label: "Exclude" },
-                                { key: "clear", label: "Clear" },
-                              ] as Array<{ key: ReferenceShortlistAction; label: string }>
-                            ).map((item) => {
-                              const pendingAction = shortlistPendingById[reference.id];
-                              const isPending = pendingAction === item.key;
-                              const isActive =
-                                item.key === "clear"
-                                  ? reference.shortlistState === "none"
-                                  : reference.shortlistState === item.key;
-                              return (
-                                <button
-                                  key={item.key}
-                                  type="button"
-                                  aria-pressed={isActive}
-                                  className={[
-                                    "vbs-action-chip",
-                                    `vbs-action-${item.key}`,
-                                    isActive ? "is-active" : "",
-                                  ]
-                                    .filter(Boolean)
-                                    .join(" ")}
-                                  onClick={() => void shortlistReference(reference.id, item.key)}
-                                  disabled={Boolean(pendingAction)}
-                                >
-                                  {isPending ? `${item.label}…` : item.label}
-                                </button>
-                              );
-                            })}
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  {filteredReferences.length === 0 ? <p className="vbs-meta">No references match current filters.</p> : null}
-                  {selectedReference && selectedReferenceInsights ? (
-                    <div className="vbs-analysis-drawer">
-                      {(() => {
-                        const visual = resolveReferenceVisual(selectedReference);
-                        return (
-                          <>
-                            <p className="vbs-meta">
-                              Analysis Drawer • #{selectedReference.ranking.rank} • {toPlatformLabel(selectedReference.sourcePlatform)} •{" "}
-                              {shortlistLabel(selectedReference.shortlistState)}
-                            </p>
-                            <div className="vbs-analysis-hero">
-                              <div className="vbs-analysis-poster">
-                                <Image
-                                  src={visual.posterUrl}
-                                  alt={`${toPlatformLabel(selectedReference.sourcePlatform)} reference analysis preview`}
-                                  fill
-                                  unoptimized
-                                  sizes="(max-width: 1100px) 100vw, 40vw"
-                                />
-                              </div>
-                              <div className="vbs-analysis-story">
-                                <div className="vbs-analysis-story-head">
-                                  <h3>{visual.headline}</h3>
-                                  <p>{selectedReference.ranking.rationaleTitle}</p>
-                                </div>
-                                <div className="vbs-top-driver-row">
-                                  {selectedReference.explainability.topDrivers.map((driver) => (
-                                    <span key={driver} className="vbs-driver-chip">
-                                      {driver}
-                                    </span>
-                                  ))}
-                                </div>
-                                <div className="vbs-analysis-story-grid">
-                                  <article>
-                                    <span>Hook</span>
-                                    <strong>{compactText(selectedReference.caption, 120)}</strong>
-                                  </article>
-                                  <article>
-                                    <span>Narrative Beat</span>
-                                    <strong>{compactText(selectedReference.transcriptSummary, 120)}</strong>
-                                  </article>
-                                  <article>
-                                    <span>On-screen Text</span>
-                                    <strong>{compactText(selectedReference.ocrSummary, 120)}</strong>
-                                  </article>
-                                </div>
-                              </div>
+                          <div className="vbs-analysis-kpi-grid">
+                            <div>
+                              <span>Composite</span>
+                              <strong>{selectedReference.scores.composite.toFixed(3)}</strong>
+                              <p
+                                className={
+                                  selectedReferenceInsights.compositeDelta >= 0 ? "vbs-delta-positive" : "vbs-delta-negative"
+                                }
+                              >
+                                {selectedReferenceInsights.compositeDelta >= 0 ? "+" : ""}
+                                {selectedReferenceInsights.compositeDelta.toFixed(3)} vs board avg{" "}
+                                {selectedReferenceInsights.avgComposite.toFixed(3)}
+                              </p>
                             </div>
-                            <div className="vbs-analysis-kpi-grid">
-                              <div>
-                                <span>Composite</span>
-                                <strong>{selectedReference.scores.composite.toFixed(3)}</strong>
-                                <p
-                                  className={
-                                    selectedReferenceInsights.compositeDelta >= 0 ? "vbs-delta-positive" : "vbs-delta-negative"
-                                  }
-                                >
-                                  {selectedReferenceInsights.compositeDelta >= 0 ? "+" : ""}
-                                  {selectedReferenceInsights.compositeDelta.toFixed(3)} vs board avg{" "}
-                                  {selectedReferenceInsights.avgComposite.toFixed(3)}
-                                </p>
-                              </div>
-                              <div>
-                                <span>Views</span>
-                                <strong>{formatCompactNumber(selectedReference.metrics.views)}</strong>
-                                <p>{selectedReference.metrics.likes} likes • {selectedReference.metrics.comments} comments</p>
-                              </div>
-                              <div>
-                                <span>Interaction Rate</span>
-                                <strong>{formatUnitPercent(selectedReferenceInsights.interactionRateRaw)}</strong>
-                                <p>{selectedReference.metrics.shares} shares</p>
-                              </div>
-                              <div>
-                                <span>Recency</span>
-                                <strong>
-                                  {selectedReferenceInsights.postedAgeDays === null
-                                    ? "n/a"
-                                    : `${selectedReferenceInsights.postedAgeDays}d ago`}
-                                </strong>
-                                <p>{formatTimestamp(selectedReference.metrics.postedAt)}</p>
-                              </div>
+                            <div>
+                              <span>Views</span>
+                              <strong>{formatCompactNumber(selectedReference.metrics.views)}</strong>
+                              <p>{selectedReference.metrics.likes} likes • {selectedReference.metrics.comments} comments</p>
                             </div>
-                            <div className="vbs-analysis-grid">
-                              {selectedReferenceInsights.contributionRows.map(({ key, value }) => (
-                                <div key={key} className="vbs-analysis-metric">
-                                  <p>{contributionLabel(key)}</p>
-                                  <strong>{(Number(value) * 100).toFixed(1)} pts</strong>
-                                  <div className="vbs-analysis-bar">
-                                    <span style={{ width: `${Math.max(6, Math.min(100, Number(value) * 320))}%` }} />
-                                  </div>
+                            <div>
+                              <span>Interaction Rate</span>
+                              <strong>{formatUnitPercent(selectedReferenceInsights.interactionRateRaw)}</strong>
+                              <p>{selectedReference.metrics.shares} shares</p>
+                            </div>
+                            <div>
+                              <span>Recency</span>
+                              <strong>
+                                {selectedReferenceInsights.postedAgeDays === null
+                                  ? "n/a"
+                                  : `${selectedReferenceInsights.postedAgeDays}d ago`}
+                              </strong>
+                              <p>{formatTimestamp(selectedReference.metrics.postedAt)}</p>
+                            </div>
+                          </div>
+                          <div className="vbs-analysis-grid">
+                            {selectedReferenceInsights.contributionRows.map(({ key, value }) => (
+                              <div key={key} className="vbs-analysis-metric">
+                                <p>{contributionLabel(key)}</p>
+                                <strong>{(Number(value) * 100).toFixed(1)} pts</strong>
+                                <div className="vbs-analysis-bar">
+                                  <span style={{ width: `${Math.max(6, Math.min(100, Number(value) * 320))}%` }} />
                                 </div>
-                              ))}
-                            </div>
-                            <div className="vbs-analysis-grid vbs-normalized-grid">
-                              {selectedReferenceInsights.normalizedRows.map(({ key, value }) => (
-                                <div key={key} className="vbs-analysis-metric">
-                                  <p>{normalizedMetricLabel(key)}</p>
-                                  <strong>{value.toFixed(1)}%</strong>
-                                  <div className="vbs-analysis-bar">
-                                    <span style={{ width: `${Math.max(6, Math.min(100, value))}%` }} />
-                                  </div>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="vbs-analysis-grid vbs-normalized-grid">
+                            {selectedReferenceInsights.normalizedRows.map(({ key, value }) => (
+                              <div key={key} className="vbs-analysis-metric">
+                                <p>{normalizedMetricLabel(key)}</p>
+                                <strong>{value.toFixed(1)}%</strong>
+                                <div className="vbs-analysis-bar">
+                                  <span style={{ width: `${Math.max(6, Math.min(100, value))}%` }} />
                                 </div>
-                              ))}
-                            </div>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="vbs-analysis-why">
+                            <h4>Why this wins</h4>
                             <ul>
                               {selectedReference.explainability.whyRankedHigh.map((line) => (
                                 <li key={line}>{line}</li>
                               ))}
                             </ul>
-                            {comparedReferences.length === 2 ? (
-                              <div className="vbs-compare-panel">
-                                <div className="vbs-compare-panel-head">
-                                  <h4>Compare winners</h4>
-                                  <p className="vbs-meta">Two references selected for side-by-side steering.</p>
-                                </div>
-                                <div className="vbs-compare-grid">
-                                  {comparedReferences.map((reference) => (
-                                    <article key={reference.id} className="vbs-compare-card">
-                                      <p className="vbs-meta">
-                                        #{reference.ranking.rank} • {toPlatformLabel(reference.sourcePlatform)}
-                                      </p>
-                                      <strong>{compactText(reference.ranking.rationaleTitle, 80)}</strong>
-                                      <p>{compactText(reference.caption || reference.transcriptSummary || "", 110)}</p>
-                                      <div className="vbs-mini-actions">
-                                        <span className="vbs-chip-toggle is-active">
-                                          {reference.scores.composite.toFixed(3)}
-                                        </span>
-                                        <button type="button" onClick={() => setSelectedReferenceId(reference.id)}>
-                                          Focus
-                                        </button>
-                                      </div>
-                                    </article>
-                                  ))}
-                                </div>
+                          </div>
+                          {comparedReferences.length === 2 ? (
+                            <div className="vbs-compare-panel">
+                              <div className="vbs-compare-panel-head">
+                                <h4>Compare winners</h4>
+                                <p className="vbs-meta">Two references selected for side-by-side steering.</p>
                               </div>
-                            ) : null}
-                            <div className="vbs-source-context">
-                              <h4>Source Context</h4>
-                              <p className="vbs-meta">{selectedReference.caption}</p>
-                              <p className="vbs-meta">{selectedReference.transcriptSummary}</p>
-                              <p className="vbs-meta">{selectedReference.ocrSummary}</p>
-                              <p className="vbs-meta">
-                                Formula {selectedReference.explainability.formulaVersion} • Shortcuts: 1 pin, 2 must-use, 3
-                                exclude, 0 clear
-                              </p>
+                              <div className="vbs-compare-grid">
+                                {comparedReferences.map((reference) => (
+                                  <article key={reference.id} className="vbs-compare-card">
+                                    <p className="vbs-meta">
+                                      #{reference.ranking.rank} • {toPlatformLabel(reference.sourcePlatform)}
+                                    </p>
+                                    <strong>{compactText(reference.ranking.rationaleTitle, 80)}</strong>
+                                    <p>{compactText(reference.caption || reference.transcriptSummary || "", 110)}</p>
+                                    <div className="vbs-mini-actions">
+                                      <span className="vbs-chip-toggle is-active">{reference.scores.composite.toFixed(3)}</span>
+                                      <button type="button" onClick={() => setSelectedReferenceId(reference.id)}>
+                                        Focus
+                                      </button>
+                                    </div>
+                                  </article>
+                                ))}
+                              </div>
                             </div>
-                          </>
-                        );
-                      })()}
-                    </div>
-                  ) : null}
+                          ) : null}
+                          <div className="vbs-source-context">
+                            <h4>Source Context</h4>
+                            <p className="vbs-meta">{selectedReference.caption}</p>
+                            <p className="vbs-meta">{selectedReference.transcriptSummary}</p>
+                            <p className="vbs-meta">{selectedReference.ocrSummary}</p>
+                            <p className="vbs-meta">
+                              Formula {selectedReference.explainability.formulaVersion} • Shortcuts: 1 pin, 2 must-use, 3
+                              exclude, 0 clear
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="vbs-analysis-drawer vbs-analysis-empty">
+                          <p className="vbs-meta">Analysis sidecar</p>
+                          <h3>Select a reference to open its full reasoning.</h3>
+                          <p>
+                            The selected card will stay visible here with its poster, drivers, metrics, source context, and
+                            shortlist actions so curation feels continuous instead of hidden below the board.
+                          </p>
+                        </div>
+                      )}
+                    </aside>
+                  </div>
                 </div>
               </article>
             </div>

@@ -202,6 +202,8 @@ async function validateDrawerAndShortcuts(page: Page) {
   await firstReference.click();
   const drawer = page.locator('.vbs-analysis-drawer');
   await drawer.waitFor({ timeout: 15_000 });
+  await page.locator('.vbs-reference-focus-card').waitFor({ timeout: 15_000 });
+  await page.locator('.vbs-analysis-sidecar').waitFor({ timeout: 15_000 });
 
   await page.keyboard.press('2');
   await waitForSelectedShortlistState(page, 'Must-use');
@@ -234,6 +236,14 @@ async function validateDrawerAndShortcuts(page: Page) {
     normalizedMetricCards >= 5,
     `Expected normalized metric rows in analysis drawer, got ${normalizedMetricCards}`
   );
+
+  const focusMetricCards = await page.locator('.vbs-reference-focus-metrics > div').count();
+  assert.ok(focusMetricCards >= 3, `Expected focus metrics in reference sidecar, got ${focusMetricCards}`);
+
+  const boardMetricChips = await page.locator('.vbs-reference-card-metrics span').count();
+  assert.ok(boardMetricChips >= 3, `Expected reference card metric chips in board, got ${boardMetricChips}`);
+
+  await drawer.locator('.vbs-analysis-why').waitFor({ timeout: 10_000 });
 }
 
 async function validateCreateAndSaveFlow(page: Page) {
@@ -345,6 +355,7 @@ async function runFlowAttempt(baseUrl: string): Promise<void> {
             'brand_dna_summary_surface_rendered',
             'extraction_run_completed_with_references',
             'analysis_drawer_renders_extended_sections',
+            'reference_sidecar_and_board_metrics_render',
             'shortlist_keyboard_shortcuts_1_2_3_0',
             'shortlist_notice_and_active_state_feedback',
             'generation_gallery_and_save_vault_render',
