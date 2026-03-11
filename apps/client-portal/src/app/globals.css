@@ -351,6 +351,13 @@ a {
   color: color-mix(in srgb, var(--vbs-cobalt) 76%, var(--vbs-ink));
 }
 
+.vbs-launchpad-save-note {
+  margin: 0;
+  min-height: 1.6rem;
+  color: color-mix(in srgb, var(--vbs-ink) 62%, #5f6880);
+  line-height: 1.45;
+}
+
 .vbs-launchpad-action {
   border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 44%, var(--bat-border));
   background: color-mix(in srgb, white 72%, var(--vbs-sand));

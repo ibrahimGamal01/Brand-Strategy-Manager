@@ -272,6 +272,30 @@ function tonePreview(form: BrandFormState): string {
   return `Voice profile: ${tags.join(", ")}. Keep messaging clear, specific, and aligned with your brand promise.`;
 }
 
+function formatShortTime(value?: string | null): string {
+  if (!value) return "n/a";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "n/a";
+  return parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function hasBrandDraftSignal(form: BrandFormState): boolean {
+  return Boolean(
+    form.mission.trim() ||
+      form.valueProposition.trim() ||
+      form.productOrService.trim() ||
+      form.region.trim() ||
+      form.audiencePersonas.trim() ||
+      form.pains.trim() ||
+      form.desires.trim() ||
+      form.objections.trim() ||
+      form.bannedPhrases.trim() ||
+      form.requiredClaims.trim() ||
+      form.exemplars.trim() ||
+      form.summary.trim()
+  );
+}
+
 function compactText(value: string, maxChars = 180): string {
   const normalized = String(value || "").replace(/\s+/g, " ").trim();
   if (!normalized) return "";
@@ -847,6 +871,10 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   const [brandForm, setBrandForm] = useState<BrandFormState>({ ...DEFAULT_FORM_STATE });
   const [onboardingStep, setOnboardingStep] = useState<1 | 2 | 3 | 4>(1);
   const [isEditingBrandDna, setIsEditingBrandDna] = useState(false);
+  const [brandAutosaveState, setBrandAutosaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [brandAutosavedAt, setBrandAutosavedAt] = useState<string | null>(null);
+  const [extractionAutosavedAt, setExtractionAutosavedAt] = useState<string | null>(null);
+  const [curationAutosavedAt, setCurationAutosavedAt] = useState<string | null>(null);
 
   const [ingestions, setIngestions] = useState<ViralStudioIngestionRun[]>([]);
   const [activeIngestion, setActiveIngestion] = useState<ViralStudioIngestionRun | null>(null);
@@ -870,6 +898,9 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   const autopilotTriggerRef = useRef<string>("");
   const generationSnapshotKeysRef = useRef<Set<string>>(new Set());
   const generationSnapshotBusyRef = useRef(false);
+  const brandAutosaveFingerprintRef = useRef<string>("");
+  const brandAutosaveInFlightRef = useRef(false);
+  const extractionAutosaveRunIdsRef = useRef<Set<string>>(new Set());
 
   const [sourcePlatform, setSourcePlatform] = useState<ViralStudioPlatform>("instagram");
   const [sourceUrl, setSourceUrl] = useState("");
@@ -1015,6 +1046,10 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
           if (payload.run.status === "completed" || payload.run.status === "partial") {
             void listViralStudioReferences(workspaceId, { ingestionRunId: payload.run.id }).then((referencePayload) => {
               setReferences(referencePayload.items);
+              if (!extractionAutosaveRunIdsRef.current.has(payload.run.id)) {
+                extractionAutosaveRunIdsRef.current.add(payload.run.id);
+                setExtractionAutosavedAt(new Date().toISOString());
+              }
               void Promise.all([refreshTelemetry(), refreshWorkflow()]);
             });
           }
@@ -1236,37 +1271,87 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     return autofillPreview.suggestedFields.filter((field) => autofillSelection[field] !== false).length;
   }, [autofillPreview, autofillSelection]);
 
+  const buildBrandDnaPayload = useCallback(
+    (mode: "draft" | "final") => ({
+      status: mode,
+      mission: brandForm.mission,
+      valueProposition: brandForm.valueProposition,
+      productOrService: brandForm.productOrService,
+      region: brandForm.region,
+      audiencePersonas: csvToArray(brandForm.audiencePersonas),
+      pains: csvToArray(brandForm.pains),
+      desires: csvToArray(brandForm.desires),
+      objections: csvToArray(brandForm.objections),
+      bannedPhrases: csvToArray(brandForm.bannedPhrases),
+      requiredClaims: csvToArray(brandForm.requiredClaims),
+      exemplars: csvToArray(brandForm.exemplars),
+      summary: brandForm.summary,
+      voiceSliders: {
+        bold: brandForm.voiceBold,
+        formal: brandForm.voiceFormal,
+        playful: brandForm.voicePlayful,
+        direct: brandForm.voiceDirect,
+      },
+    }),
+    [brandForm]
+  );
+
+  const autoSaveBrandDnaDraft = useCallback(
+    async (reason: "typing" | "step") => {
+      if (brandReady || autofillBusy || isBusy) return;
+      if (brandAutosaveInFlightRef.current) return;
+      if (!hasBrandDraftSignal(brandForm)) return;
+      const payload = buildBrandDnaPayload("draft");
+      const fingerprint = JSON.stringify(payload);
+      if (brandAutosaveFingerprintRef.current === fingerprint) return;
+      brandAutosaveInFlightRef.current = true;
+      setBrandAutosaveState("saving");
+      try {
+        const response = brandProfile
+          ? await patchWorkspaceBrandDna(workspaceId, payload)
+          : await createWorkspaceBrandDna(workspaceId, payload);
+        brandAutosaveFingerprintRef.current = fingerprint;
+        setBrandProfile(response.profile);
+        const savedAt = new Date().toISOString();
+        setBrandAutosaveState("saved");
+        setBrandAutosavedAt(savedAt);
+        if (reason === "step") {
+          setChatBridgeStatus(`Foundation step auto-saved at ${formatShortTime(savedAt)}.`);
+        }
+        void Promise.all([refreshTelemetry(), refreshWorkflow()]);
+      } catch {
+        setBrandAutosaveState("error");
+      } finally {
+        brandAutosaveInFlightRef.current = false;
+      }
+    },
+    [
+      workspaceId,
+      brandReady,
+      autofillBusy,
+      isBusy,
+      brandForm,
+      buildBrandDnaPayload,
+      brandProfile,
+      refreshTelemetry,
+      refreshWorkflow,
+    ]
+  );
+
   const saveBrandDna = useCallback(
     async (mode: "draft" | "final") => {
       setIsBusy(true);
       setError(null);
       try {
-        const payload = {
-          status: mode,
-          mission: brandForm.mission,
-          valueProposition: brandForm.valueProposition,
-          productOrService: brandForm.productOrService,
-          region: brandForm.region,
-          audiencePersonas: csvToArray(brandForm.audiencePersonas),
-          pains: csvToArray(brandForm.pains),
-          desires: csvToArray(brandForm.desires),
-          objections: csvToArray(brandForm.objections),
-          bannedPhrases: csvToArray(brandForm.bannedPhrases),
-          requiredClaims: csvToArray(brandForm.requiredClaims),
-          exemplars: csvToArray(brandForm.exemplars),
-          summary: brandForm.summary,
-          voiceSliders: {
-            bold: brandForm.voiceBold,
-            formal: brandForm.voiceFormal,
-            playful: brandForm.voicePlayful,
-            direct: brandForm.voiceDirect,
-          },
-        };
+        const payload = buildBrandDnaPayload(mode);
         const response = brandProfile
           ? await patchWorkspaceBrandDna(workspaceId, payload)
           : await createWorkspaceBrandDna(workspaceId, payload);
         setBrandProfile(response.profile);
         setBrandForm(toFormState(response.profile));
+        brandAutosaveFingerprintRef.current = JSON.stringify(buildBrandDnaPayload("draft"));
+        setBrandAutosaveState("saved");
+        setBrandAutosavedAt(new Date().toISOString());
         if (response.profile.status === "final" && response.profile.completeness.ready) {
           setIsEditingBrandDna(false);
           setOnboardingStep(4);
@@ -1278,7 +1363,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         setIsBusy(false);
       }
     },
-    [workspaceId, brandForm, brandProfile, refreshTelemetry, refreshWorkflow]
+    [workspaceId, buildBrandDnaPayload, brandProfile, refreshTelemetry, refreshWorkflow]
   );
 
   const generateSummary = useCallback(async () => {
@@ -1342,6 +1427,9 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       setBrandForm(toFormState(payload.profile));
       setAutofillPreview(payload.preview);
       setAutofillSelection(createAutofillSelection(payload.preview));
+      brandAutosaveFingerprintRef.current = JSON.stringify(buildBrandDnaPayload("draft"));
+      setBrandAutosaveState("saved");
+      setBrandAutosavedAt(new Date().toISOString());
       if (payload.profile.status === "final" && payload.profile.completeness.ready) {
         setOnboardingStep(4);
         setIsEditingBrandDna(false);
@@ -1352,7 +1440,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     } finally {
       setAutofillBusy(false);
     }
-  }, [workspaceId, autofillPreview, autofillSelection, refreshTelemetry, refreshWorkflow]);
+  }, [workspaceId, autofillPreview, autofillSelection, refreshTelemetry, refreshWorkflow, buildBrandDnaPayload]);
 
   useEffect(() => {
     if (brandReady) return;
@@ -1361,6 +1449,42 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     if (stage !== "studio_autofill_review" && stage !== "intake_complete") return;
     void previewAutofill();
   }, [brandReady, autofillBusy, autofillPreview, previewAutofill, workflowStatus?.workflowStage]);
+
+  const brandDraftSignature = useMemo(
+    () =>
+      JSON.stringify({
+        mission: brandForm.mission,
+        valueProposition: brandForm.valueProposition,
+        productOrService: brandForm.productOrService,
+        region: brandForm.region,
+        audiencePersonas: brandForm.audiencePersonas,
+        pains: brandForm.pains,
+        desires: brandForm.desires,
+        objections: brandForm.objections,
+        bannedPhrases: brandForm.bannedPhrases,
+        requiredClaims: brandForm.requiredClaims,
+        exemplars: brandForm.exemplars,
+        summary: brandForm.summary,
+        voiceBold: brandForm.voiceBold,
+        voiceFormal: brandForm.voiceFormal,
+        voicePlayful: brandForm.voicePlayful,
+        voiceDirect: brandForm.voiceDirect,
+      }),
+    [brandForm]
+  );
+
+  useEffect(() => {
+    if (loading) return;
+    if (brandReady) return;
+    if (autofillBusy || isBusy) return;
+    if (!hasBrandDraftSignal(brandForm)) return;
+    const timer = window.setTimeout(() => {
+      void autoSaveBrandDnaDraft("typing");
+    }, 1400);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [loading, brandReady, autofillBusy, isBusy, brandForm, brandDraftSignature, autoSaveBrandDnaDraft]);
 
   const runExtraction = useCallback(async () => {
     if (!brandReady) return;
@@ -1410,6 +1534,10 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         try {
           const payload = await listViralStudioReferences(workspaceId, { ingestionRunId: run.id });
           setReferences(payload.items);
+          if (!extractionAutosaveRunIdsRef.current.has(run.id)) {
+            extractionAutosaveRunIdsRef.current.add(run.id);
+            setExtractionAutosavedAt(new Date().toISOString());
+          }
           void Promise.all([refreshTelemetry(), refreshWorkflow()]);
         } catch {
           // Keep current list if refresh fails.
@@ -1450,6 +1578,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
             ? `Reference #${payload.item.ranking.rank} cleared from shortlist.`
             : `Reference #${payload.item.ranking.rank} moved to ${shortlistLabel(payload.item.shortlistState)}.`
         );
+        setCurationAutosavedAt(new Date().toISOString());
         void Promise.all([refreshTelemetry(), refreshWorkflow()]);
       } catch (shortlistError: unknown) {
         setError(String((shortlistError as Error)?.message || "Failed to update shortlist"));
@@ -1962,6 +2091,9 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       setBrandForm(toFormState(appliedPayload.profile));
       setAutofillPreview(appliedPayload.preview);
       setAutofillSelection(createAutofillSelection(appliedPayload.preview));
+      brandAutosaveFingerprintRef.current = JSON.stringify(buildBrandDnaPayload("draft"));
+      setBrandAutosaveState("saved");
+      setBrandAutosavedAt(new Date().toISOString());
       if (appliedPayload.profile.status === "final" && appliedPayload.profile.completeness.ready) {
         setOnboardingStep(4);
         setIsEditingBrandDna(false);
@@ -1972,7 +2104,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     } finally {
       setAutofillBusy(false);
     }
-  }, [workspaceId, autofillPreview, autofillSelection, refreshWorkflow, refreshTelemetry]);
+  }, [workspaceId, autofillPreview, autofillSelection, refreshWorkflow, refreshTelemetry, buildBrandDnaPayload]);
 
   const startGuidedDataMaxExtraction = useCallback(
     async (preferredSource?: ViralStudioSuggestedSource | null) => {
@@ -2059,6 +2191,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         )
       );
       setCurationNotice("Top references auto-curated: #1 must-use, #2-3 pinned.");
+      setCurationAutosavedAt(new Date().toISOString());
       await Promise.all([refreshTelemetry(), refreshWorkflow()]);
       return updates.map((entry) => entry.item);
     },
@@ -2116,6 +2249,10 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         ingestionRunId: terminalRun.id,
       });
       setReferences(referencesPayload.items);
+      if (!extractionAutosaveRunIdsRef.current.has(terminalRun.id)) {
+        extractionAutosaveRunIdsRef.current.add(terminalRun.id);
+        setExtractionAutosavedAt(new Date().toISOString());
+      }
 
       setAutopilotStatus("Curating top references...");
       await autoCurateTopReferences(referencesPayload.items);
@@ -2137,6 +2274,17 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     waitForIngestionTerminal,
     autoCurateTopReferences,
   ]);
+
+  const setOnboardingStepWithAutosave = useCallback(
+    (nextStep: 1 | 2 | 3 | 4) => {
+      const previousStep = onboardingStep;
+      if (!brandReady && nextStep > previousStep && isStepValid(previousStep, brandForm)) {
+        void autoSaveBrandDnaDraft("step");
+      }
+      setOnboardingStep(nextStep);
+    },
+    [onboardingStep, brandReady, brandForm, autoSaveBrandDnaDraft]
+  );
 
   useEffect(() => {
     if (loading) return;
@@ -2206,12 +2354,31 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   const latestReferenceSummary = activeIngestion
     ? `${activeIngestion.progress.ranked}/${activeIngestion.progress.found || activeIngestion.maxVideos} ranked`
     : `${references.length} references loaded`;
+  const foundationAutosaveNote = brandReady
+    ? `Finalized and saved at ${formatShortTime(brandProfile?.updatedAt)}`
+    : brandAutosaveState === "saving"
+      ? "Auto-saving foundation..."
+      : brandAutosaveState === "saved"
+        ? `Foundation auto-saved at ${formatShortTime(brandAutosavedAt)}`
+        : brandAutosaveState === "error"
+          ? "Auto-save failed. Keep editing and retry finalize."
+          : "Auto-save activates as soon as inputs are added.";
+  const extractionAutosaveNote = extractionAutosavedAt
+    ? `Downloaded references auto-saved at ${formatShortTime(extractionAutosavedAt)}`
+    : activeIngestion
+      ? "Run progress is persisted automatically."
+      : "Downloaded references auto-save when extraction finishes.";
+  const curationAutosaveNote = curationAutosavedAt
+    ? `Shortlist auto-saved at ${formatShortTime(curationAutosavedAt)}`
+    : "Shortlist decisions auto-save per action.";
+  const generationAutosaveNote = generationSaveStatus || "Every generation revision auto-saves to the document timeline.";
   const launchpadCards: Array<{
     id: "foundation" | "references" | "create";
     eyebrow: string;
     title: string;
     body: string;
     stat: string;
+    saveNote: string;
     actionLabel: string;
     action: () => void | Promise<void>;
     disabled?: boolean;
@@ -2224,6 +2391,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         ? compactText(brandProfile?.summary || "Brand DNA is finalized and ready to drive generation.", 170)
         : "Use one website-first autofill pass, confirm the summary, and finalize voice guardrails.",
       stat: `${onboardingCoveragePct}% coverage`,
+      saveNote: foundationAutosaveNote,
       actionLabel: brandReady ? "Edit DNA" : workflowGuide.cta,
       action: () => {
         window.document.getElementById("vbs-section-onboarding")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -2243,6 +2411,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         ? `${latestSuggestedSource.label} is the top website/social source. Run data-max extraction and curate only the winners.`
         : "We will use suggested website and social evidence as soon as intake is complete.",
       stat: latestReferenceSummary,
+      saveNote: `${extractionAutosaveNote} ${curationAutosaveNote}`,
       actionLabel: activeIngestion ? "Open reference engine" : "Start extraction",
       action: async () => {
         window.document.getElementById("vbs-section-extraction")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -2281,6 +2450,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         ? `Revision ${generation.revision} is available and every revision now saves into document history automatically.`
         : "Generate one multi-pack and let the studio save each revision into the document timeline.",
       stat: document ? `${versions.length} saved version(s)` : "No document yet",
+      saveNote: generationAutosaveNote,
       actionLabel: generation ? "Open create & save" : "Generate pack",
       action: async () => {
         window.document.getElementById("vbs-section-create-save")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -2477,6 +2647,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                   {card.actionLabel}
                 </button>
               </div>
+              <p className="vbs-meta vbs-launchpad-save-note">{card.saveNote}</p>
             </article>
           ))}
         </div>
@@ -2537,7 +2708,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                     ]
                       .filter(Boolean)
                       .join(" ")}
-                    onClick={() => setOnboardingStep(item.step)}
+                    onClick={() => setOnboardingStepWithAutosave(item.step)}
                   >
                     <span>{item.step}</span>
                     <strong>{item.title}</strong>
@@ -2673,7 +2844,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                       key={item.step}
                       type="button"
                       className={item.step === onboardingStep ? "vbs-chip-toggle is-active" : "vbs-chip-toggle"}
-                      onClick={() => setOnboardingStep(item.step)}
+                      onClick={() => setOnboardingStepWithAutosave(item.step)}
                     >
                       {item.step}. {item.title}
                     </button>
@@ -2883,14 +3054,14 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                   <button
                     type="button"
                     disabled={onboardingStep === 1 || isBusy}
-                    onClick={() => setOnboardingStep((Math.max(1, onboardingStep - 1) as 1 | 2 | 3 | 4))}
+                    onClick={() => setOnboardingStepWithAutosave(Math.max(1, onboardingStep - 1) as 1 | 2 | 3 | 4)}
                   >
                     Back
                   </button>
                   <button
                     type="button"
                     disabled={onboardingStep === 4 || !isStepValid(onboardingStep, brandForm) || isBusy}
-                    onClick={() => setOnboardingStep((Math.min(4, onboardingStep + 1) as 1 | 2 | 3 | 4))}
+                    onClick={() => setOnboardingStepWithAutosave(Math.min(4, onboardingStep + 1) as 1 | 2 | 3 | 4)}
                   >
                     Next
                   </button>
@@ -2911,7 +3082,8 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
           )}
 
           <p className="vbs-meta">
-            Status: <strong>{brandProfile?.status || "draft"}</strong> • Ready: <strong>{brandProfile?.completeness.ready ? "yes" : "no"}</strong> • Updated: {formatTimestamp(brandProfile?.updatedAt)}
+            Status: <strong>{brandProfile?.status || "draft"}</strong> • Ready: <strong>{brandProfile?.completeness.ready ? "yes" : "no"}</strong> • Updated: {formatTimestamp(brandProfile?.updatedAt)} • Autosave:{" "}
+            <strong>{brandAutosaveState === "saving" ? "saving" : brandAutosaveState === "saved" ? "saved" : brandAutosaveState === "error" ? "error" : "idle"}</strong>
           </p>
         </article>
 
