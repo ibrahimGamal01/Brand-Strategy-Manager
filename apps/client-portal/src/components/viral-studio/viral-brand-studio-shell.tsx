@@ -294,7 +294,16 @@ type ReferenceCardDetail = {
   secondaryContributionValue?: number;
   bullets: string[];
   palette: string[];
+  sourceUrl?: string;
+  sourceHostLabel: string;
+  sourcePathLabel: string;
   mediaUrl?: string;
+  mediaBadge: string;
+  contentExcerpts: Array<{
+    id: string;
+    label: string;
+    text: string;
+  }>;
 };
 
 function workflowStageOrderIndex(stage: ViralStudioWorkflowStatus["workflowStage"] | undefined): number {
@@ -370,6 +379,63 @@ function sanitizeHttpUrl(value: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function toSourceHostLabel(value: string | undefined, platform: ViralStudioPlatform): string {
+  if (!value) return `${toPlatformLabel(platform)} source`;
+  try {
+    return new URL(value).hostname.replace(/^www\./, "");
+  } catch {
+    return `${toPlatformLabel(platform)} source`;
+  }
+}
+
+function toSourcePathLabel(value: string | undefined): string {
+  if (!value) return "Source URL unavailable";
+  try {
+    const candidate = new URL(value);
+    return compactText(`${candidate.pathname}${candidate.search}` || candidate.hostname, 54);
+  } catch {
+    return compactText(value, 54);
+  }
+}
+
+function buildReferenceContentExcerpts(
+  reference: ViralStudioReferenceAsset,
+  maxChars: number
+): Array<{ id: string; label: string; text: string }> {
+  const excerpts = [
+    reference.caption.trim()
+      ? {
+          id: "caption",
+          label: "Original caption",
+          text: compactText(reference.caption.trim(), maxChars),
+        }
+      : null,
+    reference.transcriptSummary.trim()
+      ? {
+          id: "transcript",
+          label: "Downloaded transcript cue",
+          text: compactText(reference.transcriptSummary.trim(), maxChars),
+        }
+      : null,
+    reference.ocrSummary.trim()
+      ? {
+          id: "ocr",
+          label: "On-screen text cue",
+          text: compactText(reference.ocrSummary.trim(), maxChars),
+        }
+      : null,
+  ].filter(Boolean) as Array<{ id: string; label: string; text: string }>;
+  return excerpts.length > 0
+    ? excerpts
+    : [
+        {
+          id: "fallback",
+          label: "Downloaded cue",
+          text: "No caption, transcript summary, or OCR summary was stored for this asset yet.",
+        },
+      ];
 }
 
 function toPlatformLabel(platform: ViralStudioPlatform): string {
@@ -894,6 +960,8 @@ function buildReferenceCardDetail(reference: ViralStudioReferenceAsset): Referen
     Math.max(1, reference.metrics.views);
   const palette = reference.visual?.palette?.filter(Boolean).slice(0, 3) || defaultReferencePalette(reference.sourcePlatform);
   while (palette.length < 3) palette.push(palette[palette.length - 1] || "#cbd5f5");
+  const sourceUrl = sanitizeHttpUrl(reference.sourceUrl);
+  const mediaUrl = sanitizeHttpUrl(reference.visual?.posterUrl || reference.visual?.thumbnailUrl || "");
   return {
     eyebrow: reference.visual?.eyebrow || `${toPlatformLabel(reference.sourcePlatform)} winner`,
     headline:
@@ -921,7 +989,19 @@ function buildReferenceCardDetail(reference: ViralStudioReferenceAsset): Referen
       .slice(0, 2)
       .map((line) => compactText(line, 120)),
     palette,
-    mediaUrl: sanitizeHttpUrl(reference.visual?.posterUrl || reference.visual?.thumbnailUrl || ""),
+    sourceUrl,
+    sourceHostLabel: toSourceHostLabel(sourceUrl, reference.sourcePlatform),
+    sourcePathLabel: toSourcePathLabel(sourceUrl),
+    mediaUrl,
+    mediaBadge:
+      reference.visual?.mediaKind === "video"
+        ? "Downloaded video preview"
+        : reference.visual?.mediaKind === "image"
+          ? "Downloaded image preview"
+          : mediaUrl
+            ? "Downloaded preview"
+            : "Styled reference view",
+    contentExcerpts: buildReferenceContentExcerpts(reference, 168),
   };
 }
 
@@ -4077,6 +4157,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                       >
                         <div className="vbs-reference-visual" style={visualStyle}>
                           <span className="vbs-rank-badge">#{reference.ranking.rank}</span>
+                          <span className="vbs-reference-asset-badge">{cardDetail.mediaBadge}</span>
                           <div className="vbs-reference-visual-copy">
                             <small>{cardDetail.eyebrow}</small>
                             <strong>{cardDetail.headline}</strong>
@@ -4135,6 +4216,43 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                           ))}
                         </ul>
                       </button>
+                    <div className="vbs-reference-source-bar">
+                      <div className="vbs-reference-source-meta">
+                        <span>Original post</span>
+                        <strong>{cardDetail.sourceHostLabel}</strong>
+                        <p>{cardDetail.sourcePathLabel}</p>
+                      </div>
+                      <div className="vbs-reference-link-row">
+                        {cardDetail.sourceUrl ? (
+                          <a
+                            href={cardDetail.sourceUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="vbs-reference-link-chip"
+                          >
+                            Open original post
+                          </a>
+                        ) : null}
+                        {cardDetail.mediaUrl ? (
+                          <a
+                            href={cardDetail.mediaUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="vbs-reference-link-chip"
+                          >
+                            Open downloaded preview
+                          </a>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="vbs-reference-content-preview-grid">
+                      {cardDetail.contentExcerpts.slice(0, 2).map((excerpt) => (
+                        <article key={`${reference.id}:${excerpt.id}`} className="vbs-reference-content-card">
+                          <span>{excerpt.label}</span>
+                          <p>{excerpt.text}</p>
+                        </article>
+                      ))}
+                    </div>
                     <div className="vbs-mini-actions vbs-shortlist-actions">
                       {(
                         [
@@ -4180,6 +4298,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                   <div className="vbs-analysis-hero">
                     <div className="vbs-reference-visual vbs-analysis-visual" style={selectedReferenceVisualStyle}>
                       <span className="vbs-rank-badge">#{selectedReference.ranking.rank}</span>
+                      <span className="vbs-reference-asset-badge">{selectedReferenceCardDetail.mediaBadge}</span>
                       <div className="vbs-reference-visual-copy">
                         <small>{selectedReferenceCardDetail.eyebrow}</small>
                         <strong>{selectedReferenceCardDetail.headline}</strong>
@@ -4192,12 +4311,36 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                           Expanded analysis • {toPlatformLabel(selectedReference.sourcePlatform)} •{" "}
                           {shortlistLabel(selectedReference.shortlistState)}
                         </p>
-                        <div className="vbs-top-driver-row vbs-top-driver-row-compact">
-                          {selectedReference.explainability.topDrivers.map((driver) => (
-                            <span key={driver} className="vbs-driver-chip">
-                              {driver}
-                            </span>
-                          ))}
+                        <div className="vbs-analysis-overview-actions">
+                          <div className="vbs-top-driver-row vbs-top-driver-row-compact">
+                            {selectedReference.explainability.topDrivers.map((driver) => (
+                              <span key={driver} className="vbs-driver-chip">
+                                {driver}
+                              </span>
+                            ))}
+                          </div>
+                          <div className="vbs-reference-link-row">
+                            {selectedReferenceCardDetail.sourceUrl ? (
+                              <a
+                                href={selectedReferenceCardDetail.sourceUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="vbs-reference-link-chip"
+                              >
+                                Open original post
+                              </a>
+                            ) : null}
+                            {selectedReferenceCardDetail.mediaUrl ? (
+                              <a
+                                href={selectedReferenceCardDetail.mediaUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="vbs-reference-link-chip"
+                              >
+                                Open downloaded preview
+                              </a>
+                            ) : null}
+                          </div>
                         </div>
                       </div>
                       <h3>{selectedReference.ranking.rationaleTitle}</h3>
@@ -4364,6 +4507,11 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                       <span className="vbs-analysis-chip">Shortcuts: 1 pin, 2 must-use, 3 exclude, 0 clear</span>
                     </div>
                     <div className="vbs-analysis-source-grid">
+                      <article className="vbs-reference-content-card is-origin">
+                        <span>Original post</span>
+                        <strong>{selectedReferenceCardDetail.sourceHostLabel}</strong>
+                        <p>{selectedReferenceCardDetail.sourcePathLabel}</p>
+                      </article>
                       <article>
                         <span>Caption</span>
                         <p className="vbs-meta">{selectedReference.caption}</p>
@@ -4376,6 +4524,14 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                         <span>OCR summary</span>
                         <p className="vbs-meta">{selectedReference.ocrSummary}</p>
                       </article>
+                    </div>
+                    <div className="vbs-reference-content-preview-grid vbs-reference-content-preview-grid-expanded">
+                      {selectedReferenceCardDetail.contentExcerpts.map((excerpt) => (
+                        <article key={`drawer:${excerpt.id}`} className="vbs-reference-content-card">
+                          <span>{excerpt.label}</span>
+                          <p>{excerpt.text}</p>
+                        </article>
+                      ))}
                     </div>
                   </div>
                 </div>
