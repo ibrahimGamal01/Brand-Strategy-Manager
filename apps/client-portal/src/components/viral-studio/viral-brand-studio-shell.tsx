@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   applyWorkspaceBrandDnaAutofill,
@@ -264,6 +264,22 @@ type StudioDetailCard = {
   value: string;
   note: string;
   tone?: "info" | "success" | "warning";
+};
+
+type ReferenceCardDetail = {
+  eyebrow: string;
+  headline: string;
+  footer: string;
+  bestUse: string;
+  interactionRate: number;
+  ageDays: number | null;
+  primaryContributionLabel: string;
+  primaryContributionValue: number;
+  secondaryContributionLabel?: string;
+  secondaryContributionValue?: number;
+  bullets: string[];
+  palette: string[];
+  mediaUrl?: string;
 };
 
 function workflowStageOrderIndex(stage: ViralStudioWorkflowStatus["workflowStage"] | undefined): number {
@@ -765,6 +781,71 @@ function delay(ms: number): Promise<void> {
 
 function detailCardClassName(card: StudioDetailCard): string {
   return ["vbs-detail-card", card.tone ? `is-${card.tone}` : ""].filter(Boolean).join(" ");
+}
+
+function defaultReferencePalette(platform: ViralStudioPlatform): string[] {
+  if (platform === "instagram") {
+    return ["#1d4ed8", "#0f766e", "#93c5fd"];
+  }
+  if (platform === "tiktok") {
+    return ["#0f172a", "#0f766e", "#67e8f9"];
+  }
+  return ["#1e3a8a", "#475569", "#cbd5f5"];
+}
+
+function toReferenceBestUse(reference: ViralStudioReferenceAsset): string {
+  if (reference.shortlistState === "must-use") return "Anchor the pack around this angle.";
+  if (reference.shortlistState === "pin") return "Use this as a supporting proof point.";
+  if (reference.shortlistState === "exclude") return "Keep it out of the influence set.";
+  const leadDriver = String(reference.explainability.topDrivers[0] || "").toLowerCase();
+  if (leadDriver.includes("hook")) return "Borrow the opening angle or first line energy.";
+  if (leadDriver.includes("retention")) return "Study pacing and mid-script structure.";
+  if (leadDriver.includes("caption")) return "Use this for caption framing and clarity.";
+  if (leadDriver.includes("recency")) return "Use this as a timely market signal.";
+  return "Use this for proof, framing, or market positioning.";
+}
+
+function buildReferenceCardDetail(reference: ViralStudioReferenceAsset): ReferenceCardDetail {
+  const contributionRows = Object.entries(reference.explainability.weightedContributions)
+    .map(([key, value]) => ({
+      key: key as keyof ViralStudioReferenceAsset["explainability"]["weightedContributions"],
+      value: Number(value),
+    }))
+    .sort((a, b) => b.value - a.value);
+  const interactionRate =
+    (reference.metrics.likes + reference.metrics.comments + reference.metrics.shares) /
+    Math.max(1, reference.metrics.views);
+  const palette = reference.visual?.palette?.filter(Boolean).slice(0, 3) || defaultReferencePalette(reference.sourcePlatform);
+  while (palette.length < 3) palette.push(palette[palette.length - 1] || "#cbd5f5");
+  return {
+    eyebrow: reference.visual?.eyebrow || `${toPlatformLabel(reference.sourcePlatform)} winner`,
+    headline:
+      compactText(reference.visual?.headline || reference.ranking.rationaleTitle || reference.caption || "Reference asset", 84) ||
+      "Reference asset",
+    footer: compactText(
+      reference.visual?.footer ||
+        reference.explainability.topDrivers[0] ||
+        reference.ranking.rationaleBullets[0] ||
+        reference.transcriptSummary ||
+        "No summary available yet.",
+      120
+    ),
+    bestUse: toReferenceBestUse(reference),
+    interactionRate,
+    ageDays: daysSinceIso(reference.metrics.postedAt),
+    primaryContributionLabel: contributionLabel(contributionRows[0]?.key || "engagementRate"),
+    primaryContributionValue: Number(contributionRows[0]?.value || 0),
+    secondaryContributionLabel: contributionRows[1] ? contributionLabel(contributionRows[1].key) : undefined,
+    secondaryContributionValue: contributionRows[1] ? Number(contributionRows[1].value) : undefined,
+    bullets: (reference.explainability.whyRankedHigh.length
+      ? reference.explainability.whyRankedHigh
+      : reference.ranking.rationaleBullets
+    )
+      .slice(0, 2)
+      .map((line) => compactText(line, 120)),
+    palette,
+    mediaUrl: sanitizeHttpUrl(reference.visual?.posterUrl || reference.visual?.thumbnailUrl || ""),
+  };
 }
 
 export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) {
@@ -2515,6 +2596,14 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     selectedReferenceInsights,
   ]);
 
+  const referenceCardDetails = useMemo(() => {
+    const next = new Map<string, ReferenceCardDetail>();
+    for (const reference of filteredReferences) {
+      next.set(reference.id, buildReferenceCardDetail(reference));
+    }
+    return next;
+  }, [filteredReferences]);
+
   const generationFocusCards = useMemo<StudioDetailCard[]>(() => {
     const influenceCount = prioritizedReferenceCount > 0 ? prioritizedReferenceCount : selectedReferenceIds.length;
     const qualityValue = generation
@@ -3623,35 +3712,93 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                 </button>
               </div>
               <div className={referenceViewMode === "grid" ? "vbs-reference-board-grid" : "vbs-reference-board-list"}>
-                {filteredReferences.map((reference) => (
-                  <div
-                    key={reference.id}
-                    className={[
-                      "vbs-reference-card",
-                      selectedReference?.id === reference.id ? "is-selected" : "",
-                      recentShortlistReferenceId === reference.id ? "is-updated" : "",
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
-                  >
-                    <button
-                      type="button"
-                      className="vbs-reference-card-head"
-                      onClick={() => setSelectedReferenceId(reference.id)}
+                {filteredReferences.map((reference) => {
+                  const cardDetail = referenceCardDetails.get(reference.id) || buildReferenceCardDetail(reference);
+                  const visualStyle = (cardDetail.mediaUrl
+                    ? {
+                        backgroundImage: `linear-gradient(180deg, rgba(11,19,43,0.18), rgba(11,19,43,0.82)), url("${cardDetail.mediaUrl}")`,
+                      }
+                    : {
+                        ["--vbs-reference-accent" as const]: cardDetail.palette[0],
+                        ["--vbs-reference-accent-soft" as const]: cardDetail.palette[1],
+                        ["--vbs-reference-accent-deep" as const]: cardDetail.palette[2],
+                      }) as CSSProperties;
+                  return (
+                    <div
+                      key={reference.id}
+                      className={[
+                        "vbs-reference-card",
+                        selectedReference?.id === reference.id ? "is-selected" : "",
+                        recentShortlistReferenceId === reference.id ? "is-updated" : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
                     >
-                      <span className="vbs-rank-badge">#{reference.ranking.rank}</span>
-                      <p>{reference.ranking.rationaleTitle}</p>
-                      <p className="vbs-meta">
-                        {toPlatformLabel(reference.sourcePlatform)} • score {reference.scores.composite.toFixed(3)} •{" "}
-                        {shortlistLabel(reference.shortlistState)}
-                      </p>
-                      <p className="vbs-meta">
-                        {formatCompactNumber(reference.metrics.views)} views • {formatTimestamp(reference.metrics.postedAt)}
-                      </p>
-                      <p className="vbs-meta">
-                        {reference.explainability.topDrivers[0] || reference.ranking.rationaleBullets[0]}
-                      </p>
-                    </button>
+                      <button
+                        type="button"
+                        className="vbs-reference-card-head"
+                        onClick={() => setSelectedReferenceId(reference.id)}
+                      >
+                        <div className="vbs-reference-visual" style={visualStyle}>
+                          <span className="vbs-rank-badge">#{reference.ranking.rank}</span>
+                          <div className="vbs-reference-visual-copy">
+                            <small>{cardDetail.eyebrow}</small>
+                            <strong>{cardDetail.headline}</strong>
+                            <p>{cardDetail.footer}</p>
+                          </div>
+                        </div>
+                        <div className="vbs-reference-card-topline">
+                          <p className="vbs-reference-title">{reference.ranking.rationaleTitle}</p>
+                          <p className="vbs-meta">
+                            {toPlatformLabel(reference.sourcePlatform)} • score {reference.scores.composite.toFixed(3)} •{" "}
+                            {shortlistLabel(reference.shortlistState)}
+                          </p>
+                        </div>
+                        <div className="vbs-reference-card-insight-grid">
+                          <div>
+                            <span>Best use</span>
+                            <strong>{cardDetail.bestUse}</strong>
+                          </div>
+                          <div>
+                            <span>Lead driver</span>
+                            <strong>
+                              {cardDetail.primaryContributionLabel} • {(cardDetail.primaryContributionValue * 100).toFixed(1)} pts
+                            </strong>
+                          </div>
+                        </div>
+                        <div className="vbs-reference-metric-strip">
+                          <div>
+                            <span>Views</span>
+                            <strong>{formatCompactNumber(reference.metrics.views)}</strong>
+                          </div>
+                          <div>
+                            <span>Interaction</span>
+                            <strong>{formatUnitPercent(cardDetail.interactionRate)}</strong>
+                          </div>
+                          <div>
+                            <span>Age</span>
+                            <strong>{cardDetail.ageDays === null ? "n/a" : `${cardDetail.ageDays}d`}</strong>
+                          </div>
+                        </div>
+                        <div className="vbs-top-driver-row vbs-top-driver-row-compact">
+                          {reference.explainability.topDrivers.slice(0, 3).map((driver) => (
+                            <span key={driver} className="vbs-driver-chip">
+                              {driver}
+                            </span>
+                          ))}
+                        </div>
+                        {cardDetail.secondaryContributionLabel ? (
+                          <p className="vbs-meta">
+                            Second driver: {cardDetail.secondaryContributionLabel} •{" "}
+                            {(Number(cardDetail.secondaryContributionValue || 0) * 100).toFixed(1)} pts
+                          </p>
+                        ) : null}
+                        <ul className="vbs-reference-bullets">
+                          {cardDetail.bullets.map((line) => (
+                            <li key={line}>{line}</li>
+                          ))}
+                        </ul>
+                      </button>
                     <div className="vbs-mini-actions vbs-shortlist-actions">
                       {(
                         [
@@ -3687,8 +3834,9 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                         );
                       })}
                     </div>
-                  </div>
-                ))}
+                    </div>
+                  );
+                })}
               </div>
               {filteredReferences.length === 0 ? <p className="vbs-meta">No references match current filters.</p> : null}
               {selectedReference && selectedReferenceInsights ? (

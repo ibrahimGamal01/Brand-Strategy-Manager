@@ -1132,6 +1132,13 @@ a {
   padding: 0.6rem;
   display: grid;
   gap: 0.45rem;
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.vbs-reference-card:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--vbs-cobalt) 26%, var(--bat-border));
+  box-shadow: 0 10px 22px rgba(11, 19, 43, 0.08);
 }
 
 .vbs-reference-card.is-selected {
@@ -1151,13 +1158,132 @@ a {
   padding: 0;
   text-align: left;
   display: grid;
-  gap: 0.25rem;
+  gap: 0.5rem;
   cursor: pointer;
 }
 
 .vbs-reference-card-head p {
   margin: 0;
   font-size: 0.8rem;
+}
+
+.vbs-reference-visual {
+  --vbs-reference-accent: color-mix(in srgb, var(--vbs-cobalt) 72%, white);
+  --vbs-reference-accent-soft: color-mix(in srgb, var(--vbs-teal) 70%, white);
+  --vbs-reference-accent-deep: color-mix(in srgb, var(--vbs-ink) 84%, black);
+  min-height: 9.2rem;
+  border-radius: 0.75rem;
+  padding: 0.65rem;
+  display: grid;
+  align-content: space-between;
+  gap: 0.55rem;
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--vbs-reference-accent-soft) 48%, transparent) 0%, transparent 42%),
+    linear-gradient(145deg, var(--vbs-reference-accent) 0%, var(--vbs-reference-accent-soft) 55%, var(--vbs-reference-accent-deep) 100%);
+  background-size: cover;
+  background-position: center;
+  overflow: hidden;
+}
+
+.vbs-reference-visual .vbs-rank-badge {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.28);
+  color: white;
+  backdrop-filter: blur(10px);
+}
+
+.vbs-reference-visual-copy {
+  display: grid;
+  gap: 0.22rem;
+}
+
+.vbs-reference-visual-copy small {
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.vbs-reference-visual-copy strong {
+  font-family: var(--vbs-display-font);
+  font-size: 1.02rem;
+  line-height: 1.04;
+  color: white;
+  max-width: 12ch;
+}
+
+.vbs-reference-visual-copy p {
+  margin: 0;
+  font-size: 0.74rem;
+  line-height: 1.38;
+  color: rgba(255, 255, 255, 0.82);
+  max-width: 28ch;
+}
+
+.vbs-reference-card-topline {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.vbs-reference-title {
+  font-family: var(--vbs-display-font);
+  font-size: 0.92rem;
+  line-height: 1.25;
+  color: var(--vbs-ink);
+}
+
+.vbs-reference-card-insight-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.vbs-reference-card-insight-grid > div,
+.vbs-reference-metric-strip > div {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 12%, var(--bat-border));
+  border-radius: 0.7rem;
+  background: color-mix(in srgb, white 95%, var(--vbs-sand));
+  padding: 0.5rem 0.55rem;
+  display: grid;
+  gap: 0.16rem;
+}
+
+.vbs-reference-card-insight-grid span,
+.vbs-reference-metric-strip span {
+  font-size: 0.64rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--vbs-ink) 54%, #677089);
+}
+
+.vbs-reference-card-insight-grid strong,
+.vbs-reference-metric-strip strong {
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--vbs-ink);
+}
+
+.vbs-reference-metric-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+.vbs-top-driver-row-compact {
+  margin-top: 0;
+}
+
+.vbs-reference-bullets {
+  margin: 0;
+  padding-left: 1rem;
+  display: grid;
+  gap: 0.24rem;
+}
+
+.vbs-reference-bullets li {
+  font-size: 0.76rem;
+  line-height: 1.42;
+  color: color-mix(in srgb, var(--vbs-ink) 80%, #5f6374);
 }
 
 .vbs-rank-badge {
@@ -2125,6 +2251,11 @@ a {
   }
 
   .vbs-reference-board-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vbs-reference-card-insight-grid,
+  .vbs-reference-metric-strip {
     grid-template-columns: minmax(0, 1fr);
   }
 
