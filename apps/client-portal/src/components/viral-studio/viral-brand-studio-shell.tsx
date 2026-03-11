@@ -2486,6 +2486,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                         <span>Mission</span>
                         <textarea
                           rows={3}
+                          aria-label="Mission"
                           placeholder="We help premium skincare brands turn social attention into repeatable sales."
                           value={brandForm.mission}
                           onChange={(e) => setBrandForm((p) => ({ ...p, mission: e.target.value }))}
@@ -2495,6 +2496,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                         <span>Value proposition</span>
                         <textarea
                           rows={3}
+                          aria-label="Value Proposition"
                           placeholder="Fast, strategy-led creative systems that turn research into campaign-ready content."
                           value={brandForm.valueProposition}
                           onChange={(e) => setBrandForm((p) => ({ ...p, valueProposition: e.target.value }))}
@@ -2505,6 +2507,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                       <label className="vbs-dna-field">
                         <span>Product or service</span>
                         <input
+                          aria-label="Product / Service"
                           placeholder="Brand strategy, viral content systems, creative production"
                           value={brandForm.productOrService}
                           onChange={(e) => setBrandForm((p) => ({ ...p, productOrService: e.target.value }))}
@@ -2513,6 +2516,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                       <label className="vbs-dna-field">
                         <span>Region</span>
                         <input
+                          aria-label="Region"
                           placeholder="GCC, MENA, global ecommerce, United States"
                           value={brandForm.region}
                           onChange={(e) => setBrandForm((p) => ({ ...p, region: e.target.value }))}
@@ -2529,6 +2533,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                         <span>Audience personas</span>
                         <textarea
                           rows={4}
+                          aria-label="Audience Personas"
                           placeholder="Founders, growth leads, brand managers, clinic owners"
                           value={brandForm.audiencePersonas}
                           onChange={(e) => setBrandForm((p) => ({ ...p, audiencePersonas: e.target.value }))}
@@ -2538,6 +2543,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                         <span>Pains</span>
                         <textarea
                           rows={4}
+                          aria-label="Pains"
                           placeholder="Inconsistent content, low converting traffic, unclear brand message"
                           value={brandForm.pains}
                           onChange={(e) => setBrandForm((p) => ({ ...p, pains: e.target.value }))}
@@ -2549,6 +2555,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                         <span>Desires</span>
                         <textarea
                           rows={4}
+                          aria-label="Desires"
                           placeholder="Higher trust, sharper positioning, campaign ideas that actually perform"
                           value={brandForm.desires}
                           onChange={(e) => setBrandForm((p) => ({ ...p, desires: e.target.value }))}
@@ -2558,6 +2565,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                         <span>Objections</span>
                         <textarea
                           rows={4}
+                          aria-label="Objections"
                           placeholder="Too expensive, not sure it fits our market, unclear proof"
                           value={brandForm.objections}
                           onChange={(e) => setBrandForm((p) => ({ ...p, objections: e.target.value }))}
@@ -2620,6 +2628,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                         <span>Banned phrases</span>
                         <textarea
                           rows={4}
+                          aria-label="Banned Phrases"
                           placeholder="best in class, disrupt, game-changing"
                           value={brandForm.bannedPhrases}
                           onChange={(e) => setBrandForm((p) => ({ ...p, bannedPhrases: e.target.value }))}
@@ -2629,6 +2638,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                         <span>Required claims</span>
                         <textarea
                           rows={4}
+                          aria-label="Required Claims"
                           placeholder="Doctor-led, evidence-backed, cruelty-free, available across GCC"
                           value={brandForm.requiredClaims}
                           onChange={(e) => setBrandForm((p) => ({ ...p, requiredClaims: e.target.value }))}
@@ -2644,6 +2654,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                       <span>Exemplar inputs</span>
                       <textarea
                         rows={4}
+                        aria-label="Exemplar Inputs"
                         placeholder="Paste strong posts, brand lines, landing page copy, or campaign examples"
                         value={brandForm.exemplars}
                         onChange={(e) => setBrandForm((p) => ({ ...p, exemplars: e.target.value }))}
@@ -2653,6 +2664,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                       <span>Brand DNA summary</span>
                       <textarea
                         rows={6}
+                        aria-label="Brand DNA Summary"
                         placeholder="Summarize the brand in a way the generation system can reuse across outputs"
                         value={brandForm.summary}
                         onChange={(e) => setBrandForm((p) => ({ ...p, summary: e.target.value }))}
@@ -2679,7 +2691,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                     disabled={onboardingStep === 4 || !isStepValid(onboardingStep, brandForm) || isBusy}
                     onClick={() => setOnboardingStep((Math.min(4, onboardingStep + 1) as 1 | 2 | 3 | 4))}
                   >
-                    Continue
+                    Next
                   </button>
                   <button type="button" disabled={isBusy} onClick={() => void saveBrandDna("draft")}>
                     Save Draft
