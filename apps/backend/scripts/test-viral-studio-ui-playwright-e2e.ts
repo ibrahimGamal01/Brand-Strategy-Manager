@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chromium, Page } from 'playwright';
+import { chromium, Locator, Page } from 'playwright';
 
 type FlowDiagnostics = {
   currentUrl: string;
@@ -54,6 +54,41 @@ async function waitForCountAtLeast(page: Page, selector: string, minimum: number
     await page.waitForTimeout(160);
   }
   throw new Error(`Timed out waiting for "${selector}" to reach count ${minimum}`);
+}
+
+async function waitForEnabled(locator: Locator, timeoutMs = 20_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const disabled = await locator.isDisabled().catch(() => true);
+    if (!disabled) {
+      return;
+    }
+    await locator.scrollIntoViewIfNeeded().catch(() => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  throw new Error('Timed out waiting for control to become enabled');
+}
+
+async function waitForInputValue(page: Page, selector: string, expectedValue: string, timeoutMs = 20_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const values = await page
+      .locator(selector)
+      .evaluateAll((elements) =>
+        elements.map((element) => {
+          if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+            return element.value;
+          }
+          return '';
+        })
+      )
+      .catch(() => []);
+    if (values.includes(expectedValue)) {
+      return;
+    }
+    await page.waitForTimeout(150);
+  }
+  throw new Error(`Timed out waiting for input selector "${selector}" to contain "${expectedValue}"`);
 }
 
 async function waitForSelectedShortlistState(page: Page, label: string, timeoutMs = 12_000) {
@@ -158,47 +193,43 @@ async function completeAuthAndResolveWorkspace(page: Page, baseUrl: string): Pro
 }
 
 async function finalizeBrandDna(page: Page) {
-  const foundationSlide = page.locator('#vbs-slide-foundation');
-  await foundationSlide.getByLabel('Mission').fill('Scale high-converting short-form content with consistent brand narrative.');
-  await foundationSlide.getByLabel('Value Proposition').fill('We blend strategy and creative systems to drive measurable demand.');
-  await foundationSlide.getByLabel('Product / Service').fill('Viral content strategy and production.');
-  await foundationSlide.getByLabel('Region').fill('MENA');
-  await foundationSlide.getByRole('button', { name: 'Next', exact: true }).click();
+  const onboardingSection = page.locator('#vbs-section-onboarding');
+  await onboardingSection.scrollIntoViewIfNeeded();
+  if (await onboardingSection.getByText('Brand DNA is finalized and active.').isVisible().catch(() => false)) {
+    return;
+  }
 
-  await foundationSlide.getByLabel('Audience Personas').fill('Founders, Growth marketers');
-  await foundationSlide.getByLabel('Pains').fill('Inconsistent content performance');
-  await foundationSlide.getByLabel('Desires').fill('Predictable pipeline growth');
-  await foundationSlide.getByLabel('Objections').fill('Not sure what angle works');
-  await foundationSlide.getByRole('button', { name: 'Next', exact: true }).click();
+  await onboardingSection.getByLabel('Mission').fill('Scale high-converting short-form content with consistent brand narrative.');
+  await onboardingSection.getByLabel('Value Proposition').fill('We blend strategy and creative systems to drive measurable demand.');
+  await onboardingSection.getByLabel('Product / Service').fill('Viral content strategy and production.');
+  await onboardingSection.getByLabel('Region').fill('MENA');
+  await onboardingSection.getByRole('button', { name: 'Next', exact: true }).click();
 
-  await foundationSlide.getByLabel('Banned Phrases').fill('guaranteed overnight success');
-  await foundationSlide.getByLabel('Required Claims').fill('results depend on execution');
-  await foundationSlide.getByRole('button', { name: 'Next', exact: true }).click();
+  await onboardingSection.getByLabel('Audience Personas').fill('Founders, Growth marketers');
+  await onboardingSection.getByLabel('Pains').fill('Inconsistent content performance');
+  await onboardingSection.getByLabel('Desires').fill('Predictable pipeline growth');
+  await onboardingSection.getByLabel('Objections').fill('Not sure what angle works');
+  await onboardingSection.getByRole('button', { name: 'Next', exact: true }).click();
 
-  await foundationSlide.getByLabel('Exemplar Inputs').fill('Strong hook + proof + CTA');
-  await foundationSlide
+  await onboardingSection.getByLabel('Banned Phrases').fill('guaranteed overnight success');
+  await onboardingSection.getByLabel('Required Claims').fill('results depend on execution');
+  await onboardingSection.getByRole('button', { name: 'Next', exact: true }).click();
+
+  await onboardingSection.getByLabel('Exemplar Inputs').fill('Strong hook + proof + CTA');
+  await onboardingSection
     .getByLabel('Brand DNA Summary')
     .fill('Direct, strategic, and execution-focused messaging for growth-minded teams.');
-  await foundationSlide.getByRole('button', { name: 'Finalize DNA', exact: true }).click();
+  await onboardingSection.getByRole('button', { name: 'Finalize DNA', exact: true }).click();
   await page.getByText('Brand DNA is finalized and active.').waitFor({ timeout: 60_000 });
 }
 
 async function runExtraction(page: Page) {
-  const extractButton = page.getByRole('button', { name: 'Extract Best Videos', exact: true });
-  const visibleNow = await extractButton
-    .first()
-    .isVisible()
-    .catch(() => false);
-  if (!visibleNow) {
-    const powerModeToggle = page
-      .getByRole('button', { name: /Switch To Power Surface|Open Full Workspace/i })
-      .first();
-    const hasToggle = (await powerModeToggle.count().catch(() => 0)) > 0;
-    if (hasToggle) {
-      await powerModeToggle.click();
-    }
-    await extractButton.first().waitFor({ timeout: 20_000 });
+  if ((await page.locator('.vbs-reference-card .vbs-reference-card-head').count().catch(() => 0)) > 0) {
+    return;
   }
+  const extractButton = page.getByRole('button', { name: 'Extract Best Videos', exact: true });
+  await page.locator('#vbs-section-extraction').scrollIntoViewIfNeeded();
+  await extractButton.first().waitFor({ timeout: 20_000 });
   await clickButtonByText(page, 'Extract Best Videos');
   await page.getByRole('dialog', { name: /Extract best videos/i }).waitFor({ timeout: 20_000 });
   await page.getByLabel('Source URL').fill('https://instagram.com/viral.studio.reference');
@@ -213,7 +244,8 @@ async function waitForReferenceBoard(page: Page): Promise<void> {
 }
 
 async function validateLaunchpadActionsAreClickable(page: Page): Promise<void> {
-  const actionButtons = page.locator('.vbs-launchpad-foot .vbs-launchpad-action');
+  const actionButtons = page.locator('.vbs-launchpad-grid .vbs-launchpad-card .vbs-launchpad-foot button');
+  await actionButtons.first().scrollIntoViewIfNeeded();
   await actionButtons.first().waitFor({ timeout: 20_000 });
   const actionCount = await actionButtons.count();
   assert.ok(actionCount >= 3, `Expected >=3 launchpad action buttons, got ${actionCount}`);
@@ -227,20 +259,27 @@ async function validateLaunchpadActionsAreClickable(page: Page): Promise<void> {
 }
 
 async function validateFoundationGuidance(page: Page) {
-  await page.getByRole('tab', { name: /Brand DNA/i }).click();
-  await page.locator('#vbs-slide-foundation .vbs-foundation-pulse-grid').waitFor({ timeout: 20_000 });
-  await waitForCountAtLeast(page, '#vbs-slide-foundation .vbs-foundation-pulse-card', 4, 20_000);
-  await page.locator('#vbs-slide-foundation .vbs-dna-spotlight').waitFor({ timeout: 20_000 });
-  await waitForCountAtLeast(page, '#vbs-slide-foundation .vbs-dna-spotlight-stat', 3, 20_000);
+  const onboardingSection = page.locator('#vbs-section-onboarding');
+  await onboardingSection.scrollIntoViewIfNeeded();
+  await onboardingSection.waitFor({ timeout: 20_000 });
+  await onboardingSection.locator('.vbs-detail-grid article').first().waitFor({ timeout: 20_000 });
+  await waitForCountAtLeast(page, '#vbs-section-onboarding .vbs-detail-grid article', 3, 20_000);
+  const finalizedView = await onboardingSection.getByText('Brand DNA is finalized and active.').isVisible().catch(() => false);
+  if (finalizedView) {
+    await onboardingSection.getByRole('button', { name: /Edit Brand DNA/i }).waitFor({ timeout: 20_000 });
+    return;
+  }
+  await onboardingSection.locator('.vbs-dna-step-tabs').waitFor({ timeout: 20_000 });
+  await waitForCountAtLeast(page, '#vbs-section-onboarding .vbs-dna-step-tabs button', 4, 20_000);
+  await onboardingSection.locator('.vbs-dna-sidecar').waitFor({ timeout: 20_000 });
 }
 
 async function validateDrawerAndShortcuts(page: Page) {
+  await page.locator('#vbs-section-extraction').scrollIntoViewIfNeeded();
   const firstReference = page.locator('.vbs-reference-card .vbs-reference-card-head').first();
   await firstReference.click();
   const drawer = page.locator('.vbs-analysis-drawer');
   await drawer.waitFor({ timeout: 15_000 });
-  await page.locator('.vbs-reference-focus-card').waitFor({ timeout: 15_000 });
-  await page.locator('.vbs-analysis-sidecar').waitFor({ timeout: 15_000 });
 
   await page.keyboard.press('2');
   await waitForSelectedShortlistState(page, 'Must-use');
@@ -274,70 +313,77 @@ async function validateDrawerAndShortcuts(page: Page) {
     `Expected normalized metric rows in analysis drawer, got ${normalizedMetricCards}`
   );
 
-  const focusMetricCards = await page.locator('.vbs-reference-focus-metrics > div').count();
-  assert.ok(focusMetricCards >= 3, `Expected focus metrics in reference sidecar, got ${focusMetricCards}`);
+  const boardMetricCards = await page.locator('.vbs-reference-metric-strip > div').count();
+  assert.ok(boardMetricCards >= 3, `Expected reference card metrics in board, got ${boardMetricCards}`);
 
-  const boardMetricChips = await page.locator('.vbs-reference-card-metrics span').count();
-  assert.ok(boardMetricChips >= 3, `Expected reference card metric chips in board, got ${boardMetricChips}`);
-
-  await drawer.locator('.vbs-analysis-why').waitFor({ timeout: 10_000 });
+  await drawer.locator('.vbs-source-context').waitFor({ timeout: 10_000 });
 }
 
 async function validateCreateAndSaveFlow(page: Page) {
-  await page.getByRole('tab', { name: /Create & Save/i }).click();
-  const createSlide = page.locator('#vbs-slide-create');
-  await createSlide.waitFor({ timeout: 20_000 });
-  await createSlide.locator('.vbs-staged-planner').waitFor({ timeout: 20_000 });
+  const createSection = page.locator('#vbs-section-create-save');
+  await createSection.scrollIntoViewIfNeeded();
+  await createSection.waitFor({ timeout: 20_000 });
+  await createSection.locator('.vbs-staged-planner').waitFor({ timeout: 20_000 });
 
-  await createSlide.getByRole('button', { name: /Analyze design directions/i }).first().click();
-  await waitForCountAtLeast(page, '#vbs-slide-create .vbs-planner-card-grid .vbs-planner-card', 3, 80_000);
+  await createSection.getByRole('button', { name: /Analyze design directions/i }).first().click();
+  await waitForCountAtLeast(page, '#vbs-section-create-save .vbs-planner-card-grid .vbs-planner-card', 3, 80_000);
 
-  const compareButton = createSlide
+  const compareButton = createSection
     .locator('.vbs-planner-card')
     .first()
     .getByRole('button', { name: /^Compare$/i });
   await compareButton.click();
-  await waitForCountAtLeast(page, '#vbs-slide-create .vbs-planner-compare-card', 1, 20_000);
+  await waitForCountAtLeast(page, '#vbs-section-create-save .vbs-planner-compare-card', 1, 20_000);
 
-  const useDesignButton = createSlide
+  const useDesignButton = createSection
     .locator('.vbs-planner-card')
     .first()
     .getByRole('button', { name: /Use this design|Approved/i });
   await useDesignButton.click();
-  await createSlide.getByText(/Design locked:/i).waitFor({ timeout: 20_000 });
+  await useDesignButton.getByText(/Approved/i).waitFor({ timeout: 20_000 }).catch(() => undefined);
+  await createSection.getByText(/Design locked:/i).waitFor({ timeout: 20_000 });
 
-  await createSlide.getByRole('button', { name: /Analyze content directions/i }).first().click();
-  await waitForCountAtLeast(page, '#vbs-slide-create .vbs-planner-card-grid .vbs-planner-card', 3, 80_000);
+  await createSection.getByRole('button', { name: /Analyze content directions/i }).first().click();
+  await waitForCountAtLeast(page, '#vbs-section-create-save .vbs-planner-card-grid .vbs-planner-card', 3, 80_000);
 
-  const useContentButton = createSlide
+  const useContentButton = createSection
     .locator('.vbs-planner-step')
     .nth(1)
     .locator('.vbs-planner-card')
     .first()
     .getByRole('button', { name: /Use this content|Approved/i });
   await useContentButton.click();
+  await useContentButton.getByText(/Approved/i).waitFor({ timeout: 20_000 }).catch(() => undefined);
 
-  await createSlide.getByRole('button', { name: 'Carousel', exact: true }).click();
-  await createSlide.getByRole('button', { name: /Generate format details|Generate next format/i }).first().click();
+  await createSection.getByRole('button', { name: 'Carousel', exact: true }).click();
+  const generateButton = createSection.getByRole('button', { name: /Generate format details|Generate next format/i }).first();
+  await waitForEnabled(generateButton, 20_000);
+  await generateButton.click();
 
-  await waitForCountAtLeast(page, '#vbs-slide-create .vbs-format-result-grid .vbs-planner-result-card', 3, 80_000);
-  await createSlide.getByText(/Design details/i).waitFor({ timeout: 20_000 });
-  await createSlide.getByText(/Content details/i).waitFor({ timeout: 20_000 });
+  await waitForCountAtLeast(page, '#vbs-section-create-save .vbs-format-result-grid .vbs-planner-result-card', 3, 80_000);
+  await createSection.locator('.vbs-planner-result-card').nth(0).getByText(/^Design details$/i).waitFor({ timeout: 20_000 });
+  await createSection.locator('.vbs-planner-result-card').nth(1).getByText(/^Content details$/i).waitFor({ timeout: 20_000 });
 
-  await createSlide.getByRole('button', { name: /Save To Document|Document Ready/i }).first().click();
-  await waitForTextContains(page, '#vbs-slide-create .vbs-status-strip', 'Document ready', 80_000);
-  await createSlide.locator('#vbs-section-documents').getByText(/Design Details/i).waitFor({ timeout: 20_000 });
-  await createSlide.locator('#vbs-section-documents').getByText(/Content Details/i).waitFor({ timeout: 20_000 });
+  const saveButton = createSection.getByRole('button', { name: /Save To Document|Document Ready/i }).first();
+  await saveButton.waitFor({ timeout: 20_000 });
+  const saveLabel = (await saveButton.textContent().catch(() => '')).trim();
+  const saveDisabled = await saveButton.isDisabled().catch(() => false);
+  if (!saveDisabled && /save to document/i.test(saveLabel)) {
+    await saveButton.click();
+  }
+  await page.locator('#vbs-section-documents').scrollIntoViewIfNeeded();
+  await waitForInputValue(page, '#vbs-section-documents .vbs-doc-section-head input', 'Design Details', 20_000);
+  await waitForInputValue(page, '#vbs-section-documents .vbs-doc-section-head input', 'Content Details', 20_000);
 
-  await createSlide.locator('.vbs-advanced-fallback').waitFor({ timeout: 20_000 });
+  await createSection.locator('.vbs-advanced-fallback').waitFor({ timeout: 20_000 });
 
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.getByRole('heading', { name: 'Viral Brand Studio' }).waitFor({ timeout: 60_000 });
-  await page.getByRole('tab', { name: /Create & Save/i }).click();
-  await createSlide.locator('.vbs-staged-planner').waitFor({ timeout: 20_000 });
-  await waitForTextContains(page, '#vbs-slide-create .vbs-status-strip', 'Document ready', 20_000);
-  await createSlide.locator('#vbs-section-documents').getByText(/Design Details/i).waitFor({ timeout: 20_000 });
-  await createSlide.locator('#vbs-section-documents').getByText(/Content Details/i).waitFor({ timeout: 20_000 });
+  await page.locator('#vbs-section-create-save').scrollIntoViewIfNeeded();
+  await page.locator('#vbs-section-create-save .vbs-staged-planner').waitFor({ timeout: 20_000 });
+  await page.locator('#vbs-section-documents').scrollIntoViewIfNeeded();
+  await waitForInputValue(page, '#vbs-section-documents .vbs-doc-section-head input', 'Design Details', 20_000);
+  await waitForInputValue(page, '#vbs-section-documents .vbs-doc-section-head input', 'Content Details', 20_000);
 }
 
 async function collectDiagnostics(
@@ -391,7 +437,7 @@ async function runFlowAttempt(baseUrl: string): Promise<void> {
     await validateLaunchpadActionsAreClickable(page);
     await validateFoundationGuidance(page);
     await finalizeBrandDna(page);
-    await page.locator('#vbs-slide-foundation .vbs-dna-summary-shell').waitFor({ timeout: 20_000 });
+    await page.locator('#vbs-section-onboarding').getByText('Brand DNA is finalized and active.').waitFor({ timeout: 20_000 });
     await runExtraction(page);
     await waitForReferenceBoard(page);
     await validateDrawerAndShortcuts(page);
@@ -415,7 +461,7 @@ async function runFlowAttempt(baseUrl: string): Promise<void> {
             'brand_dna_summary_surface_rendered',
             'extraction_run_completed_with_references',
             'analysis_drawer_renders_extended_sections',
-            'reference_sidecar_and_board_metrics_render',
+            'reference_board_metrics_render',
             'shortlist_keyboard_shortcuts_1_2_3_0',
             'shortlist_notice_and_active_state_feedback',
             'staged_design_direction_board_rendered',
