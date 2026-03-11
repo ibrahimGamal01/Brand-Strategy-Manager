@@ -98,6 +98,12 @@ type PromptStudioSectionMeta = {
   kind: "list" | "text";
 };
 
+type PromptStudioSectionGuide = {
+  eyebrow: string;
+  reviewLens: string;
+  purpose: string;
+};
+
 const PROMPT_STUDIO_SECTIONS: PromptStudioSectionMeta[] = [
   { id: "hooks", title: "Hooks", kind: "list" },
   { id: "scripts.short", title: "Short Script", kind: "text" },
@@ -107,6 +113,44 @@ const PROMPT_STUDIO_SECTIONS: PromptStudioSectionMeta[] = [
   { id: "ctas", title: "CTA Variants", kind: "list" },
   { id: "angleRemixes", title: "Angle Remixes", kind: "list" },
 ];
+
+const PROMPT_STUDIO_SECTION_GUIDES: Record<ViralStudioGenerationSection, PromptStudioSectionGuide> = {
+  hooks: {
+    eyebrow: "Stop the scroll",
+    reviewLens: "Check clarity, tension, and how fast the promise lands.",
+    purpose: "Hooks should make the first 2 seconds feel inevitable to keep watching.",
+  },
+  "scripts.short": {
+    eyebrow: "Quick win script",
+    reviewLens: "Tight pacing, one proof point, immediate CTA.",
+    purpose: "This is the fast-turn execution version for aggressive testing.",
+  },
+  "scripts.medium": {
+    eyebrow: "Balanced script",
+    reviewLens: "Clear setup, evidence, payoff, and branded close.",
+    purpose: "Use this when you need enough explanation without losing momentum.",
+  },
+  "scripts.long": {
+    eyebrow: "Editorial script",
+    reviewLens: "Narrative flow, depth, and retention across a longer build.",
+    purpose: "This is the deeper variant for richer story-led or educational content.",
+  },
+  captions: {
+    eyebrow: "Caption angles",
+    reviewLens: "First line strength, payoff clarity, and CTA handoff.",
+    purpose: "Captions should reinforce the angle without repeating the script word-for-word.",
+  },
+  ctas: {
+    eyebrow: "Action language",
+    reviewLens: "Specific next step, urgency, and conversion clarity.",
+    purpose: "CTAs should tell the audience exactly what to do next and why now.",
+  },
+  angleRemixes: {
+    eyebrow: "Creative expansion",
+    reviewLens: "Fresh positioning, non-obvious angles, and market contrast.",
+    purpose: "Angle remixes help the team test smarter variations without losing the core strategy.",
+  },
+};
 
 const DEFAULT_FORM_STATE: BrandFormState = {
   mission: "",
@@ -347,6 +391,14 @@ function toGenerationFormatLabel(target: ViralStudioGenerationFormatTarget): str
   if (target === "shorts") return "YouTube Shorts";
   if (target === "story") return "Story Sequence";
   return "30s Reel";
+}
+
+function toPromptIntentLabel(intent: ViralStudioPromptTemplate["intent"]): string {
+  if (intent === "hook-script") return "Hook-led";
+  if (intent === "caption") return "Caption-first";
+  if (intent === "cta") return "CTA-focused";
+  if (intent === "angle-remix") return "Angle remix";
+  return "Full script";
 }
 
 function defaultSectionInstructions(): Record<ViralStudioGenerationSection, string> {
@@ -2517,6 +2569,68 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     selectedTemplate,
   ]);
 
+  const generationReferencePreview = useMemo(() => {
+    const referenceById = new Map(references.map((item) => [item.id, item] as const));
+    const activeIds = generation?.selectedReferenceIds?.length ? generation.selectedReferenceIds : selectedReferenceIds;
+    return activeIds
+      .map((id) => referenceById.get(id))
+      .filter((item): item is ViralStudioReferenceAsset => Boolean(item))
+      .slice(0, 4);
+  }, [generation?.selectedReferenceIds, references, selectedReferenceIds]);
+
+  const generationSummaryCards = useMemo<StudioDetailCard[]>(() => {
+    if (!generation) {
+      return [
+        {
+          label: "Pack status",
+          value: "No pack generated yet",
+          note: "Choose the template, tighten the direction, then run one full pack before section-level refinements.",
+          tone: "warning",
+        },
+        {
+          label: "What will appear",
+          value: "Hooks, scripts, captions, CTAs, and angle remixes",
+          note: "The studio will lay out each section as its own review card so you can refine one part without restarting the whole pack.",
+        },
+        {
+          label: "First review pass",
+          value: "Check the strongest hook, the medium script, and CTA clarity",
+          note: "Those three signals tell you very quickly whether the prompt direction is on-strategy or needs another pass.",
+        },
+        {
+          label: "Document handoff",
+          value: "Best pack becomes the editable campaign draft",
+          note: "Create the document only after the pack feels structurally right, not while the strategy is still drifting.",
+        },
+      ];
+    }
+    return [
+      {
+        label: "Pack status",
+        value: `Revision ${generation.revision} • ${generation.qualityCheck.passed ? "Ready to refine" : "Needs review"}`,
+        note: `Created ${formatTimestamp(generation.createdAt)} • ${generationReferencePreview.length} reference(s) influenced this run.`,
+        tone: generation.qualityCheck.passed ? "success" : "warning",
+      },
+      {
+        label: "Section mix",
+        value: `${generation.outputs.hooks.length} hooks • ${generation.outputs.captions.length} captions • ${generation.outputs.ctas.length} CTAs`,
+        note: "Use the section cards as an editorial pass, not as a single giant text blob.",
+      },
+      {
+        label: "Script coverage",
+        value: `${generation.outputs.scripts.short ? "Short" : ""}${generation.outputs.scripts.medium ? " • Medium" : ""}${generation.outputs.scripts.long ? " • Long" : ""}`.replace(/^ • /, ""),
+        note: "Short is for speed, medium is the default working version, and long is for deeper educational or story-led variants.",
+      },
+      {
+        label: "Document handoff",
+        value: document ? `${document.title} is linked to this pack` : "No document linked yet",
+        note: document
+          ? "Keep refining here, then snapshot the best draft into version history."
+          : "When this revision feels right, create the document so the team can edit and version it safely.",
+      },
+    ];
+  }, [document, generation, generationReferencePreview.length]);
+
   const documentFocusCards = useMemo<StudioDetailCard[]>(() => {
     const latestVersion = versions[versions.length - 1] || null;
     const autosaveValue =
@@ -3703,12 +3817,127 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                   <article key={card.label} className={detailCardClassName(card)}>
                     <span>{card.label}</span>
                     <strong>{card.value}</strong>
-                    <p>{card.note}</p>
-                  </article>
+                  <p>{card.note}</p>
+                </article>
+              ))}
+              </div>
+              <div className="vbs-generation-overview">
+                <article className="vbs-generation-brief-card">
+                  <div className="vbs-generation-brief-head">
+                    <div>
+                      <p className="vbs-meta">Creative brief</p>
+                      <h3>{generation ? generation.promptContext.objective : "Set the direction before you generate"}</h3>
+                    </div>
+                    <span className="vbs-brief-badge">
+                      {selectedTemplate ? toPromptIntentLabel(selectedTemplate.intent) : "Template"}
+                    </span>
+                  </div>
+                  <p className="vbs-generation-brief-copy">
+                    {generation
+                      ? generation.promptContext.audienceSnapshot
+                      : compactText(
+                          brandProfile?.summary ||
+                            "Your Brand DNA summary and prioritized references will be condensed into one working brief here.",
+                          240
+                        )}
+                  </p>
+                  <div className="vbs-generation-brief-grid">
+                    <div>
+                      <span>Brand brief</span>
+                      <strong>{compactText(generation?.promptContext.brandSummary || brandProfile?.summary || "Finalize Brand DNA to strengthen the pack brief.", 120)}</strong>
+                    </div>
+                    <div>
+                      <span>Voice profile</span>
+                      <strong>
+                        {generation?.promptContext.voiceProfile?.length
+                          ? generation.promptContext.voiceProfile.join(" • ")
+                          : tonePreview(brandForm).replace("Voice profile: ", "")}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Required claims</span>
+                      <strong>
+                        {generation?.promptContext.requiredClaims?.length
+                          ? compactText(generation.promptContext.requiredClaims.join(", "), 110)
+                          : brandProfile?.requiredClaims?.length
+                            ? compactText(brandProfile.requiredClaims.join(", "), 110)
+                            : "No required claims set"}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Banned phrases</span>
+                      <strong>
+                        {generation?.promptContext.bannedPhrases?.length
+                          ? compactText(generation.promptContext.bannedPhrases.join(", "), 110)
+                          : brandProfile?.bannedPhrases?.length
+                            ? compactText(brandProfile.bannedPhrases.join(", "), 110)
+                            : "No banned phrases set"}
+                      </strong>
+                    </div>
+                  </div>
+                </article>
+                <article className="vbs-generation-reference-card">
+                  <div className="vbs-generation-brief-head">
+                    <div>
+                      <p className="vbs-meta">Influence set</p>
+                      <h3>{generationReferencePreview.length} references are steering this pack</h3>
+                    </div>
+                    <span className="vbs-brief-badge">
+                      {prioritizedReferenceCount > 0 ? `${prioritizedReferenceCount} prioritized` : "Fallback top refs"}
+                    </span>
+                  </div>
+                  {generationReferencePreview.length ? (
+                    <div className="vbs-generation-reference-list">
+                      {generationReferencePreview.map((reference) => (
+                        <button
+                          key={`generation-ref-${reference.id}`}
+                          type="button"
+                          className="vbs-generation-reference-item"
+                          onClick={() => setSelectedReferenceId(reference.id)}
+                        >
+                          <span>#{reference.ranking.rank}</span>
+                          <strong>{compactText(reference.ranking.rationaleTitle, 70)}</strong>
+                          <p>
+                            {toPlatformLabel(reference.sourcePlatform)} • {shortlistLabel(reference.shortlistState)} •{" "}
+                            {formatCompactNumber(reference.metrics.views)} views
+                          </p>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="vbs-meta">
+                      Prioritize references in the board first. The strongest shortlist should become the visible influence set here.
+                    </p>
+                  )}
+                </article>
+              </div>
+              <div className="vbs-template-rail">
+                {promptTemplates.map((template) => (
+                  <button
+                    key={template.id}
+                    type="button"
+                    className={template.id === selectedTemplateId ? "vbs-template-card is-active" : "vbs-template-card"}
+                    aria-pressed={template.id === selectedTemplateId}
+                    onClick={() => setSelectedTemplateId(template.id)}
+                  >
+                    <span>{toPromptIntentLabel(template.intent)}</span>
+                    <strong>{template.title}</strong>
+                    <p>{compactText(template.description, 120)}</p>
+                    <small>{template.requiredFields.length} required fields • {compactText(template.outputSchema, 80)}</small>
+                  </button>
                 ))}
               </div>
               <div className="vbs-prompt-two-pane">
                 <div className="vbs-prompt-controls">
+                  <div className="vbs-generation-summary-strip">
+                    {generationSummaryCards.map((card) => (
+                      <article key={card.label} className={detailCardClassName(card)}>
+                        <span>{card.label}</span>
+                        <strong>{card.value}</strong>
+                        <p>{card.note}</p>
+                      </article>
+                    ))}
+                  </div>
                   <div className="vbs-form-grid">
                     <label>
                       Template
@@ -3781,6 +4010,8 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                       const sectionLines = readGenerationSectionContent(generation, sectionMeta.id);
                       const sectionInstruction = sectionInstructions[sectionMeta.id] || "";
                       const isSectionPending = promptActionSection === sectionMeta.id;
+                      const sectionGuide = PROMPT_STUDIO_SECTION_GUIDES[sectionMeta.id];
+                      const leadLine = sectionLines[0] || "";
                       return (
                         <article
                           key={sectionMeta.id}
@@ -3788,9 +4019,16 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                           onClick={() => setActivePromptSection(sectionMeta.id)}
                         >
                           <header className="vbs-pack-card-head">
-                            <h3>{sectionMeta.title}</h3>
+                            <div>
+                              <p className="vbs-meta">{sectionGuide.eyebrow}</p>
+                              <h3>{sectionMeta.title}</h3>
+                            </div>
                             <span>{sectionMeta.kind === "list" ? `${sectionLines.length} variants` : "1 block"}</span>
                           </header>
+                          <div className="vbs-pack-card-lead">
+                            <strong>{compactText(leadLine, 150) || "This section will populate after generation."}</strong>
+                            <p>{sectionGuide.purpose}</p>
+                          </div>
                           <div className="vbs-pack-card-body">
                             {sectionMeta.kind === "list" ? (
                               <ul>
@@ -3801,6 +4039,10 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                             ) : (
                               <pre>{sectionLines[0] || ""}</pre>
                             )}
+                          </div>
+                          <div className="vbs-pack-card-review">
+                            <span>Review lens</span>
+                            <strong>{sectionGuide.reviewLens}</strong>
                           </div>
                           <label className="vbs-pack-instruction">
                             Section instruction
@@ -3830,8 +4072,28 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                       );
                     })
                   ) : (
-                    <div className="vbs-output">
-                      <p className="vbs-meta">Run Generate Multi-Pack to populate section cards.</p>
+                    <div className="vbs-generation-empty">
+                      <div className="vbs-generation-empty-head">
+                        <p className="vbs-meta">Pack preview</p>
+                        <h3>Generate once, then refine with precision</h3>
+                      </div>
+                      <div className="vbs-generation-empty-grid">
+                        <article>
+                          <span>1</span>
+                          <strong>Choose the strongest template</strong>
+                          <p>Pick the template that matches the job, not the one with the most words.</p>
+                        </article>
+                        <article>
+                          <span>2</span>
+                          <strong>Keep the direction narrow</strong>
+                          <p>One clear angle beats a long prompt with mixed goals.</p>
+                        </article>
+                        <article>
+                          <span>3</span>
+                          <strong>Review before editing the document</strong>
+                          <p>Use the first full pack as a read on strategy, then refine only the sections that miss.</p>
+                        </article>
+                      </div>
                     </div>
                   )}
                 </div>
