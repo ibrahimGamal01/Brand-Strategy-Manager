@@ -2911,6 +2911,33 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     return next;
   }, [filteredReferences]);
 
+  const selectedReferenceCardDetail = useMemo(() => {
+    if (!selectedReference) return null;
+    return referenceCardDetails.get(selectedReference.id) || buildReferenceCardDetail(selectedReference);
+  }, [referenceCardDetails, selectedReference]);
+
+  const selectedReferenceVisualStyle = useMemo(() => {
+    if (!selectedReferenceCardDetail) return undefined;
+    return (selectedReferenceCardDetail.mediaUrl
+      ? {
+          backgroundImage: `linear-gradient(180deg, rgba(11,19,43,0.16), rgba(11,19,43,0.82)), url("${selectedReferenceCardDetail.mediaUrl}")`,
+        }
+      : {
+          ["--vbs-reference-accent" as const]: selectedReferenceCardDetail.palette[0],
+          ["--vbs-reference-accent-soft" as const]: selectedReferenceCardDetail.palette[1],
+          ["--vbs-reference-accent-deep" as const]: selectedReferenceCardDetail.palette[2],
+        }) as CSSProperties;
+  }, [selectedReferenceCardDetail]);
+
+  const selectedReferenceDrawerStyle = useMemo(() => {
+    if (!selectedReferenceCardDetail) return undefined;
+    return {
+      ["--vbs-analysis-accent" as const]: selectedReferenceCardDetail.palette[0],
+      ["--vbs-analysis-accent-soft" as const]: selectedReferenceCardDetail.palette[1],
+      ["--vbs-analysis-accent-deep" as const]: selectedReferenceCardDetail.palette[2],
+    } as CSSProperties;
+  }, [selectedReferenceCardDetail]);
+
   const generationFocusCards = useMemo<StudioDetailCard[]>(() => {
     const influenceCount = prioritizedReferenceCount > 0 ? prioritizedReferenceCount : selectedReferenceIds.length;
     const qualityValue = generation
@@ -4146,90 +4173,208 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                 })}
               </div>
               {filteredReferences.length === 0 ? <p className="vbs-meta">No references match current filters.</p> : null}
-              {selectedReference && selectedReferenceInsights ? (
-                <div className="vbs-analysis-drawer">
-                  <p className="vbs-meta">
-                    Analysis Drawer • #{selectedReference.ranking.rank} • {toPlatformLabel(selectedReference.sourcePlatform)} •{" "}
-                    {shortlistLabel(selectedReference.shortlistState)}
-                  </p>
-                  <h3>{selectedReference.ranking.rationaleTitle}</h3>
-                  <div className="vbs-analysis-kpi-grid">
-                    <div>
-                      <span>Composite</span>
-                      <strong>{selectedReference.scores.composite.toFixed(3)}</strong>
-                      <p
-                        className={
-                          selectedReferenceInsights.compositeDelta >= 0 ? "vbs-delta-positive" : "vbs-delta-negative"
-                        }
-                      >
-                        {selectedReferenceInsights.compositeDelta >= 0 ? "+" : ""}
-                        {selectedReferenceInsights.compositeDelta.toFixed(3)} vs board avg{" "}
-                        {selectedReferenceInsights.avgComposite.toFixed(3)}
+              {selectedReference && selectedReferenceInsights && selectedReferenceCardDetail ? (
+                <div className="vbs-analysis-drawer" style={selectedReferenceDrawerStyle}>
+                  <div className="vbs-analysis-hero">
+                    <div className="vbs-reference-visual vbs-analysis-visual" style={selectedReferenceVisualStyle}>
+                      <span className="vbs-rank-badge">#{selectedReference.ranking.rank}</span>
+                      <div className="vbs-reference-visual-copy">
+                        <small>{selectedReferenceCardDetail.eyebrow}</small>
+                        <strong>{selectedReferenceCardDetail.headline}</strong>
+                        <p>{selectedReferenceCardDetail.footer}</p>
+                      </div>
+                    </div>
+                    <div className="vbs-analysis-overview">
+                      <div className="vbs-analysis-overview-head">
+                        <p className="vbs-meta">
+                          Expanded analysis • {toPlatformLabel(selectedReference.sourcePlatform)} •{" "}
+                          {shortlistLabel(selectedReference.shortlistState)}
+                        </p>
+                        <div className="vbs-top-driver-row vbs-top-driver-row-compact">
+                          {selectedReference.explainability.topDrivers.map((driver) => (
+                            <span key={driver} className="vbs-driver-chip">
+                              {driver}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <h3>{selectedReference.ranking.rationaleTitle}</h3>
+                      <p className="vbs-analysis-summary">
+                        {selectedReferenceCardDetail.bestUse} This expanded state keeps the same creative object in view
+                        while exposing the ranking logic underneath it.
                       </p>
-                    </div>
-                    <div>
-                      <span>Views</span>
-                      <strong>{formatCompactNumber(selectedReference.metrics.views)}</strong>
-                      <p>{selectedReference.metrics.likes} likes • {selectedReference.metrics.comments} comments</p>
-                    </div>
-                    <div>
-                      <span>Interaction Rate</span>
-                      <strong>{formatUnitPercent(selectedReferenceInsights.interactionRateRaw)}</strong>
-                      <p>{selectedReference.metrics.shares} shares</p>
-                    </div>
-                    <div>
-                      <span>Recency</span>
-                      <strong>
-                        {selectedReferenceInsights.postedAgeDays === null
-                          ? "n/a"
-                          : `${selectedReferenceInsights.postedAgeDays}d ago`}
-                      </strong>
-                      <p>{formatTimestamp(selectedReference.metrics.postedAt)}</p>
-                    </div>
-                  </div>
-                  <div className="vbs-top-driver-row">
-                    {selectedReference.explainability.topDrivers.map((driver) => (
-                      <span key={driver} className="vbs-driver-chip">
-                        {driver}
-                      </span>
-                    ))}
-                  </div>
-                  <div className="vbs-analysis-grid">
-                    {selectedReferenceInsights.contributionRows.map(({ key, value }) => (
-                      <div key={key} className="vbs-analysis-metric">
-                        <p>{contributionLabel(key)}</p>
-                        <strong>{(Number(value) * 100).toFixed(1)} pts</strong>
-                        <div className="vbs-analysis-bar">
-                          <span style={{ width: `${Math.max(6, Math.min(100, Number(value) * 320))}%` }} />
+                      <div className="vbs-reference-card-insight-grid vbs-analysis-insight-grid">
+                        <div>
+                          <span>Best use</span>
+                          <strong>{selectedReferenceCardDetail.bestUse}</strong>
+                        </div>
+                        <div>
+                          <span>Lead driver</span>
+                          <strong>
+                            {selectedReferenceCardDetail.primaryContributionLabel} •{" "}
+                            {(selectedReferenceCardDetail.primaryContributionValue * 100).toFixed(1)} pts
+                          </strong>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                  <div className="vbs-analysis-grid vbs-normalized-grid">
-                    {selectedReferenceInsights.normalizedRows.map(({ key, value }) => (
-                      <div key={key} className="vbs-analysis-metric">
-                        <p>{normalizedMetricLabel(key)}</p>
-                        <strong>{value.toFixed(1)}%</strong>
-                        <div className="vbs-analysis-bar">
-                          <span style={{ width: `${Math.max(6, Math.min(100, value))}%` }} />
+                      <div className="vbs-reference-metric-strip vbs-analysis-metric-strip">
+                        <div>
+                          <span>Views</span>
+                          <strong>{formatCompactNumber(selectedReference.metrics.views)}</strong>
+                        </div>
+                        <div>
+                          <span>Interaction</span>
+                          <strong>{formatUnitPercent(selectedReferenceCardDetail.interactionRate)}</strong>
+                        </div>
+                        <div>
+                          <span>Age</span>
+                          <strong>
+                            {selectedReferenceCardDetail.ageDays === null ? "n/a" : `${selectedReferenceCardDetail.ageDays}d`}
+                          </strong>
                         </div>
                       </div>
-                    ))}
+                      <ul className="vbs-reference-bullets vbs-analysis-preview-bullets">
+                        {selectedReferenceCardDetail.bullets.map((line) => (
+                          <li key={line}>{line}</li>
+                        ))}
+                      </ul>
+                    </div>
                   </div>
-                  <ul>
-                    {selectedReference.explainability.whyRankedHigh.map((line) => (
-                      <li key={line}>{line}</li>
-                    ))}
-                  </ul>
-                  <div className="vbs-source-context">
-                    <h4>Source Context</h4>
-                    <p className="vbs-meta">{selectedReference.caption}</p>
-                    <p className="vbs-meta">{selectedReference.transcriptSummary}</p>
-                    <p className="vbs-meta">{selectedReference.ocrSummary}</p>
-                    <p className="vbs-meta">
-                      Formula {selectedReference.explainability.formulaVersion} • Shortcuts: 1 pin, 2 must-use, 3
-                      exclude, 0 clear
-                    </p>
+
+                  <div className="vbs-analysis-story-grid">
+                    <section className="vbs-analysis-section">
+                      <div className="vbs-analysis-section-head">
+                        <div>
+                          <p className="vbs-meta">Score pulse</p>
+                          <h4>Why this keeps winning on the board</h4>
+                        </div>
+                        <span className="vbs-analysis-chip">
+                          {selectedReferenceInsights.compositeDelta >= 0 ? "Above board average" : "Below board average"}
+                        </span>
+                      </div>
+                      <div className="vbs-analysis-kpi-grid">
+                        <div>
+                          <span>Composite</span>
+                          <strong>{selectedReference.scores.composite.toFixed(3)}</strong>
+                          <p
+                            className={
+                              selectedReferenceInsights.compositeDelta >= 0 ? "vbs-delta-positive" : "vbs-delta-negative"
+                            }
+                          >
+                            {selectedReferenceInsights.compositeDelta >= 0 ? "+" : ""}
+                            {selectedReferenceInsights.compositeDelta.toFixed(3)} vs board avg{" "}
+                            {selectedReferenceInsights.avgComposite.toFixed(3)}
+                          </p>
+                        </div>
+                        <div>
+                          <span>Views</span>
+                          <strong>{formatCompactNumber(selectedReference.metrics.views)}</strong>
+                          <p>{selectedReference.metrics.likes} likes • {selectedReference.metrics.comments} comments</p>
+                        </div>
+                        <div>
+                          <span>Interaction Rate</span>
+                          <strong>{formatUnitPercent(selectedReferenceInsights.interactionRateRaw)}</strong>
+                          <p>{selectedReference.metrics.shares} shares</p>
+                        </div>
+                        <div>
+                          <span>Recency</span>
+                          <strong>
+                            {selectedReferenceInsights.postedAgeDays === null
+                              ? "n/a"
+                              : `${selectedReferenceInsights.postedAgeDays}d ago`}
+                          </strong>
+                          <p>{formatTimestamp(selectedReference.metrics.postedAt)}</p>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="vbs-analysis-section">
+                      <div className="vbs-analysis-section-head">
+                        <div>
+                          <p className="vbs-meta">Editorial read</p>
+                          <h4>What to borrow and what to preserve</h4>
+                        </div>
+                        <span className="vbs-analysis-chip">
+                          {selectedReferenceCardDetail.secondaryContributionLabel
+                            ? `Second driver: ${selectedReferenceCardDetail.secondaryContributionLabel}`
+                            : "Single dominant angle"}
+                        </span>
+                      </div>
+                      <ul className="vbs-analysis-rationale-list">
+                        {selectedReference.explainability.whyRankedHigh.map((line) => (
+                          <li key={line}>{line}</li>
+                        ))}
+                      </ul>
+                    </section>
+                  </div>
+
+                  <div className="vbs-analysis-story-grid">
+                    <section className="vbs-analysis-section">
+                      <div className="vbs-analysis-section-head">
+                        <div>
+                          <p className="vbs-meta">Contribution map</p>
+                          <h4>Weighted drivers</h4>
+                        </div>
+                        <span className="vbs-analysis-chip">
+                          Formula {selectedReference.explainability.formulaVersion}
+                        </span>
+                      </div>
+                      <div className="vbs-analysis-grid">
+                        {selectedReferenceInsights.contributionRows.map(({ key, value }) => (
+                          <div key={key} className="vbs-analysis-metric">
+                            <p>{contributionLabel(key)}</p>
+                            <strong>{(Number(value) * 100).toFixed(1)} pts</strong>
+                            <div className="vbs-analysis-bar">
+                              <span style={{ width: `${Math.max(6, Math.min(100, Number(value) * 320))}%` }} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+
+                    <section className="vbs-analysis-section">
+                      <div className="vbs-analysis-section-head">
+                        <div>
+                          <p className="vbs-meta">Normalized read</p>
+                          <h4>Cross-platform strength profile</h4>
+                        </div>
+                        <span className="vbs-analysis-chip">Comparable metrics</span>
+                      </div>
+                      <div className="vbs-analysis-grid vbs-normalized-grid">
+                        {selectedReferenceInsights.normalizedRows.map(({ key, value }) => (
+                          <div key={key} className="vbs-analysis-metric">
+                            <p>{normalizedMetricLabel(key)}</p>
+                            <strong>{value.toFixed(1)}%</strong>
+                            <div className="vbs-analysis-bar">
+                              <span style={{ width: `${Math.max(6, Math.min(100, value))}%` }} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  </div>
+
+                  <div className="vbs-source-context vbs-analysis-section">
+                    <div className="vbs-analysis-section-head">
+                      <div>
+                        <p className="vbs-meta">Source context</p>
+                        <h4>Transcript, caption, and OCR cues</h4>
+                      </div>
+                      <span className="vbs-analysis-chip">Shortcuts: 1 pin, 2 must-use, 3 exclude, 0 clear</span>
+                    </div>
+                    <div className="vbs-analysis-source-grid">
+                      <article>
+                        <span>Caption</span>
+                        <p className="vbs-meta">{selectedReference.caption}</p>
+                      </article>
+                      <article>
+                        <span>Transcript summary</span>
+                        <p className="vbs-meta">{selectedReference.transcriptSummary}</p>
+                      </article>
+                      <article>
+                        <span>OCR summary</span>
+                        <p className="vbs-meta">{selectedReference.ocrSummary}</p>
+                      </article>
+                    </div>
                   </div>
                 </div>
               ) : null}
