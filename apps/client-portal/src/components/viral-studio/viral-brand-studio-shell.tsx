@@ -300,6 +300,7 @@ type ReferenceCardDetail = {
   sourceHostLabel: string;
   sourcePathLabel: string;
   mediaUrl?: string;
+  previewVideoUrl?: string;
   visualBackgroundUrl?: string;
   mediaBadge: string;
   contentExcerpts: Array<{
@@ -389,6 +390,20 @@ function sanitizeVisualBackgroundUrl(value: string): string | undefined {
   if (!raw) return undefined;
   if (/^data:image\//i.test(raw)) return raw;
   return sanitizeHttpUrl(raw);
+}
+
+function isLikelyVideoUrl(value: string | undefined): boolean {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return false;
+  if (raw.startsWith("data:image/")) return false;
+  return (
+    raw.includes(".mp4") ||
+    raw.includes(".webm") ||
+    raw.includes(".mov") ||
+    raw.includes(".m4v") ||
+    raw.includes(".m3u8") ||
+    raw.includes("video")
+  );
 }
 
 function normalizeReferenceSourceUrl(
@@ -1003,9 +1018,16 @@ function buildReferenceCardDetail(reference: ViralStudioReferenceAsset): Referen
   while (palette.length < 3) palette.push(palette[palette.length - 1] || "#cbd5f5");
   const sourceResolution = normalizeReferenceSourceUrl(reference.sourceUrl, reference.sourcePlatform);
   const sourceUrl = sourceResolution.url;
-  const rawVisualUrl = String(reference.visual?.posterUrl || reference.visual?.thumbnailUrl || "").trim();
-  const visualBackgroundUrl = sanitizeVisualBackgroundUrl(rawVisualUrl);
-  const mediaUrl = sanitizeHttpUrl(rawVisualUrl);
+  const rawPosterUrl = String(reference.visual?.posterUrl || "").trim();
+  const rawThumbnailUrl = String(reference.visual?.thumbnailUrl || "").trim();
+  const posterHttpUrl = sanitizeHttpUrl(rawPosterUrl);
+  const thumbnailHttpUrl = sanitizeHttpUrl(rawThumbnailUrl);
+  const previewVideoUrl = [posterHttpUrl, thumbnailHttpUrl].find((candidate) => isLikelyVideoUrl(candidate));
+  const downloadableImageUrl = [posterHttpUrl, thumbnailHttpUrl].find((candidate) => Boolean(candidate) && !isLikelyVideoUrl(candidate));
+  const visualBackgroundUrl = [rawPosterUrl, rawThumbnailUrl]
+    .map((candidate) => sanitizeVisualBackgroundUrl(candidate))
+    .find((candidate) => Boolean(candidate) && !isLikelyVideoUrl(candidate));
+  const mediaUrl = previewVideoUrl || downloadableImageUrl;
   return {
     eyebrow: reference.visual?.eyebrow || `${toPlatformLabel(reference.sourcePlatform)} winner`,
     headline:
@@ -1041,17 +1063,16 @@ function buildReferenceCardDetail(reference: ViralStudioReferenceAsset): Referen
       ? `${toSourcePathLabel(sourceUrl)} • synthetic ref id`
       : toSourcePathLabel(sourceUrl),
     mediaUrl,
+    previewVideoUrl,
     visualBackgroundUrl,
     mediaBadge:
-      mediaUrl && reference.visual?.mediaKind === "video"
+      previewVideoUrl
         ? "Downloaded video preview"
-        : mediaUrl && reference.visual?.mediaKind === "image"
+        : downloadableImageUrl
           ? "Downloaded image preview"
-          : mediaUrl
-            ? "Downloaded preview"
-            : visualBackgroundUrl
-              ? "Generated preview sample"
-              : "Preview unavailable",
+          : visualBackgroundUrl
+            ? "Generated preview sample"
+            : "Preview unavailable",
     contentExcerpts: buildReferenceContentExcerpts(reference, 168),
   };
 }
@@ -4207,6 +4228,20 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                         onClick={() => setSelectedReferenceId(reference.id)}
                       >
                         <div className="vbs-reference-visual" style={visualStyle}>
+                          {cardDetail.previewVideoUrl ? (
+                            <>
+                              <video
+                                className="vbs-reference-visual-media"
+                                src={cardDetail.previewVideoUrl}
+                                muted
+                                playsInline
+                                autoPlay
+                                loop
+                                preload="metadata"
+                              />
+                              <span className="vbs-reference-visual-video-overlay" aria-hidden />
+                            </>
+                          ) : null}
                           <span className="vbs-rank-badge">#{reference.ranking.rank}</span>
                           <span className="vbs-reference-asset-badge">{cardDetail.mediaBadge}</span>
                           <div className="vbs-reference-visual-copy">
@@ -4348,6 +4383,20 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                 <div className="vbs-analysis-drawer" style={selectedReferenceDrawerStyle}>
                   <div className="vbs-analysis-hero">
                     <div className="vbs-reference-visual vbs-analysis-visual" style={selectedReferenceVisualStyle}>
+                      {selectedReferenceCardDetail.previewVideoUrl ? (
+                        <>
+                          <video
+                            className="vbs-reference-visual-media"
+                            src={selectedReferenceCardDetail.previewVideoUrl}
+                            muted
+                            playsInline
+                            autoPlay
+                            loop
+                            preload="metadata"
+                          />
+                          <span className="vbs-reference-visual-video-overlay" aria-hidden />
+                        </>
+                      ) : null}
                       <span className="vbs-rank-badge">#{selectedReference.ranking.rank}</span>
                       <span className="vbs-reference-asset-badge">{selectedReferenceCardDetail.mediaBadge}</span>
                       <div className="vbs-reference-visual-copy">
