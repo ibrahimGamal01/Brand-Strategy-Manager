@@ -33,6 +33,7 @@ import {
 } from './viral-studio-persistence';
 import { buildViralStudioAssetRef } from './viral-studio-asset-refs';
 import { getPortalWorkspaceIntakeStatus } from './portal-intake';
+import { scrapeInstagramProfile } from '../scraper/instagram-service';
 
 export type ViralStudioPlatform = 'instagram' | 'tiktok' | 'youtube';
 export type IngestionSortBy = 'engagement' | 'recent' | 'views';
@@ -683,6 +684,11 @@ const DEFAULT_SCORING_WEIGHTS = {
   captionClarity: 0.1,
 } as const;
 
+const REAL_REFERENCE_FETCH_TIMEOUT_MS = Math.max(
+  1000,
+  Number(process.env.VIRAL_STUDIO_REAL_REFERENCE_FETCH_TIMEOUT_MS || 3500)
+);
+
 const DEFAULT_INGESTION_POLICY = {
   maxVideos: 50,
   lookbackDays: 180,
@@ -855,6 +861,13 @@ function clamp(value: number, min: number, max: number): number {
 function cleanString(value: unknown): string {
   if (typeof value !== 'string') return '';
   return value.trim();
+}
+
+function compactSentence(value: string, maxChars = 180): string {
+  const normalized = cleanString(value).replace(/\s+/g, ' ');
+  if (!normalized) return '';
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -1721,6 +1734,201 @@ function buildReferenceExplainability(input: {
       `Composite score ${(input.composite * 100).toFixed(1)} after weighted normalization.`,
     ],
   };
+}
+
+function isLikelyVideoAssetUrl(value: string | undefined): boolean {
+  const raw = cleanString(value).toLowerCase();
+  if (!raw) return false;
+  return (
+    raw.includes('.mp4') ||
+    raw.includes('.webm') ||
+    raw.includes('.mov') ||
+    raw.includes('.m4v') ||
+    raw.includes('.m3u8') ||
+    raw.includes('video')
+  );
+}
+
+function extractInstagramHandleFromUrl(value: string): string | null {
+  const raw = cleanString(value);
+  if (!raw) return null;
+  try {
+    const parsed = new URL(raw);
+    const host = parsed.hostname.toLowerCase();
+    if (!host.includes('instagram.com') && !host.includes('instagr.am')) return null;
+    const parts = parsed.pathname
+      .split('/')
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const handle = cleanString(parts[0] || '').replace(/^@/, '');
+    if (!handle) return null;
+    const blocked = new Set(['p', 'reel', 'reels', 'tv', 'stories', 'explore', 'accounts', 'api', 'graphql']);
+    if (blocked.has(handle.toLowerCase())) return null;
+    return handle;
+  } catch {
+    return null;
+  }
+}
+
+function shouldAttemptRealReferenceBuild(run: IngestionRun): boolean {
+  if (run.sourcePlatform !== 'instagram') return false;
+  const flag = cleanString(process.env.VIRAL_STUDIO_ENABLE_REAL_REFERENCE_BUILD).toLowerCase();
+  if (flag === 'true') return true;
+  if (flag === 'false') return false;
+  return process.env.NODE_ENV === 'production';
+}
+
+function buildInstagramReferenceFromPost(input: {
+  workspaceId: string;
+  run: IngestionRun;
+  post: {
+    external_post_id?: string;
+    post_url?: string;
+    caption?: string;
+    likes?: number;
+    comments?: number;
+    timestamp?: string;
+    media_url?: string;
+    is_video?: boolean;
+    video_url?: string | null;
+    media_urls?: string[];
+  };
+  index: number;
+  total: number;
+}): ReferenceAsset {
+  const referenceId = crypto.randomUUID();
+  const externalId = cleanString(input.post.external_post_id) || `ig-post-${input.index + 1}`;
+  const seed = toShortHash(`${input.run.id}:${externalId}:${input.index}`);
+  const likes = clamp(Math.floor(Number(input.post.likes || 0)), 0, Number.MAX_SAFE_INTEGER);
+  const comments = clamp(Math.floor(Number(input.post.comments || 0)), 0, Number.MAX_SAFE_INTEGER);
+  const shares = 0;
+  const postTimestamp = cleanString(input.post.timestamp);
+  const postedAtCandidate = postTimestamp ? new Date(postTimestamp) : null;
+  const postedAt =
+    postedAtCandidate && !Number.isNaN(postedAtCandidate.getTime()) ? postedAtCandidate.toISOString() : new Date().toISOString();
+  const postedAgeDays = Math.max(1, Math.floor((Date.now() - new Date(postedAt).getTime()) / (24 * 60 * 60 * 1000)));
+  const viewsFromPost = Number((input.post as any).video_view_count || (input.post as any).views || (input.post as any).view_count || 0);
+  const estimatedViews = Math.max(1000, Math.floor(likes * 18 + comments * 8 + 1200));
+  const views = Math.max(viewsFromPost, estimatedViews);
+  const engagementRateRaw = (likes + comments + shares) / Math.max(1, views);
+  const engagementRate = clamp(engagementRateRaw * 8, 0, 1);
+  const recency = clamp(1 - postedAgeDays / Math.max(1, input.run.lookbackDays), 0, 1);
+  const hookStrength = clamp(((seed >> 2) % 100) / 100, 0, 1);
+  const retentionProxy = clamp(((seed >> 4) % 100) / 100, 0, 1);
+  const captionClarity = clamp(((seed >> 8) % 100) / 100, 0, 1);
+  const composite = computeCompositeScore({
+    engagementRate,
+    recency,
+    hookStrength,
+    retentionProxy,
+    captionClarity,
+  });
+  const explanation = buildReferenceExplainability({
+    engagementRate,
+    recency,
+    hookStrength,
+    retentionProxy,
+    captionClarity,
+    composite,
+  });
+
+  const caption = cleanString(input.post.caption) || `High-performing instagram post from @${extractInstagramHandleFromUrl(input.run.sourceUrl) || 'source'}.`;
+  const transcriptSummary = compactSentence(caption, 150) || 'No transcript summary available.';
+  const ocrSummary = 'On-screen text extraction pending. Using caption and engagement profile for ranking.';
+  const mediaCandidates = Array.from(
+    new Set(
+      [cleanString(input.post.video_url || ''), cleanString(input.post.media_url || ''), ...((input.post.media_urls || []).map((item) => cleanString(item)))]
+        .filter(Boolean)
+    )
+  );
+  const videoUrl = mediaCandidates.find((candidate) => isLikelyVideoAssetUrl(candidate));
+  const imageUrl = mediaCandidates.find((candidate) => !isLikelyVideoAssetUrl(candidate));
+  const rank = input.total - input.index;
+  const sourceUrl = cleanString(input.post.post_url) || input.run.sourceUrl;
+
+  return {
+    id: referenceId,
+    workspaceId: input.workspaceId,
+    ingestionRunId: input.run.id,
+    sourcePlatform: 'instagram',
+    sourceUrl,
+    caption,
+    transcriptSummary,
+    ocrSummary,
+    metrics: {
+      views,
+      likes,
+      comments,
+      shares,
+      postedAt,
+    },
+    scores: {
+      engagementRate,
+      recency,
+      hookStrength,
+      retentionProxy,
+      captionClarity,
+      composite,
+    },
+    normalizedMetrics: explanation.normalizedMetrics,
+    explainability: explanation.explainability,
+    ranking: {
+      rank,
+      rationaleTitle: explanation.rationaleTitle,
+      rationaleBullets: [...explanation.rationaleBullets, `Real post URL used for source context and media preview.`],
+    },
+    visual: {
+      mediaKind: videoUrl ? 'video' : 'image',
+      palette: buildReferencePalette('instagram', seed),
+      eyebrow: `instagram ref #${rank}`,
+      headline: compactSentence(caption.replace(/^High-performing\s+instagram\s+post\s+from\s+@\w+\.\s*/i, ''), 96),
+      footer: compactSentence(transcriptSummary, 140),
+      posterUrl: videoUrl || imageUrl,
+      thumbnailUrl: imageUrl || undefined,
+    },
+    shortlistState: 'none',
+    createdAt: toIsoNow(),
+    updatedAt: toIsoNow(),
+    persistedAt: toIsoNow(),
+    storageMode: input.run.storageMode,
+    assetRef: buildViralStudioAssetRef({
+      workspaceId: input.workspaceId,
+      kind: 'reference',
+      id: referenceId,
+    }),
+  };
+}
+
+async function tryBuildRealReferences(input: {
+  workspaceId: string;
+  run: IngestionRun;
+  referenceCount: number;
+}): Promise<ReferenceAsset[] | null> {
+  if (!shouldAttemptRealReferenceBuild(input.run)) return null;
+  const handle = extractInstagramHandleFromUrl(input.run.sourceUrl);
+  if (!handle) return null;
+  const target = clamp(input.referenceCount, 1, 50);
+  const scrapePromise = scrapeInstagramProfile(handle, Math.max(target, 12))
+    .then((result) => {
+      if (!result.success || !result.data?.posts?.length) return null;
+      const usablePosts = result.data.posts.filter((post) => cleanString((post as any).post_url || '')).slice(0, target);
+      if (usablePosts.length === 0) return null;
+      const references = usablePosts.map((post, index) =>
+        buildInstagramReferenceFromPost({
+          workspaceId: input.workspaceId,
+          run: input.run,
+          post: post as any,
+          index,
+          total: usablePosts.length,
+        })
+      );
+      return sortReferencesForOutput(references);
+    })
+    .catch(() => null);
+  const timeoutPromise = new Promise<ReferenceAsset[] | null>((resolve) => {
+    setTimeout(() => resolve(null), REAL_REFERENCE_FETCH_TIMEOUT_MS);
+  });
+  return Promise.race([scrapePromise, timeoutPromise]);
 }
 
 function buildSyntheticReference(input: {
@@ -2614,6 +2822,7 @@ function startIngestionSimulation(workspaceId: string, runId: string) {
   }, 1260);
 
   setTimeout(() => {
+    void (async () => {
     const active = store.ingestions.get(runId);
     if (!active || isTerminalIngestionStatus(active.status) || active.status !== 'running') {
       scheduledIngestionRuns.delete(key);
@@ -2623,16 +2832,24 @@ function startIngestionSimulation(workspaceId: string, runId: string) {
     const outcome = buildIngestionOutcome(active);
     let generatedReferences: ReferenceAsset[] = [];
     if (outcome.referenceCount > 0) {
-      generatedReferences = sortReferencesForOutput(
-        new Array(outcome.referenceCount).fill(null).map((_, index) =>
-          buildSyntheticReference({
-            workspaceId,
-            run: active,
-            index,
-            total: outcome.referenceCount,
-          })
-        )
-      );
+      const realReferences = await tryBuildRealReferences({
+        workspaceId,
+        run: active,
+        referenceCount: outcome.referenceCount,
+      });
+      generatedReferences =
+        realReferences && realReferences.length > 0
+          ? realReferences
+          : sortReferencesForOutput(
+              new Array(outcome.referenceCount).fill(null).map((_, index) =>
+                buildSyntheticReference({
+                  workspaceId,
+                  run: active,
+                  index,
+                  total: outcome.referenceCount,
+                })
+              )
+            );
       updateStoredReferencesWithSortedOrder(store, generatedReferences);
     }
 
@@ -2701,6 +2918,7 @@ function startIngestionSimulation(workspaceId: string, runId: string) {
       });
     }
     scheduledIngestionRuns.delete(key);
+    })();
   }, 1680);
 }
 
