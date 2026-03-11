@@ -4689,45 +4689,162 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                   </div>
                   {formatGeneration ? (
                     <div className="vbs-format-result-grid">
-                      <article className="vbs-planner-result-card">
+                      <article className="vbs-planner-result-card is-design-artifact">
                         <p className="vbs-meta">Design details</p>
                         <h4>{formatGeneration.result.title}</h4>
-                        <ul>
-                          {formatGeneration.result.designDetails.layoutStructure.map((line) => (
-                            <li key={`layout-${line}`}>{line}</li>
+                        <div className="vbs-result-hero vbs-result-hero-design">
+                          <div className="vbs-result-preview-board">
+                            {formatGeneration.result.designDetails.layoutStructure.slice(0, 3).map((line, index) => (
+                              <div key={`layout-preview-${line}`} className="vbs-result-preview-panel">
+                                <span>Frame {index + 1}</span>
+                                <strong>{compactText(line, 60)}</strong>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="vbs-result-hero-copy">
+                            <span className="vbs-result-chip">{toContentTypeLabel(formatGeneration.contentType)}</span>
+                            <strong>{formatGeneration.result.designDetails.typographyTreatment}</strong>
+                            <p>
+                              {formatGeneration.result.designDetails.pacingOrFrameStructure[0] ||
+                                formatGeneration.result.designDetails.visualCompositionNotes[0] ||
+                                "Use the first layout move as the dominant visual anchor."}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="vbs-result-fact-grid">
+                          <div>
+                            <span>Layout stack</span>
+                            <strong>{formatGeneration.result.designDetails.layoutStructure.length} moves</strong>
+                          </div>
+                          <div>
+                            <span>Pacing plan</span>
+                            <strong>{formatGeneration.result.designDetails.pacingOrFrameStructure.length} beats</strong>
+                          </div>
+                          <div>
+                            <span>Assets</span>
+                            <strong>{formatGeneration.result.designDetails.assetSuggestions.length} suggestions</strong>
+                          </div>
+                        </div>
+                        <div className="vbs-result-section">
+                          <span>On-screen text guidance</span>
+                          <ul className="vbs-reference-bullets">
+                            {formatGeneration.result.designDetails.onScreenTextGuidance.map((line) => (
+                              <li key={`text-${line}`}>{line}</li>
+                            ))}
+                          </ul>
+                        </div>
+                        <div className="vbs-result-section">
+                          <span>Visual composition notes</span>
+                          <ul className="vbs-reference-bullets">
+                            {formatGeneration.result.designDetails.visualCompositionNotes.map((line) => (
+                              <li key={`composition-${line}`}>{line}</li>
+                            ))}
+                          </ul>
+                        </div>
+                        <div className="vbs-top-driver-row vbs-top-driver-row-compact">
+                          {formatGeneration.result.designDetails.assetSuggestions.map((line) => (
+                            <span key={`asset-${line}`} className="vbs-driver-chip">
+                              {compactText(line, 44)}
+                            </span>
                           ))}
-                        </ul>
-                        <p className="vbs-meta">Typography: {formatGeneration.result.designDetails.typographyTreatment}</p>
-                        <ul className="vbs-reference-bullets">
-                          {formatGeneration.result.designDetails.onScreenTextGuidance.map((line) => (
-                            <li key={`text-${line}`}>{line}</li>
-                          ))}
-                        </ul>
+                        </div>
                       </article>
-                      <article className="vbs-planner-result-card">
+                      <article className="vbs-planner-result-card is-content-artifact">
                         <p className="vbs-meta">Content details</p>
                         <h4>{formatGeneration.result.summary}</h4>
-                        <p><strong>Hook:</strong> {formatGeneration.result.contentDetails.hook}</p>
-                        <ul>
-                          {formatGeneration.result.contentDetails.narrativeBeats.map((line) => (
-                            <li key={`beat-${line}`}>{line}</li>
+                        <div className="vbs-result-hero vbs-result-hero-content">
+                          <div className="vbs-result-hook-card">
+                            <span>Hook</span>
+                            <strong>{formatGeneration.result.contentDetails.hook}</strong>
+                          </div>
+                          <div className="vbs-result-hero-copy">
+                            <span className="vbs-result-chip">Message architecture</span>
+                            <strong>{formatGeneration.result.contentDetails.proofPlacement}</strong>
+                            <p>{formatGeneration.result.contentDetails.cta}</p>
+                          </div>
+                        </div>
+                        <div className="vbs-result-section">
+                          <span>Narrative beats</span>
+                          <div className="vbs-result-beat-grid">
+                            {formatGeneration.result.contentDetails.narrativeBeats.map((line, index) => (
+                              <article key={`beat-${line}`} className="vbs-result-beat-card">
+                                <small>{String(index + 1).padStart(2, "0")}</small>
+                                <strong>{compactText(line, 82)}</strong>
+                              </article>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="vbs-result-fact-grid">
+                          <div>
+                            <span>Proof placement</span>
+                            <strong>{compactText(formatGeneration.result.contentDetails.proofPlacement, 64)}</strong>
+                          </div>
+                          <div>
+                            <span>Caption guidance</span>
+                            <strong>{formatGeneration.result.contentDetails.captionGuidance.length} prompts</strong>
+                          </div>
+                          <div>
+                            <span>Variant ideas</span>
+                            <strong>{formatGeneration.result.contentDetails.variantIdeas.length} angles</strong>
+                          </div>
+                        </div>
+                        <div className="vbs-top-driver-row vbs-top-driver-row-compact">
+                          {formatGeneration.result.contentDetails.variantIdeas.map((line) => (
+                            <span key={`variant-${line}`} className="vbs-driver-chip">
+                              {compactText(line, 42)}
+                            </span>
                           ))}
-                        </ul>
-                        <p className="vbs-meta">Proof placement: {formatGeneration.result.contentDetails.proofPlacement}</p>
-                        <p className="vbs-meta">{formatGeneration.result.contentDetails.cta}</p>
+                        </div>
                       </article>
-                      <article className="vbs-planner-result-card">
+                      <article className="vbs-planner-result-card is-save-artifact">
                         <p className="vbs-meta">Step 5</p>
                         <h4>Save to document</h4>
-                        <p>
-                          This format run is already persisted. Save it into Document Workspace when the design and message feel locked.
-                        </p>
+                        <div className="vbs-result-hero vbs-result-hero-save">
+                          <div className="vbs-result-vault-card">
+                            <span>Vault state</span>
+                            <strong>{document ? "Document ready" : "Persisted generation ready"}</strong>
+                            <p>
+                              {document
+                                ? `${document.sections.length} section(s) are already living in Document Workspace.`
+                                : "This format run is persisted and waiting to be promoted into the workspace vault."}
+                            </p>
+                          </div>
+                          <div className="vbs-result-hero-copy">
+                            <span className="vbs-result-chip">Save handoff</span>
+                            <strong>{latestPlannerReferenceCards.length} source references attached</strong>
+                            <p>
+                              Keep the design and message locked here, then move the best version into the document timeline.
+                            </p>
+                          </div>
+                        </div>
+                        <div className="vbs-result-fact-grid">
+                          <div>
+                            <span>Document state</span>
+                            <strong>{document ? "Active workspace draft" : "Ready to create"}</strong>
+                          </div>
+                          <div>
+                            <span>Version count</span>
+                            <strong>{versions.length} saved</strong>
+                          </div>
+                          <div>
+                            <span>Autosave</span>
+                            <strong>{documentDirty ? "Pending edits" : "Clean handoff"}</strong>
+                          </div>
+                        </div>
                         <div className="vbs-top-driver-row vbs-top-driver-row-compact">
                           {latestPlannerReferenceCards.map((reference) => (
                             <span key={`ref-${reference.id}`} className="vbs-driver-chip">
                               #{reference.ranking.rank} {toPlatformLabel(reference.sourcePlatform)}
                             </span>
                           ))}
+                        </div>
+                        <div className="vbs-result-section">
+                          <span>What gets preserved</span>
+                          <ul className="vbs-reference-bullets">
+                            <li>Design details with structure, typography, pacing, and asset suggestions.</li>
+                            <li>Content details with hook, beats, proof placement, caption guidance, and CTA.</li>
+                            <li>Linked source references so the creative decision stays auditable later.</li>
+                          </ul>
                         </div>
                         <div className="vbs-mini-actions">
                           <button type="button" disabled={isBusy || Boolean(document)} onClick={() => void createDocumentFromGeneration()}>

@@ -1151,6 +1151,29 @@ a {
   gap: 0.6rem;
 }
 
+.vbs-planner-result-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.vbs-planner-result-card.is-design-artifact {
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--vbs-cobalt) 12%, transparent) 0%, transparent 36%),
+    color-mix(in srgb, white 92%, var(--vbs-sand));
+}
+
+.vbs-planner-result-card.is-content-artifact {
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--vbs-coral) 10%, transparent) 0%, transparent 34%),
+    color-mix(in srgb, white 93%, var(--vbs-sand));
+}
+
+.vbs-planner-result-card.is-save-artifact {
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--vbs-teal) 12%, transparent) 0%, transparent 34%),
+    color-mix(in srgb, white 93%, var(--vbs-sand));
+}
+
 .vbs-planner-card.is-approved {
   border-color: color-mix(in srgb, var(--vbs-teal) 40%, var(--bat-border));
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--vbs-teal) 14%, transparent);
@@ -1164,6 +1187,196 @@ a {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.45rem;
+}
+
+.vbs-result-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: 0.65rem;
+}
+
+.vbs-result-preview-board,
+.vbs-result-hook-card,
+.vbs-result-vault-card {
+  border-radius: 0.82rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 18%, var(--bat-border));
+  min-height: 10.5rem;
+}
+
+.vbs-result-preview-board {
+  background:
+    linear-gradient(160deg, color-mix(in srgb, var(--vbs-cobalt) 72%, white) 0%, color-mix(in srgb, var(--vbs-teal) 72%, white) 100%);
+  padding: 0.7rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.vbs-result-preview-panel {
+  border-radius: 0.7rem;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.16);
+  min-height: 0;
+  padding: 0.62rem;
+  display: grid;
+  gap: 0.25rem;
+  backdrop-filter: blur(10px);
+}
+
+.vbs-result-preview-panel span,
+.vbs-result-hook-card span,
+.vbs-result-vault-card span,
+.vbs-result-section span,
+.vbs-result-fact-grid span {
+  font-size: 0.64rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--vbs-ink) 56%, #6f7488);
+}
+
+.vbs-result-preview-panel span {
+  color: rgba(255, 255, 255, 0.74);
+}
+
+.vbs-result-preview-panel strong {
+  font-family: var(--vbs-display-font);
+  font-size: 0.92rem;
+  line-height: 1.1;
+  color: white;
+}
+
+.vbs-result-hook-card,
+.vbs-result-vault-card {
+  padding: 0.75rem;
+  display: grid;
+  align-content: space-between;
+  gap: 0.6rem;
+}
+
+.vbs-result-hook-card {
+  background:
+    linear-gradient(160deg, color-mix(in srgb, var(--vbs-coral) 74%, white) 0%, color-mix(in srgb, var(--vbs-cobalt) 52%, white) 100%);
+}
+
+.vbs-result-vault-card {
+  background:
+    linear-gradient(160deg, color-mix(in srgb, var(--vbs-teal) 62%, white) 0%, color-mix(in srgb, var(--vbs-ink) 14%, white) 100%);
+}
+
+.vbs-result-hook-card span,
+.vbs-result-hook-card strong,
+.vbs-result-hook-card p,
+.vbs-result-vault-card span,
+.vbs-result-vault-card strong,
+.vbs-result-vault-card p {
+  color: white;
+}
+
+.vbs-result-hook-card strong,
+.vbs-result-vault-card strong {
+  font-family: var(--vbs-display-font);
+  font-size: 1.12rem;
+  line-height: 1.08;
+}
+
+.vbs-result-hook-card p,
+.vbs-result-vault-card p {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.vbs-result-hero-copy {
+  border-radius: 0.82rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 14%, var(--bat-border));
+  background: color-mix(in srgb, white 94%, var(--vbs-sand));
+  padding: 0.72rem;
+  display: grid;
+  align-content: start;
+  gap: 0.42rem;
+}
+
+.vbs-result-hero-copy strong {
+  font-family: var(--vbs-display-font);
+  font-size: 0.98rem;
+  line-height: 1.14;
+  color: var(--vbs-ink);
+}
+
+.vbs-result-hero-copy p {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--vbs-ink) 78%, #606981);
+}
+
+.vbs-result-chip {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 2rem;
+  padding: 0.24rem 0.62rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 24%, var(--bat-border));
+  background: color-mix(in srgb, var(--vbs-cobalt) 12%, white);
+  color: var(--vbs-ink);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.vbs-result-fact-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.vbs-result-fact-grid > div,
+.vbs-result-section {
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 12%, var(--bat-border));
+  border-radius: 0.76rem;
+  background: color-mix(in srgb, white 96%, var(--vbs-sand));
+  padding: 0.6rem;
+  display: grid;
+  gap: 0.28rem;
+}
+
+.vbs-result-fact-grid strong {
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--vbs-ink);
+}
+
+.vbs-result-section {
+  gap: 0.42rem;
+}
+
+.vbs-result-beat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.vbs-result-beat-card {
+  border: 1px solid color-mix(in srgb, var(--vbs-coral) 14%, var(--bat-border));
+  border-radius: 0.72rem;
+  background: color-mix(in srgb, white 94%, var(--vbs-sand));
+  padding: 0.58rem 0.62rem;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.vbs-result-beat-card small {
+  font-size: 0.64rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--vbs-ink) 54%, #6f7488);
+}
+
+.vbs-result-beat-card strong {
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--vbs-ink);
 }
 
 .vbs-design-thumb {
@@ -2702,6 +2915,12 @@ a {
   .vbs-format-result-grid,
   .vbs-planner-compare-grid,
   .vbs-design-thumbnail-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vbs-result-hero,
+  .vbs-result-fact-grid,
+  .vbs-result-beat-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 
