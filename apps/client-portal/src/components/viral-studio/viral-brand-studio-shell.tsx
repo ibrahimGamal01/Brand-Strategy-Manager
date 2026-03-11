@@ -3,6 +3,26 @@
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import type { LucideIcon } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Bot,
+  CheckCircle2,
+  CircleOff,
+  Compass,
+  FileText,
+  FolderArchive,
+  Layers3,
+  Palette,
+  Pin,
+  Rocket,
+  ScanSearch,
+  Send,
+  Sparkles,
+  WandSparkles,
+  Workflow,
+} from "lucide-react";
 import {
   applyWorkspaceBrandDnaAutofill,
   compareViralStudioDocumentVersions,
@@ -158,11 +178,33 @@ const WORKFLOW_STAGE_ORDER: Array<ViralStudioWorkflowStatus["workflowStage"]> = 
 const STUDIO_SLIDE_ORDER = ["launchpad", "foundation", "reference", "create"] as const;
 type StudioSlideId = (typeof STUDIO_SLIDE_ORDER)[number];
 
-const STUDIO_SLIDE_META: Array<{ id: StudioSlideId; label: string; chapter: string }> = [
-  { id: "launchpad", label: "Launchpad", chapter: "00" },
-  { id: "foundation", label: "Brand DNA", chapter: "01" },
-  { id: "reference", label: "Reference Engine", chapter: "02" },
-  { id: "create", label: "Create & Save", chapter: "03" },
+const STUDIO_SLIDE_META: Array<{
+  id: StudioSlideId;
+  label: string;
+  chapter: string;
+  detail: string;
+  icon: LucideIcon;
+}> = [
+  { id: "launchpad", label: "Launchpad", chapter: "00", detail: "Autopilot + workflow", icon: Workflow },
+  { id: "foundation", label: "Brand DNA", chapter: "01", detail: "Identity + tone", icon: Palette },
+  { id: "reference", label: "Reference Engine", chapter: "02", detail: "Extract + shortlist", icon: ScanSearch },
+  { id: "create", label: "Create & Save", chapter: "03", detail: "Generate + version", icon: FolderArchive },
+];
+
+const WORKFLOW_STAGE_META: Array<{
+  stage: ViralStudioWorkflowStatus["workflowStage"];
+  label: string;
+  caption: string;
+  icon: LucideIcon;
+  slide: StudioSlideId;
+}> = [
+  { stage: "intake_pending", label: "Intake", caption: "evidence", icon: Compass, slide: "launchpad" },
+  { stage: "intake_complete", label: "Ready", caption: "workspace", icon: Compass, slide: "launchpad" },
+  { stage: "studio_autofill_review", label: "Autofill", caption: "review", icon: WandSparkles, slide: "foundation" },
+  { stage: "extraction", label: "Extract", caption: "sources", icon: ScanSearch, slide: "reference" },
+  { stage: "curation", label: "Curate", caption: "winners", icon: Pin, slide: "reference" },
+  { stage: "generation", label: "Generate", caption: "pack", icon: Sparkles, slide: "create" },
+  { stage: "chat_execution", label: "Ship", caption: "to chat", icon: Send, slide: "launchpad" },
 ];
 
 const ONBOARDING_STEP_META: Array<{
@@ -285,6 +327,41 @@ function tonePreview(form: BrandFormState): string {
   if (form.voiceDirect >= 60) tags.push("direct");
   if (tags.length === 0) tags.push("balanced");
   return `Voice profile: ${tags.join(", ")}. Keep messaging clear, specific, and aligned with your brand promise.`;
+}
+
+function buildTonePreviewCards(form: BrandFormState): Array<{
+  id: string;
+  eyebrow: string;
+  sample: string;
+}> {
+  return [
+    {
+      id: "hook",
+      eyebrow: "Hook",
+      sample:
+        form.voiceBold >= 60
+          ? "Stop posting polite filler. Lead with the measurable shift your audience wants now."
+          : "Start with the clearest transformation your audience can recognize in one line.",
+    },
+    {
+      id: "proof",
+      eyebrow: "Proof",
+      sample:
+        form.voiceFormal >= 60
+          ? "Ground each claim in evidence, process, or a named outcome so trust shows up fast."
+          : "Add one concrete proof point so the message feels earned, not just louder.",
+    },
+    {
+      id: "cta",
+      eyebrow: "CTA",
+      sample:
+        form.voiceDirect >= 60
+          ? "Ask for the next action clearly and cut the soft language."
+          : form.voicePlayful >= 60
+            ? "Invite the next step with warmth and momentum, not pressure."
+            : "Keep the CTA simple, clear, and easy to act on.",
+    },
+  ];
 }
 
 function formatShortTime(value?: string | null): string {
@@ -939,6 +1016,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
   const [referenceFilter, setReferenceFilter] = useState<"all" | "prioritized" | "must-use" | "pin" | "exclude">("all");
   const [referencePlatformFilter, setReferencePlatformFilter] = useState<"all" | ViralStudioPlatform>("all");
   const [selectedReferenceId, setSelectedReferenceId] = useState<string | null>(null);
+  const [compareReferenceIds, setCompareReferenceIds] = useState<string[]>([]);
   const [shortlistPendingById, setShortlistPendingById] = useState<Record<string, ReferenceShortlistAction | undefined>>({});
   const [recentShortlistReferenceId, setRecentShortlistReferenceId] = useState<string | null>(null);
   const [curationNotice, setCurationNotice] = useState<string | null>(null);
@@ -1242,6 +1320,17 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       null
     );
   }, [filteredReferences, references, selectedReferenceId]);
+
+  const comparedReferences = useMemo(() => {
+    return compareReferenceIds
+      .map((id) => references.find((item) => item.id === id))
+      .filter((item): item is ViralStudioReferenceAsset => Boolean(item))
+      .slice(0, 2);
+  }, [compareReferenceIds, references]);
+
+  useEffect(() => {
+    setCompareReferenceIds((previous) => previous.filter((id) => references.some((item) => item.id === id)).slice(0, 2));
+  }, [references]);
 
   const selectedReferenceInsights = useMemo(() => {
     if (!selectedReference) return null;
@@ -1690,6 +1779,15 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     },
     [workspaceId, refreshTelemetry, refreshWorkflow]
   );
+
+  const toggleCompareReference = useCallback((referenceId: string) => {
+    setCompareReferenceIds((previous) => {
+      if (previous.includes(referenceId)) {
+        return previous.filter((id) => id !== referenceId);
+      }
+      return [...previous, referenceId].slice(-2);
+    });
+  }, []);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -2699,6 +2797,355 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     autoCurateTopReferences,
   ]);
 
+  const toneCards = useMemo(() => buildTonePreviewCards(brandForm), [brandForm]);
+  const leadReference = selectedReference || references[0] || null;
+  const leadReferenceVisual = useMemo(
+    () => (leadReference ? resolveReferenceVisual(leadReference) : null),
+    [leadReference]
+  );
+  const workflowStageCards = useMemo(
+    () =>
+      WORKFLOW_STAGE_META.map((item, index) => ({
+        ...item,
+        state:
+          index < workflowStepIndex ? "done" : index === workflowStepIndex ? "active" : "upcoming",
+      })),
+    [workflowStepIndex]
+  );
+
+  const actionDock = useMemo(() => {
+    if (activeSlide === "launchpad") {
+      return {
+        eyebrow: "Launch handlers",
+        title: workflowGuide.title,
+        note: workflowGuide.body,
+        saveNote: generationAutosaveNote,
+        shortcuts: ["Jump stages", "Website-first", "Send to chat"],
+        actions: [
+          {
+            key: "guide",
+            label: workflowGuide.cta,
+            icon: Rocket,
+            emphasis: "primary" as const,
+            disabled: isBusy || autofillBusy,
+            run: () => runWorkflowGuideAction(),
+          },
+          {
+            key: "autopilot",
+            label: autopilotBusy ? "Autopilot running" : "Website-first autopilot",
+            icon: WandSparkles,
+            emphasis: "ghost" as const,
+            disabled: isBusy || autofillBusy || autopilotBusy,
+            run: () => runWebsiteFirstAutopilot(),
+          },
+          {
+            key: "chat",
+            label: "Open core chat",
+            icon: Bot,
+            emphasis: "ghost" as const,
+            disabled: false,
+            run: () => router.push(`/app/w/${workspaceId}`),
+          },
+        ],
+      };
+    }
+
+    if (activeSlide === "foundation") {
+      return {
+        eyebrow: "Foundation handlers",
+        title: brandReady && !isEditingBrandDna ? "DNA is locked in" : `Question cluster ${onboardingStep} of 4`,
+        note:
+          brandReady && !isEditingBrandDna
+            ? "The brand summary is active across extraction, generation, and chat."
+            : activeOnboardingMeta.helper,
+        saveNote: foundationAutosaveNote,
+        shortcuts: ["Preview then apply", "One cluster at a time", "Finalize once"],
+        actions: [
+          {
+            key: "preview",
+            label: autofillBusy ? "Previewing" : "Preview autofill",
+            icon: WandSparkles,
+            emphasis: "ghost" as const,
+            disabled: autofillBusy || isBusy,
+            run: () => previewAutofill(),
+          },
+          {
+            key: "apply",
+            label: `Apply selected (${selectedAutofillCount})`,
+            icon: Sparkles,
+            emphasis: "ghost" as const,
+            disabled: autofillBusy || isBusy || !autofillPreview || selectedAutofillCount === 0,
+            run: () => applyAutofill(),
+          },
+          {
+            key: "advance",
+            label:
+              brandReady && !isEditingBrandDna
+                ? "Edit DNA"
+                : onboardingStep === 4
+                  ? "Finalize DNA"
+                  : "Next cluster",
+            icon: brandReady && !isEditingBrandDna ? Palette : CheckCircle2,
+            emphasis: "primary" as const,
+            disabled:
+              isBusy ||
+              (!(brandReady && !isEditingBrandDna) &&
+                (onboardingStep === 4 ? !isStepValid(4, brandForm) : !isStepValid(onboardingStep, brandForm))),
+            run: () => {
+              if (brandReady && !isEditingBrandDna) {
+                setIsEditingBrandDna(true);
+                return;
+              }
+              if (onboardingStep === 4) {
+                return saveBrandDna("final");
+              }
+              return setOnboardingStepWithAutosave(Math.min(4, onboardingStep + 1) as 1 | 2 | 3 | 4);
+            },
+          },
+          {
+            key: "references",
+            label: "Go to references",
+            icon: ArrowRight,
+            emphasis: "ghost" as const,
+            disabled: !brandReady,
+            run: () => setActiveSlide("reference"),
+          },
+        ],
+      };
+    }
+
+    if (activeSlide === "reference") {
+      return {
+        eyebrow: "Reference handlers",
+        title: activeIngestion ? "Extraction and curation are live" : "Load winners, then steer them visibly",
+        note:
+          activeIngestion?.status === "running"
+            ? "Progress is durable while the run keeps downloading, analyzing, and ranking."
+            : "Use shortlist handlers on the selected card or send the winning set back into chat.",
+        saveNote: `${extractionAutosaveNote} ${curationAutosaveNote}`,
+        shortcuts: ["1 pin", "2 must-use", "3 exclude", "0 clear"],
+        actions: [
+          {
+            key: "extract",
+            label: activeIngestion ? "Refresh run" : "Start extraction",
+            icon: ScanSearch,
+            emphasis: "primary" as const,
+            disabled: isBusy || (!brandReady && !activeIngestion),
+            run: async () => {
+              if (activeIngestion) {
+                await openIngestionResults(activeIngestion);
+                return;
+              }
+              setActiveSlide("reference");
+              if (!brandReady) {
+                setError("Finalize Brand DNA before extraction.");
+                setOnboardingStep(4);
+                setIsEditingBrandDna(true);
+                return;
+              }
+              setIsBusy(true);
+              setError(null);
+              try {
+                await startGuidedDataMaxExtraction();
+              } catch (ingestionError: unknown) {
+                const message = String((ingestionError as Error)?.message || "Failed to start extraction");
+                if (message.includes("No source URL available")) {
+                  setShowExtractionModal(true);
+                } else {
+                  setError(message);
+                }
+              } finally {
+                setIsBusy(false);
+              }
+            },
+          },
+          {
+            key: "pin",
+            label: "Pin selected",
+            icon: Pin,
+            emphasis: "ghost" as const,
+            disabled: !selectedReference || Boolean(selectedReference && shortlistPendingById[selectedReference.id]),
+            run: () =>
+              selectedReference ? shortlistReference(selectedReference.id, "pin") : undefined,
+          },
+          {
+            key: "must-use",
+            label: "Must-use",
+            icon: CheckCircle2,
+            emphasis: "ghost" as const,
+            disabled: !selectedReference || Boolean(selectedReference && shortlistPendingById[selectedReference.id]),
+            run: () =>
+              selectedReference ? shortlistReference(selectedReference.id, "must-use") : undefined,
+          },
+          {
+            key: "compare",
+            label:
+              selectedReference && compareReferenceIds.includes(selectedReference.id)
+                ? "Remove compare"
+                : "Compare selected",
+            icon: Layers3,
+            emphasis: "ghost" as const,
+            disabled: !selectedReference,
+            run: () => (selectedReference ? toggleCompareReference(selectedReference.id) : undefined),
+          },
+          {
+            key: "chat",
+            label: "Send shortlist to chat",
+            icon: Send,
+            emphasis: "ghost" as const,
+            disabled: prioritizedReferenceCount === 0 || isBusy,
+            run: () => sendShortlistToChat(),
+          },
+        ],
+      };
+    }
+
+    return {
+      eyebrow: "Create handlers",
+      title: generation ? "Pack gallery and vault are live" : "Generate once, then keep every revision",
+      note:
+        generation
+          ? "Refine sections, create versions, and move the winning output into chat or export."
+          : "The first run builds the gallery, and each revision saves into the document timeline.",
+      saveNote: generationAutosaveNote,
+      shortcuts: ["Generate", "Refine", "Version", "Export"],
+      actions: [
+        {
+          key: "generate",
+          label: generation ? "Regenerate pack" : "Generate pack",
+          icon: Sparkles,
+          emphasis: "primary" as const,
+          disabled: isBusy || !brandReady,
+          run: () => generatePack(),
+        },
+        {
+          key: "document",
+          label: document ? "Create version" : "Create document",
+          icon: FileText,
+          emphasis: "ghost" as const,
+          disabled: isBusy || (!generation && !document),
+          run: () => {
+            if (document) return snapshotVersion();
+            return createDocumentFromGeneration();
+          },
+        },
+        {
+          key: "chat",
+          label: "Send pack to chat",
+          icon: Send,
+          emphasis: "ghost" as const,
+          disabled: !generation || isBusy,
+          run: () => sendGenerationToChat(),
+        },
+        {
+          key: "export",
+          label: "Export markdown",
+          icon: FolderArchive,
+          emphasis: "ghost" as const,
+          disabled: !document || isBusy,
+          run: () => exportDocument("markdown"),
+        },
+      ],
+    };
+  }, [
+    activeOnboardingMeta.helper,
+    activeIngestion,
+    activeSlide,
+    applyAutofill,
+    autofillBusy,
+    autofillPreview,
+    brandForm,
+    brandReady,
+    curationAutosaveNote,
+    createDocumentFromGeneration,
+    document,
+    exportDocument,
+    extractionAutosaveNote,
+    foundationAutosaveNote,
+    generatePack,
+    generation,
+    generationAutosaveNote,
+    isBusy,
+    onboardingStep,
+    openIngestionResults,
+    previewAutofill,
+    prioritizedReferenceCount,
+    router,
+    runWebsiteFirstAutopilot,
+    runWorkflowGuideAction,
+    saveBrandDna,
+    selectedAutofillCount,
+    selectedReference,
+    sendGenerationToChat,
+    sendShortlistToChat,
+    shortlistPendingById,
+    shortlistReference,
+    startGuidedDataMaxExtraction,
+    snapshotVersion,
+    toggleCompareReference,
+    workspaceId,
+    workflowGuide.body,
+    workflowGuide.cta,
+    workflowGuide.title,
+    compareReferenceIds,
+    autopilotBusy,
+    isEditingBrandDna,
+    setOnboardingStepWithAutosave,
+  ]);
+
+  const renderLaunchpadVisual = (cardId: "foundation" | "references" | "create") => {
+    if (cardId === "foundation") {
+      return (
+        <div className="vbs-launchpad-visual vbs-tone-preview-grid">
+          {toneCards.map((card) => (
+            <article key={card.id} className="vbs-tone-preview-card">
+              <p className="vbs-meta">{card.eyebrow}</p>
+              <strong>{card.sample}</strong>
+            </article>
+          ))}
+        </div>
+      );
+    }
+
+    if (cardId === "references") {
+      return leadReferenceVisual ? (
+        <div className="vbs-launchpad-visual vbs-launchpad-poster">
+          <Image
+            src={leadReferenceVisual.posterUrl}
+            alt={leadReferenceVisual.headline}
+            fill
+            sizes="(max-width: 900px) 100vw, 420px"
+            style={{ objectFit: "cover" }}
+          />
+          <div className="vbs-launchpad-poster-copy">
+            <span>{leadReferenceVisual.eyebrow}</span>
+            <strong>{leadReferenceVisual.headline}</strong>
+          </div>
+        </div>
+      ) : (
+        <div className="vbs-launchpad-visual vbs-visual-empty">
+          <p className="vbs-meta">Visual board</p>
+          <strong>Reference posters appear here once extraction begins.</strong>
+        </div>
+      );
+    }
+
+    return (
+      <div className="vbs-launchpad-visual vbs-pack-stack">
+        {(generation?.outputs.hooks?.slice(0, 3) || [
+          "Hooks stack here",
+          "Scripts stack here",
+          "Captions + CTA variants stack here",
+        ]).map((line, index) => (
+          <div key={`${cardId}-${index}`} className="vbs-pack-stack-card">
+            <span>{index === 0 ? "Hook" : index === 1 ? "Script" : "CTA"}</span>
+            <strong>{compactText(line, 74)}</strong>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   const activeSlideIndex = Math.max(0, STUDIO_SLIDE_ORDER.indexOf(activeSlide));
   const canSlideBack = activeSlideIndex > 0;
   const canSlideForward = activeSlideIndex < STUDIO_SLIDE_ORDER.length - 1;
@@ -2740,8 +3187,18 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         </div>
       </header>
 
-      {error ? <div className="vbs-alert">{error}</div> : null}
-      {chatBridgeStatus ? <div className="vbs-alert" style={{ borderColor: "#b6f0d4", background: "#f2fff7", color: "#11643f" }}>{chatBridgeStatus}</div> : null}
+      {error ? (
+        <div className="vbs-alert bat-status bat-status-danger" role="alert">
+          <strong>Attention</strong>
+          <span>{error}</span>
+        </div>
+      ) : null}
+      {chatBridgeStatus ? (
+        <div className="vbs-alert bat-status bat-status-success" role="status" aria-live="polite">
+          <strong>Saved to workflow</strong>
+          <span>{chatBridgeStatus}</span>
+        </div>
+      ) : null}
 
       <div className="vbs-slide-toolbar">
         <div className="vbs-slide-tabs" role="tablist" aria-label="Viral Studio workflow slides">
@@ -2756,7 +3213,11 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
               onClick={() => setActiveSlide(slide.id)}
             >
               <span>{slide.chapter}</span>
-              <strong>{slide.label}</strong>
+              <strong>
+                <slide.icon className="h-3.5 w-3.5" />
+                {slide.label}
+              </strong>
+              <small>{slide.detail}</small>
             </button>
           ))}
         </div>
@@ -2766,6 +3227,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
             onClick={() => setActiveSlide(STUDIO_SLIDE_ORDER[Math.max(0, activeSlideIndex - 1)])}
             disabled={!canSlideBack}
           >
+            <ArrowLeft className="h-4 w-4" />
             Previous Slide
           </button>
           <button
@@ -2774,8 +3236,45 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
             disabled={!canSlideForward}
           >
             Next Slide
+            <ArrowRight className="h-4 w-4" />
           </button>
         </div>
+      </div>
+
+      <div className="vbs-stage-handler-rail" role="navigation" aria-label="Workflow stages">
+        {workflowStageCards.map((item) => {
+          const isCurrent = workflowStage === item.stage;
+          return (
+            <button
+              key={item.stage}
+              type="button"
+              className={[
+                "vbs-stage-handler",
+                item.state === "active" ? "is-active" : "",
+                item.state === "done" ? "is-done" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              aria-current={isCurrent ? "step" : undefined}
+              onClick={() => {
+                if (item.stage === "intake_pending" && workflowStage === "intake_pending") {
+                  router.push(`/app/w/${workspaceId}/intake`);
+                  return;
+                }
+                setActiveSlide(item.slide);
+              }}
+            >
+              <span className="vbs-stage-handler-icon">
+                <item.icon className="h-4 w-4" />
+              </span>
+              <span className="vbs-stage-handler-copy">
+                <strong>{item.label}</strong>
+                <small>{item.caption}</small>
+              </span>
+              <span className="vbs-stage-handler-state">{item.state === "done" ? "Done" : isCurrent ? "Now" : "Queued"}</span>
+            </button>
+          );
+        })}
       </div>
 
       <div className="vbs-slide-viewport">
@@ -2826,6 +3325,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
               <p className="vbs-meta">{card.eyebrow}</p>
               <h3>{card.title}</h3>
               <p>{card.body}</p>
+              {renderLaunchpadVisual(card.id)}
               <div className="vbs-launchpad-foot">
                 <strong>{card.stat}</strong>
                 <button
@@ -2952,16 +3452,17 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                           onChange={() => toggleAutofillField(field)}
                         />
                         <strong>{toAutofillFieldLabel(field)}</strong>
-                        <span className="vbs-meta">{Math.round((suggestion.confidence || 0) * 100)}%</span>
+                        <span className="vbs-chip-toggle is-active">
+                          {Math.round((suggestion.confidence || 0) * 100)}%
+                        </span>
                       </span>
                       <span className="vbs-meta">{compactText(suggestion.rationale, 220)}</span>
-                      <span className="vbs-meta">
-                        Evidence:{" "}
-                        {suggestion.sourceEvidence
-                          .slice(0, 2)
-                          .map((entry) => entry.label)
-                          .filter(Boolean)
-                          .join(" • ") || "n/a"}
+                      <span className="vbs-autofill-evidence">
+                        {suggestion.sourceEvidence.slice(0, 3).map((entry) => (
+                          <span key={`${field}-${entry.label}`} className="vbs-evidence-badge">
+                            {entry.label}
+                          </span>
+                        ))}
                       </span>
                     </label>
                   );
@@ -3024,6 +3525,14 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                 <div className="vbs-output vbs-dna-tone-card">
                   <p className="vbs-meta">Live tone preview</p>
                   <p>{tonePreview(brandForm)}</p>
+                  <div className="vbs-tone-preview-grid">
+                    {toneCards.map((card) => (
+                      <article key={card.id} className="vbs-tone-preview-card">
+                        <p className="vbs-meta">{card.eyebrow}</p>
+                        <strong>{card.sample}</strong>
+                      </article>
+                    ))}
+                  </div>
                 </div>
               </aside>
 
@@ -3638,14 +4147,63 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                         </button>
                       ))}
                     </div>
-                    <p className="vbs-meta">Shortcuts: `1` pin, `2` must-use, `3` exclude, `0` clear.</p>
-                    <button
-                      type="button"
-                      onClick={() => void sendShortlistToChat()}
-                      disabled={isBusy || filteredReferences.length === 0}
-                    >
-                      Send Filtered Shortlist To Chat
-                    </button>
+                    <div className="vbs-shortlist-handler-rail">
+                      <button
+                        type="button"
+                        disabled={!selectedReference || Boolean(selectedReference && shortlistPendingById[selectedReference.id])}
+                        onClick={() => selectedReference && void shortlistReference(selectedReference.id, "pin")}
+                      >
+                        <Pin className="h-4 w-4" />
+                        Pin
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!selectedReference || Boolean(selectedReference && shortlistPendingById[selectedReference.id])}
+                        onClick={() => selectedReference && void shortlistReference(selectedReference.id, "must-use")}
+                      >
+                        <CheckCircle2 className="h-4 w-4" />
+                        Must-use
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!selectedReference || Boolean(selectedReference && shortlistPendingById[selectedReference.id])}
+                        onClick={() => selectedReference && void shortlistReference(selectedReference.id, "exclude")}
+                      >
+                        <CircleOff className="h-4 w-4" />
+                        Exclude
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!selectedReference || Boolean(selectedReference && shortlistPendingById[selectedReference.id])}
+                        onClick={() => selectedReference && void shortlistReference(selectedReference.id, "clear")}
+                      >
+                        <ArrowLeft className="h-4 w-4" />
+                        Clear
+                      </button>
+                      <button
+                        type="button"
+                        aria-pressed={selectedReference ? compareReferenceIds.includes(selectedReference.id) : false}
+                        disabled={!selectedReference}
+                        onClick={() => selectedReference && toggleCompareReference(selectedReference.id)}
+                      >
+                        <Layers3 className="h-4 w-4" />
+                        Compare
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void sendShortlistToChat()}
+                        disabled={isBusy || filteredReferences.length === 0}
+                      >
+                        <Send className="h-4 w-4" />
+                        Send to chat
+                      </button>
+                    </div>
+                    <div className="vbs-shortcut-chips" aria-label="Keyboard shortcuts">
+                      <span>1 Pin</span>
+                      <span>2 Must-use</span>
+                      <span>3 Exclude</span>
+                      <span>0 Clear</span>
+                    </div>
                   </div>
 
                   <div className={referenceViewMode === "grid" ? "vbs-reference-board-grid" : "vbs-reference-board-list"}>
@@ -3657,6 +4215,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                           className={[
                             "vbs-reference-card",
                             selectedReference?.id === reference.id ? "is-selected" : "",
+                            compareReferenceIds.includes(reference.id) ? "is-compare" : "",
                             recentShortlistReferenceId === reference.id ? "is-updated" : "",
                           ]
                             .filter(Boolean)
@@ -3853,6 +4412,33 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                                 <li key={line}>{line}</li>
                               ))}
                             </ul>
+                            {comparedReferences.length === 2 ? (
+                              <div className="vbs-compare-panel">
+                                <div className="vbs-compare-panel-head">
+                                  <h4>Compare winners</h4>
+                                  <p className="vbs-meta">Two references selected for side-by-side steering.</p>
+                                </div>
+                                <div className="vbs-compare-grid">
+                                  {comparedReferences.map((reference) => (
+                                    <article key={reference.id} className="vbs-compare-card">
+                                      <p className="vbs-meta">
+                                        #{reference.ranking.rank} • {toPlatformLabel(reference.sourcePlatform)}
+                                      </p>
+                                      <strong>{compactText(reference.ranking.rationaleTitle, 80)}</strong>
+                                      <p>{compactText(reference.caption || reference.transcriptSummary || "", 110)}</p>
+                                      <div className="vbs-mini-actions">
+                                        <span className="vbs-chip-toggle is-active">
+                                          {reference.scores.composite.toFixed(3)}
+                                        </span>
+                                        <button type="button" onClick={() => setSelectedReferenceId(reference.id)}>
+                                          Focus
+                                        </button>
+                                      </div>
+                                    </article>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
                             <div className="vbs-source-context">
                               <h4>Source Context</h4>
                               <p className="vbs-meta">{selectedReference.caption}</p>
@@ -4372,6 +4958,42 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
           </article>
         </>
       )}
+        </div>
+      </div>
+
+      <div className="vbs-action-dock" role="toolbar" aria-label="Viral Studio handlers">
+        <div className="vbs-action-dock-copy">
+          <p className="vbs-meta">{actionDock.eyebrow}</p>
+          <h2>{actionDock.title}</h2>
+          <p>{actionDock.note}</p>
+        </div>
+        <div className="vbs-action-dock-actions">
+          {actionDock.actions.map((action) => {
+            const Icon = action.icon;
+            return (
+              <button
+                key={action.key}
+                type="button"
+                className={action.emphasis === "primary" ? "vbs-handler-button is-primary" : "vbs-handler-button"}
+                disabled={action.disabled}
+                onClick={() => void action.run()}
+              >
+                <Icon className="h-4 w-4" />
+                {action.label}
+              </button>
+            );
+          })}
+        </div>
+        <div className="vbs-action-dock-meta">
+          <div className="vbs-save-ribbon">
+            <span>Auto-save</span>
+            <strong>{actionDock.saveNote}</strong>
+          </div>
+          <div className="vbs-shortcut-chips">
+            {actionDock.shortcuts.map((shortcut) => (
+              <span key={shortcut}>{shortcut}</span>
+            ))}
+          </div>
         </div>
       </div>
 

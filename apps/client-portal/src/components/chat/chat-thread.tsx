@@ -199,13 +199,13 @@ function OverflowActionsMenu({ actions }: { actions: OverflowAction[] }) {
       <button
         type="button"
         onClick={() => setOpen((previous) => !previous)}
-        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-100"
+        className="bat-thread-icon-button inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-100"
         aria-label="More actions"
       >
         <MoreHorizontal className="h-4 w-4" />
       </button>
       {open ? (
-        <div className="absolute right-0 z-20 mt-2 w-52 rounded-xl border border-zinc-200 bg-white p-1.5 shadow-xl">
+        <div className="bat-thread-menu absolute right-0 z-20 mt-2 w-52 rounded-xl border border-zinc-200 bg-white p-1.5 shadow-xl">
           {actions.map((action) =>
             "href" in action ? (
               <a
@@ -757,14 +757,14 @@ function MessageBlocks({
                 ? "Viral Studio shortlist"
                 : "Viral Studio context";
           return (
-            <div key={`${message.id}-viral-context-${index}`} className="rounded-md border border-sky-200 bg-sky-50/70 p-2.5">
-              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-sky-700">{contextLabel}</p>
+            <div key={`${message.id}-viral-context-${index}`} className="bat-viral-context-card rounded-md border border-sky-200 bg-sky-50/70 p-2.5">
+              <p className="bat-viral-context-eyebrow text-xs font-semibold uppercase tracking-[0.08em]">{contextLabel}</p>
               {block.summary ? <p className="mt-1 text-sm text-zinc-800">{block.summary}</p> : null}
               {block.objective ? <p className="mt-1 text-xs text-zinc-600">Objective: {block.objective}</p> : null}
               {block.cards.length ? (
                 <div className="mt-2 space-y-2">
                   {block.cards.slice(0, 6).map((card) => (
-                    <div key={`${message.id}-${card.id}`} className="rounded border border-sky-100 bg-white px-2 py-1.5">
+                    <div key={`${message.id}-${card.id}`} className="bat-viral-context-subcard rounded border border-sky-100 bg-white px-2 py-1.5">
                       <p className="text-xs font-semibold text-zinc-900">{card.title}</p>
                       <p className="mt-0.5 text-xs text-zinc-600">
                         {[
@@ -1337,7 +1337,7 @@ export function ChatThread({
   }
 
   return (
-      <section ref={scrollRef} className="bat-scrollbar min-h-0 flex-1 overflow-y-auto bg-white">
+      <section ref={scrollRef} className="bat-thread-surface bat-scrollbar min-h-0 flex-1 overflow-y-auto bg-white">
       <div className={`mx-auto w-full ${contentWidthClassName} px-2 pb-4 pt-2 sm:px-3 xl:px-4`}>
         {visibleMessages.map((message, index) => {
           const isUser = message.role === "user";
@@ -1361,14 +1361,14 @@ export function ChatThread({
                 <div
                   className={
                     isUser
-                      ? "max-w-[93%] rounded-[1.35rem] bg-[#2f2f32] px-3 py-2.5 text-white shadow-[0_16px_30px_-24px_rgba(0,0,0,0.45)] sm:max-w-[84%] 2xl:max-w-[78%]"
+                      ? "bat-thread-user-card max-w-[93%] rounded-[1.35rem] bg-[#2f2f32] px-3 py-2.5 text-white shadow-[0_16px_30px_-24px_rgba(0,0,0,0.45)] sm:max-w-[84%] 2xl:max-w-[78%]"
                       : assistantIsScopedReply
-                        ? "max-w-[98%] rounded-[1.35rem] border border-zinc-200 bg-[linear-gradient(180deg,#ffffff_0%,#f8f9fa_100%)] px-3 py-2.5 text-zinc-900 shadow-[0_18px_34px_-30px_rgba(15,23,42,0.28)] sm:max-w-[94%] 2xl:max-w-[90%]"
-                        : "max-w-[98%] px-0 py-0 text-zinc-900 sm:max-w-[94%] 2xl:max-w-[90%]"
+                        ? "bat-thread-assistant-card max-w-[98%] rounded-[1.35rem] border border-zinc-200 bg-[linear-gradient(180deg,#ffffff_0%,#f8f9fa_100%)] px-3 py-2.5 text-zinc-900 shadow-[0_18px_34px_-30px_rgba(15,23,42,0.28)] sm:max-w-[94%] 2xl:max-w-[90%]"
+                        : "bat-thread-assistant-plain max-w-[98%] px-0 py-0 text-zinc-900 sm:max-w-[94%] 2xl:max-w-[90%]"
                   }
                 >
                   {assistantIsScopedReply && inheritedScopedMessage ? (
-                    <div className="mb-2 rounded-2xl border border-zinc-200 bg-zinc-50/85 p-2.5">
+                    <div className="bat-thread-scoped-assistant mb-2 rounded-2xl border border-zinc-200 bg-zinc-50/85 p-2.5">
                       <div className="flex items-start gap-2.5">
                         <div className="flex shrink-0 flex-col items-center">
                           <span className="mt-1 h-2.5 w-2.5 rounded-full bg-zinc-900" />
@@ -1410,7 +1410,7 @@ export function ChatThread({
                     </div>
                   ) : null}
                   {scopedMessage ? (
-                    <div className="mb-2 rounded-2xl border border-white/15 bg-white/8 p-2.5">
+                    <div className="bat-thread-scoped-user mb-2 rounded-2xl border border-white/15 bg-white/8 p-2.5">
                       <div className="flex items-start gap-2.5">
                         <div className="flex shrink-0 flex-col items-center">
                           <span className="mt-1 h-2.5 w-2.5 rounded-full bg-white/90" />

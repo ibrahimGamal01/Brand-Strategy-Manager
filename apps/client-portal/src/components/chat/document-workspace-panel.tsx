@@ -347,7 +347,7 @@ export function DocumentWorkspacePanel({
 
   const pickerContent = (
     <>
-      <label className="mb-2 flex items-center gap-2 rounded-md border border-zinc-200 px-2 py-1.5 text-xs">
+      <label className="bat-doc-search mb-2 flex items-center gap-2 rounded-md border border-zinc-200 px-2 py-1.5 text-xs">
         <Search className="h-3.5 w-3.5 text-zinc-500" />
         <input
           value={listQuery}
@@ -370,7 +370,7 @@ export function DocumentWorkspacePanel({
         <p className="text-[11px] text-zinc-500">{filteredDocuments.length} doc{filteredDocuments.length === 1 ? "" : "s"}</p>
       </div>
 
-      <div className="bat-scrollbar min-h-0 flex-1 space-y-0.5 overflow-y-auto rounded-md border border-zinc-200 bg-white p-1">
+      <div className="bat-doc-list bat-scrollbar min-h-0 flex-1 space-y-0.5 overflow-y-auto rounded-md border border-zinc-200 bg-white p-1">
         {filteredDocuments.map((document) => {
           const active = document.id === selectedDocument?.id;
           return (
@@ -407,8 +407,8 @@ export function DocumentWorkspacePanel({
   );
 
   return (
-    <aside className="flex h-full min-h-0 flex-col bg-white">
-      <div ref={headerRef} className="relative border-b border-zinc-200 px-3 py-2">
+    <aside className="bat-doc-panel flex h-full min-h-0 flex-col bg-white">
+      <div ref={headerRef} className="bat-doc-header relative border-b border-zinc-200 px-3 py-2">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
             <h2 className="text-sm font-semibold text-zinc-900">Docs</h2>

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { BrandMark } from "@/components/layout/brand-mark";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { getPortalMe, logoutPortal } from "@/lib/auth-api";
 import { cn } from "@/lib/cn";
 
@@ -50,6 +51,7 @@ export function AppNav() {
           <BrandMark compact />
         </Link>
         <nav className="flex flex-wrap items-center justify-end gap-2">
+          <ThemeToggle />
           {email ? (
             <span className="hidden rounded-full border px-3 py-1.5 text-xs md:inline-flex" style={{ borderColor: "var(--bat-border)", background: "var(--bat-surface)" }}>
               {email}

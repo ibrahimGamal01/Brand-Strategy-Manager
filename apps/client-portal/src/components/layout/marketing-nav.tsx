@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { BrandMark } from "@/components/layout/brand-mark";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 
 const links = [
   { href: "/", label: "Home" },
@@ -23,6 +24,7 @@ export function MarketingNav() {
           ))}
         </nav>
         <div className="flex items-center gap-2">
+          <ThemeToggle />
           <Link href="/login" className="rounded-full px-4 py-2 text-sm" style={{ border: "1px solid var(--bat-border)" }}>
             Log in
           </Link>

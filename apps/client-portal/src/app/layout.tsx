@@ -2,6 +2,28 @@ import type { Metadata } from "next";
 import { Providers } from "./providers";
 import "./globals.css";
 
+const themeInitScript = `
+(() => {
+  try {
+    const modeKey = "bat-theme-mode";
+    const legacyKey = "bat-theme";
+    const parseMode = (value) =>
+      value === "light" || value === "dark" || value === "system" ? value : null;
+    const stored = parseMode(window.localStorage.getItem(modeKey));
+    const legacy = parseMode(window.localStorage.getItem(legacyKey));
+    const mode = stored || (legacy === "light" || legacy === "dark" ? legacy : null) || "system";
+    const resolved =
+      mode === "system"
+        ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+        : mode;
+    const root = document.documentElement;
+    root.setAttribute("data-theme", resolved);
+    root.setAttribute("data-theme-mode", mode);
+    root.style.colorScheme = resolved;
+  } catch {}
+})();
+`;
+
 export const metadata: Metadata = {
   metadataBase: new URL("https://bat-platform.example"),
   title: {
@@ -30,6 +52,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} suppressHydrationWarning />
         <Providers>{children}</Providers>
       </body>
     </html>

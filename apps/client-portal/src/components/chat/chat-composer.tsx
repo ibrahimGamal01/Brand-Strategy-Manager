@@ -587,7 +587,7 @@ export function ChatComposer({
   const showComposerStatusRow = isStreaming || queuedMessages.length > 0;
 
   return (
-    <section className="sticky bottom-0 z-20 border-t border-zinc-200/80 bg-white/96 px-0 pb-2 pt-2 backdrop-blur-xl">
+    <section className="bat-composer-shell sticky bottom-0 z-20 border-t border-zinc-200/80 bg-white/96 px-0 pb-2 pt-2 backdrop-blur-xl">
       <div className={`mx-auto w-full ${contentWidthClassName} px-2 sm:px-3 xl:px-4`}>
         {showComposerStatusRow ? (
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] text-zinc-500">
@@ -612,7 +612,7 @@ export function ChatComposer({
         ) : null}
 
         {showQueue && queuedMessages.length > 0 ? (
-          <div className="mb-2 rounded-2xl border border-zinc-200 bg-zinc-50/85 p-2.5">
+          <div className="bat-composer-queue mb-2 rounded-2xl border border-zinc-200 bg-zinc-50/85 p-2.5">
             <div className="bat-scrollbar max-h-56 space-y-1.5 overflow-y-auto pr-1">
               {queuedMessages.map((item, index) => {
                 const options = item.inputOptions || currentInputOptions;
@@ -620,7 +620,7 @@ export function ChatComposer({
                 const steerDraft = readSteerDraft(item);
                 const showSteerEditor = expandedSteerId === item.id;
                 return (
-                  <div key={item.id} className="rounded-xl border border-zinc-200 bg-white p-2.5">
+                  <div key={item.id} className="bat-composer-queue-item rounded-xl border border-zinc-200 bg-white p-2.5">
                     <div className="flex items-start gap-2">
                       <div className="flex-1">
                         <p className="mb-1 text-[11px] uppercase tracking-wide text-zinc-400">Queued {item.position || index + 1}</p>
@@ -766,9 +766,9 @@ export function ChatComposer({
             }}
           />
 
-          <div className="overflow-hidden rounded-[1.5rem] border border-zinc-200 bg-[linear-gradient(180deg,#ffffff_0%,#fafafa_100%)] shadow-[0_18px_42px_-28px_rgba(15,23,42,0.45)]">
+          <div className="bat-composer-card overflow-hidden rounded-[1.5rem] border border-zinc-200 bg-[linear-gradient(180deg,#ffffff_0%,#fafafa_100%)] shadow-[0_18px_42px_-28px_rgba(15,23,42,0.45)]">
             {branchContext ? (
-              <div className="border-b border-zinc-200/90 bg-[linear-gradient(180deg,#fafafa_0%,#f4f5f6_100%)] px-3 py-2.5">
+              <div className="bat-composer-branch border-b border-zinc-200/90 bg-[linear-gradient(180deg,#fafafa_0%,#f4f5f6_100%)] px-3 py-2.5">
                 <div className="flex items-start gap-2.5">
                   <div className="flex shrink-0 flex-col items-center">
                     <span className="mt-1 h-2.5 w-2.5 rounded-full bg-zinc-900" />
@@ -849,7 +849,7 @@ export function ChatComposer({
                   }
                 }}
                 placeholder={resolveComposerPlaceholder(branchContext)}
-                className="min-h-[7.2rem] w-full resize-none border-0 bg-transparent px-4 pb-16 pt-3.5 text-[15px] leading-6 text-zinc-900 outline-none placeholder:text-zinc-400 sm:min-h-[8.2rem]"
+                className="bat-composer-input min-h-[7.2rem] w-full resize-none border-0 bg-transparent px-4 pb-16 pt-3.5 text-[15px] leading-6 text-zinc-900 outline-none placeholder:text-zinc-400 sm:min-h-[8.2rem]"
               />
 
               {uploadedDocs.length > 0 ? (
@@ -857,7 +857,7 @@ export function ChatComposer({
                   {uploadedDocs.map((doc) => (
                     <span
                       key={doc.id}
-                      className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-700 shadow-sm"
+                      className="bat-composer-upload-pill inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-700 shadow-sm"
                     >
                       <FileText className="h-3.5 w-3.5 text-zinc-500" />
                       <span className="max-w-[180px] truncate">{doc.fileName}</span>
@@ -878,7 +878,7 @@ export function ChatComposer({
               ) : null}
 
               {showSlashSurface ? (
-                <div className="absolute bottom-[4.6rem] left-2 right-2 z-10 rounded-[1.75rem] border border-zinc-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(248,248,248,0.98)_100%)] p-2.5 shadow-[0_24px_70px_-40px_rgba(15,23,42,0.45)] backdrop-blur-xl">
+                <div className="bat-composer-slash-surface absolute bottom-[4.6rem] left-2 right-2 z-10 rounded-[1.75rem] border border-zinc-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(248,248,248,0.98)_100%)] p-2.5 shadow-[0_24px_70px_-40px_rgba(15,23,42,0.45)] backdrop-blur-xl">
                   <div className="mb-2 flex items-center justify-between px-1.5">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
                       {slashMatches.length ? "Slash Commands" : "Start With An Action"}
@@ -894,7 +894,7 @@ export function ChatComposer({
                         type="button"
                         onMouseDown={(event) => event.preventDefault()}
                         onClick={() => applySlashCommand(command)}
-                        className="min-h-11 whitespace-nowrap rounded-full border border-zinc-200/90 bg-white px-5 py-2.5 text-[15px] font-medium text-zinc-700 shadow-[0_1px_0_rgba(255,255,255,0.9),0_8px_20px_-18px_rgba(15,23,42,0.35)] transition hover:border-zinc-300 hover:bg-zinc-50"
+                        className="bat-composer-slash-pill min-h-11 whitespace-nowrap rounded-full border border-zinc-200/90 bg-white px-5 py-2.5 text-[15px] font-medium text-zinc-700 shadow-[0_1px_0_rgba(255,255,255,0.9),0_8px_20px_-18px_rgba(15,23,42,0.35)] transition hover:border-zinc-300 hover:bg-zinc-50"
                       >
                         {command.label}
                       </button>

@@ -309,35 +309,33 @@ function RightRailPulse({
   taskDetail: string;
 }) {
   return (
-    <div className="border-b border-zinc-200 bg-[linear-gradient(180deg,#ffffff_0%,#f7f8f9_100%)] px-3 py-3">
-      <div className="rounded-[1.35rem] border border-zinc-200 bg-white px-3 py-3 shadow-[0_14px_32px_-28px_rgba(15,23,42,0.35)]">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">{taskEyebrow}</p>
-        <p className="mt-1 text-sm font-semibold text-zinc-900">{taskTitle}</p>
-        <p className="mt-1 line-clamp-3 text-[11px] leading-5 text-zinc-500">{taskDetail || activeRunLabel || "No active process right now."}</p>
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-600">
+    <div className="bat-right-rail-pulse-wrap px-3 py-3">
+      <div className="bat-right-rail-pulse-card px-3 py-3">
+        <p className="bat-right-rail-eyebrow">{taskEyebrow}</p>
+        <p className="bat-right-rail-title">{taskTitle}</p>
+        <p className="bat-right-rail-detail">{taskDetail || activeRunLabel || "No active process right now."}</p>
+        <div className="bat-right-rail-chips mt-3">
+          <span className="bat-right-rail-chip">
             {runsCount ? `${runsCount} live` : "Idle"}
           </span>
-          <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-600">
+          <span className="bat-right-rail-chip">
             Feed {feedCount}
           </span>
-          <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-600">
+          <span className="bat-right-rail-chip">
             Docs {docsCount}
           </span>
           {decisionsCount ? (
-            <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-700">
+            <span className="bat-right-rail-chip bat-right-rail-chip-warning">
               {decisionsCount} waiting
             </span>
           ) : null}
         </div>
       </div>
-      <div className="mt-3 inline-flex w-full items-center rounded-full border border-zinc-200 bg-white p-1">
+      <div className="bat-right-rail-toggle mt-3">
         <button
           type="button"
           onClick={() => onSelectMode("activity")}
-          className={`flex-1 rounded-full px-3 py-1.5 text-xs font-medium transition ${
-            mode === "activity" ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"
-          }`}
+          className={`bat-right-rail-toggle-button ${mode === "activity" ? "is-active" : ""}`}
         >
           Live Activity
         </button>
@@ -345,9 +343,7 @@ function RightRailPulse({
           <button
             type="button"
             onClick={() => onSelectMode("docs")}
-            className={`flex-1 rounded-full px-3 py-1.5 text-xs font-medium transition ${
-              mode === "docs" ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"
-            }`}
+            className={`bat-right-rail-toggle-button ${mode === "docs" ? "is-active" : ""}`}
           >
             Documents
           </button>
@@ -657,7 +653,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
       }
     }
     return items.slice(0, 6);
-  }, [activeDocumentContextId, composerBranchContext?.documentId, messages, selectedRuntimeDocument?.id]);
+  }, [activeDocumentContextId, messages]);
 
   const hasDocsContext = runtimeDocuments.length > 0;
   const resolvedRightRailMode: "activity" | "docs" =
@@ -1720,17 +1716,17 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   return (
     <>
       {error || actionError ? (
-        <div className="mb-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+        <div className="bat-status bat-status-danger mb-3 text-sm">
           <p>{error || actionError}</p>
         </div>
       ) : null}
 
-      <div className="relative h-full overflow-hidden bg-[#f6f7f8]">
+      <div className="bat-runtime-shell relative h-full overflow-hidden">
         <div className="grid h-[calc(100dvh-5rem)] min-h-[34rem] w-full grid-cols-1 lg:grid-cols-[16.5rem_minmax(0,1fr)] xl:grid-cols-[17.25rem_minmax(0,1fr)]">
           <aside
             className={`${
               sidebarOpen ? "absolute inset-y-0 left-0 z-30 flex w-11/12 max-w-sm" : "hidden"
-            } min-h-0 flex-col border-r border-zinc-800/70 bg-[#171717] text-zinc-200 lg:static lg:z-auto lg:flex lg:w-auto`}
+            } bat-runtime-sidebar min-h-0 flex-col border-r border-zinc-800/70 bg-[#171717] text-zinc-200 lg:static lg:z-auto lg:flex lg:w-auto`}
           >
             <div className="border-b border-zinc-800 px-3 py-3">
               <div className="flex items-center justify-between gap-2">
@@ -1899,8 +1895,8 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
             </div>
           </aside>
 
-          <section className="relative flex min-h-0 flex-col overflow-hidden bg-[#fbfbfc]">
-            <header className="flex items-center justify-between gap-3 border-b border-zinc-200/80 bg-white/90 px-2.5 py-2 backdrop-blur sm:px-3 xl:px-4">
+          <section className="bat-runtime-main relative flex min-h-0 flex-col overflow-hidden bg-[#fbfbfc]">
+            <header className="bat-runtime-header flex items-center justify-between gap-3 border-b border-zinc-200/80 bg-white/90 px-2.5 py-2 backdrop-blur sm:px-3 xl:px-4">
               <div className="min-w-0 flex items-center gap-2">
                 <div className="shrink-0">
                   <button
@@ -1956,82 +1952,82 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
             >
               <div className="flex min-h-0 flex-col border-zinc-200 xl:border-r xl:border-zinc-200/80">
                 {viralWorkflow ? (
-                  <div className="mx-3 mt-3 rounded-[1.35rem] border border-sky-200 bg-gradient-to-br from-sky-50 via-white to-cyan-50 p-3 shadow-[0_20px_45px_-35px_rgba(14,165,233,0.45)] sm:mx-4 xl:mx-5">
+                  <div className="bat-viral-bridge mx-3 mt-3 p-3 sm:mx-4 xl:mx-5">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div className="max-w-3xl">
-                        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-sky-700">
+                        <p className="bat-viral-bridge-eyebrow">
                           Viral Studio
                         </p>
-                        <h2 className="mt-1 text-lg font-semibold tracking-[-0.02em] text-zinc-950">
+                        <h2 className="bat-viral-bridge-title mt-1 text-lg font-semibold tracking-[-0.02em]">
                           {viralPrimaryAction?.title || "Studio context is ready"}
                         </h2>
-                        <p className="mt-1 text-sm leading-6 text-zinc-700">
+                        <p className="bat-viral-bridge-copy mt-1 text-sm leading-6">
                           {viralPrimaryAction?.body ||
                             "Use Viral Studio context from this workspace to keep strategy, generation, and delivery connected."}
                         </p>
                       </div>
-                      <div className="rounded-2xl border border-sky-200 bg-white px-3 py-2 text-right">
-                        <p className="text-[10px] uppercase tracking-[0.08em] text-sky-700">Progress</p>
-                        <strong className="text-sm text-sky-800">{viralProgressPct}%</strong>
+                      <div className="bat-viral-bridge-progress px-3 py-2 text-right">
+                        <p className="text-[10px] uppercase tracking-[0.08em]">Progress</p>
+                        <strong className="text-sm">{viralProgressPct}%</strong>
                       </div>
                     </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <span className="rounded-full border border-sky-200 bg-white px-2.5 py-1 text-xs text-zinc-700">
+                    <div className="bat-viral-bridge-chips mt-3">
+                      <span className="bat-viral-bridge-chip">
                         Stage: {formatViralWorkflowStage(viralWorkflow.workflowStage)}
                       </span>
-                      <span className="rounded-full border border-sky-200 bg-white px-2.5 py-1 text-xs text-zinc-700">
+                      <span className="bat-viral-bridge-chip">
                         Brand DNA: {viralWorkflow.brandDnaReady ? "ready" : "needs review"}
                       </span>
-                      <span className="rounded-full border border-sky-200 bg-white px-2.5 py-1 text-xs text-zinc-700">
+                      <span className="bat-viral-bridge-chip">
                         Prioritized refs: {viralWorkflow.counts.prioritizedReferences}
                       </span>
                     </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
+                    <div className="bat-viral-bridge-actions mt-3">
                       <button
                         type="button"
                         onClick={runViralBridgePrimaryAction}
                         disabled={viralBridgeBusy}
-                        className="rounded-full border border-sky-200 bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-60"
+                        className="bat-viral-bridge-button bat-viral-bridge-button-primary"
                       >
                         {viralBridgeBusy ? "Working..." : viralPrimaryAction?.cta || "Continue"}
                       </button>
                       <button
                         type="button"
                         onClick={() => router.push(`/app/w/${workspaceId}/viral-studio`)}
-                        className="rounded-full border border-sky-200 bg-white px-4 py-2 text-sm text-sky-700 hover:bg-sky-100"
+                        className="bat-viral-bridge-button"
                       >
                         Open Studio
                       </button>
                       <button
                         type="button"
                         onClick={() => setShowViralBridgeAdvanced((previous) => !previous)}
-                        className="rounded-full border border-sky-200 bg-white px-4 py-2 text-sm text-sky-700 hover:bg-sky-100"
+                        className="bat-viral-bridge-button"
                       >
                         {showViralBridgeAdvanced ? "Hide advanced" : "Advanced"}
                       </button>
                     </div>
 
                     {viralBridgeError ? (
-                      <p className="mt-1 text-xs text-red-700">{viralBridgeError}</p>
+                      <p className="mt-1 text-xs" style={{ color: "var(--bat-danger)" }}>{viralBridgeError}</p>
                     ) : null}
                     {showViralBridgeAdvanced ? (
-                      <div className="mt-2 rounded-lg border border-sky-100 bg-white/80 p-2">
+                      <div className="bat-viral-bridge-advanced mt-2 p-2">
                         {viralAutofillPreview ? (
-                          <p className="text-xs text-zinc-600">
+                          <p className="text-xs" style={{ color: "var(--bat-text-muted)" }}>
                             Autofill preview: {viralAutofillPreview.coverage.suggestedCount} field(s) • Confidence{" "}
                             {Math.round((viralAutofillPreview.suggestionConfidence || 0) * 100)}%
                           </p>
                         ) : null}
                         {viralSuggestedSources[0] ? (
-                          <p className="mt-1 line-clamp-2 text-xs text-zinc-600">
+                          <p className="mt-1 line-clamp-2 text-xs" style={{ color: "var(--bat-text-muted)" }}>
                             Suggested source: {viralSuggestedSources[0].label} • {viralSuggestedSources[0].sourceUrl}
                           </p>
                         ) : null}
-                        <div className="mt-2 flex flex-wrap gap-2">
+                        <div className="bat-viral-bridge-advanced-actions mt-2">
                           <button
                             type="button"
                             onClick={() => router.push(`/app/w/${workspaceId}/viral-studio?autopilot=website-first`)}
-                            className="rounded-md border border-sky-200 bg-white px-2.5 py-1 text-xs text-sky-700 hover:bg-sky-100"
+                            className="bat-viral-bridge-advanced-button"
                           >
                             Run website-first autopilot
                           </button>
@@ -2039,7 +2035,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                             type="button"
                             onClick={previewViralAutofill}
                             disabled={viralBridgeBusy}
-                            className="rounded-md border border-sky-200 bg-white px-2.5 py-1 text-xs text-sky-700 hover:bg-sky-100 disabled:opacity-60"
+                            className="bat-viral-bridge-advanced-button"
                           >
                             Preview autofill
                           </button>
@@ -2047,7 +2043,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                             type="button"
                             onClick={applyViralAutofill}
                             disabled={viralBridgeBusy}
-                            className="rounded-md border border-sky-200 bg-white px-2.5 py-1 text-xs text-sky-700 hover:bg-sky-100 disabled:opacity-60"
+                            className="bat-viral-bridge-advanced-button"
                           >
                             Apply autofill
                           </button>
@@ -2055,7 +2051,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                             type="button"
                             onClick={launchViralExtractionFromSuggestion}
                             disabled={viralBridgeBusy || !viralWorkflow.brandDnaReady || viralSuggestedSources.length === 0}
-                            className="rounded-md border border-sky-200 bg-white px-2.5 py-1 text-xs text-sky-700 hover:bg-sky-100 disabled:opacity-60"
+                            className="bat-viral-bridge-advanced-button"
                           >
                             Start data-max extraction
                           </button>
@@ -2153,7 +2149,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
               </div>
 
               {!rightRailCollapsed ? (
-                <div className="relative hidden min-h-0 border-l border-zinc-200 bg-white xl:flex xl:flex-col">
+                <div className="bat-right-rail-shell relative hidden min-h-0 border-l border-zinc-200 bg-white xl:flex xl:flex-col">
                   {isWideViewport ? (
                     <button
                       type="button"
@@ -2239,7 +2235,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
 
         {activityOpen ? (
           <div className="absolute inset-0 z-40 flex justify-end bg-black/35 xl:hidden">
-            <div className="flex h-full w-11/12 max-w-lg flex-col border-l border-zinc-200 bg-white shadow-2xl">
+            <div className="bat-right-rail-sheet flex h-full w-11/12 max-w-lg flex-col border-l border-zinc-200 bg-white shadow-2xl">
               <div className="flex items-center justify-between border-b border-zinc-200 px-3 py-2">
                 <div className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-[0.08em] text-zinc-500">
                   Inspector

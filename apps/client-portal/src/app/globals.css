@@ -1,3 +1,4 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Source+Serif+4:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap");
 @import "tailwindcss";
 @import "../styles/tokens.css";
 
@@ -13,15 +14,22 @@ body {
 }
 
 body {
-  background: var(--bat-bg);
+  background:
+    radial-gradient(circle at top, color-mix(in srgb, var(--bat-accent) 8%, transparent) 0%, transparent 38%),
+    linear-gradient(180deg, var(--bat-bg-soft) 0%, var(--bat-bg) 100%);
   color: var(--bat-text);
   font-family: var(--font-body), sans-serif;
   line-height: 1.5;
+  transition: background-color 180ms ease, color 180ms ease;
 }
 
 a {
   color: inherit;
   text-decoration: none;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--bat-accent) 20%, transparent);
 }
 
 .bat-shell {
@@ -63,6 +71,102 @@ a {
   color: var(--bat-text-muted);
   font-size: 0.78rem;
   padding: 0.2rem 0.7rem;
+}
+
+.bat-theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-height: 44px;
+  padding: 0.28rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--bat-border) 82%, transparent);
+  background: color-mix(in srgb, var(--bat-surface-overlay) 84%, transparent);
+  box-shadow: 0 18px 36px -28px rgba(15, 23, 42, 0.36);
+  backdrop-filter: blur(16px);
+}
+
+.bat-theme-toggle-compact {
+  gap: 0.2rem;
+}
+
+.bat-theme-toggle-option {
+  min-height: 38px;
+  min-width: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0 0.85rem;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--bat-text-muted);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 600;
+  transition:
+    background-color 180ms ease,
+    color 180ms ease,
+    transform 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.bat-theme-toggle-option:hover {
+  background: color-mix(in srgb, var(--bat-accent-soft) 62%, transparent);
+  color: var(--bat-text);
+}
+
+.bat-theme-toggle-option.is-active {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--bat-accent) 18%, var(--bat-surface-elevated)) 0%,
+    color-mix(in srgb, var(--bat-success) 16%, var(--bat-surface-elevated)) 100%
+  );
+  color: var(--bat-text);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bat-accent) 16%, transparent);
+}
+
+.bat-theme-toggle-option:focus-visible,
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--bat-focus-ring);
+  outline-offset: 2px;
+}
+
+.bat-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.85rem 1rem;
+  border-radius: 1rem;
+  border: 1px solid var(--bat-border);
+  background: color-mix(in srgb, var(--bat-surface-overlay) 78%, transparent);
+  color: var(--bat-text);
+}
+
+.bat-status-success {
+  border-color: color-mix(in srgb, var(--bat-success) 28%, var(--bat-border));
+  background: linear-gradient(135deg, var(--bat-success-soft) 0%, color-mix(in srgb, var(--bat-surface) 92%, transparent) 100%);
+}
+
+.bat-status-warning {
+  border-color: color-mix(in srgb, var(--bat-warning) 28%, var(--bat-border));
+  background: linear-gradient(135deg, var(--bat-warning-soft) 0%, color-mix(in srgb, var(--bat-surface) 92%, transparent) 100%);
+}
+
+.bat-status-danger {
+  border-color: color-mix(in srgb, var(--bat-danger) 30%, var(--bat-border));
+  background: linear-gradient(135deg, var(--bat-danger-soft) 0%, color-mix(in srgb, var(--bat-surface) 92%, transparent) 100%);
+}
+
+.bat-status-info {
+  border-color: color-mix(in srgb, var(--bat-info) 30%, var(--bat-border));
+  background: linear-gradient(135deg, var(--bat-info-soft) 0%, color-mix(in srgb, var(--bat-surface) 92%, transparent) 100%);
 }
 
 @keyframes fade-up {
@@ -2766,5 +2870,800 @@ a {
 
   .vbs-reference-card.is-updated {
     animation: none;
+  }
+}
+
+.vbs-shell::before {
+  background:
+    radial-gradient(circle at 8% 8%, color-mix(in srgb, var(--vbs-coral) 18%, transparent) 0%, transparent 32%),
+    radial-gradient(circle at 88% 4%, color-mix(in srgb, var(--vbs-teal) 18%, transparent) 0%, transparent 30%),
+    linear-gradient(180deg, color-mix(in srgb, var(--bat-accent-soft) 56%, transparent) 0%, transparent 100%);
+}
+
+.vbs-slide-toolbar,
+.vbs-stage-handler-rail,
+.vbs-action-dock,
+.vbs-panel,
+.vbs-output,
+.vbs-dna-form-card,
+.vbs-dna-step-card,
+.vbs-dna-tone-card,
+.vbs-autofill-item,
+.vbs-reference-card,
+.vbs-analysis-drawer,
+.vbs-pack-card,
+.vbs-doc-sidebar-card,
+.vbs-document-empty,
+.vbs-export-preview,
+.vbs-modal,
+.vbs-extraction-source-card,
+.vbs-run-row,
+.vbs-doc-section-card {
+  border-color: var(--vbs-line);
+  background: var(--vbs-card);
+  color: var(--vbs-copy);
+  box-shadow: 0 24px 54px -42px rgba(15, 23, 42, 0.46);
+  backdrop-filter: blur(20px);
+}
+
+.vbs-shell-slides {
+  padding-bottom: 0.4rem;
+}
+
+.vbs-slide-toolbar {
+  background: color-mix(in srgb, var(--vbs-card-strong) 94%, transparent);
+  box-shadow: 0 20px 54px -40px rgba(15, 23, 42, 0.42);
+}
+
+.vbs-slide-tab {
+  min-height: 72px;
+  background: var(--vbs-handler);
+  color: var(--vbs-handler-text);
+}
+
+.vbs-slide-tab strong {
+  display: flex;
+  align-items: center;
+  gap: 0.42rem;
+  font-size: 0.88rem;
+  color: var(--vbs-handler-text);
+}
+
+.vbs-slide-tab small {
+  font-size: 0.69rem;
+  color: var(--vbs-copy-soft);
+}
+
+.vbs-slide-tab.is-active {
+  background: var(--vbs-handler-active);
+  box-shadow: 0 18px 42px -34px rgba(37, 99, 235, 0.48);
+}
+
+.vbs-slide-arrows button,
+.vbs-actions button,
+.vbs-mini-actions button,
+.vbs-shortlist-handler-rail button,
+.vbs-handler-button,
+.vbs-launchpad-action {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--vbs-line);
+  background: var(--vbs-handler);
+  color: var(--vbs-handler-text);
+  cursor: pointer;
+  transition:
+    transform 180ms ease,
+    background-color 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    color 180ms ease;
+}
+
+.vbs-slide-arrows button:hover,
+.vbs-actions button:hover,
+.vbs-mini-actions button:hover,
+.vbs-shortlist-handler-rail button:hover,
+.vbs-handler-button:hover,
+.vbs-launchpad-action:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--bat-accent) 28%, var(--vbs-line));
+  box-shadow: 0 18px 34px -28px rgba(37, 99, 235, 0.38);
+}
+
+.vbs-slide-arrows button:disabled,
+.vbs-actions button:disabled,
+.vbs-mini-actions button:disabled,
+.vbs-shortlist-handler-rail button:disabled,
+.vbs-handler-button:disabled,
+.vbs-launchpad-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
+  box-shadow: none;
+}
+
+.vbs-launchpad-action,
+.vbs-actions button:first-child,
+.vbs-handler-button.is-primary {
+  border-color: transparent;
+  background: var(--vbs-progress);
+  color: var(--bat-text-inverse);
+}
+
+.vbs-slide-viewport {
+  border: 1px solid var(--vbs-line);
+  background: var(--vbs-canvas);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.vbs-launchpad,
+.vbs-section-shell {
+  background: transparent;
+}
+
+.vbs-launchpad-card,
+.vbs-reference-card,
+.vbs-pack-card,
+.vbs-doc-section-card {
+  overflow: hidden;
+}
+
+.vbs-launchpad-card::before {
+  background: linear-gradient(
+    140deg,
+    color-mix(in srgb, var(--bat-accent-soft) 72%, transparent) 0%,
+    transparent 50%,
+    color-mix(in srgb, var(--bat-success-soft) 56%, transparent) 100%
+  );
+}
+
+.vbs-launchpad-visual {
+  position: relative;
+  margin-top: 0.9rem;
+  min-height: 13.5rem;
+  border-radius: 1.15rem;
+  border: 1px solid color-mix(in srgb, var(--bat-border) 68%, transparent);
+  background: var(--vbs-media-frame);
+  overflow: hidden;
+}
+
+.vbs-launchpad-poster {
+  min-height: 16rem;
+}
+
+.vbs-launchpad-poster-copy {
+  position: absolute;
+  inset: auto 0 0;
+  display: grid;
+  gap: 0.35rem;
+  padding: 1rem;
+  background: linear-gradient(180deg, transparent 0%, rgba(8, 16, 28, 0.82) 100%);
+  color: white;
+}
+
+.vbs-launchpad-poster-copy span {
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.vbs-launchpad-poster-copy strong {
+  font-family: var(--vbs-editorial-font);
+  font-size: 1.08rem;
+  line-height: 1.2;
+}
+
+.vbs-visual-empty,
+.vbs-pack-stack,
+.vbs-tone-preview-grid {
+  padding: 0.85rem;
+}
+
+.vbs-pack-stack,
+.vbs-tone-preview-grid,
+.vbs-compare-grid {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.vbs-pack-stack-card,
+.vbs-tone-preview-card,
+.vbs-compare-card {
+  border-radius: 1rem;
+  border: 1px solid color-mix(in srgb, var(--bat-border) 72%, transparent);
+  background: color-mix(in srgb, var(--vbs-card-strong) 92%, transparent);
+  padding: 0.8rem 0.85rem;
+}
+
+.vbs-pack-stack-card span,
+.vbs-tone-preview-card .vbs-meta {
+  color: var(--vbs-copy-soft);
+}
+
+.vbs-pack-stack-card strong,
+.vbs-tone-preview-card strong,
+.vbs-compare-card strong {
+  display: block;
+  margin-top: 0.32rem;
+  color: var(--vbs-copy);
+}
+
+.vbs-autofill-item {
+  gap: 0.6rem;
+}
+
+.vbs-autofill-row {
+  align-items: center;
+}
+
+.vbs-autofill-evidence,
+.vbs-shortcut-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.vbs-evidence-badge,
+.vbs-shortcut-chips span,
+.vbs-save-ribbon {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--bat-border) 76%, transparent);
+  background: color-mix(in srgb, var(--vbs-card-strong) 92%, transparent);
+  color: var(--vbs-copy-soft);
+  font-size: 0.72rem;
+  padding: 0.34rem 0.62rem;
+}
+
+.vbs-dna-tone-card {
+  background:
+    linear-gradient(155deg, color-mix(in srgb, var(--bat-accent-soft) 72%, transparent) 0%, transparent 100%),
+    var(--vbs-card);
+}
+
+.vbs-dna-tone-card > p {
+  max-width: 48ch;
+}
+
+.vbs-status-strip span,
+.vbs-document-ribbon span,
+.vbs-driver-chip,
+.vbs-chip-toggle,
+.vbs-reference-state,
+.vbs-rank-badge {
+  background: color-mix(in srgb, var(--vbs-card-strong) 92%, transparent);
+  border-color: color-mix(in srgb, var(--bat-border) 80%, transparent);
+  color: var(--vbs-handler-text);
+}
+
+.vbs-reference-card.is-selected {
+  border-color: color-mix(in srgb, var(--bat-accent) 38%, var(--bat-border));
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--bat-accent) 16%, transparent),
+    0 24px 54px -42px rgba(37, 99, 235, 0.42);
+}
+
+.vbs-reference-card.is-compare {
+  border-color: color-mix(in srgb, var(--bat-success) 42%, var(--bat-border));
+}
+
+.vbs-reference-card-summary,
+.vbs-source-context,
+.vbs-analysis-story-grid article,
+.vbs-analysis-metric,
+.vbs-ingestion-step,
+.vbs-doc-sidebar-card,
+.vbs-document-ribbon,
+.vbs-extraction-monitor {
+  background: color-mix(in srgb, var(--vbs-card-strong) 88%, transparent);
+  border-radius: 1rem;
+}
+
+.vbs-shortlist-handler-rail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.vbs-analysis-drawer {
+  display: grid;
+  gap: 1rem;
+}
+
+.vbs-analysis-poster,
+.vbs-reference-poster {
+  background: var(--vbs-media-frame);
+}
+
+.vbs-analysis-bar,
+.vbs-progress-track {
+  background: color-mix(in srgb, var(--bat-accent-soft) 56%, transparent);
+}
+
+.vbs-analysis-bar span,
+.vbs-progress-track span {
+  background: var(--vbs-progress);
+}
+
+.vbs-compare-panel {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.9rem;
+  border-radius: 1.1rem;
+  border: 1px solid var(--vbs-line);
+  background: color-mix(in srgb, var(--vbs-card-strong) 92%, transparent);
+}
+
+.vbs-compare-panel-head h4,
+.vbs-action-dock-copy h2 {
+  margin: 0;
+  font-family: var(--vbs-display-font);
+}
+
+.vbs-action-dock {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.6fr);
+  gap: 1rem;
+  padding: 1rem 1.1rem;
+  border-radius: 1.5rem;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--vbs-card-strong) 96%, transparent) 0%, color-mix(in srgb, var(--bat-accent-soft) 32%, transparent) 100%);
+}
+
+.vbs-action-dock-copy p:last-child {
+  margin-bottom: 0;
+  color: var(--vbs-copy-soft);
+}
+
+.vbs-action-dock-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.55rem;
+}
+
+.vbs-action-dock-meta {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.vbs-save-ribbon strong {
+  color: var(--vbs-copy);
+  font-weight: 600;
+}
+
+.vbs-stage-handler-rail {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.vbs-stage-handler {
+  min-height: 76px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 1.15rem;
+  border: 1px solid var(--vbs-line);
+  background: var(--vbs-handler);
+  color: var(--vbs-handler-text);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.vbs-stage-handler:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 18px 34px -30px rgba(37, 99, 235, 0.38);
+}
+
+.vbs-stage-handler.is-active {
+  border-color: color-mix(in srgb, var(--bat-accent) 36%, var(--bat-border));
+  background: var(--vbs-handler-active);
+}
+
+.vbs-stage-handler.is-done {
+  border-color: color-mix(in srgb, var(--bat-success) 32%, var(--bat-border));
+}
+
+.vbs-stage-handler-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 0.85rem;
+  background: color-mix(in srgb, var(--vbs-card-strong) 92%, transparent);
+}
+
+.vbs-stage-handler-copy {
+  min-width: 0;
+  display: grid;
+  gap: 0.1rem;
+}
+
+.vbs-stage-handler-copy strong {
+  font-size: 0.82rem;
+}
+
+.vbs-stage-handler-copy small,
+.vbs-stage-handler-state {
+  color: var(--vbs-copy-soft);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.vbs-reference-toolbar,
+.vbs-curation-assist,
+.vbs-document-action-bar {
+  gap: 0.75rem;
+}
+
+.vbs-modal {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--vbs-card-strong) 94%, transparent) 0%, color-mix(in srgb, var(--bat-bg) 86%, transparent) 100%);
+}
+
+.vbs-modal-backdrop {
+  background: rgba(8, 16, 28, 0.62);
+  backdrop-filter: blur(12px);
+}
+
+.vbs-panel-title,
+.vbs-launchpad-copy h2,
+.vbs-reference-poster-bottom h3,
+.vbs-output-empty h3,
+.vbs-document-empty h3 {
+  color: var(--vbs-copy);
+}
+
+.vbs-panel-subtitle,
+.vbs-launchpad-copy p:not(.vbs-meta),
+.vbs-meta,
+.vbs-reference-card-copy .vbs-meta,
+.vbs-output-empty p,
+.vbs-document-empty p {
+  color: var(--vbs-copy-soft);
+}
+
+.vbs-launchpad-copy p:not(.vbs-meta),
+.vbs-panel-subtitle,
+.vbs-action-dock-copy p {
+  max-width: 60ch;
+}
+
+@media (max-width: 1100px) {
+  .vbs-stage-handler-rail {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .vbs-action-dock {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vbs-action-dock-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 700px) {
+  .bat-theme-toggle-option span {
+    display: none;
+  }
+
+  .vbs-stage-handler-rail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .vbs-slide-tab {
+    min-height: 64px;
+  }
+
+  .vbs-slide-tab small,
+  .vbs-stage-handler-state {
+    display: none;
+  }
+
+  .vbs-action-dock {
+    padding: 0.85rem;
+  }
+
+  .vbs-launchpad-visual {
+    min-height: 11.5rem;
+  }
+
+  .vbs-shortlist-handler-rail,
+  .vbs-action-dock-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.bat-runtime-shell {
+  background:
+    radial-gradient(circle at top, color-mix(in srgb, var(--bat-accent) 8%, transparent) 0%, transparent 35%),
+    linear-gradient(180deg, var(--bat-bg-soft) 0%, var(--bat-bg) 100%);
+}
+
+.bat-runtime-sidebar,
+.bat-runtime-main,
+.bat-runtime-header,
+.bat-right-rail-shell,
+.bat-right-rail-sheet,
+.bat-doc-panel,
+.bat-doc-header,
+.bat-doc-list,
+.bat-doc-search,
+.bat-composer-shell,
+.bat-composer-queue,
+.bat-composer-queue-item,
+.bat-composer-card,
+.bat-composer-branch,
+.bat-composer-upload-pill,
+.bat-composer-slash-surface,
+.bat-composer-slash-pill,
+.bat-thread-surface,
+.bat-thread-assistant-card,
+.bat-thread-scoped-assistant,
+.bat-thread-menu,
+.bat-viral-context-card,
+.bat-viral-context-subcard,
+.bat-right-rail-pulse-card,
+.bat-viral-bridge,
+.bat-viral-bridge-progress,
+.bat-viral-bridge-advanced {
+  border-color: var(--bat-border);
+  background: color-mix(in srgb, var(--bat-surface-overlay) 86%, transparent);
+  color: var(--bat-text);
+  backdrop-filter: blur(18px);
+}
+
+.bat-runtime-sidebar {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bat-surface) 96%, rgba(8, 16, 28, 0.9)) 0%, color-mix(in srgb, var(--bat-bg-soft) 82%, rgba(8, 16, 28, 0.95)) 100%);
+  color: var(--bat-text);
+}
+
+.bat-runtime-header {
+  background: color-mix(in srgb, var(--bat-surface-overlay) 88%, transparent);
+}
+
+.bat-right-rail-pulse-wrap {
+  border-bottom: 1px solid var(--bat-border);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bat-surface) 96%, transparent) 0%, color-mix(in srgb, var(--bat-bg-soft) 82%, transparent) 100%);
+}
+
+.bat-right-rail-pulse-card,
+.bat-viral-bridge {
+  border: 1px solid var(--bat-border);
+  border-radius: 1.35rem;
+  box-shadow: 0 20px 42px -34px rgba(15, 23, 42, 0.42);
+}
+
+.bat-right-rail-eyebrow,
+.bat-viral-bridge-eyebrow,
+.bat-viral-context-eyebrow {
+  margin: 0;
+  color: var(--bat-accent);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.bat-right-rail-title,
+.bat-viral-bridge-title {
+  color: var(--bat-text);
+}
+
+.bat-right-rail-detail,
+.bat-viral-bridge-copy {
+  color: var(--bat-text-muted);
+}
+
+.bat-right-rail-chips,
+.bat-viral-bridge-chips,
+.bat-viral-bridge-actions,
+.bat-viral-bridge-advanced-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.bat-right-rail-chip,
+.bat-viral-bridge-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--bat-border);
+  background: color-mix(in srgb, var(--bat-surface-elevated) 94%, transparent);
+  color: var(--bat-text-muted);
+  font-size: 0.72rem;
+  padding: 0.38rem 0.7rem;
+}
+
+.bat-right-rail-chip-warning {
+  border-color: color-mix(in srgb, var(--bat-warning) 24%, var(--bat-border));
+  background: var(--bat-warning-soft);
+  color: var(--bat-warning);
+}
+
+.bat-right-rail-toggle {
+  display: inline-flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+  border: 1px solid var(--bat-border);
+  background: color-mix(in srgb, var(--bat-surface) 94%, transparent);
+  padding: 0.3rem;
+}
+
+.bat-right-rail-toggle-button,
+.bat-viral-bridge-button,
+.bat-viral-bridge-advanced-button,
+.bat-thread-icon-button {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--bat-border);
+  background: color-mix(in srgb, var(--bat-surface-elevated) 94%, transparent);
+  color: var(--bat-text-muted);
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    transform 180ms ease;
+}
+
+.bat-right-rail-toggle-button {
+  flex: 1;
+}
+
+.bat-right-rail-toggle-button.is-active,
+.bat-viral-bridge-button-primary {
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--bat-accent) 0%, var(--bat-success) 100%);
+  color: var(--bat-text-inverse);
+}
+
+.bat-viral-bridge-button,
+.bat-viral-bridge-advanced-button,
+.bat-right-rail-toggle-button,
+.bat-thread-icon-button {
+  cursor: pointer;
+}
+
+.bat-viral-bridge-button:hover,
+.bat-viral-bridge-advanced-button:hover,
+.bat-right-rail-toggle-button:hover,
+.bat-thread-icon-button:hover,
+.bat-composer-slash-pill:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--bat-accent) 26%, var(--bat-border));
+}
+
+.bat-viral-bridge-progress {
+  border: 1px solid color-mix(in srgb, var(--bat-accent) 22%, var(--bat-border));
+  border-radius: 1rem;
+}
+
+.bat-viral-bridge-progress p {
+  color: var(--bat-accent);
+}
+
+.bat-viral-bridge-progress strong {
+  color: var(--bat-text);
+}
+
+.bat-thread-surface,
+.bat-doc-panel {
+  background: transparent;
+}
+
+.bat-thread-user-card {
+  background:
+    linear-gradient(160deg, color-mix(in srgb, var(--bat-accent) 82%, #111827) 0%, color-mix(in srgb, var(--bat-success) 42%, #111827) 100%);
+  color: var(--bat-text-inverse);
+}
+
+.bat-thread-assistant-card,
+.bat-thread-assistant-plain,
+.bat-thread-scoped-assistant,
+.bat-viral-context-card {
+  color: var(--bat-text);
+}
+
+.bat-thread-assistant-card {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bat-surface-elevated) 96%, transparent) 0%, color-mix(in srgb, var(--bat-surface-muted) 88%, transparent) 100%);
+  border: 1px solid var(--bat-border);
+}
+
+.bat-thread-scoped-assistant,
+.bat-composer-branch {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bat-surface-muted) 90%, transparent) 0%, color-mix(in srgb, var(--bat-surface) 94%, transparent) 100%);
+}
+
+.bat-thread-scoped-user {
+  background: color-mix(in srgb, white 10%, transparent);
+}
+
+.bat-thread-menu,
+.bat-viral-context-subcard {
+  box-shadow: 0 18px 36px -28px rgba(15, 23, 42, 0.42);
+}
+
+.bat-viral-context-card {
+  border-color: color-mix(in srgb, var(--bat-accent) 24%, var(--bat-border));
+  background:
+    linear-gradient(135deg, var(--bat-info-soft) 0%, color-mix(in srgb, var(--bat-surface-elevated) 96%, transparent) 100%);
+}
+
+.bat-viral-context-subcard {
+  border-color: color-mix(in srgb, var(--bat-accent) 16%, var(--bat-border));
+}
+
+.bat-composer-shell {
+  background: color-mix(in srgb, var(--bat-surface-overlay) 78%, transparent);
+}
+
+.bat-composer-card {
+  border-color: var(--bat-border);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bat-surface-elevated) 96%, transparent) 0%, color-mix(in srgb, var(--bat-surface) 90%, transparent) 100%);
+}
+
+.bat-composer-input {
+  color: var(--bat-text);
+}
+
+.bat-composer-input::placeholder {
+  color: var(--bat-text-soft);
+}
+
+.bat-composer-queue,
+.bat-composer-queue-item,
+.bat-composer-slash-surface,
+.bat-doc-list,
+.bat-doc-search {
+  border-color: var(--bat-border);
+}
+
+.bat-composer-upload-pill,
+.bat-composer-slash-pill {
+  color: var(--bat-text);
+}
+
+@media (max-width: 700px) {
+  .bat-right-rail-chips,
+  .bat-viral-bridge-chips,
+  .bat-viral-bridge-actions,
+  .bat-viral-bridge-advanced-actions {
+    gap: 0.4rem;
   }
 }
