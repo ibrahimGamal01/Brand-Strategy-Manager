@@ -242,6 +242,107 @@ a {
   gap: 0.8rem;
 }
 
+.vbs-process-board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.vbs-process-card,
+.vbs-detail-card {
+  border-radius: 1rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 16%, var(--bat-border));
+  background: color-mix(in srgb, white 93%, var(--vbs-sand));
+  padding: 0.95rem;
+}
+
+.vbs-process-card {
+  display: grid;
+  gap: 0.75rem;
+  min-height: 15rem;
+}
+
+.vbs-process-card.is-done {
+  border-color: color-mix(in srgb, var(--vbs-teal) 24%, var(--bat-border));
+  background: linear-gradient(160deg, color-mix(in srgb, white 88%, var(--vbs-teal)) 0%, color-mix(in srgb, var(--vbs-teal) 8%, white) 100%);
+}
+
+.vbs-process-card.is-active {
+  border-color: color-mix(in srgb, var(--vbs-cobalt) 30%, var(--bat-border));
+  background: linear-gradient(160deg, color-mix(in srgb, white 88%, var(--vbs-cobalt)) 0%, color-mix(in srgb, var(--vbs-cobalt) 7%, white) 100%);
+}
+
+.vbs-process-card-head,
+.vbs-detail-card {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.vbs-process-card-head span,
+.vbs-process-card-grid span,
+.vbs-detail-card span {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--vbs-ink) 52%, #6a7287);
+}
+
+.vbs-process-card-head strong,
+.vbs-detail-card strong {
+  font-family: var(--vbs-display-font);
+  font-size: 0.98rem;
+  color: var(--vbs-ink);
+}
+
+.vbs-process-card-head small {
+  color: color-mix(in srgb, var(--vbs-cobalt) 80%, var(--vbs-ink));
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.vbs-process-card p,
+.vbs-detail-card p {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.58;
+  color: color-mix(in srgb, var(--vbs-ink) 78%, #646d82);
+}
+
+.vbs-process-card-grid,
+.vbs-detail-grid {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.vbs-process-card-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: auto;
+}
+
+.vbs-process-card-grid > div,
+.vbs-detail-card {
+  border-radius: 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 12%, var(--bat-border));
+  background: color-mix(in srgb, white 92%, transparent);
+  padding: 0.72rem 0.78rem;
+}
+
+.vbs-process-card-grid strong {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--vbs-ink);
+}
+
+.vbs-detail-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.vbs-detail-grid-compact {
+  margin-top: -0.15rem;
+}
+
 .vbs-launchpad-card {
   border-radius: 1rem;
   border: 1px solid color-mix(in srgb, var(--vbs-cobalt) 16%, var(--bat-border));
@@ -1684,7 +1785,9 @@ a {
 
   .vbs-reset-hero,
   .vbs-launchpad-main,
-  .vbs-launchpad-grid {
+  .vbs-launchpad-grid,
+  .vbs-process-board,
+  .vbs-detail-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -1770,6 +1873,10 @@ a {
   .vbs-launchpad,
   .vbs-section-shell {
     padding: 0.85rem;
+  }
+
+  .vbs-process-card-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .vbs-launchpad-foot {

@@ -2120,6 +2120,198 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     },
   ];
 
+  const workflowBabySteps = useMemo(() => {
+    const extractionReady = Boolean(activeIngestion || references.length > 0);
+    const curationReady = prioritizedReferenceCount > 0;
+    const generationReady = Boolean(generation || document);
+    return [
+      {
+        key: "brand",
+        eyebrow: "Step 1",
+        title: "Lock the brand truth",
+        state: brandReady ? "done" : "active",
+        body: brandReady
+          ? "Mission, audience, tone, and claims are approved and ready to steer every later decision."
+          : "Use the website-first autofill as a first draft, then tighten the fields one cluster at a time.",
+        input: workflowStatus?.intakeCompleted ? "Intake evidence + website/social context" : "Workspace intake and website evidence",
+        decision: activeOnboardingMeta.title,
+        output: brandReady ? compactText(brandProfile?.summary || tonePreview(brandForm), 130) : `${onboardingCoveragePct}% coverage so far`,
+      },
+      {
+        key: "extract",
+        eyebrow: "Step 2",
+        title: "Pull the strongest reference pool",
+        state: extractionReady ? "done" : brandReady ? "active" : "upcoming",
+        body: activeIngestion
+          ? "The extraction engine is already turning one source into a ranked evidence board."
+          : "Choose one strong source first. A cleaner source makes the ranking and shortlist far more reliable.",
+        input: latestSuggestedSource ? `${latestSuggestedSource.label} • ${toPlatformLabel(latestSuggestedSource.platform)}` : "Suggested sources from intake and website evidence",
+        decision: activeIngestion ? `${statusLabel(activeIngestion.status)} run` : "Preset, depth, and source URL",
+        output: extractionReady ? `${references.length} references loaded` : "A ranked board of references to inspect",
+      },
+      {
+        key: "curate",
+        eyebrow: "Step 3",
+        title: "Shortlist only the winners",
+        state: curationReady ? "done" : extractionReady ? "active" : "upcoming",
+        body: curationReady
+          ? "Your shortlist now tells generation exactly which references are allowed to influence the pack."
+          : "Use pin, must-use, and exclude deliberately. Treat this step as editorial judgment, not just filtering.",
+        input: extractionReady ? `${filteredReferences.length} visible references` : "Ranked references will appear here after extraction",
+        decision: curationReady ? `${prioritizedReferenceCount} prioritized refs` : "Pick what must guide the pack",
+        output: curationReady ? "A sharp shortlist ready for generation" : "A smaller set of references with clear rationale",
+      },
+      {
+        key: "create",
+        eyebrow: "Step 4",
+        title: "Generate, refine, and save",
+        state: generationReady ? "done" : curationReady ? "active" : "upcoming",
+        body: generation
+          ? "The pack is live. Now the job is refinement, quality control, and durable versioning."
+          : "Once the shortlist is right, generate one multi-pack, review quality, and save the strongest draft into the document timeline.",
+        input: `${selectedTemplate?.title || "Prompt template"} • ${toGenerationFormatLabel(generationFormatTarget)}`,
+        decision: generation ? `Revision ${generation.revision}` : "Prompt direction + section refinements",
+        output: document ? `${versions.length} version(s) saved` : "A durable campaign document and revision history",
+      },
+    ];
+  }, [
+    activeIngestion,
+    activeOnboardingMeta.title,
+    brandProfile,
+    brandReady,
+    document,
+    filteredReferences.length,
+    generation,
+    generationFormatTarget,
+    latestSuggestedSource,
+    onboardingCoveragePct,
+    prioritizedReferenceCount,
+    references.length,
+    selectedTemplate,
+    versions.length,
+    workflowStatus?.intakeCompleted,
+    brandForm,
+  ]);
+
+  const foundationDetailCards = useMemo(() => {
+    const cardsByStep = {
+      1: [
+        {
+          label: "What you are defining",
+          value: "Mission, value proposition, offer, and region",
+          note: "Keep it specific enough that the system could reuse it in a landing page headline.",
+        },
+        {
+          label: "Why it matters",
+          value: "This becomes the positioning layer",
+          note: "Reference ranking and generation quality both improve when the product promise is concrete.",
+        },
+        {
+          label: "What unlocks next",
+          value: "Audience modeling",
+          note: "Once the offer is clear, the next step can focus on who needs it and why they hesitate.",
+        },
+      ],
+      2: [
+        {
+          label: "What you are defining",
+          value: "Personas, pains, desires, and objections",
+          note: "Write like you are describing real buyers, not a broad marketing segment.",
+        },
+        {
+          label: "Why it matters",
+          value: "This shapes hooks and angles",
+          note: "The best references will feel more relevant when the board is judged through a clear audience lens.",
+        },
+        {
+          label: "What unlocks next",
+          value: "Voice guardrails",
+          note: "Once the buyer is clear, we can decide how directly, formally, or playfully to speak to them.",
+        },
+      ],
+      3: [
+        {
+          label: "What you are defining",
+          value: "Voice sliders, banned phrases, and required claims",
+          note: "This is where the studio stops sounding generic and starts sounding like your team.",
+        },
+        {
+          label: "Why it matters",
+          value: "This protects brand consistency",
+          note: "Generation and refinements will use these settings as a quality gate, not just as decoration.",
+        },
+        {
+          label: "What unlocks next",
+          value: "Examples and final summary",
+          note: "After the tone is locked, the final step turns all of that structure into one AI-ready brief.",
+        },
+      ],
+      4: [
+        {
+          label: "What you are defining",
+          value: "Exemplars and the final reusable summary",
+          note: "Give the system a few real examples so the final summary stays anchored to actual brand texture.",
+        },
+        {
+          label: "Why it matters",
+          value: "This becomes the working brief",
+          note: "Extraction choices, generation, and chat handoff all inherit this summary after finalization.",
+        },
+        {
+          label: "What unlocks next",
+          value: "Extraction, generation, and saving",
+          note: "Once finalized, the rest of Viral Studio can move without asking the brand questions again.",
+        },
+      ],
+    } as const;
+    return cardsByStep[onboardingStep];
+  }, [onboardingStep]);
+
+  const referenceDetailCards = useMemo(() => {
+    const activeSource = latestSuggestedSource ? `${latestSuggestedSource.label} • ${toPlatformLabel(latestSuggestedSource.platform)}` : "No source selected yet";
+    return [
+      {
+        label: "1. Choose one source",
+        value: activeSource,
+        note: "Start with the cleanest source first. One strong source beats five noisy ones.",
+      },
+      {
+        label: "2. Read the board carefully",
+        value: activeIngestion ? `${statusLabel(activeIngestion.status)} • ${references.length} refs loaded` : "Wait for the run to finish",
+        note: "Use score, platform, recency, and the first rationale line to decide which cards deserve attention.",
+      },
+      {
+        label: "3. Shortlist with intent",
+        value: prioritizedReferenceCount > 0 ? `${prioritizedReferenceCount} prioritized` : "No prioritized refs yet",
+        note: "Use must-use for anchors, pin for strong supporting examples, exclude for anything misleading or off-brand.",
+      },
+    ];
+  }, [activeIngestion, latestSuggestedSource, prioritizedReferenceCount, references.length]);
+
+  const createDetailCards = useMemo(() => {
+    return [
+      {
+        label: "Before you generate",
+        value: `${selectedTemplate?.title || "Select template"} • ${toGenerationFormatLabel(generationFormatTarget)}`,
+        note: `The pack will use ${prioritizedReferenceCount} prioritized reference(s) and the current Brand DNA guardrails.`,
+      },
+      {
+        label: "What to review next",
+        value: generation ? `Revision ${generation.revision} ready` : "Quality gate will appear after generation",
+        note: generation
+          ? `Check hooks, scripts, captions, and CTA variants before refining one section at a time.`
+          : "Generate once, then review quality signals and section cards before editing the document.",
+      },
+      {
+        label: "What gets saved",
+        value: document ? `${versions.length} version(s) in the vault` : "Document draft is still waiting",
+        note: document
+          ? "Every revision can become a durable version snapshot, export, or promoted working draft."
+          : "The best draft should move into Document Workspace so the team can iterate safely.",
+      },
+    ];
+  }, [document, generation, generationFormatTarget, prioritizedReferenceCount, selectedTemplate, versions.length]);
+
   const runWorkflowGuideAction = useCallback(async () => {
     if (workflowGuide.action === "open_intake") {
       router.push(`/app/w/${workspaceId}/intake`);
@@ -2276,6 +2468,32 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
             </div>
           </div>
         </div>
+        <div className="vbs-process-board">
+          {workflowBabySteps.map((step) => (
+            <article key={step.key} className={`vbs-process-card is-${step.state}`}>
+              <div className="vbs-process-card-head">
+                <span>{step.eyebrow}</span>
+                <strong>{step.title}</strong>
+                <small>{step.state === "done" ? "Done" : step.state === "active" ? "Now" : "Up next"}</small>
+              </div>
+              <p>{step.body}</p>
+              <div className="vbs-process-card-grid">
+                <div>
+                  <span>Input</span>
+                  <strong>{step.input}</strong>
+                </div>
+                <div>
+                  <span>Decision</span>
+                  <strong>{step.decision}</strong>
+                </div>
+                <div>
+                  <span>Output</span>
+                  <strong>{step.output}</strong>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
         <div className="vbs-launchpad-grid">
           {launchpadCards.map((card) => (
             <article key={card.id} className="vbs-launchpad-card">
@@ -2351,6 +2569,15 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
               Viral Studio now behaves like one continuous system: approve foundation once, let references inherit that
               context, then generate and save without re-explaining the brand every step.
             </p>
+          </div>
+          <div className="vbs-detail-grid">
+            {foundationDetailCards.map((card) => (
+              <article key={card.label} className="vbs-detail-card">
+                <span>{card.label}</span>
+                <strong>{card.value}</strong>
+                <p>{card.note}</p>
+              </article>
+            ))}
           </div>
           <div className="vbs-output vbs-autofill-panel">
             <div className="vbs-mini-actions">
@@ -2844,6 +3071,15 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                 <span>{prioritizedReferenceCount} prioritized</span>
               </div>
             </div>
+            <div className="vbs-detail-grid vbs-detail-grid-compact">
+              {referenceDetailCards.map((card) => (
+                <article key={card.label} className="vbs-detail-card">
+                  <span>{card.label}</span>
+                  <strong>{card.value}</strong>
+                  <p>{card.note}</p>
+                </article>
+              ))}
+            </div>
             <div className="vbs-grid">
               <article className="vbs-panel" id="vbs-section-extraction">
               <h2 className="vbs-panel-title">Competitor Extraction</h2>
@@ -3159,6 +3395,15 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                 <span>{document ? "Document ready" : "Document pending"}</span>
                 <span>{versions.length} versions</span>
               </div>
+            </div>
+            <div className="vbs-detail-grid vbs-detail-grid-compact">
+              {createDetailCards.map((card) => (
+                <article key={card.label} className="vbs-detail-card">
+                  <span>{card.label}</span>
+                  <strong>{card.value}</strong>
+                  <p>{card.note}</p>
+                </article>
+              ))}
             </div>
             <div className="vbs-grid">
               <article className="vbs-panel vbs-prompt-studio" id="vbs-section-generation">
