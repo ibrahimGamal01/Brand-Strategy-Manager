@@ -81,7 +81,44 @@ async function waitForSignupHydration(page: Page, baseUrl: string): Promise<void
   await page.waitForSelector('input[autocomplete="new-password"]', { timeout: 60_000 });
 }
 
+async function loginExistingUser(
+  page: Page,
+  baseUrl: string,
+  email: string,
+  password: string
+): Promise<string> {
+  await page.goto(`${baseUrl}/login`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('input[autocomplete="email"]', { timeout: 60_000 });
+  await page.waitForSelector('input[autocomplete="current-password"]', { timeout: 60_000 });
+  await page.locator('input[autocomplete="email"]').fill(email);
+  await page.locator('input[autocomplete="current-password"]').fill(password);
+  await page.getByRole('button', { name: /^(Sign in|Log in)$/i }).first().click();
+
+  await page.waitForURL((url) => url.pathname.startsWith('/app'), { timeout: 60_000 });
+  const viralStudioLink = page.getByRole('link', { name: 'Open Viral Studio' }).first();
+  const hasViralStudioLink = (await viralStudioLink.count().catch(() => 0)) > 0;
+  if (hasViralStudioLink) {
+    await viralStudioLink.click();
+    await page.waitForURL((url) => /^\/app\/w\/[^/]+\/viral-studio/.test(url.pathname), { timeout: 60_000 });
+  } else {
+    await page.locator('a[href^="/app/w/"]').first().click();
+    await page.waitForURL((url) => /^\/app\/w\/[^/]+/.test(url.pathname), { timeout: 60_000 });
+  }
+
+  const workspaceMatch = page.url().match(/\/app\/w\/([^/?#]+)/);
+  if (!workspaceMatch?.[1]) {
+    throw new Error(`Unable to resolve workspace id from URL after login: ${page.url()}`);
+  }
+  return workspaceMatch[1];
+}
+
 async function completeAuthAndResolveWorkspace(page: Page, baseUrl: string): Promise<string> {
+  const existingEmail = String(process.env.PORTAL_UI_E2E_EMAIL || '').trim();
+  const existingPassword = String(process.env.PORTAL_UI_E2E_PASSWORD || '').trim();
+  if (existingEmail && existingPassword) {
+    return loginExistingUser(page, baseUrl, existingEmail, existingPassword);
+  }
+
   const email = `viral.studio.playwright.${Date.now()}@example.com`;
   const password = 'TestPass123!';
 
@@ -250,34 +287,57 @@ async function validateCreateAndSaveFlow(page: Page) {
   await page.getByRole('tab', { name: /Create & Save/i }).click();
   const createSlide = page.locator('#vbs-slide-create');
   await createSlide.waitFor({ timeout: 20_000 });
+  await createSlide.locator('.vbs-staged-planner').waitFor({ timeout: 20_000 });
 
-  await createSlide.getByRole('button', { name: 'Generate Multi-Pack', exact: true }).click();
-  await waitForTextContains(page, '#vbs-slide-create .vbs-status-strip', 'Revision', 80_000);
-  await page.locator('.vbs-create-preview-board').waitFor({ timeout: 20_000 });
-  await waitForCountAtLeast(page, '.vbs-create-preview-card.is-ready', 1, 80_000);
-  await waitForCountAtLeast(page, '.vbs-pack-card', 4, 20_000);
-  await waitForCountAtLeast(page, '.vbs-quality-gate-card', 3, 20_000);
-  await waitForCountAtLeast(page, '.vbs-save-vault-step:not(.is-empty)', 1, 80_000);
+  await createSlide.getByRole('button', { name: /Analyze design directions/i }).first().click();
+  await waitForCountAtLeast(page, '#vbs-slide-create .vbs-planner-card-grid .vbs-planner-card', 3, 80_000);
+
+  const compareButton = createSlide
+    .locator('.vbs-planner-card')
+    .first()
+    .getByRole('button', { name: /^Compare$/i });
+  await compareButton.click();
+  await waitForCountAtLeast(page, '#vbs-slide-create .vbs-planner-compare-card', 1, 20_000);
+
+  const useDesignButton = createSlide
+    .locator('.vbs-planner-card')
+    .first()
+    .getByRole('button', { name: /Use this design|Approved/i });
+  await useDesignButton.click();
+  await createSlide.getByText(/Design locked:/i).waitFor({ timeout: 20_000 });
+
+  await createSlide.getByRole('button', { name: /Analyze content directions/i }).first().click();
+  await waitForCountAtLeast(page, '#vbs-slide-create .vbs-planner-card-grid .vbs-planner-card', 3, 80_000);
+
+  const useContentButton = createSlide
+    .locator('.vbs-planner-step')
+    .nth(1)
+    .locator('.vbs-planner-card')
+    .first()
+    .getByRole('button', { name: /Use this content|Approved/i });
+  await useContentButton.click();
+
+  await createSlide.getByRole('button', { name: 'Carousel', exact: true }).click();
+  await createSlide.getByRole('button', { name: /Generate format details|Generate next format/i }).first().click();
+
+  await waitForCountAtLeast(page, '#vbs-slide-create .vbs-format-result-grid .vbs-planner-result-card', 3, 80_000);
+  await createSlide.getByText(/Design details/i).waitFor({ timeout: 20_000 });
+  await createSlide.getByText(/Content details/i).waitFor({ timeout: 20_000 });
+
+  await createSlide.getByRole('button', { name: /Save To Document|Document Ready/i }).first().click();
   await waitForTextContains(page, '#vbs-slide-create .vbs-status-strip', 'Document ready', 80_000);
+  await createSlide.locator('#vbs-section-documents').getByText(/Design Details/i).waitFor({ timeout: 20_000 });
+  await createSlide.locator('#vbs-section-documents').getByText(/Content Details/i).waitFor({ timeout: 20_000 });
 
-  const firstPreviewCard = page.locator('.vbs-create-preview-card.is-ready').first();
-  await firstPreviewCard.click();
-  await page.waitForTimeout(250);
-  const pressed = await firstPreviewCard.getAttribute('aria-pressed');
-  assert.equal(pressed, 'true', 'Expected gallery preview handler to become active after click.');
-
-  const versionHandler = page.locator('.vbs-save-vault-step:not(.is-empty)').first();
-  await versionHandler.click();
-  const versionPressed = await versionHandler.getAttribute('aria-pressed');
-  assert.equal(versionPressed, 'true', 'Expected save vault step to become active after click.');
+  await createSlide.locator('.vbs-advanced-fallback').waitFor({ timeout: 20_000 });
 
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.getByRole('heading', { name: 'Viral Brand Studio' }).waitFor({ timeout: 60_000 });
   await page.getByRole('tab', { name: /Create & Save/i }).click();
-  await page.locator('.vbs-create-preview-board').waitFor({ timeout: 20_000 });
-  await waitForTextContains(page, '#vbs-slide-create .vbs-status-strip', 'Revision', 20_000);
-  await waitForCountAtLeast(page, '.vbs-create-preview-card.is-ready', 1, 20_000);
-  await waitForCountAtLeast(page, '.vbs-save-vault-step:not(.is-empty)', 1, 20_000);
+  await createSlide.locator('.vbs-staged-planner').waitFor({ timeout: 20_000 });
+  await waitForTextContains(page, '#vbs-slide-create .vbs-status-strip', 'Document ready', 20_000);
+  await createSlide.locator('#vbs-section-documents').getByText(/Design Details/i).waitFor({ timeout: 20_000 });
+  await createSlide.locator('#vbs-section-documents').getByText(/Content Details/i).waitFor({ timeout: 20_000 });
 }
 
 async function collectDiagnostics(
@@ -358,9 +418,10 @@ async function runFlowAttempt(baseUrl: string): Promise<void> {
             'reference_sidecar_and_board_metrics_render',
             'shortlist_keyboard_shortcuts_1_2_3_0',
             'shortlist_notice_and_active_state_feedback',
-            'generation_gallery_and_save_vault_render',
-            'create_and_save_handlers_are_clickable',
-            'generation_and_document_survive_reload',
+            'staged_design_direction_board_rendered',
+            'staged_content_direction_board_rendered',
+            'single_format_generation_rendered',
+            'staged_document_save_survives_reload',
           ],
         },
         null,
