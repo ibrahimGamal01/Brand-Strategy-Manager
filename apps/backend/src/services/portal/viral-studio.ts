@@ -1778,7 +1778,7 @@ function buildSyntheticReference(input: {
     workspaceId: input.workspaceId,
     ingestionRunId: input.run.id,
     sourcePlatform: input.run.sourcePlatform,
-    sourceUrl: `${input.run.sourceUrl}/video-${input.index + 1}`,
+    sourceUrl: input.run.sourceUrl,
     caption,
     transcriptSummary,
     ocrSummary,

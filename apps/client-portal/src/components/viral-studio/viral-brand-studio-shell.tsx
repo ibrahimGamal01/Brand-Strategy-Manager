@@ -295,9 +295,12 @@ type ReferenceCardDetail = {
   bullets: string[];
   palette: string[];
   sourceUrl?: string;
+  sourceSurfaceLabel: string;
+  sourceActionLabel: string;
   sourceHostLabel: string;
   sourcePathLabel: string;
   mediaUrl?: string;
+  visualBackgroundUrl?: string;
   mediaBadge: string;
   contentExcerpts: Array<{
     id: string;
@@ -378,6 +381,44 @@ function sanitizeHttpUrl(value: string): string | undefined {
     return parsed.toString();
   } catch {
     return undefined;
+  }
+}
+
+function sanitizeVisualBackgroundUrl(value: string): string | undefined {
+  const raw = String(value || "").trim();
+  if (!raw) return undefined;
+  if (/^data:image\//i.test(raw)) return raw;
+  return sanitizeHttpUrl(raw);
+}
+
+function normalizeReferenceSourceUrl(
+  value: string,
+  platform: ViralStudioPlatform
+): { url?: string; isSyntheticPath: boolean } {
+  const raw = String(value || "").trim();
+  if (!raw) return { url: undefined, isSyntheticPath: false };
+  const withProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`;
+  try {
+    const parsed = new URL(withProtocol);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return { url: undefined, isSyntheticPath: false };
+    }
+    const syntheticPath = /\/video-\d+\/?$/i.test(parsed.pathname);
+    if (syntheticPath) {
+      parsed.pathname = parsed.pathname.replace(/\/video-\d+\/?$/i, "/");
+      parsed.search = "";
+      parsed.hash = "";
+    }
+    if (
+      platform === "instagram" &&
+      !parsed.hostname.toLowerCase().includes("instagram.com") &&
+      !parsed.hostname.toLowerCase().includes("instagr.am")
+    ) {
+      return { url: undefined, isSyntheticPath: syntheticPath };
+    }
+    return { url: parsed.toString(), isSyntheticPath: syntheticPath };
+  } catch {
+    return { url: undefined, isSyntheticPath: false };
   }
 }
 
@@ -960,8 +1001,11 @@ function buildReferenceCardDetail(reference: ViralStudioReferenceAsset): Referen
     Math.max(1, reference.metrics.views);
   const palette = reference.visual?.palette?.filter(Boolean).slice(0, 3) || defaultReferencePalette(reference.sourcePlatform);
   while (palette.length < 3) palette.push(palette[palette.length - 1] || "#cbd5f5");
-  const sourceUrl = sanitizeHttpUrl(reference.sourceUrl);
-  const mediaUrl = sanitizeHttpUrl(reference.visual?.posterUrl || reference.visual?.thumbnailUrl || "");
+  const sourceResolution = normalizeReferenceSourceUrl(reference.sourceUrl, reference.sourcePlatform);
+  const sourceUrl = sourceResolution.url;
+  const rawVisualUrl = String(reference.visual?.posterUrl || reference.visual?.thumbnailUrl || "").trim();
+  const visualBackgroundUrl = sanitizeVisualBackgroundUrl(rawVisualUrl);
+  const mediaUrl = sanitizeHttpUrl(rawVisualUrl);
   return {
     eyebrow: reference.visual?.eyebrow || `${toPlatformLabel(reference.sourcePlatform)} winner`,
     headline:
@@ -990,17 +1034,24 @@ function buildReferenceCardDetail(reference: ViralStudioReferenceAsset): Referen
       .map((line) => compactText(line, 120)),
     palette,
     sourceUrl,
+    sourceSurfaceLabel: sourceResolution.isSyntheticPath ? "Source profile" : "Original post",
+    sourceActionLabel: sourceResolution.isSyntheticPath ? "Open source profile" : "Open original post",
     sourceHostLabel: toSourceHostLabel(sourceUrl, reference.sourcePlatform),
-    sourcePathLabel: toSourcePathLabel(sourceUrl),
+    sourcePathLabel: sourceResolution.isSyntheticPath
+      ? `${toSourcePathLabel(sourceUrl)} • synthetic ref id`
+      : toSourcePathLabel(sourceUrl),
     mediaUrl,
+    visualBackgroundUrl,
     mediaBadge:
-      reference.visual?.mediaKind === "video"
+      mediaUrl && reference.visual?.mediaKind === "video"
         ? "Downloaded video preview"
-        : reference.visual?.mediaKind === "image"
+        : mediaUrl && reference.visual?.mediaKind === "image"
           ? "Downloaded image preview"
           : mediaUrl
             ? "Downloaded preview"
-            : "Styled reference view",
+            : visualBackgroundUrl
+              ? "Generated preview sample"
+              : "Preview unavailable",
     contentExcerpts: buildReferenceContentExcerpts(reference, 168),
   };
 }
@@ -3000,9 +3051,9 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
 
   const selectedReferenceVisualStyle = useMemo(() => {
     if (!selectedReferenceCardDetail) return undefined;
-    return (selectedReferenceCardDetail.mediaUrl
+    return (selectedReferenceCardDetail.visualBackgroundUrl
       ? {
-          backgroundImage: `linear-gradient(180deg, rgba(11,19,43,0.16), rgba(11,19,43,0.82)), url("${selectedReferenceCardDetail.mediaUrl}")`,
+          backgroundImage: `linear-gradient(180deg, rgba(11,19,43,0.16), rgba(11,19,43,0.82)), url("${selectedReferenceCardDetail.visualBackgroundUrl}")`,
         }
       : {
           ["--vbs-reference-accent" as const]: selectedReferenceCardDetail.palette[0],
@@ -4130,9 +4181,9 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
               <div className={referenceViewMode === "grid" ? "vbs-reference-board-grid" : "vbs-reference-board-list"}>
                 {filteredReferences.map((reference) => {
                   const cardDetail = referenceCardDetails.get(reference.id) || buildReferenceCardDetail(reference);
-                  const visualStyle = (cardDetail.mediaUrl
+                  const visualStyle = (cardDetail.visualBackgroundUrl
                     ? {
-                        backgroundImage: `linear-gradient(180deg, rgba(11,19,43,0.18), rgba(11,19,43,0.82)), url("${cardDetail.mediaUrl}")`,
+                        backgroundImage: `linear-gradient(180deg, rgba(11,19,43,0.18), rgba(11,19,43,0.82)), url("${cardDetail.visualBackgroundUrl}")`,
                       }
                     : {
                         ["--vbs-reference-accent" as const]: cardDetail.palette[0],
@@ -4218,7 +4269,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                       </button>
                     <div className="vbs-reference-source-bar">
                       <div className="vbs-reference-source-meta">
-                        <span>Original post</span>
+                        <span>{cardDetail.sourceSurfaceLabel}</span>
                         <strong>{cardDetail.sourceHostLabel}</strong>
                         <p>{cardDetail.sourcePathLabel}</p>
                       </div>
@@ -4230,7 +4281,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                             rel="noreferrer"
                             className="vbs-reference-link-chip"
                           >
-                            Open original post
+                            {cardDetail.sourceActionLabel}
                           </a>
                         ) : null}
                         {cardDetail.mediaUrl ? (
@@ -4327,7 +4378,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                                 rel="noreferrer"
                                 className="vbs-reference-link-chip"
                               >
-                                Open original post
+                                {selectedReferenceCardDetail.sourceActionLabel}
                               </a>
                             ) : null}
                             {selectedReferenceCardDetail.mediaUrl ? (
@@ -4508,7 +4559,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                     </div>
                     <div className="vbs-analysis-source-grid">
                       <article className="vbs-reference-content-card is-origin">
-                        <span>Original post</span>
+                        <span>{selectedReferenceCardDetail.sourceSurfaceLabel}</span>
                         <strong>{selectedReferenceCardDetail.sourceHostLabel}</strong>
                         <p>{selectedReferenceCardDetail.sourcePathLabel}</p>
                       </article>
