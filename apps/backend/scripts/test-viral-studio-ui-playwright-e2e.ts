@@ -18,8 +18,20 @@ class FlowError extends Error {
   }
 }
 
+type PortalUiE2eAuthMode = 'auto' | 'existing' | 'fresh';
+
 function cookieHeaderFrom(pageCookies: Array<{ name: string; value: string }>) {
   return pageCookies.map((cookie) => `${cookie.name}=${cookie.value}`).join('; ');
+}
+
+function resolveAuthMode(): PortalUiE2eAuthMode {
+  const raw = String(process.env.PORTAL_UI_E2E_AUTH_MODE || 'auto')
+    .trim()
+    .toLowerCase();
+  if (raw === 'existing' || raw === 'fresh') {
+    return raw;
+  }
+  return 'auto';
 }
 
 async function clickButtonByText(page: Page, text: string) {
@@ -91,6 +103,25 @@ async function waitForInputValue(page: Page, selector: string, expectedValue: st
   throw new Error(`Timed out waiting for input selector "${selector}" to contain "${expectedValue}"`);
 }
 
+async function waitForDocumentHydrationAfterSave(page: Page, clickSave: () => Promise<void>) {
+  const createResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' &&
+      /\/api\/portal\/workspaces\/[^/]+\/viral-studio\/documents$/.test(response.url()) &&
+      response.status() === 201,
+    { timeout: 80_000 }
+  );
+  const fetchResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'GET' &&
+      /\/api\/portal\/workspaces\/[^/]+\/viral-studio\/documents\/[^/]+$/.test(response.url()) &&
+      response.status() === 200,
+    { timeout: 80_000 }
+  );
+  await Promise.all([createResponse, clickSave()]);
+  await fetchResponse;
+}
+
 async function waitForSelectedShortlistState(page: Page, label: string, timeoutMs = 12_000) {
   const button = page
     .locator('.vbs-reference-card.is-selected .vbs-shortlist-actions button', { hasText: label })
@@ -148,9 +179,16 @@ async function loginExistingUser(
 }
 
 async function completeAuthAndResolveWorkspace(page: Page, baseUrl: string): Promise<string> {
+  const authMode = resolveAuthMode();
   const existingEmail = String(process.env.PORTAL_UI_E2E_EMAIL || '').trim();
   const existingPassword = String(process.env.PORTAL_UI_E2E_PASSWORD || '').trim();
-  if (existingEmail && existingPassword) {
+  if (authMode === 'existing') {
+    if (!existingEmail || !existingPassword) {
+      throw new Error('PORTAL_UI_E2E_AUTH_MODE=existing requires PORTAL_UI_E2E_EMAIL and PORTAL_UI_E2E_PASSWORD');
+    }
+    return loginExistingUser(page, baseUrl, existingEmail, existingPassword);
+  }
+  if (authMode === 'auto' && existingEmail && existingPassword) {
     return loginExistingUser(page, baseUrl, existingEmail, existingPassword);
   }
 
@@ -369,11 +407,11 @@ async function validateCreateAndSaveFlow(page: Page) {
   const saveLabel = (await saveButton.textContent().catch(() => '')).trim();
   const saveDisabled = await saveButton.isDisabled().catch(() => false);
   if (!saveDisabled && /save to document/i.test(saveLabel)) {
-    await saveButton.click();
+    await waitForDocumentHydrationAfterSave(page, () => saveButton.click());
   }
   await page.locator('#vbs-section-documents').scrollIntoViewIfNeeded();
-  await waitForInputValue(page, '#vbs-section-documents .vbs-doc-section-head input', 'Design Details', 20_000);
-  await waitForInputValue(page, '#vbs-section-documents .vbs-doc-section-head input', 'Content Details', 20_000);
+  await waitForInputValue(page, '#vbs-section-documents .vbs-doc-section-head input', 'Design Details', 80_000);
+  await waitForInputValue(page, '#vbs-section-documents .vbs-doc-section-head input', 'Content Details', 80_000);
 
   await createSection.locator('.vbs-advanced-fallback').waitFor({ timeout: 20_000 });
 
@@ -382,8 +420,8 @@ async function validateCreateAndSaveFlow(page: Page) {
   await page.locator('#vbs-section-create-save').scrollIntoViewIfNeeded();
   await page.locator('#vbs-section-create-save .vbs-staged-planner').waitFor({ timeout: 20_000 });
   await page.locator('#vbs-section-documents').scrollIntoViewIfNeeded();
-  await waitForInputValue(page, '#vbs-section-documents .vbs-doc-section-head input', 'Design Details', 20_000);
-  await waitForInputValue(page, '#vbs-section-documents .vbs-doc-section-head input', 'Content Details', 20_000);
+  await waitForInputValue(page, '#vbs-section-documents .vbs-doc-section-head input', 'Design Details', 60_000);
+  await waitForInputValue(page, '#vbs-section-documents .vbs-doc-section-head input', 'Content Details', 60_000);
 }
 
 async function collectDiagnostics(

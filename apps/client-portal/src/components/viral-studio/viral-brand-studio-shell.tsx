@@ -1036,6 +1036,29 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     }
   }, [workspaceId]);
 
+  const hydrateLatestDocument = useCallback(
+    async (workflow: ViralStudioWorkflowStatus) => {
+      const latestDocumentId = workflow.latest.documentId;
+      if (!latestDocumentId) return;
+      if (document?.id === latestDocumentId) return;
+      try {
+        const payload = await fetchViralStudioDocument(workspaceId, latestDocumentId);
+        setDocument(payload.document);
+        setDocumentDraft(payload.document);
+        setDocumentDirty(false);
+        setAutosaveState("saved");
+        setVersions(payload.versions);
+        setComparison(null);
+        setCompareLeftVersionId("current");
+        setCompareRightVersionId("current");
+        setPromoteVersionId(payload.versions[payload.versions.length - 1]?.id || "");
+      } catch {
+        // Keep prior document state if document hydration fails during workflow refresh.
+      }
+    },
+    [workspaceId, document?.id]
+  );
+
   const refreshWorkflow = useCallback(async () => {
     try {
       const [workflowPayload, sourcesPayload] = await Promise.all([
@@ -1044,10 +1067,11 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       ]);
       setWorkflowStatus(workflowPayload.workflow);
       setSuggestedSources(sourcesPayload.items);
+      await hydrateLatestDocument(workflowPayload.workflow);
     } catch {
       // Keep prior workflow snapshot when refresh fails.
     }
-  }, [workspaceId]);
+  }, [workspaceId, hydrateLatestDocument]);
 
   const refreshPlanner = useCallback(async () => {
     try {
@@ -1130,6 +1154,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
       } else {
         setFormatGeneration(null);
       }
+      await hydrateLatestDocument(workflowPayload.workflow);
       if (brandPayload.profile?.status === "final" && brandPayload.profile?.completeness.ready) {
         setOnboardingStep(4);
       }
@@ -1138,7 +1163,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
     } finally {
       setLoading(false);
     }
-  }, [workspaceId]);
+  }, [workspaceId, hydrateLatestDocument]);
 
   useEffect(() => {
     void bootstrap();
