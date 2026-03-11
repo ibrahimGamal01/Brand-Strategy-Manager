@@ -3593,6 +3593,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
             "vbs-section-shell",
             "vbs-chapter-shell",
             "vbs-chapter-foundation",
+            "vbs-scroll-section",
             brandReady && !isEditingBrandDna ? "is-compact" : "",
           ]
             .filter(Boolean)
@@ -3821,7 +3822,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
             </div>
           ) : (
             <div className="vbs-dna-flow">
-              <aside className="vbs-dna-sidecar">
+              <aside className="vbs-dna-sidecar vbs-scroll-column">
                 <div className="vbs-dna-step-card">
                   <p className="vbs-meta">Step {activeOnboardingMeta.step} of 4</p>
                   <h3>{activeOnboardingMeta.title}</h3>
@@ -3863,7 +3864,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                 </div>
               </aside>
 
-              <div className="vbs-dna-main">
+              <div className="vbs-dna-main vbs-scroll-column">
                 <div className="vbs-dna-spotlight">
                   <div>
                     <p className="vbs-meta">Current question cluster</p>
@@ -4148,7 +4149,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         </article>
 
         {canAccessDiagnostics ? (
-          <article className="vbs-panel vbs-dev-drawer" id="vbs-section-diagnostics">
+          <article className="vbs-panel vbs-dev-drawer vbs-scroll-section" id="vbs-section-diagnostics">
             <div className="vbs-diagnostics-head">
               <div>
                 <p className="vbs-meta">Developer Access</p>
@@ -4284,7 +4285,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
               </div>
             </div>
             <div className="vbs-grid">
-              <article className="vbs-panel" id="vbs-section-extraction">
+              <article className="vbs-panel vbs-scroll-section" id="vbs-section-extraction">
                 <div className="vbs-extraction-stage">
                   <div className="vbs-extraction-launchpad">
                     <p className="vbs-meta">Launch</p>
@@ -4418,7 +4419,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                 </div>
               </article>
 
-              <article className="vbs-panel">
+              <article className="vbs-panel vbs-scroll-section" id="vbs-section-curation">
                 <div className="vbs-curation-shell">
                   <div className="vbs-curation-topline">
                     <div>
@@ -4912,7 +4913,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
               </div>
             </div>
             <div className="vbs-grid">
-              <article className="vbs-panel vbs-prompt-studio" id="vbs-section-generation">
+              <article className="vbs-panel vbs-prompt-studio vbs-scroll-section" id="vbs-section-generation">
                 <h2 className="vbs-panel-title">Prompt Studio</h2>
                 <p className="vbs-panel-subtitle">
                   Set the brief once, then refine only the sections that need more edge, clarity, or control.
@@ -5045,7 +5046,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                       })}
                     </div>
                     <div className="vbs-prompt-two-pane">
-                      <div className="vbs-prompt-controls">
+                      <div className="vbs-prompt-controls vbs-scroll-column">
                         <div className="vbs-prompt-controls-head">
                           <div>
                             <p className="vbs-meta">Direction setup</p>
@@ -5130,7 +5131,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                           </div>
                         )}
                       </div>
-                      <div className="vbs-prompt-output">
+                      <div className="vbs-prompt-output vbs-scroll-column">
                         <div className="vbs-output-head">
                           <div>
                             <p className="vbs-meta">Pack gallery</p>
@@ -5217,7 +5218,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                 </div>
               </article>
 
-              <article className="vbs-panel vbs-document-workspace" id="vbs-section-documents">
+              <article className="vbs-panel vbs-document-workspace vbs-scroll-section" id="vbs-section-documents">
                 <h2 className="vbs-panel-title">Document Workspace</h2>
                 <p className="vbs-panel-subtitle">
                   Keep the winning pack as a durable working document, then publish clean versions without losing history.
@@ -5310,7 +5311,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                   </div>
                   {documentDraft ? (
                     <div className="vbs-document-layout">
-                      <div className="vbs-doc-editor">
+                      <div className="vbs-doc-editor vbs-scroll-column">
                         <div className="vbs-doc-editor-head">
                           <div>
                             <p className="vbs-meta">Editor canvas</p>
@@ -5373,7 +5374,7 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
                         </div>
                       </div>
 
-                      <aside className="vbs-doc-sidebar">
+                      <aside className="vbs-doc-sidebar vbs-scroll-column">
                         <div className="vbs-doc-sidebar-card vbs-doc-compare-controls">
                           <h3>Version Compare</h3>
                           <p className="vbs-meta">Check what changed before you promote a draft into the main working version.</p>
@@ -5509,11 +5510,11 @@ export function ViralBrandStudioShell({ workspaceId }: { workspaceId: string }) 
         </>
       ) : (
         <>
-          <article className="vbs-panel vbs-slide-card" id="vbs-slide-reference" role="tabpanel" aria-label="Reference engine slide">
+          <article className="vbs-panel vbs-slide-card vbs-scroll-section" id="vbs-slide-reference" role="tabpanel" aria-label="Reference engine slide">
             <h2 className="vbs-panel-title">Workflow Locked Until DNA Finalization</h2>
             <p className="vbs-panel-subtitle">Plan 2 onboarding gate is active. Complete and finalize Brand DNA to unlock extraction, generation, and document actions.</p>
           </article>
-          <article className="vbs-panel vbs-slide-card" id="vbs-slide-create" role="tabpanel" aria-label="Create and save slide">
+          <article className="vbs-panel vbs-slide-card vbs-scroll-section" id="vbs-slide-create" role="tabpanel" aria-label="Create and save slide">
             <h2 className="vbs-panel-title">Create & Save unlocks after DNA finalization</h2>
             <p className="vbs-panel-subtitle">Finish the Brand DNA flow once and the generation + versioning workspace will unlock automatically.</p>
           </article>

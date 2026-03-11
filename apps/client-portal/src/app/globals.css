@@ -353,6 +353,52 @@ select:focus-visible {
   align-content: start;
 }
 
+.vbs-scroll-section,
+.vbs-scroll-column {
+  min-height: 0;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable both-edges;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--vbs-copy-soft) 38%, transparent) transparent;
+}
+
+.vbs-scroll-section::-webkit-scrollbar,
+.vbs-scroll-column::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.vbs-scroll-section::-webkit-scrollbar-thumb,
+.vbs-scroll-column::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--vbs-copy-soft) 34%, transparent);
+}
+
+.vbs-scroll-section::-webkit-scrollbar-track,
+.vbs-scroll-column::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.vbs-scroll-section {
+  overflow-y: auto;
+}
+
+.vbs-scroll-column {
+  overflow-y: auto;
+}
+
+.vbs-slide-card.vbs-stack > .vbs-scroll-section {
+  max-height: min(58dvh, 48rem);
+}
+
+.vbs-grid > .vbs-scroll-section {
+  height: 100%;
+}
+
+.vbs-shell-slides.is-compact .vbs-slide-card.vbs-stack > .vbs-scroll-section {
+  max-height: min(52dvh, 42rem);
+}
+
 .vbs-reset-hero {
   position: relative;
   display: grid;
@@ -1003,13 +1049,15 @@ select:focus-visible {
   display: grid;
   grid-template-columns: minmax(240px, 0.72fr) minmax(0, 1.28fr);
   gap: 1rem;
-  align-items: start;
+  min-height: 0;
+  align-items: stretch;
 }
 
 .vbs-dna-sidecar,
 .vbs-dna-main {
   display: grid;
   gap: 0.9rem;
+  min-height: 0;
 }
 
 .vbs-dna-step-card,
@@ -1847,6 +1895,18 @@ select:focus-visible {
   height: 100%;
   min-height: 0;
   overflow: hidden;
+}
+
+.vbs-section-shell.vbs-scroll-section,
+.vbs-reference-slide .vbs-grid > .vbs-scroll-section {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.vbs-reference-slide .vbs-grid > .vbs-scroll-section:first-child,
+.vbs-reference-slide .vbs-grid > .vbs-scroll-section:last-child {
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .vbs-reference-slide .vbs-run-history {
@@ -2756,6 +2816,8 @@ select:focus-visible {
   display: grid;
   grid-template-columns: minmax(260px, 0.95fr) minmax(0, 1.3fr);
   gap: 0.8rem;
+  min-height: 0;
+  align-items: stretch;
 }
 
 .vbs-prompt-controls,
@@ -2764,6 +2826,7 @@ select:focus-visible {
   border-radius: 0.8rem;
   background: color-mix(in srgb, white 93%, var(--vbs-sand));
   padding: 0.75rem;
+  min-height: 0;
 }
 
 .vbs-prompt-output {
@@ -2945,7 +3008,8 @@ select:focus-visible {
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
   gap: 0.8rem;
-  align-items: start;
+  min-height: 0;
+  align-items: stretch;
 }
 
 .vbs-doc-editor {
@@ -2955,6 +3019,7 @@ select:focus-visible {
   padding: 0.7rem;
   display: grid;
   gap: 0.7rem;
+  min-height: 0;
 }
 
 .vbs-document-summary-compact {
@@ -3013,6 +3078,7 @@ select:focus-visible {
 .vbs-doc-sidebar {
   display: grid;
   gap: 0.65rem;
+  min-height: 0;
 }
 
 .vbs-doc-sidebar-card {
