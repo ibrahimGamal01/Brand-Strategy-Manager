@@ -52,6 +52,32 @@ function dedupeTargets(targets: Array<{ platform: string; handle: string }>) {
   });
 }
 
+async function claimContinuityRun(
+  jobId: string
+): Promise<'claimed' | 'already_running' | 'not_found'> {
+  const claimed = await prisma.researchJob.updateMany({
+    where: {
+      id: jobId,
+      continuityRunning: false,
+    },
+    data: {
+      continuityRunning: true,
+      continuityErrorMessage: null,
+    },
+  });
+
+  if (claimed.count > 0) {
+    return 'claimed';
+  }
+
+  const existing = await prisma.researchJob.findUnique({
+    where: { id: jobId },
+    select: { id: true },
+  });
+
+  return existing ? 'already_running' : 'not_found';
+}
+
 function collectClientTargets(job: any): Array<{ platform: string; handle: string }> {
   const targets: Array<{ platform: string; handle: string }> = [];
 
@@ -146,6 +172,32 @@ export async function continueResearchJob(
     };
   }
 
+  const claimState = await claimContinuityRun(jobId);
+  if (claimState === 'already_running') {
+    return {
+      success: false,
+      partial: true,
+      trigger,
+      jobId,
+      runId,
+      clientProfilesAttempted: 0,
+      competitorProfilesAttempted: 0,
+      errors: ['Continuation already running for this job'],
+    };
+  }
+  if (claimState === 'not_found') {
+    return {
+      success: false,
+      partial: false,
+      trigger,
+      jobId,
+      runId,
+      clientProfilesAttempted: 0,
+      competitorProfilesAttempted: 0,
+      errors: ['Research job not found'],
+    };
+  }
+
   inFlightJobs.add(jobId);
   const errors: string[] = [];
   let clientProfilesAttempted = 0;
@@ -161,6 +213,14 @@ export async function continueResearchJob(
     });
 
     if (!job) {
+      await prisma.researchJob
+        .updateMany({
+          where: { id: jobId },
+          data: {
+            continuityRunning: false,
+          },
+        })
+        .catch(() => undefined);
       return {
         success: false,
         partial: false,
@@ -175,14 +235,6 @@ export async function continueResearchJob(
 
     const intervalHours = normalizeIntervalHours((job as any).continuityIntervalHours);
     intervalHoursForNextRun = intervalHours;
-
-    await prisma.researchJob.update({
-      where: { id: jobId },
-      data: {
-        continuityRunning: true,
-        continuityErrorMessage: null,
-      },
-    });
 
     emitResearchJobEvent({
       researchJobId: jobId,

@@ -58,10 +58,12 @@ import {
   startPortalSignupEnrichment,
   syncPortalIntakeContinuousEnrichment,
 } from '../services/portal/portal-signup-enrichment';
+import portalProcessRunsRouter from './portal-process-runs';
 import portalViralStudioRouter from './portal-viral-studio';
 
 const router = Router();
 const authRateLimitStore = new Map<string, { count: number; resetAt: number }>();
+const DEFAULT_PORTAL_INTAKE_EVENTS_STREAM_POLL_MS = 1_000;
 
 function hashEmailForLogs(email: string): string | null {
   const normalized = safeString(email).toLowerCase();
@@ -126,6 +128,14 @@ function getRequestIp(req: Request): string | null {
 
 function safeString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function resolvePortalIntakeEventsStreamPollMs(): number {
+  const parsed = Number(
+    process.env.PORTAL_INTAKE_EVENTS_STREAM_POLL_MS || DEFAULT_PORTAL_INTAKE_EVENTS_STREAM_POLL_MS
+  );
+  if (!Number.isFinite(parsed)) return DEFAULT_PORTAL_INTAKE_EVENTS_STREAM_POLL_MS;
+  return Math.max(250, Math.floor(parsed));
 }
 
 function parseStringArray(value: unknown, maxItems = 12): string[] {
@@ -907,6 +917,8 @@ router.get(
       res.flushHeaders?.();
       res.write('retry: 3000\n\n');
 
+      let lastEventId = afterId || 0;
+
       const backlog = await listPortalIntakeEvents(workspaceId, {
         afterId,
         limit: 200,
@@ -915,17 +927,41 @@ router.get(
       for (const event of backlog) {
         res.write(serializePortalIntakeEventSse(event));
       }
+      if (backlog.length > 0) {
+        lastEventId = backlog[backlog.length - 1]?.id || lastEventId;
+      }
 
       const unsubscribe = subscribePortalIntakeEvents(workspaceId, (event) => {
         if (scanRunId && event.scanRunId !== scanRunId) return;
+        if (event.id <= lastEventId) return;
+        lastEventId = event.id;
         res.write(serializePortalIntakeEventSse(event));
       });
+
+      const poller = setInterval(() => {
+        void listPortalIntakeEvents(workspaceId, {
+          afterId: lastEventId,
+          limit: 100,
+          ...(scanRunId ? { scanRunId } : {}),
+        })
+          .then((events) => {
+            for (const event of events) {
+              if (event.id <= lastEventId) continue;
+              lastEventId = event.id;
+              res.write(serializePortalIntakeEventSse(event));
+            }
+          })
+          .catch((error: any) => {
+            console.warn('[Portal SSE] Intake events poll failed:', error?.message || error);
+          });
+      }, resolvePortalIntakeEventsStreamPollMs());
 
       const heartbeat = setInterval(() => {
         res.write(`event: ping\ndata: {"time":"${new Date().toISOString()}"}\n\n`);
       }, 25000);
 
       req.on('close', () => {
+        clearInterval(poller);
         clearInterval(heartbeat);
         unsubscribe();
         res.end();
@@ -989,5 +1025,6 @@ router.post('/workspaces/:workspaceId/intake', requirePortalAuth, requireWorkspa
 });
 
 router.use('/workspaces/:workspaceId', requirePortalAuth, requireWorkspaceMembership, portalViralStudioRouter);
+router.use('/workspaces/:workspaceId', requirePortalAuth, requireWorkspaceMembership, portalProcessRunsRouter);
 
 export default router;

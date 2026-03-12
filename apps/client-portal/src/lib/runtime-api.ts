@@ -428,6 +428,332 @@ export function createWorkspaceIntakeEventsSource(
   });
 }
 
+export type ProcessRunStage =
+  | "INTAKE_READY"
+  | "METHOD_SELECTED"
+  | "RESEARCHING"
+  | "SECTION_PLANNING"
+  | "SECTION_DRAFTING"
+  | "SECTION_VALIDATING"
+  | "WAITING_USER"
+  | "COMPOSING"
+  | "FINAL_GATE"
+  | "READY"
+  | "NEEDS_HUMAN_REVIEW"
+  | "FAILED";
+
+export type ProcessRunStatus =
+  | "RUNNING"
+  | "WAITING_USER"
+  | "PAUSED"
+  | "READY"
+  | "NEEDS_HUMAN_REVIEW"
+  | "FAILED"
+  | "CANCELLED";
+
+export type ProcessQuestionSeverity = "BLOCKER" | "IMPORTANT" | "OPTIONAL";
+export type ProcessQuestionStatus = "OPEN" | "ANSWERED" | "DISMISSED";
+export type ProcessRequestMode = "single_doc" | "section_bundle" | "multi_doc_bundle";
+export type ProcessArtifactType =
+  | "BUSINESS_STRATEGY"
+  | "COMPETITOR_AUDIT"
+  | "EXECUTIVE_SUMMARY"
+  | "CONTENT_CALENDAR"
+  | "GO_TO_MARKET"
+  | "PLAYBOOK"
+  | "SWOT";
+export type ProcessSectionStatus =
+  | "PLANNED"
+  | "DRAFTED"
+  | "VALIDATED"
+  | "NEEDS_USER_INPUT"
+  | "NEEDS_REVIEW"
+  | "READY"
+  | "LOCKED";
+
+export type ProcessRunDto = {
+  id: string;
+  researchJobId: string;
+  documentType: "BUSINESS_STRATEGY";
+  stage: ProcessRunStage;
+  status: ProcessRunStatus;
+  objective?: string | null;
+  method?: "NICHE_STANDARD" | "BAT_CORE" | null;
+  createdAt: string;
+  updatedAt: string;
+  composedMarkdown?: string | null;
+};
+
+export type ProcessRunListItemDto = ProcessRunDto & {
+  sectionRuns?: Array<{
+    id: string;
+    status: ProcessSectionStatus;
+    updatedAt: string;
+  }>;
+  questionTasks?: Array<{
+    id: string;
+    status: ProcessQuestionStatus;
+    severity: ProcessQuestionSeverity;
+    createdAt: string;
+  }>;
+  escalationRecords?: Array<{
+    id: string;
+    status: string;
+    createdAt: string;
+  }>;
+};
+
+export type ProcessRunEventDto = {
+  id: string;
+  processRunId: string;
+  researchJobId: string;
+  type: string;
+  message: string;
+  payloadJson?: unknown;
+  createdAt: string;
+};
+
+export type ProcessQuestionTaskDto = {
+  id: string;
+  processRunId: string;
+  sectionRunId?: string | null;
+  fieldKey: string;
+  question: string;
+  severity: ProcessQuestionSeverity;
+  status: ProcessQuestionStatus;
+  surfacesJson?: unknown;
+  answerJson?: unknown;
+  answeredAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ProcessSectionRevisionDto = {
+  id: string;
+  processRunId: string;
+  sectionRunId: string;
+  revisionNumber: number;
+  markdown: string;
+  summary?: string | null;
+  createdByRole: string;
+  createdAt: string;
+};
+
+export type ProcessSectionRunDto = {
+  id: string;
+  processRunId: string;
+  sectionKey: string;
+  title: string;
+  framework: string;
+  sortOrder: number;
+  status: ProcessSectionStatus;
+  revisions?: ProcessSectionRevisionDto[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ProcessRunTargetDto = {
+  artifactType: ProcessArtifactType;
+  sections?: string[];
+  objective?: string;
+};
+
+export type ProcessRunPlanDto = {
+  version: string;
+  mode: ProcessRequestMode;
+  rootObjective: string;
+  primaryArtifactType: ProcessArtifactType;
+  planHash: string;
+  artifacts: Array<{
+    artifactKey: string;
+    artifactType: ProcessArtifactType;
+    objective: string;
+    requestedSections: string[] | null;
+    selectedSections: string[];
+    standardId: string;
+    standardVersion: number;
+    professorMethod: string;
+  }>;
+  sections: Array<{
+    nodeId: string;
+    artifactKey: string;
+    artifactType: ProcessArtifactType;
+    sectionKey: string;
+    title: string;
+    framework: string;
+    order: number;
+    dependsOnNodeIds: string[];
+    requiredInputs: Array<{
+      key: string;
+      label: string;
+      severity: ProcessQuestionSeverity;
+      question: string;
+    }>;
+    exitCriteria: string[];
+    minEvidence: number;
+    minWords: number;
+    standardId: string;
+    standardVersion: number;
+  }>;
+};
+
+export async function createWorkspaceProcessRun(
+  workspaceId: string,
+  payload: {
+    documentType?: "BUSINESS_STRATEGY";
+    objective?: string;
+    requestMode?: ProcessRequestMode;
+    targets?: ProcessRunTargetDto[];
+    idempotencyKey?: string;
+  },
+  options?: { idempotencyKey?: string }
+) {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (options?.idempotencyKey && options.idempotencyKey.trim()) {
+    headers["x-idempotency-key"] = options.idempotencyKey.trim();
+  }
+
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/process-runs`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload || {}),
+    credentials: "include",
+  });
+  return parseJson<{ ok: boolean; run: ProcessRunDto }>(response);
+}
+
+export async function listWorkspaceProcessRuns(
+  workspaceId: string,
+  options?: { limit?: number }
+) {
+  const params = new URLSearchParams();
+  if (typeof options?.limit === "number" && Number.isFinite(options.limit)) {
+    params.set("limit", String(Math.max(1, Math.min(50, Math.floor(options.limit)))));
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/process-runs${suffix}`, {
+    method: "GET",
+    cache: "no-store",
+    credentials: "include",
+  });
+  return parseJson<{ ok: boolean; runs: ProcessRunListItemDto[] }>(response);
+}
+
+export async function fetchWorkspaceProcessRun(workspaceId: string, runId: string) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/process-runs/${runId}`, {
+    method: "GET",
+    cache: "no-store",
+    credentials: "include",
+  });
+  return parseJson<{ ok: boolean; run: ProcessRunDto; events: ProcessRunEventDto[] }>(response);
+}
+
+export async function fetchWorkspaceProcessRunPlan(workspaceId: string, runId: string) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/process-runs/${runId}/plan`, {
+    method: "GET",
+    cache: "no-store",
+    credentials: "include",
+  });
+  return parseJson<{
+    ok: boolean;
+    plan: ProcessRunPlanDto | null;
+    planHash: string | null;
+    requestMode: ProcessRequestMode | null;
+    artifacts: Array<{
+      artifactKey: string;
+      artifactType: ProcessArtifactType;
+      objective: string;
+      requestedSections: string[] | null;
+      selectedSections: string[];
+      standardId: string;
+      standardVersion: number;
+    }>;
+  }>(response);
+}
+
+export async function resumeWorkspaceProcessRun(
+  workspaceId: string,
+  runId: string,
+  mode: "retry" | "retry_with_new_evidence" = "retry"
+) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/process-runs/${runId}/resume`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ mode }),
+    credentials: "include",
+  });
+  return parseJson<{ ok: boolean; run: ProcessRunDto }>(response);
+}
+
+export async function escalateWorkspaceProcessRun(
+  workspaceId: string,
+  runId: string,
+  payload: { reason: string; details?: string }
+) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/process-runs/${runId}/escalate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+    credentials: "include",
+  });
+  return parseJson<{ ok: boolean; run: ProcessRunDto }>(response);
+}
+
+export async function listWorkspaceProcessQuestions(workspaceId: string, runId: string) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/process-runs/${runId}/questions`, {
+    method: "GET",
+    cache: "no-store",
+    credentials: "include",
+  });
+  return parseJson<{ ok: boolean; questions: ProcessQuestionTaskDto[] }>(response);
+}
+
+export async function answerWorkspaceProcessQuestion(
+  workspaceId: string,
+  taskId: string,
+  answer: unknown
+) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/question-tasks/${taskId}/answer`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ answer }),
+    credentials: "include",
+  });
+  return parseJson<{ ok: boolean; run: ProcessRunDto }>(response);
+}
+
+export async function listWorkspaceProcessSections(workspaceId: string, runId: string) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/process-runs/${runId}/sections`, {
+    method: "GET",
+    cache: "no-store",
+    credentials: "include",
+  });
+  return parseJson<{ ok: boolean; sections: ProcessSectionRunDto[] }>(response);
+}
+
+export async function listWorkspaceSectionRevisions(workspaceId: string, sectionId: string) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/sections/${sectionId}/revisions`, {
+    method: "GET",
+    cache: "no-store",
+    credentials: "include",
+  });
+  return parseJson<{ ok: boolean; revisions: ProcessSectionRevisionDto[] }>(response);
+}
+
+export async function reviseWorkspaceSection(
+  workspaceId: string,
+  sectionId: string,
+  payload: { markdown: string; summary?: string; createdByRole?: string }
+) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/sections/${sectionId}/revise`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+    credentials: "include",
+  });
+  return parseJson<{ ok: boolean; run: ProcessRunDto }>(response);
+}
+
 export async function listRuntimeThreads(workspaceId: string): Promise<Array<RuntimeThread & { branches?: RuntimeBranch[] }>> {
   const response = await fetch(`/api/research-jobs/${workspaceId}/runtime/threads`, {
     method: "GET",

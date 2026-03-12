@@ -62,11 +62,18 @@ import { getLatestMediaAnalysisRunSummary } from '../services/orchestration/medi
 
 const router = Router();
 const BRAIN_COMMAND_REPLY_ENABLED = process.env.BRAIN_COMMAND_REPLY_ENABLED === 'true';
+const DEFAULT_RESEARCH_EVENTS_STREAM_POLL_MS = 1_000;
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function isUuid(value: string): boolean {
   return UUID_REGEX.test(value);
+}
+
+function resolveResearchEventsStreamPollMs(): number {
+  const parsed = Number(process.env.RESEARCH_EVENTS_STREAM_POLL_MS || DEFAULT_RESEARCH_EVENTS_STREAM_POLL_MS);
+  if (!Number.isFinite(parsed)) return DEFAULT_RESEARCH_EVENTS_STREAM_POLL_MS;
+  return Math.max(250, Math.floor(parsed));
 }
 
 function parseCompetitorSurfaces(
@@ -1994,24 +2001,46 @@ router.get('/:id/events/stream', async (req: Request, res: Response) => {
   res.flushHeaders?.();
   res.write('retry: 3000\n\n');
 
+  let lastEventId = afterId || 0;
+
   try {
     const backlog = await listResearchJobEvents(id, { afterId, limit: 500 });
     for (const event of backlog) {
       res.write(serializeResearchJobEventSse(event));
+    }
+    if (backlog.length > 0) {
+      lastEventId = backlog[backlog.length - 1]?.id || lastEventId;
     }
   } catch (error: any) {
     console.error('[API] Failed to send SSE backlog:', error);
   }
 
   const unsubscribe = subscribeResearchJobEvents(id, (event) => {
+    if (event.id <= lastEventId) return;
+    lastEventId = event.id;
     res.write(serializeResearchJobEventSse(event));
   });
+
+  const poller = setInterval(() => {
+    void listResearchJobEvents(id, { afterId: lastEventId, limit: 100 })
+      .then((events) => {
+        for (const event of events) {
+          if (event.id <= lastEventId) continue;
+          lastEventId = event.id;
+          res.write(serializeResearchJobEventSse(event));
+        }
+      })
+      .catch((error: any) => {
+        console.warn('[API] Research event SSE poll failed:', error?.message || error);
+      });
+  }, resolveResearchEventsStreamPollMs());
 
   const heartbeat = setInterval(() => {
     res.write(`event: ping\ndata: {"time":"${new Date().toISOString()}"}\n\n`);
   }, 25000);
 
   req.on('close', () => {
+    clearInterval(poller);
     clearInterval(heartbeat);
     unsubscribe();
     res.end();

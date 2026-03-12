@@ -42,6 +42,7 @@ import { ChatThread } from "./chat-thread";
 import { CommandPalette } from "./command-palette";
 import { DocumentWorkspacePanel } from "./document-workspace-panel";
 import { LiveActivityPanel } from "./live-activity-panel";
+import { ProcessControlPanel } from "./process-control-panel";
 import { LibraryDrawer } from "@/components/library/library-drawer";
 import type { UploadedDocumentChip } from "@/types/chat";
 import type {
@@ -283,6 +284,8 @@ type RecentDocumentBranchActivity = {
   createdAt: string;
 };
 
+type RightRailMode = "activity" | "docs" | "process";
+
 function RightRailPulse({
   runsCount,
   activeRunLabel,
@@ -301,9 +304,9 @@ function RightRailPulse({
   feedCount: number;
   docsCount: number;
   decisionsCount: number;
-  mode: "activity" | "docs";
+  mode: RightRailMode;
   hasDocs: boolean;
-  onSelectMode: (mode: "activity" | "docs") => void;
+  onSelectMode: (mode: RightRailMode) => void;
   taskEyebrow: string;
   taskTitle: string;
   taskDetail: string;
@@ -348,16 +351,25 @@ function RightRailPulse({
             Documents
           </button>
         ) : null}
+        <button
+          type="button"
+          onClick={() => onSelectMode("process")}
+          className={`bat-right-rail-toggle-button ${mode === "process" ? "is-active" : ""}`}
+        >
+          Process
+        </button>
       </div>
     </div>
   );
 }
 
 export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
-  const [rightRailMode, setRightRailMode] = useState<"activity" | "docs">(() => {
+  const [rightRailMode, setRightRailMode] = useState<RightRailMode>(() => {
     if (typeof window === "undefined") return "activity";
     const stored = window.localStorage.getItem(`bat.runtime.rightRailMode.${workspaceId}`);
-    return stored === "docs" ? "docs" : "activity";
+    if (stored === "docs") return "docs";
+    if (stored === "process") return "process";
+    return "activity";
   });
   const [rightRailCollapsed, setRightRailCollapsed] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -656,7 +668,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
   }, [activeDocumentContextId, messages]);
 
   const hasDocsContext = runtimeDocuments.length > 0;
-  const resolvedRightRailMode: "activity" | "docs" =
+  const resolvedRightRailMode: RightRailMode =
     rightRailMode === "docs" && !hasDocsContext ? "activity" : rightRailMode;
   const activeTaskSummary = useMemo(() => {
     if (composerBranchContext?.documentId) {
@@ -1063,30 +1075,12 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
     setLibraryOpen(false);
   };
 
-  const openRightRailMode = (mode: "activity" | "docs") => {
+  const openRightRailMode = (mode: RightRailMode) => {
     setRightRailMode(mode);
     if (typeof window !== "undefined" && window.innerWidth < 1280) {
       setActivityOpen(true);
       return;
     }
-    setRightRailCollapsed(false);
-  };
-
-  const toggleRightRailMode = (mode: "activity" | "docs") => {
-    if (typeof window !== "undefined" && window.innerWidth < 1280) {
-      if (activityOpen && rightRailMode === mode) {
-        setActivityOpen(false);
-        return;
-      }
-      setRightRailMode(mode);
-      setActivityOpen(true);
-      return;
-    }
-    if (!rightRailCollapsed && rightRailMode === mode) {
-      setRightRailCollapsed(true);
-      return;
-    }
-    setRightRailMode(mode);
     setRightRailCollapsed(false);
   };
 
@@ -2191,7 +2185,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                         focusDetail={activeTaskSummary.detail}
                         focusDocumentId={activeDocumentContextId}
                       />
-                    ) : (
+                    ) : resolvedRightRailMode === "docs" ? (
                       <DocumentWorkspacePanel
                         workspaceId={workspaceId}
                         branchId={activeBranchId}
@@ -2205,6 +2199,8 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                         onRefreshDocuments={refreshRuntimeDocuments}
                         onRefreshRuntime={refreshNow}
                       />
+                    ) : (
+                      <ProcessControlPanel workspaceId={workspaceId} />
                     )}
                   </div>
                 </div>
@@ -2275,7 +2271,7 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                     focusDetail={activeTaskSummary.detail}
                     focusDocumentId={activeDocumentContextId}
                   />
-                ) : (
+                ) : resolvedRightRailMode === "docs" ? (
                   <DocumentWorkspacePanel
                     workspaceId={workspaceId}
                     branchId={activeBranchId}
@@ -2289,6 +2285,8 @@ export function ChatOsRuntimeLayout({ workspaceId }: { workspaceId: string }) {
                     onRefreshDocuments={refreshRuntimeDocuments}
                     onRefreshRuntime={refreshNow}
                   />
+                ) : (
+                  <ProcessControlPanel workspaceId={workspaceId} />
                 )}
               </div>
             </div>

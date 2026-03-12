@@ -34,6 +34,7 @@ import {
 import { buildViralStudioAssetRef } from './viral-studio-asset-refs';
 import { getPortalWorkspaceIntakeStatus } from './portal-intake';
 import { scrapeInstagramProfile } from '../scraper/instagram-service';
+import { fileManager } from '../storage/file-manager';
 
 export type ViralStudioPlatform = 'instagram' | 'tiktok' | 'youtube';
 export type IngestionSortBy = 'engagement' | 'recent' | 'views';
@@ -1807,6 +1808,124 @@ function isLikelyImageAssetUrl(value: string | undefined): boolean {
   );
 }
 
+function isLikelyInstagramShortcode(value: string | undefined): boolean {
+  const raw = cleanString(value);
+  if (!raw) return false;
+  if (raw.toLowerCase().startsWith('site_limited_')) return false;
+  return /^[a-zA-Z0-9_-]{5,24}$/.test(raw);
+}
+
+function metadataStringValue(metadata: unknown, keys: string[]): string {
+  const record = asRecord(metadata);
+  for (const key of keys) {
+    const value = cleanString(record[key]);
+    if (value) return value;
+  }
+  return '';
+}
+
+function metadataStringList(metadata: unknown, keys: string[]): string[] {
+  const record = asRecord(metadata);
+  const output: string[] = [];
+  for (const key of keys) {
+    const value = record[key];
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const normalized = cleanString(item);
+        if (normalized) output.push(normalized);
+      }
+      continue;
+    }
+    const scalar = cleanString(value);
+    if (scalar) output.push(scalar);
+  }
+  return output;
+}
+
+function normalizeMediaStorageUrl(value: string | null | undefined): string | null {
+  const raw = cleanString(value);
+  if (!raw) return null;
+  const resolved = fileManager.toUrl(raw) || raw;
+  return normalizeHttpAssetUrl(resolved) || null;
+}
+
+function buildInstagramSourceUrlFromSocialPost(input: {
+  url?: string | null;
+  metadata?: unknown;
+  handle?: string | null;
+  externalId?: string | null;
+}): string | null {
+  const directCandidates = [
+    input.url,
+    metadataStringValue(input.metadata, ['permalink', 'post_url', 'postUrl', 'share_url', 'shareUrl', 'url']),
+  ];
+  for (const candidate of directCandidates) {
+    const normalized = normalizeHttpAssetUrl(candidate || '');
+    if (!normalized) continue;
+    try {
+      const host = new URL(normalized).hostname.toLowerCase();
+      if (host.includes('instagram.com') || host.includes('instagr.am')) return normalized;
+    } catch {
+      // no-op, move to next candidate
+    }
+  }
+  const explicitShortcode = metadataStringValue(input.metadata, ['shortcode', 'short_code']);
+  const externalId = cleanString(input.externalId);
+  const shortcode = isLikelyInstagramShortcode(explicitShortcode)
+    ? explicitShortcode
+    : isLikelyInstagramShortcode(externalId)
+      ? externalId
+      : '';
+  if (shortcode) return `https://www.instagram.com/p/${shortcode}/`;
+  const handle = normalizeHandle(input.handle);
+  if (handle) return `https://www.instagram.com/${handle}/`;
+  return null;
+}
+
+function collectSocialPostMediaCandidates(post: {
+  thumbnailUrl?: string | null;
+  metadata?: unknown;
+  mediaAssets: Array<{
+    originalUrl?: string | null;
+    blobStoragePath?: string | null;
+    thumbnailPath?: string | null;
+  }>;
+}): string[] {
+  const metadataVideo = metadataStringValue(post.metadata, ['video_url', 'videoUrl', 'content_url', 'contentUrl']);
+  const metadataSingle = metadataStringValue(post.metadata, [
+    'media_url',
+    'mediaUrl',
+    'thumbnail_url',
+    'thumbnailUrl',
+    'display_url',
+    'displayUrl',
+    'image_url',
+    'imageUrl',
+  ]);
+  const metadataLists = metadataStringList(post.metadata, [
+    'media_urls',
+    'mediaUrls',
+    'image_urls',
+    'imageUrls',
+    'video_urls',
+    'videoUrls',
+    'thumbnails',
+  ]);
+  const assetCandidates = post.mediaAssets.flatMap((asset) => [
+    normalizeMediaStorageUrl(asset.originalUrl),
+    normalizeMediaStorageUrl(asset.blobStoragePath),
+    normalizeMediaStorageUrl(asset.thumbnailPath),
+  ]);
+  return Array.from(
+    new Set(
+      [metadataVideo, metadataSingle, post.thumbnailUrl, ...metadataLists, ...assetCandidates]
+        .map((candidate) => normalizeHttpAssetUrl(candidate || ''))
+        .filter((candidate): candidate is string => Boolean(candidate))
+        .filter((candidate) => !isLikelySocialPageUrl(candidate))
+    )
+  );
+}
+
 function toInstagramPostSourceUrl(
   post: {
     post_url?: string;
@@ -1821,7 +1940,7 @@ function toInstagramPostSourceUrl(
     .filter((candidate): candidate is string => Boolean(candidate));
   if (candidates.length > 0) return candidates[0];
   const shortcode = cleanString(post.shortcode);
-  if (shortcode) return `https://www.instagram.com/p/${shortcode}/`;
+  if (isLikelyInstagramShortcode(shortcode)) return `https://www.instagram.com/p/${shortcode}/`;
   return fallback;
 }
 
@@ -1877,9 +1996,13 @@ function buildInstagramReferenceFromPost(input: {
     thumbnailUrl?: string;
     media_urls?: string[];
     mediaUrls?: string[];
+    video_view_count?: number;
+    views?: number;
+    view_count?: number;
   };
   index: number;
   total: number;
+  sourceHint?: 'live_scrape' | 'workspace_social_cache';
 }): ReferenceAsset {
   const referenceId = crypto.randomUUID();
   const externalId = cleanString(input.post.external_post_id) || `ig-post-${input.index + 1}`;
@@ -1892,7 +2015,9 @@ function buildInstagramReferenceFromPost(input: {
   const postedAt =
     postedAtCandidate && !Number.isNaN(postedAtCandidate.getTime()) ? postedAtCandidate.toISOString() : new Date().toISOString();
   const postedAgeDays = Math.max(1, Math.floor((Date.now() - new Date(postedAt).getTime()) / (24 * 60 * 60 * 1000)));
-  const viewsFromPost = Number((input.post as any).video_view_count || (input.post as any).views || (input.post as any).view_count || 0);
+  const viewsFromPost = Number(
+    input.post.video_view_count || input.post.views || input.post.view_count || 0
+  );
   const estimatedViews = Math.max(1000, Math.floor(likes * 18 + comments * 8 + 1200));
   const views = Math.max(viewsFromPost, estimatedViews);
   const engagementRateRaw = (likes + comments + shares) / Math.max(1, views);
@@ -1942,6 +2067,10 @@ function buildInstagramReferenceFromPost(input: {
   const imageUrl = mediaCandidates.find((candidate) => isLikelyImageAssetUrl(candidate));
   const rank = input.total - input.index;
   const sourceUrl = toInstagramPostSourceUrl(input.post, input.run.sourceUrl);
+  const sourceHintLabel =
+    input.sourceHint === 'workspace_social_cache'
+      ? 'Workspace social cache used for source/media continuity.'
+      : 'Live scraper source/media context used.';
 
   return {
     id: referenceId,
@@ -1972,7 +2101,7 @@ function buildInstagramReferenceFromPost(input: {
     ranking: {
       rank,
       rationaleTitle: explanation.rationaleTitle,
-      rationaleBullets: [...explanation.rationaleBullets, `Real post URL used for source context and media preview.`],
+      rationaleBullets: [...explanation.rationaleBullets, `Real post URL used for source context and media preview.`, sourceHintLabel],
     },
     visual: {
       mediaKind: videoUrl ? 'video' : 'image',
@@ -2019,6 +2148,7 @@ async function tryBuildRealReferences(input: {
           post: post as any,
           index,
           total: usablePosts.length,
+          sourceHint: 'live_scrape',
         })
       );
       return sortReferencesForOutput(references);
@@ -2027,7 +2157,141 @@ async function tryBuildRealReferences(input: {
   const timeoutPromise = new Promise<ReferenceAsset[] | null>((resolve) => {
     setTimeout(() => resolve(null), REAL_REFERENCE_FETCH_TIMEOUT_MS);
   });
-  return Promise.race([scrapePromise, timeoutPromise]);
+  const scrapedReferences = await Promise.race([scrapePromise, timeoutPromise]);
+  if (scrapedReferences && scrapedReferences.length > 0) return scrapedReferences;
+  const cachedReferences = await tryBuildWorkspaceCachedReferences(input);
+  if (cachedReferences && cachedReferences.length > 0) return cachedReferences;
+  return null;
+}
+
+async function tryBuildWorkspaceCachedReferences(input: {
+  workspaceId: string;
+  run: IngestionRun;
+  referenceCount: number;
+}): Promise<ReferenceAsset[] | null> {
+  if (input.run.sourcePlatform !== 'instagram') return null;
+  try {
+    const target = clamp(input.referenceCount, 1, 50);
+    const sourceHandle = extractInstagramHandleFromUrl(input.run.sourceUrl);
+
+    const rows = await prisma.socialPost.findMany({
+      where: {
+        socialProfile: {
+          researchJobId: input.workspaceId,
+          platform: 'instagram',
+        },
+      },
+      orderBy: [{ postedAt: 'desc' }, { scrapedAt: 'desc' }],
+      take: Math.max(target * 6, 180),
+      select: {
+        externalId: true,
+        url: true,
+        caption: true,
+        thumbnailUrl: true,
+        likesCount: true,
+        commentsCount: true,
+        sharesCount: true,
+        viewsCount: true,
+        playsCount: true,
+        postedAt: true,
+        metadata: true,
+        socialProfile: {
+          select: {
+            handle: true,
+            url: true,
+          },
+        },
+        mediaAssets: {
+          where: {
+            isActive: true,
+          },
+          orderBy: [{ downloadedAt: 'desc' }, { updatedAt: 'desc' }],
+          take: 4,
+          select: {
+            originalUrl: true,
+            blobStoragePath: true,
+            thumbnailPath: true,
+          },
+        },
+      },
+    });
+    if (rows.length === 0) return null;
+
+    const scopedRows = sourceHandle
+      ? rows.filter((row) => normalizeHandle(row.socialProfile.handle) === sourceHandle)
+      : rows;
+    const candidateRows = scopedRows.length > 0 ? scopedRows : rows;
+
+    const prepared = candidateRows
+      .map((row) => {
+        const mediaUrls = collectSocialPostMediaCandidates({
+          thumbnailUrl: row.thumbnailUrl,
+          metadata: row.metadata,
+          mediaAssets: row.mediaAssets,
+        });
+        const sourceUrl =
+          buildInstagramSourceUrlFromSocialPost({
+            url: row.url,
+            metadata: row.metadata,
+            handle: row.socialProfile.handle,
+            externalId: row.externalId,
+          }) || normalizeHttpAssetUrl(row.socialProfile.url || '') || input.run.sourceUrl;
+        const videoUrl = mediaUrls.find((candidate) => isLikelyVideoAssetUrl(candidate));
+        const mediaUrl = mediaUrls.find((candidate) => !isLikelyVideoAssetUrl(candidate));
+        const views = Number(row.viewsCount || row.playsCount || 0);
+        const likes = Number(row.likesCount || 0);
+        const comments = Number(row.commentsCount || 0);
+        const shares = Number(row.sharesCount || 0);
+        const postedAtIso = row.postedAt ? row.postedAt.toISOString() : undefined;
+        const recencyScore = postedAtIso
+          ? Math.max(0, Date.now() - new Date(postedAtIso).getTime())
+          : Number.MAX_SAFE_INTEGER;
+        const engagementScore = likes * 2 + comments * 3 + shares * 3 + views * 0.03;
+        return {
+          post: {
+            external_post_id: row.externalId,
+            post_url: sourceUrl,
+            caption: cleanString(row.caption),
+            likes,
+            comments,
+            timestamp: postedAtIso,
+            media_url: mediaUrl || '',
+            video_url: videoUrl || null,
+            media_urls: mediaUrls,
+            views,
+            view_count: views,
+            video_view_count: views,
+          } satisfies Parameters<typeof buildInstagramReferenceFromPost>[0]['post'],
+          hasMedia: mediaUrls.length > 0 ? 1 : 0,
+          recencyScore,
+          engagementScore,
+        };
+      })
+      .filter((row) => cleanString(row.post.post_url) || row.hasMedia || cleanString(row.post.caption));
+    if (prepared.length === 0) return null;
+
+    prepared.sort((a, b) => {
+      if (b.hasMedia !== a.hasMedia) return b.hasMedia - a.hasMedia;
+      if (b.engagementScore !== a.engagementScore) return b.engagementScore - a.engagementScore;
+      return a.recencyScore - b.recencyScore;
+    })
+
+    const selected = prepared.slice(0, target);
+    if (selected.length === 0) return null;
+    const references = selected.map((entry, index) =>
+      buildInstagramReferenceFromPost({
+        workspaceId: input.workspaceId,
+        run: input.run,
+        post: entry.post,
+        index,
+        total: selected.length,
+        sourceHint: 'workspace_social_cache',
+      })
+    );
+    return sortReferencesForOutput(references);
+  } catch {
+    return null;
+  }
 }
 
 function buildSyntheticReference(input: {

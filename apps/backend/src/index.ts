@@ -44,7 +44,14 @@ for (const warning of preflight.warnings) {
   console.warn(`[Preflight] ${warning}`);
 }
 
+function isEnvFlagEnabled(name: string, defaultValue = true): boolean {
+  const raw = String(process.env[name] || '').trim().toLowerCase();
+  if (!raw) return defaultValue;
+  return !['0', 'false', 'no', 'off'].includes(raw);
+}
+
 const app = express();
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || process.env.BACKEND_PORT || 3001;
 let schemaReport: SchemaReadinessReport | null = null;
 
@@ -194,30 +201,42 @@ async function startServer(): Promise<void> {
     console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
     console.log(`📁 Storage: http://localhost:${PORT}/storage/`);
 
-    // Start monitoring scheduler (runs daily at 2 AM)
-    const { startMonitoringScheduler } = require('./services/monitoring/monitoring-scheduler');
-    startMonitoringScheduler({
-      enabled: true,
-      cronExpression: '0 2 * * *', // 2 AM daily
-      timezone: 'UTC'
-    });
-    console.log(`📅 Monitoring scheduler started (daily at 2 AM UTC)`);
+    if (isEnvFlagEnabled('MONITORING_SCHEDULER_ENABLED', true)) {
+      const { startMonitoringScheduler } = require('./services/monitoring/monitoring-scheduler');
+      startMonitoringScheduler({
+        enabled: true,
+        cronExpression: '0 2 * * *',
+        timezone: 'UTC',
+      });
+      console.log(`📅 Monitoring scheduler started (daily at 2 AM UTC)`);
+    } else {
+      console.log('📅 Monitoring scheduler disabled on this instance');
+    }
 
-    // Start research continuity loop (checks due "continue" jobs every minute).
-    const { startResearchContinuityLoop } = require('./services/social/research-continuity');
-    const continuityPollMs = Number(process.env.RESEARCH_CONTINUITY_POLL_MS || 60000);
-    startResearchContinuityLoop(continuityPollMs);
-    console.log(`♻️  Research continuity loop started (${continuityPollMs}ms poll)`);
+    if (isEnvFlagEnabled('RESEARCH_CONTINUITY_ENABLED', true)) {
+      const { startResearchContinuityLoop } = require('./services/social/research-continuity');
+      const continuityPollMs = Number(process.env.RESEARCH_CONTINUITY_POLL_MS || 60000);
+      startResearchContinuityLoop(continuityPollMs);
+      console.log(`♻️  Research continuity loop started (${continuityPollMs}ms poll)`);
+    } else {
+      console.log('♻️  Research continuity loop disabled on this instance');
+    }
 
-    // Start research event pruning loop (retention + max-per-job constraints).
-    const { startResearchJobEventPruning } = require('./services/social/research-job-events');
-    startResearchJobEventPruning();
-    console.log('🧹 Research event pruning loop started');
+    if (isEnvFlagEnabled('RESEARCH_EVENT_PRUNER_ENABLED', true)) {
+      const { startResearchJobEventPruning } = require('./services/social/research-job-events');
+      startResearchJobEventPruning();
+      console.log('🧹 Research event pruning loop started');
+    } else {
+      console.log('🧹 Research event pruning loop disabled on this instance');
+    }
 
-    // Start continuous orchestration scheduler (every 15 minutes)
-    const { startOrchestrationScheduler } = require('./services/orchestration/orchestration-scheduler');
-    startOrchestrationScheduler();
-    console.log('🔄 Continuous orchestration scheduler started (15-minute intervals)');
+    if (isEnvFlagEnabled('ORCHESTRATION_ENABLED', true)) {
+      const { startOrchestrationScheduler } = require('./services/orchestration/orchestration-scheduler');
+      startOrchestrationScheduler();
+      console.log('🔄 Continuous orchestration scheduler started (15-minute intervals)');
+    } else {
+      console.log('🔄 Continuous orchestration scheduler disabled on this instance');
+    }
   });
 }
 

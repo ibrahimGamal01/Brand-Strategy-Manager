@@ -54,6 +54,7 @@
         "test:competitor-quality-v3": "tsx src/scripts/test-competitor-quality-v3.ts",
         "test:intake-competitor-links": "tsx src/scripts/test-intake-competitor-links-suggest.ts",
         "test:competitor-pipeline-fixes": "tsx src/scripts/test-competitor-pipeline-fixes.ts",
+        "test:process-control-v2": "tsx src/scripts/test-process-control-v2.ts",
         "test:viral-studio-plan34": "tsx src/scripts/test-viral-studio-plan34.ts",
         "test:viral-studio-plan5": "tsx src/scripts/test-viral-studio-plan5.ts",
         "test:viral-studio-plan6": "tsx src/scripts/test-viral-studio-plan6.ts",

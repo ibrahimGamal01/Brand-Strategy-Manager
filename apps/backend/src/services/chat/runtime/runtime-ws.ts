@@ -14,6 +14,7 @@ import { verifyRuntimeWsToken } from './runtime-ws-auth';
 type SchemaReadyProvider = () => boolean;
 
 const RUNTIME_WS_PATH_REGEX = /^\/api\/ws\/research-jobs\/([^/]+)\/runtime\/branches\/([^/]+)$/;
+const DEFAULT_RUNTIME_WS_DB_POLL_MS = 1_000;
 
 function parseCookieValue(header: string | undefined, key: string): string | null {
   if (!header) return null;
@@ -36,6 +37,18 @@ function parseCookieValue(header: string | undefined, key: string): string | nul
 function safeSend(socket: WebSocket, payload: Record<string, unknown>) {
   if (socket.readyState !== WebSocket.OPEN) return;
   socket.send(JSON.stringify(payload));
+}
+
+function resolveRuntimeWsPollMs(): number {
+  const parsed = Number(process.env.RUNTIME_WS_DB_POLL_MS || DEFAULT_RUNTIME_WS_DB_POLL_MS);
+  if (!Number.isFinite(parsed)) return DEFAULT_RUNTIME_WS_DB_POLL_MS;
+  return Math.max(250, Math.floor(parsed));
+}
+
+function toEventSeqCursor(value: unknown): string | undefined {
+  if (typeof value === 'bigint') return value.toString();
+  const raw = String(value || '').trim();
+  return /^\d+$/.test(raw) ? raw : undefined;
 }
 
 export function attachRuntimeWebSocketServer(server: http.Server, isSchemaReady: SchemaReadyProvider) {
@@ -77,10 +90,33 @@ export function attachRuntimeWebSocketServer(server: http.Server, isSchemaReady:
     }
 
     let unsubscribe: (() => void) | null = null;
+    let pollTimer: NodeJS.Timeout | null = null;
+    let lastEventSeq = toEventSeqCursor(afterSeq);
 
     const closeWithError = (error: string, details?: string) => {
       safeSend(socket, { type: 'ERROR', error, ...(details ? { details } : {}) });
       socket.close();
+    };
+
+    const deliverEvents = (events: Awaited<ReturnType<typeof listProcessEvents>>) => {
+      const nextEvents = events.filter((event) => {
+        const cursor = toEventSeqCursor(event.eventSeq);
+        if (!cursor) return true;
+        if (!lastEventSeq) return true;
+        return BigInt(cursor) > BigInt(lastEventSeq);
+      });
+
+      if (nextEvents.length === 0) return;
+
+      lastEventSeq = toEventSeqCursor(nextEvents[nextEvents.length - 1]?.eventSeq) || lastEventSeq;
+      safeSend(socket, {
+        type: nextEvents.length === 1 ? 'EVENT' : 'EVENT_BATCH',
+        workspaceId: researchJobId,
+        branchId,
+        ...(nextEvents.length === 1
+          ? { event: serializeRuntimeProcessEvent(nextEvents[0]) }
+          : { events: nextEvents.map((event) => serializeRuntimeProcessEvent(event)) }),
+      });
     };
 
     const initialize = async () => {
@@ -145,6 +181,7 @@ export function attachRuntimeWebSocketServer(server: http.Server, isSchemaReady:
         });
 
         if (backlog.length > 0) {
+          lastEventSeq = toEventSeqCursor(backlog[backlog.length - 1]?.eventSeq) || lastEventSeq;
           safeSend(socket, {
             type: 'EVENT_BATCH',
             workspaceId: researchJobId,
@@ -154,13 +191,22 @@ export function attachRuntimeWebSocketServer(server: http.Server, isSchemaReady:
         }
 
         unsubscribe = subscribeProcessEvents(branchId, (event) => {
-          safeSend(socket, {
-            type: 'EVENT',
-            workspaceId: researchJobId,
-            branchId,
-            event: serializeRuntimeProcessEvent(event),
-          });
+          deliverEvents([event]);
         });
+
+        const pollMs = resolveRuntimeWsPollMs();
+        pollTimer = setInterval(() => {
+          void listProcessEvents(branchId, {
+            afterSeq: lastEventSeq,
+            limit: 100,
+          })
+            .then((events) => {
+              deliverEvents(events);
+            })
+            .catch((error: any) => {
+              console.warn('[Runtime WS] Poll failed:', error?.message || error);
+            });
+        }, pollMs);
       } catch (error: any) {
         closeWithError('WS_INIT_FAILED', String(error?.message || error));
       }
@@ -182,6 +228,10 @@ export function attachRuntimeWebSocketServer(server: http.Server, isSchemaReady:
     });
 
     socket.on('close', () => {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
       if (unsubscribe) {
         unsubscribe();
         unsubscribe = null;

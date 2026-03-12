@@ -10,6 +10,7 @@ import {
 import { searchRawDDG } from '../discovery/duckduckgo-search';
 import { evaluatePendingQuestionSets } from '../intake/question-workflow';
 import { suggestIntakeCompletion, type IntakeSuggestionStep } from '../intake/suggest-intake-completion';
+import { autoStartBusinessStrategyProcessRun } from '../process-control/control-engine';
 import { resumeResearchJob } from '../social/research-resume';
 import {
   parseSocialReferenceList,
@@ -1304,6 +1305,10 @@ export async function submitPortalWorkspaceIntake(
 
   void resumeResearchJob(workspaceId).catch((error) => {
     console.error(`[PortalIntake] Failed to resume research job ${workspaceId}:`, error);
+  });
+
+  void autoStartBusinessStrategyProcessRun(workspaceId, { trigger: 'intake_submit' }).catch((error) => {
+    console.error(`[PortalIntake] Failed to auto-start process run ${workspaceId}:`, error);
   });
 
   const pendingSets = await evaluatePendingQuestionSets(workspaceId);

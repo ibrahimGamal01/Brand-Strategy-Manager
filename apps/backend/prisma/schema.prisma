@@ -60,21 +60,21 @@ model Persona {
 }
 
 model ResearchJob {
-  id                             String                          @id @default(uuid())
-  clientId                       String                          @map("client_id")
-  status                         ResearchJobStatus               @default(PENDING)
-  inputData                      Json?                           @map("input_data")
-  competitorsToFind              Int                             @default(10) @map("competitors_to_find")
-  priorityCompetitors            Int                             @default(3) @map("priority_competitors")
-  errorMessage                   String?                         @map("error_message")
-  startedAt                      DateTime?                       @map("started_at")
-  completedAt                    DateTime?                       @map("completed_at")
-  continuityEnabled              Boolean                         @default(false) @map("continuity_enabled")
-  continuityErrorMessage         String?                         @map("continuity_error_message")
-  continuityIntervalHours        Int                             @default(2) @map("continuity_interval_hours")
-  continuityLastRunAt            DateTime?                       @map("continuity_last_run_at")
-  continuityNextRunAt            DateTime?                       @map("continuity_next_run_at")
-  continuityRunning              Boolean                         @default(false) @map("continuity_running")
+  id                             String                                 @id @default(uuid())
+  clientId                       String                                 @map("client_id")
+  status                         ResearchJobStatus                      @default(PENDING)
+  inputData                      Json?                                  @map("input_data")
+  competitorsToFind              Int                                    @default(10) @map("competitors_to_find")
+  priorityCompetitors            Int                                    @default(3) @map("priority_competitors")
+  errorMessage                   String?                                @map("error_message")
+  startedAt                      DateTime?                              @map("started_at")
+  completedAt                    DateTime?                              @map("completed_at")
+  continuityEnabled              Boolean                                @default(false) @map("continuity_enabled")
+  continuityErrorMessage         String?                                @map("continuity_error_message")
+  continuityIntervalHours        Int                                    @default(2) @map("continuity_interval_hours")
+  continuityLastRunAt            DateTime?                              @map("continuity_last_run_at")
+  continuityNextRunAt            DateTime?                              @map("continuity_next_run_at")
+  continuityRunning              Boolean                                @default(false) @map("continuity_running")
   aiAnalyses                     AiAnalysis[]
   mediaAnalysisRuns              MediaAnalysisRun[]
   aiBusinessAnalyses             AiBusinessAnalysis[]
@@ -97,7 +97,7 @@ model ResearchJob {
   orchestrationPlans             OrchestrationPlan[]
   rawSearchResults               RawSearchResult[]
   events                         ResearchJobEvent[]
-  client                         Client                          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  client                         Client                                 @relation(fields: [clientId], references: [id], onDelete: Cascade)
   searchTrends                   SearchTrend[]
   socialProfiles                 SocialProfile[]
   socialTrends                   SocialTrend[]
@@ -142,6 +142,16 @@ model ResearchJob {
   viralStudioContentDirections   ViralStudioContentDirectionCandidate[]
   viralStudioApprovedContents    ViralStudioApprovedContentDirection[]
   viralStudioFormatGenerations   ViralStudioFormatGenerationJob[]
+  processRuns                    ProcessRun[]
+  processSectionRuns             ProcessSectionRun[]
+  processSectionRevisions        ProcessSectionRevision[]
+  processQuestionTasks           ProcessQuestionTask[]
+  processEvidenceRecords         ProcessEvidenceRecord[]
+  processClaimRecords            ProcessClaimRecord[]
+  processGateResults             ProcessGateResult[]
+  processDecisionEvents          ProcessDecisionEvent[]
+  processEscalationRecords       ProcessEscalationRecord[]
+  processRunEvents               ProcessRunEvent[]
 
   @@map("research_jobs")
 }
@@ -1431,18 +1441,18 @@ model ViralStudioTelemetryEvent {
 }
 
 model ViralStudioPlannerSession {
-  id                        String      @id
-  workspaceId               String      @unique @map("workspace_id")
-  stage                     String
-  shortlistedReferenceIds   Json?       @map("shortlisted_reference_ids_json")
-  approvedDesignDirectionId String?     @map("approved_design_direction_id")
-  approvedContentDirectionId String?    @map("approved_content_direction_id")
-  selectedContentType       String?     @map("selected_content_type")
-  latestFormatGenerationId  String?     @map("latest_format_generation_id")
-  payloadJson               Json        @map("payload_json")
-  createdAt                 DateTime    @default(now()) @map("created_at")
-  updatedAt                 DateTime    @updatedAt @map("updated_at")
-  workspace                 ResearchJob @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  id                         String      @id
+  workspaceId                String      @unique @map("workspace_id")
+  stage                      String
+  shortlistedReferenceIds    Json?       @map("shortlisted_reference_ids_json")
+  approvedDesignDirectionId  String?     @map("approved_design_direction_id")
+  approvedContentDirectionId String?     @map("approved_content_direction_id")
+  selectedContentType        String?     @map("selected_content_type")
+  latestFormatGenerationId   String?     @map("latest_format_generation_id")
+  payloadJson                Json        @map("payload_json")
+  createdAt                  DateTime    @default(now()) @map("created_at")
+  updatedAt                  DateTime    @updatedAt @map("updated_at")
+  workspace                  ResearchJob @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId, updatedAt(sort: Desc)], map: "viral_studio_planner_sessions_workspace_updated_idx")
   @@index([workspaceId, stage], map: "viral_studio_planner_sessions_workspace_stage_idx")
@@ -3053,6 +3063,307 @@ enum StrategyDocChatRole {
   USER
   ASSISTANT
   SYSTEM
+}
+
+enum ProcessRunDocumentType {
+  BUSINESS_STRATEGY
+}
+
+enum ProcessRunStage {
+  INTAKE_READY
+  METHOD_SELECTED
+  RESEARCHING
+  SECTION_PLANNING
+  SECTION_DRAFTING
+  SECTION_VALIDATING
+  WAITING_USER
+  COMPOSING
+  FINAL_GATE
+  READY
+  NEEDS_HUMAN_REVIEW
+  FAILED
+}
+
+enum ProcessRunStatus {
+  RUNNING
+  WAITING_USER
+  PAUSED
+  READY
+  NEEDS_HUMAN_REVIEW
+  FAILED
+  CANCELLED
+}
+
+enum ProcessRunMethod {
+  NICHE_STANDARD
+  BAT_CORE
+}
+
+enum ProcessQuestionSeverity {
+  BLOCKER
+  IMPORTANT
+  OPTIONAL
+}
+
+enum ProcessQuestionStatus {
+  OPEN
+  ANSWERED
+  DISMISSED
+}
+
+enum ProcessSectionStatus {
+  PLANNED
+  DRAFTED
+  VALIDATED
+  NEEDS_USER_INPUT
+  NEEDS_REVIEW
+  READY
+  LOCKED
+}
+
+enum ProcessGateStatus {
+  PASS
+  FAIL
+  HOLD
+}
+
+enum ProcessEscalationStatus {
+  OPEN
+  RESOLVED
+}
+
+model ProcessRun {
+  id                        String                    @id @default(uuid())
+  researchJobId             String                    @map("research_job_id")
+  documentType              ProcessRunDocumentType    @default(BUSINESS_STRATEGY) @map("document_type")
+  stage                     ProcessRunStage           @default(INTAKE_READY)
+  status                    ProcessRunStatus          @default(RUNNING)
+  objective                 String?
+  idempotencyKey            String?                   @map("idempotency_key")
+  method                    ProcessRunMethod?
+  methodRuleId              String?                   @map("method_rule_id")
+  methodInputsJson          Json?                     @map("method_inputs_json")
+  methodEvidenceJson        Json?                     @map("method_evidence_json")
+  composedMarkdown          String?                   @map("composed_markdown")
+  retryCount                Int                       @default(0) @map("retry_count")
+  retryWithNewEvidenceCount Int                       @default(0) @map("retry_with_new_evidence_count")
+  maxRetries                Int                       @default(3) @map("max_retries")
+  maxRetryWithEvidence      Int                       @default(2) @map("max_retry_with_evidence")
+  lastRetriedAt             DateTime?                 @map("last_retried_at")
+  pausedAt                  DateTime?                 @map("paused_at")
+  lastError                 String?                   @map("last_error")
+  metadataJson              Json?                     @map("metadata_json")
+  createdAt                 DateTime                  @default(now()) @map("created_at")
+  updatedAt                 DateTime                  @updatedAt @map("updated_at")
+  researchJob               ResearchJob               @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  sectionRuns               ProcessSectionRun[]
+  questionTasks             ProcessQuestionTask[]
+  evidenceRecords           ProcessEvidenceRecord[]
+  claimRecords              ProcessClaimRecord[]
+  gateResults               ProcessGateResult[]
+  decisionEvents            ProcessDecisionEvent[]
+  escalationRecords         ProcessEscalationRecord[]
+  events                    ProcessRunEvent[]
+  processSectionRevisions   ProcessSectionRevision[]
+
+  @@unique([researchJobId, idempotencyKey], map: "process_runs_workspace_idempotency_key")
+  @@index([researchJobId, stage, createdAt(sort: Desc)], map: "process_runs_workspace_stage_created_idx")
+  @@index([researchJobId, documentType, createdAt(sort: Desc)], map: "process_runs_workspace_doc_created_idx")
+  @@map("process_runs")
+}
+
+model ProcessSectionRun {
+  id                   String                   @id @default(uuid())
+  processRunId         String                   @map("process_run_id")
+  researchJobId        String                   @map("research_job_id")
+  sectionKey           String                   @map("section_key")
+  title                String
+  framework            String
+  sortOrder            Int                      @default(0) @map("sort_order")
+  status               ProcessSectionStatus     @default(PLANNED)
+  requiredInputsJson   Json?                    @map("required_inputs_json")
+  requiredEvidenceJson Json?                    @map("required_evidence_json")
+  entrySatisfied       Boolean                  @default(false) @map("entry_satisfied")
+  exitSatisfied        Boolean                  @default(false) @map("exit_satisfied")
+  lastError            String?                  @map("last_error")
+  createdAt            DateTime                 @default(now()) @map("created_at")
+  updatedAt            DateTime                 @updatedAt @map("updated_at")
+  processRun           ProcessRun               @relation(fields: [processRunId], references: [id], onDelete: Cascade)
+  researchJob          ResearchJob              @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  revisions            ProcessSectionRevision[]
+  questionTasks        ProcessQuestionTask[]
+  gateResults          ProcessGateResult[]
+  evidenceRecords      ProcessEvidenceRecord[]
+  claimRecords         ProcessClaimRecord[]
+
+  @@unique([processRunId, sectionKey], map: "process_section_runs_run_section_key")
+  @@index([researchJobId, processRunId, sortOrder], map: "process_section_runs_workspace_run_order_idx")
+  @@map("process_section_runs")
+}
+
+model ProcessSectionRevision {
+  id                    String               @id @default(uuid())
+  processRunId          String               @map("process_run_id")
+  sectionRunId          String               @map("section_run_id")
+  researchJobId         String               @map("research_job_id")
+  revisionNumber        Int                  @map("revision_number")
+  markdown              String
+  summary               String?
+  createdByRole         String               @map("created_by_role")
+  evidenceRecordIdsJson Json?                @map("evidence_record_ids_json")
+  createdAt             DateTime             @default(now()) @map("created_at")
+  processRun            ProcessRun           @relation(fields: [processRunId], references: [id], onDelete: Cascade)
+  sectionRun            ProcessSectionRun    @relation(fields: [sectionRunId], references: [id], onDelete: Cascade)
+  researchJob           ResearchJob          @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  claimRecords          ProcessClaimRecord[]
+
+  @@unique([sectionRunId, revisionNumber], map: "process_section_revisions_section_revision_key")
+  @@index([researchJobId, processRunId, createdAt(sort: Desc)], map: "process_section_revisions_workspace_run_created_idx")
+  @@map("process_section_revisions")
+}
+
+model ProcessQuestionTask {
+  id            String                  @id @default(uuid())
+  processRunId  String                  @map("process_run_id")
+  researchJobId String                  @map("research_job_id")
+  sectionRunId  String?                 @map("section_run_id")
+  fieldKey      String                  @map("field_key")
+  question      String
+  severity      ProcessQuestionSeverity
+  status        ProcessQuestionStatus   @default(OPEN)
+  surfacesJson  Json?                   @map("surfaces_json")
+  answerJson    Json?                   @map("answer_json")
+  requestedBy   String?                 @map("requested_by")
+  answeredBy    String?                 @map("answered_by")
+  answeredAt    DateTime?               @map("answered_at")
+  createdAt     DateTime                @default(now()) @map("created_at")
+  updatedAt     DateTime                @updatedAt @map("updated_at")
+  processRun    ProcessRun              @relation(fields: [processRunId], references: [id], onDelete: Cascade)
+  researchJob   ResearchJob             @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  sectionRun    ProcessSectionRun?      @relation(fields: [sectionRunId], references: [id], onDelete: SetNull)
+
+  @@index([processRunId, status, severity, createdAt(sort: Desc)], map: "process_question_tasks_run_status_severity_idx")
+  @@index([researchJobId, sectionRunId], map: "process_question_tasks_workspace_section_idx")
+  @@map("process_question_tasks")
+}
+
+model ProcessEvidenceRecord {
+  id            String             @id @default(uuid())
+  processRunId  String             @map("process_run_id")
+  researchJobId String             @map("research_job_id")
+  sectionRunId  String?            @map("section_run_id")
+  sourceType    String             @map("source_type")
+  refId         String?            @map("ref_id")
+  url           String?
+  title         String?
+  snippet       String?
+  fetchedAt     DateTime           @default(now()) @map("fetched_at")
+  metadataJson  Json?              @map("metadata_json")
+  createdAt     DateTime           @default(now()) @map("created_at")
+  processRun    ProcessRun         @relation(fields: [processRunId], references: [id], onDelete: Cascade)
+  researchJob   ResearchJob        @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  sectionRun    ProcessSectionRun? @relation(fields: [sectionRunId], references: [id], onDelete: SetNull)
+
+  @@index([processRunId, createdAt(sort: Desc)], map: "process_evidence_records_run_created_idx")
+  @@index([researchJobId, sourceType], map: "process_evidence_records_workspace_source_idx")
+  @@map("process_evidence_records")
+}
+
+model ProcessClaimRecord {
+  id                    String                  @id @default(uuid())
+  processRunId          String                  @map("process_run_id")
+  researchJobId         String                  @map("research_job_id")
+  sectionRunId          String                  @map("section_run_id")
+  revisionId            String?                 @map("revision_id")
+  claimText             String                  @map("claim_text")
+  material              Boolean                 @default(true)
+  evidenceRecordIdsJson Json?                   @map("evidence_record_ids_json")
+  groundingStatus       String                  @default("ungrounded") @map("grounding_status")
+  createdAt             DateTime                @default(now()) @map("created_at")
+  updatedAt             DateTime                @updatedAt @map("updated_at")
+  processRun            ProcessRun              @relation(fields: [processRunId], references: [id], onDelete: Cascade)
+  researchJob           ResearchJob             @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  sectionRun            ProcessSectionRun       @relation(fields: [sectionRunId], references: [id], onDelete: Cascade)
+  revision              ProcessSectionRevision? @relation(fields: [revisionId], references: [id], onDelete: SetNull)
+
+  @@index([processRunId, sectionRunId, createdAt(sort: Desc)], map: "process_claim_records_run_section_created_idx")
+  @@index([researchJobId, groundingStatus], map: "process_claim_records_workspace_grounding_idx")
+  @@map("process_claim_records")
+}
+
+model ProcessGateResult {
+  id                    String             @id @default(uuid())
+  processRunId          String             @map("process_run_id")
+  researchJobId         String             @map("research_job_id")
+  sectionRunId          String?            @map("section_run_id")
+  gateName              String             @map("gate_name")
+  status                ProcessGateStatus
+  passed                Boolean            @default(false)
+  score                 Float?
+  ruleId                String?            @map("rule_id")
+  reasonsJson           Json?              @map("reasons_json")
+  evidenceRecordIdsJson Json?              @map("evidence_record_ids_json")
+  createdAt             DateTime           @default(now()) @map("created_at")
+  processRun            ProcessRun         @relation(fields: [processRunId], references: [id], onDelete: Cascade)
+  researchJob           ResearchJob        @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  sectionRun            ProcessSectionRun? @relation(fields: [sectionRunId], references: [id], onDelete: SetNull)
+
+  @@index([processRunId, sectionRunId, gateName, createdAt(sort: Desc)], map: "process_gate_results_run_section_gate_created_idx")
+  @@index([researchJobId, status], map: "process_gate_results_workspace_status_idx")
+  @@map("process_gate_results")
+}
+
+model ProcessDecisionEvent {
+  id                String           @id @default(uuid())
+  processRunId      String           @map("process_run_id")
+  researchJobId     String           @map("research_job_id")
+  stage             ProcessRunStage?
+  ruleId            String           @map("rule_id")
+  inputSnapshotJson Json             @map("input_snapshot_json")
+  evidenceRefsJson  Json?            @map("evidence_refs_json")
+  outputJson        Json             @map("output_json")
+  createdAt         DateTime         @default(now()) @map("created_at")
+  processRun        ProcessRun       @relation(fields: [processRunId], references: [id], onDelete: Cascade)
+  researchJob       ResearchJob      @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+
+  @@index([processRunId, createdAt(sort: Desc)], map: "process_decision_events_run_created_idx")
+  @@index([researchJobId, ruleId, createdAt(sort: Desc)], map: "process_decision_events_workspace_rule_created_idx")
+  @@map("process_decision_events")
+}
+
+model ProcessEscalationRecord {
+  id            String                  @id @default(uuid())
+  processRunId  String                  @map("process_run_id")
+  researchJobId String                  @map("research_job_id")
+  reason        String
+  details       String?
+  status        ProcessEscalationStatus @default(OPEN)
+  createdBy     String                  @map("created_by")
+  resolvedBy    String?                 @map("resolved_by")
+  resolvedAt    DateTime?               @map("resolved_at")
+  createdAt     DateTime                @default(now()) @map("created_at")
+  processRun    ProcessRun              @relation(fields: [processRunId], references: [id], onDelete: Cascade)
+  researchJob   ResearchJob             @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+
+  @@index([processRunId, status, createdAt(sort: Desc)], map: "process_escalation_records_run_status_created_idx")
+  @@index([researchJobId, status], map: "process_escalation_records_workspace_status_idx")
+  @@map("process_escalation_records")
+}
+
+model ProcessRunEvent {
+  id            String      @id @default(uuid())
+  processRunId  String      @map("process_run_id")
+  researchJobId String      @map("research_job_id")
+  type          String
+  message       String
+  payloadJson   Json?       @map("payload_json")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  processRun    ProcessRun  @relation(fields: [processRunId], references: [id], onDelete: Cascade)
+  researchJob   ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+
+  @@index([processRunId, createdAt], map: "process_run_events_run_created_idx")
+  @@index([researchJobId, type, createdAt(sort: Desc)], map: "process_run_events_workspace_type_created_idx")
+  @@map("process_run_events")
 }
 
 /// Persistent facts the user provides during chat sessions.
