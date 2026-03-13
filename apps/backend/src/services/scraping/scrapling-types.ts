@@ -36,6 +36,7 @@ export type ScraplingCrawlRequest = {
   concurrency?: number;
   resumeKey?: string;
   mode?: ScraplingMode;
+  timeoutMs?: number;
 };
 
 export type ScraplingCrawlPage = {

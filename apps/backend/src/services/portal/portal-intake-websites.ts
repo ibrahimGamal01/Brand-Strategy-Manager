@@ -2,6 +2,7 @@ import { crawlAndPersistWebSources, fetchAndPersistWebSnapshot } from '../scrapi
 import { publishPortalIntakeEvent } from './portal-intake-events';
 import {
   createPortalIntakeScanRun,
+  expireStalePortalIntakeScanRuns,
   updatePortalIntakeScanRun,
 } from './portal-intake-events-repository';
 
@@ -10,6 +11,7 @@ export type PortalIntakeScanMode = 'quick' | 'standard' | 'deep';
 type CrawlSettings = {
   maxPages: number;
   maxDepth: number;
+  crawlTimeoutMs: number;
   coverageProfile: 'default' | 'coverage_first';
   minPagesPersisted: number;
   minPagesFetched: number;
@@ -20,6 +22,7 @@ const CRAWL_SETTINGS_BY_MODE: Record<PortalIntakeScanMode, CrawlSettings> = {
   quick: {
     maxPages: 4,
     maxDepth: 1,
+    crawlTimeoutMs: 60_000,
     coverageProfile: 'default',
     minPagesPersisted: 0,
     minPagesFetched: 0,
@@ -28,6 +31,7 @@ const CRAWL_SETTINGS_BY_MODE: Record<PortalIntakeScanMode, CrawlSettings> = {
   standard: {
     maxPages: 20,
     maxDepth: 2,
+    crawlTimeoutMs: 120_000,
     coverageProfile: 'default',
     minPagesPersisted: 0,
     minPagesFetched: 0,
@@ -36,6 +40,7 @@ const CRAWL_SETTINGS_BY_MODE: Record<PortalIntakeScanMode, CrawlSettings> = {
   deep: {
     maxPages: 180,
     maxDepth: 4,
+    crawlTimeoutMs: 240_000,
     coverageProfile: 'coverage_first',
     minPagesPersisted: 35,
     minPagesFetched: 40,
@@ -302,6 +307,22 @@ export async function scanPortalIntakeWebsites(
       { scanRunId: resolvedScanRunId }
     );
 
+  const heartbeatRunProgress = async (errorMessage?: string | null) =>
+    updatePortalIntakeScanRun(resolvedScanRunId, {
+      status: 'RUNNING',
+      targetsCompleted,
+      snapshotsSaved,
+      pagesDiscovered,
+      pagesFetched,
+      pagesPersisted,
+      uniquePathPatterns,
+      templateCoverageScore: clampCoverageScore(templateCoverageScore),
+      coverageStatus: 'PENDING',
+      warnings,
+      failures,
+      ...(errorMessage !== undefined ? { error: errorMessage } : {}),
+    });
+
   if (!targets.length) {
     await publish('SCAN_WARNING', 'No valid websites found to scan.', {
       mode,
@@ -425,9 +446,11 @@ export async function scanPortalIntakeWebsites(
     targets,
     crawlSettings,
   });
+  await heartbeatRunProgress(null);
 
   try {
     for (const [index, target] of targets.entries()) {
+      await heartbeatRunProgress(null);
       await publish('SCAN_TARGET_STARTED', `Scanning ${target} (${index + 1}/${targets.length}).`, {
         mode,
         target,
@@ -470,6 +493,7 @@ export async function scanPortalIntakeWebsites(
           ...(snapshot.lineageSummary ? { lineageSummary: snapshot.lineageSummary } : {}),
           ...(snapshot.fallbackReason ? { fallbackReason: snapshot.fallbackReason } : {}),
         });
+        await heartbeatRunProgress(null);
 
         const crawl = await crawlAndPersistWebSources({
           researchJobId: workspaceId,
@@ -477,6 +501,7 @@ export async function scanPortalIntakeWebsites(
           allowedDomains,
           maxPages: crawlSettings.maxPages,
           maxDepth: crawlSettings.maxDepth,
+          crawlTimeoutMs: crawlSettings.crawlTimeoutMs,
           mode: 'AUTO',
           allowExternal: true,
           scanRunId: resolvedScanRunId,
@@ -505,6 +530,7 @@ export async function scanPortalIntakeWebsites(
           stylesheetCount += Number(crawl.assetStats.stylesheets || 0);
         }
         targetsCompleted += 1;
+        await heartbeatRunProgress(null);
 
         if (crawl.fallbackReason && crawlSettings.coverageProfile === 'coverage_first') {
           failures += 1;
@@ -520,6 +546,7 @@ export async function scanPortalIntakeWebsites(
             coverageStatus: crawl.coverageStatus,
             runId: crawl.runId,
           });
+          await heartbeatRunProgress(terminalError);
           break;
         }
 
@@ -555,6 +582,7 @@ export async function scanPortalIntakeWebsites(
             },
             runId: crawl.runId,
           });
+          await heartbeatRunProgress(terminalError);
           break;
         }
 
@@ -583,10 +611,12 @@ export async function scanPortalIntakeWebsites(
           assetStats: crawl.assetStats,
           ...(crawl.fallbackReason ? { fallbackReason: crawl.fallbackReason } : {}),
         });
+        await heartbeatRunProgress(null);
       } catch (error) {
         failures += 1;
         const message = (error as Error)?.message || String(error);
         terminalError = message;
+        await heartbeatRunProgress(message);
         await publish('SCAN_FAILED', `Scan failed for ${target}: ${message}`, {
           target,
           error: message,
@@ -718,6 +748,10 @@ export async function queuePortalIntakeWebsiteScan(
   const initiatedBy = options?.initiatedBy || 'USER';
   const normalizedWebsites = parseWebsiteList(websites, 5);
   const crawlSettings = resolveCrawlSettings(mode);
+
+  await expireStalePortalIntakeScanRuns({
+    workspaceId,
+  });
 
   const scanRun = await createPortalIntakeScanRun({
     workspaceId,

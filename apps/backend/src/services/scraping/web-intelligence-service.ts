@@ -283,6 +283,7 @@ export async function crawlAndPersistWebSources(input: {
   allowedDomains?: string[];
   maxPages?: number;
   maxDepth?: number;
+  crawlTimeoutMs?: number;
   mode?: ScraplingMode;
   allowExternal?: boolean;
   scanRunId?: string;
@@ -334,6 +335,7 @@ export async function crawlAndPersistWebSources(input: {
     allowedDomains,
     maxPages: input.maxPages,
     maxDepth: input.maxDepth,
+    timeoutMs: input.crawlTimeoutMs,
     mode: input.mode || 'AUTO',
     concurrency: 4,
     resumeKey: `job:${input.researchJobId}:crawl`,

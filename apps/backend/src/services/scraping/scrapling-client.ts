@@ -22,6 +22,14 @@ import {
 
 const DEFAULT_TIMEOUT_MS = Number(process.env.SCRAPLING_TIMEOUT_MS || 20_000);
 const WORKER_URL = String(process.env.SCRAPLING_WORKER_URL || '').replace(/\/$/, '');
+const DEFAULT_CRAWL_TIMEOUT_MS = Math.max(
+  DEFAULT_TIMEOUT_MS,
+  Number(process.env.SCRAPLING_CRAWL_TIMEOUT_DEFAULT_MS || 90_000)
+);
+const MAX_CRAWL_TIMEOUT_MS = Math.max(
+  DEFAULT_CRAWL_TIMEOUT_MS,
+  Number(process.env.SCRAPLING_CRAWL_TIMEOUT_MAX_MS || 300_000)
+);
 const SCRAPLING_WARNING_THROTTLE_MS = Math.max(10_000, Number(process.env.SCRAPLING_WARNING_THROTTLE_MS || 60_000));
 const SCRAPLING_FETCH_MAX_ATTEMPTS = Math.max(
   1,
@@ -224,6 +232,15 @@ function hasUsableWorkerContent(payload: { html?: string | null; text?: string |
   return html.length > 0 || text.length > 0;
 }
 
+function resolveCrawlTimeoutMs(requestedTimeoutMs: unknown, maxPages: number): number {
+  const requested = Number(requestedTimeoutMs || 0);
+  if (Number.isFinite(requested) && requested > 0) {
+    return Math.max(45_000, Math.min(MAX_CRAWL_TIMEOUT_MS, Math.round(requested)));
+  }
+  const derived = Math.round(maxPages * 2_500);
+  return Math.max(DEFAULT_CRAWL_TIMEOUT_MS, Math.min(MAX_CRAWL_TIMEOUT_MS, derived));
+}
+
 async function fetchViaWorker(payload: ScraplingFetchRequest): Promise<ScraplingFetchResponse> {
   const response = await axios.post(`${WORKER_URL}/v1/fetch`, payload, {
     timeout: payload.timeoutMs || DEFAULT_TIMEOUT_MS,
@@ -398,6 +415,7 @@ function fallbackExtract(request: ScraplingExtractRequest): ScraplingExtractResp
 async function fallbackCrawl(payload: ScraplingCrawlRequest): Promise<ScraplingCrawlResponse> {
   const fallbackMaxPages = Math.max(1, Math.min(60, Number(payload.maxPages || 20)));
   const fallbackMaxDepth = Math.max(0, Math.min(5, Number(payload.maxDepth || 1)));
+  const deadlineMs = Number(payload.timeoutMs || 0) > 0 ? Date.now() + Number(payload.timeoutMs) : null;
   const allowedDomains = toAllowedDomainSet(payload);
   const queue: Array<{ url: string; depth: number }> = payload.startUrls
     .map((entry) => normalizeUrlForQueue(entry))
@@ -408,8 +426,13 @@ async function fallbackCrawl(payload: ScraplingCrawlRequest): Promise<ScraplingC
   const pages: ScraplingCrawlPage[] = [];
   let failed = 0;
   let queued = queue.length;
+  let timedOut = false;
 
   while (queue.length > 0 && pages.length < fallbackMaxPages) {
+    if (deadlineMs && Date.now() >= deadlineMs) {
+      timedOut = true;
+      break;
+    }
     const next = queue.shift();
     if (!next) break;
     const currentUrl = normalizeUrlForQueue(next.url);
@@ -462,7 +485,9 @@ async function fallbackCrawl(payload: ScraplingCrawlRequest): Promise<ScraplingC
       failed: pages.filter((page) => (page.statusCode || 0) >= 400 || !page.statusCode).length + failed,
     },
     pages,
-    fallbackReason: 'Used HTTP fallback crawler with on-page link discovery.',
+    fallbackReason: timedOut
+      ? `Used HTTP fallback crawler with on-page link discovery, but timed out after ${Number(payload.timeoutMs || 0)}ms.`
+      : 'Used HTTP fallback crawler with on-page link discovery.',
   };
 }
 
@@ -615,12 +640,15 @@ export const scraplingClient = {
   },
 
   async crawl(request: ScraplingCrawlRequest): Promise<ScraplingCrawlResponse> {
+    const normalizedMaxPages = Math.max(1, Math.min(200, Number(request.maxPages || 20)));
+    const crawlTimeoutMs = resolveCrawlTimeoutMs(request.timeoutMs, normalizedMaxPages);
     const payload: ScraplingCrawlRequest = {
       ...request,
       mode: normalizeMode(request.mode),
-      maxPages: Math.max(1, Math.min(200, Number(request.maxPages || 20))),
+      maxPages: normalizedMaxPages,
       maxDepth: Math.max(0, Math.min(5, Number(request.maxDepth || 1))),
       concurrency: Math.max(1, Math.min(20, Number(request.concurrency || 4))),
+      timeoutMs: crawlTimeoutMs,
     };
 
     if (!WORKER_URL) {
@@ -628,12 +656,8 @@ export const scraplingClient = {
     }
 
     try {
-      const crawlTimeoutMs = Math.max(
-        DEFAULT_TIMEOUT_MS,
-        60_000,
-        Math.min(600_000, (payload.maxPages || 20) * 4_000),
-      );
-      const response = await axios.post(`${WORKER_URL}/v1/crawl`, payload, {
+      const { timeoutMs: _timeoutMs, ...workerPayload } = payload;
+      const response = await axios.post(`${WORKER_URL}/v1/crawl`, workerPayload, {
         timeout: crawlTimeoutMs,
         headers: { 'Content-Type': 'application/json' },
       });

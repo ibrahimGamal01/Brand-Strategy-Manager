@@ -1,0 +1,42 @@
+name: deploy-scrapling-worker
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'apps/scrapling-worker/**'
+      - '.github/workflows/deploy-scrapling-worker.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RAILWAY_PROJECT_ID: cc758a60-96f8-4feb-9657-9e1238cb23c8
+      RAILWAY_ENVIRONMENT: production
+      RAILWAY_SERVICE: scrapling-worker
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy scrapling-worker
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          if [ -z "${RAILWAY_TOKEN:-}" ]; then
+            echo "Missing required repository secret: RAILWAY_TOKEN"
+            exit 1
+          fi
+          railway up apps/scrapling-worker \
+            --path-as-root \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENVIRONMENT" \
+            --service "$RAILWAY_SERVICE" \
+            --detach \
+            --message "gha: deploy scrapling-worker ${GITHUB_SHA}"

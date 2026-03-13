@@ -4,6 +4,11 @@ import { prisma } from '../../lib/prisma';
 export type PortalIntakeScanRunStatus = 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
 export type PortalIntakeScanInitiatedBy = 'USER' | 'SYSTEM';
 
+const DEFAULT_STALE_SCAN_WINDOW_MS = Math.max(
+  60_000,
+  Number(process.env.PORTAL_INTAKE_SCAN_STALE_MS || 20 * 60_000)
+);
+
 export type PortalIntakeEventRecord = {
   id: number;
   workspaceId: string;
@@ -134,6 +139,41 @@ export async function updatePortalIntakeScanRun(
       ...(data.endedAt !== undefined ? { endedAt: data.endedAt } : {}),
     },
   });
+}
+
+export async function expireStalePortalIntakeScanRuns(input?: {
+  workspaceId?: string;
+  staleMs?: number;
+  reason?: string;
+}) {
+  const workspaceId = String(input?.workspaceId || '').trim();
+  const staleMs = Math.max(60_000, Number(input?.staleMs || DEFAULT_STALE_SCAN_WINDOW_MS));
+  const cutoff = new Date(Date.now() - staleMs);
+  const reason =
+    String(input?.reason || '').trim() ||
+    `Scan exceeded stale window (${Math.round(staleMs / 60_000)}m) without progress heartbeat.`;
+  const endedAt = new Date();
+
+  const updated = await prisma.portalIntakeScanRun.updateMany({
+    where: {
+      status: 'RUNNING',
+      updatedAt: { lt: cutoff },
+      ...(workspaceId ? { workspaceId } : {}),
+    },
+    data: {
+      status: 'FAILED',
+      coverageStatus: 'FAILED',
+      error: reason,
+      failures: 1,
+      endedAt,
+    },
+  });
+
+  return {
+    staleMs,
+    cutoff,
+    failedRuns: updated.count,
+  };
 }
 
 export async function getPortalIntakeScanRun(workspaceId: string, scanRunId: string) {
