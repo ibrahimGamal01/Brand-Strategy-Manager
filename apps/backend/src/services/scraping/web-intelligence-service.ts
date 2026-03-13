@@ -9,6 +9,7 @@ import {
   normalizeUrl,
   writeSnapshotArtifact,
 } from './web-intelligence-utils';
+import { extractAndPersistWebsiteDesignLineage } from './web-design-intelligence';
 import { getJobDomains, upsertWebSource } from './web-intelligence-domain-service';
 import type {
   ScraplingCrawlRequest,
@@ -29,6 +30,130 @@ function getHostnameFromUrl(value: string): string {
   }
 }
 
+function normalizeText(value: unknown): string {
+  return String(value || '').trim();
+}
+
+function clamp(value: number, min = 0, max = 1): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, value));
+}
+
+function normalizePathPattern(value: string): string {
+  try {
+    const parsed = new URL(value);
+    const normalizedSegments = parsed.pathname
+      .split('/')
+      .map((segment) => segment.trim().toLowerCase())
+      .filter(Boolean)
+      .slice(0, 5)
+      .map((segment) => {
+        if (/^\d+$/.test(segment)) return '{n}';
+        if (/^[a-f0-9]{8,}$/i.test(segment)) return '{id}';
+        if (segment.length > 26) return '{slug}';
+        return segment;
+      });
+    if (normalizedSegments.length === 0) return '/';
+    return `/${normalizedSegments.join('/')}`;
+  } catch {
+    return '/';
+  }
+}
+
+function toAllowedDomainSet(startUrls: string[], explicitAllowedDomains?: string[]): Set<string> {
+  if (Array.isArray(explicitAllowedDomains) && explicitAllowedDomains.length > 0) {
+    return new Set(
+      explicitAllowedDomains
+        .map((entry) => String(entry || '').trim().toLowerCase().replace(/^https?:\/\//i, '').replace(/^www\./i, ''))
+        .map((entry) => entry.split('/')[0] || '')
+        .filter(Boolean)
+    );
+  }
+  return new Set(startUrls.map((url) => getHostnameFromUrl(url)).filter(Boolean));
+}
+
+function extractLinksForCoverage(html: string, baseUrl: string, allowedDomains: Set<string>): string[] {
+  const links: string[] = [];
+  const seen = new Set<string>();
+  const source = String(html || '').replace(/<script[\s\S]*?<\/script>/gi, ' ');
+  if (!source.trim()) return links;
+
+  const hrefRegex = /href\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s"'<>`]+))/gi;
+  let match: RegExpExecArray | null;
+  while ((match = hrefRegex.exec(source))) {
+    const rawHref = String(match[1] || match[2] || match[3] || '').trim();
+    if (!rawHref) continue;
+    if (
+      rawHref.startsWith('#') ||
+      /^javascript:/i.test(rawHref) ||
+      /^mailto:/i.test(rawHref) ||
+      /^tel:/i.test(rawHref) ||
+      /^data:/i.test(rawHref) ||
+      /^blob:/i.test(rawHref)
+    ) {
+      continue;
+    }
+
+    try {
+      const resolved = normalizeUrl(new URL(rawHref, baseUrl).toString());
+      if (!resolved) continue;
+      const host = getHostnameFromUrl(resolved);
+      if (allowedDomains.size > 0 && host && !allowedDomains.has(host)) continue;
+      if (/\.(?:pdf|jpg|jpeg|png|gif|svg|webp|mp4|mov|avi|zip|rar|7z|docx?|xlsx?|pptx?)(?:$|[?#])/i.test(resolved)) {
+        continue;
+      }
+      if (seen.has(resolved)) continue;
+      seen.add(resolved);
+      links.push(resolved);
+    } catch {
+      // Ignore malformed URLs.
+    }
+  }
+
+  return links;
+}
+
+async function discoverCoverageSeedUrls(input: {
+  startUrls: string[];
+  allowedDomains?: string[];
+  mode?: ScraplingMode;
+}): Promise<string[]> {
+  const seedSet = new Set<string>(input.startUrls);
+  const allowedDomainSet = toAllowedDomainSet(input.startUrls, input.allowedDomains);
+
+  for (const startUrl of input.startUrls.slice(0, 5)) {
+    try {
+      const result = await scraplingClient.fetch({
+        url: startUrl,
+        mode: input.mode || 'AUTO',
+        returnHtml: true,
+        returnText: false,
+      });
+      const finalUrl = normalizeUrl(result.finalUrl || startUrl);
+      if (finalUrl) seedSet.add(finalUrl);
+
+      const links = extractLinksForCoverage(result.html || '', finalUrl || startUrl, allowedDomainSet);
+      for (const link of links.slice(0, 80)) {
+        seedSet.add(link);
+      }
+    } catch {
+      // Ignore single-url discovery failures and continue deterministic pass.
+    }
+  }
+
+  for (const domain of Array.from(allowedDomainSet)) {
+    seedSet.add(`https://${domain}/sitemap.xml`);
+    seedSet.add(`https://${domain}/sitemap_index.xml`);
+    seedSet.add(`https://${domain}/about`);
+    seedSet.add(`https://${domain}/services`);
+    seedSet.add(`https://${domain}/contact`);
+    seedSet.add(`https://${domain}/pricing`);
+    seedSet.add(`https://${domain}/blog`);
+  }
+
+  return Array.from(seedSet).map((entry) => normalizeUrl(entry)).filter(Boolean).slice(0, 160);
+}
+
 export async function fetchAndPersistWebSnapshot(input: {
   researchJobId: string;
   url: string;
@@ -37,6 +162,8 @@ export async function fetchAndPersistWebSnapshot(input: {
   mode?: ScraplingMode;
   sessionKey?: string;
   allowExternal?: boolean;
+  scanRunId?: string;
+  metadata?: Record<string, unknown>;
 }): Promise<{
   sourceId: string;
   snapshotId: string;
@@ -45,6 +172,15 @@ export async function fetchAndPersistWebSnapshot(input: {
   fetcherUsed: ScraplingMode;
   blockedSuspected: boolean;
   cleanTextSnippet: string;
+  lineageSummary?: {
+    persisted: number;
+    logos: number;
+    images: number;
+    fonts: number;
+    designTokens: number;
+    stylesheets: number;
+    ambiguities: string[];
+  };
   fallbackReason?: string;
 }> {
   const normalizedUrl = normalizeUrl(input.url);
@@ -73,6 +209,7 @@ export async function fetchAndPersistWebSnapshot(input: {
     data: {
       researchJobId: input.researchJobId,
       webSourceId: source.id,
+      scanRunId: normalizeText(input.scanRunId) || null,
       fetcherUsed: fetchResult.fetcherUsed,
       finalUrl: fetchResult.finalUrl || guard.normalizedUrl,
       statusCode: fetchResult.statusCode,
@@ -87,6 +224,9 @@ export async function fetchAndPersistWebSnapshot(input: {
           (fetchResult.metadata && (fetchResult.metadata as Record<string, unknown>).sourceTransport) ||
           (fetchResult.fallbackReason ? 'HTTP_FALLBACK' : 'SCRAPLING_WORKER'),
         sourceMetadata: fetchResult.metadata || null,
+        scanRunId: normalizeText(input.scanRunId) || null,
+        lineageMetadata: input.metadata || null,
+        ...(input.metadata || {}),
       }),
       cleanText: compactText(String(fetchResult.text || ''), 30000) || null,
     },
@@ -108,6 +248,22 @@ export async function fetchAndPersistWebSnapshot(input: {
     },
   });
 
+  const lineageSummary = await extractAndPersistWebsiteDesignLineage({
+    researchJobId: input.researchJobId,
+    snapshotId: snapshot.id,
+    scanRunId: normalizeText(input.scanRunId) || null,
+    pageUrl: fetchResult.finalUrl || guard.normalizedUrl,
+    html: String(fetchResult.html || ''),
+  }).catch(() => ({
+    persisted: 0,
+    logos: 0,
+    images: 0,
+    fonts: 0,
+    designTokens: 0,
+    stylesheets: 0,
+    ambiguities: ['Lineage extraction failed.'],
+  }));
+
   return {
     sourceId: source.id,
     snapshotId: snapshot.id,
@@ -116,6 +272,7 @@ export async function fetchAndPersistWebSnapshot(input: {
     fetcherUsed: fetchResult.fetcherUsed,
     blockedSuspected: fetchResult.blockedSuspected,
     cleanTextSnippet: compactText(fetchResult.text || snapshot.cleanText || '', 500),
+    ...(lineageSummary ? { lineageSummary } : {}),
     ...(fetchResult.fallbackReason ? { fallbackReason: fetchResult.fallbackReason } : {}),
   };
 }
@@ -128,7 +285,14 @@ export async function crawlAndPersistWebSources(input: {
   maxDepth?: number;
   mode?: ScraplingMode;
   allowExternal?: boolean;
+  scanRunId?: string;
+  coverageProfile?: 'default' | 'coverage_first';
 }) {
+  const coverageProfile = input.coverageProfile === 'coverage_first' ? 'coverage_first' : 'default';
+  if (coverageProfile === 'coverage_first' && !scraplingClient.isWorkerConfigured()) {
+    throw new Error('COVERAGE_FIRST_REQUIRES_SCRAPLING_WORKER');
+  }
+
   const normalizedStartUrls = Array.from(new Set(input.startUrls.map((url) => normalizeUrl(url)).filter(Boolean)));
   if (!normalizedStartUrls.length) throw new Error('At least one start URL is required for crawl');
 
@@ -156,8 +320,17 @@ export async function crawlAndPersistWebSources(input: {
     throw new Error('No crawl URL passed guard checks. Add allowed domains or use allowExternal=true intentionally.');
   }
 
+  const crawlStartUrls =
+    coverageProfile === 'coverage_first'
+      ? await discoverCoverageSeedUrls({
+          startUrls: guardedUrls,
+          allowedDomains,
+          mode: input.mode || 'AUTO',
+        })
+      : guardedUrls;
+
   const crawlResult = await scraplingClient.crawl({
-    startUrls: guardedUrls,
+    startUrls: crawlStartUrls,
     allowedDomains,
     maxPages: input.maxPages,
     maxDepth: input.maxDepth,
@@ -167,7 +340,14 @@ export async function crawlAndPersistWebSources(input: {
   } as ScraplingCrawlRequest);
 
   let persisted = 0;
+  let lineagePersisted = 0;
+  let logoCount = 0;
+  let imageCount = 0;
+  let fontCount = 0;
+  let designTokenCount = 0;
+  let stylesheetCount = 0;
   const failures: string[] = [];
+  const uniquePathPatterns = new Set<string>();
 
   for (const page of crawlResult.pages || []) {
     const pageUrlRaw = String(page.finalUrl || page.url || '').trim();
@@ -192,6 +372,7 @@ export async function crawlAndPersistWebSources(input: {
         data: {
           researchJobId: input.researchJobId,
           webSourceId: source.id,
+          scanRunId: normalizeText(input.scanRunId) || null,
           fetcherUsed: page.fetcherUsed || input.mode || 'AUTO',
           finalUrl: pageUrl,
           statusCode: page.statusCode || null,
@@ -206,6 +387,8 @@ export async function crawlAndPersistWebSources(input: {
               (page.metadata && (page.metadata as Record<string, unknown>).sourceTransport) ||
               (crawlResult.fallbackReason ? 'HTTP_FALLBACK' : 'SCRAPLING_WORKER'),
             sourceMetadata: page.metadata || null,
+            scanRunId: normalizeText(input.scanRunId) || null,
+            coverageProfile,
           }),
         },
       });
@@ -214,15 +397,67 @@ export async function crawlAndPersistWebSources(input: {
       const textPath = await writeSnapshotArtifact(input.researchJobId, snapshot.id, 'txt', String(page.text || ''));
       await prisma.webPageSnapshot.update({ where: { id: snapshot.id }, data: { htmlPath, textPath } });
       persisted += 1;
+      uniquePathPatterns.add(normalizePathPattern(pageUrl));
+
+      const lineage = await extractAndPersistWebsiteDesignLineage({
+        researchJobId: input.researchJobId,
+        snapshotId: snapshot.id,
+        scanRunId: normalizeText(input.scanRunId) || null,
+        pageUrl,
+        html: String(page.html || ''),
+      }).catch(() => ({
+        persisted: 0,
+        logos: 0,
+        images: 0,
+        fonts: 0,
+        designTokens: 0,
+        stylesheets: 0,
+        ambiguities: [],
+      }));
+      lineagePersisted += lineage.persisted;
+      logoCount += lineage.logos;
+      imageCount += lineage.images;
+      fontCount += lineage.fonts;
+      designTokenCount += lineage.designTokens;
+      stylesheetCount += lineage.stylesheets;
     } catch (error: any) {
       failures.push(`Failed to persist ${pageUrlRaw}: ${error?.message || error}`);
     }
   }
 
+  const pagesDiscovered = Number(crawlResult.summary?.queued || crawlStartUrls.length || 0);
+  const pagesFetched = Number(crawlResult.summary?.fetched || 0);
+  const minPersistedForCoverage =
+    coverageProfile === 'coverage_first'
+      ? Math.max(24, Math.min(120, Math.floor((Number(input.maxPages || 100) || 100) * 0.35)))
+      : 0;
+  const templateCoverageScore = clamp(
+    coverageProfile === 'coverage_first' ? uniquePathPatterns.size / 18 : uniquePathPatterns.size / 10,
+  );
+  const coverageStatus =
+    coverageProfile === 'coverage_first'
+      ? persisted >= minPersistedForCoverage && uniquePathPatterns.size >= 12 && pagesFetched >= 20
+        ? 'SUFFICIENT'
+        : 'THIN'
+      : 'NOT_EVALUATED';
+
   return {
     runId: crawlResult.runId,
     summary: crawlResult.summary,
+    pagesDiscovered,
+    pagesFetched,
     persisted,
+    uniquePathPatterns: uniquePathPatterns.size,
+    templateCoverageScore,
+    coverageStatus,
+    assetStats: {
+      lineagePersisted,
+      logos: logoCount,
+      images: imageCount,
+      fonts: fontCount,
+      designTokens: designTokenCount,
+      stylesheets: stylesheetCount,
+    },
     failures,
     fallbackReason: crawlResult.fallbackReason || null,
   };

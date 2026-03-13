@@ -55,6 +55,11 @@ import {
   listPortalIntakeScanRunsWithEventCounts,
 } from '../services/portal/portal-intake-events-repository';
 import {
+  getLatestWorkspaceWebsiteAssetPacks,
+  getWorkspaceWebsiteAssetProvenance,
+  listOpenBrandAssetAmbiguityTasks,
+} from '../services/scraping/website-asset-packs';
+import {
   startPortalSignupEnrichment,
   syncPortalIntakeContinuousEnrichment,
 } from '../services/portal/portal-signup-enrichment';
@@ -130,6 +135,10 @@ function safeString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
 function resolvePortalIntakeEventsStreamPollMs(): number {
   const parsed = Number(
     process.env.PORTAL_INTAKE_EVENTS_STREAM_POLL_MS || DEFAULT_PORTAL_INTAKE_EVENTS_STREAM_POLL_MS
@@ -203,6 +212,48 @@ function parseLibraryVersion(value: unknown): 'v1' | 'v2' | undefined {
 
 function serializePortalIntakeEventSse(event: PortalIntakeEvent): string {
   return `id: ${event.id}\nevent: intake_event\ndata: ${JSON.stringify(event)}\n\n`;
+}
+
+function buildPortalIntakeScanProof(scanRun: Record<string, unknown>): Record<string, unknown> {
+  const crawlSettings = asRecord(scanRun.crawlSettingsJson);
+  const proofFromRow = asRecord(scanRun.proofJson);
+  const extractionFromRow = asRecord(scanRun.assetStatsJson);
+  const coverageFromProof = asRecord(proofFromRow.coverage);
+  const extractionFromProof = asRecord(proofFromRow.extraction);
+  const qualityFromProof = asRecord(proofFromRow.quality);
+
+  return {
+    coverage: {
+      profile: safeString(coverageFromProof.profile) || safeString(crawlSettings.coverageProfile) || 'default',
+      status: safeString(coverageFromProof.status) || safeString(scanRun.coverageStatus) || 'PENDING',
+      pagesDiscovered: Number(coverageFromProof.pagesDiscovered || scanRun.pagesDiscovered || 0),
+      pagesFetched: Number(coverageFromProof.pagesFetched || scanRun.pagesFetched || 0),
+      pagesPersisted: Number(coverageFromProof.pagesPersisted || scanRun.pagesPersisted || 0),
+      uniquePathPatterns: Number(coverageFromProof.uniquePathPatterns || scanRun.uniquePathPatterns || 0),
+      templateCoverageScore: Number(
+        coverageFromProof.templateCoverageScore || scanRun.templateCoverageScore || 0
+      ),
+      thresholds: coverageFromProof.thresholds || null,
+      sampleStatuses: Array.isArray(coverageFromProof.sampleStatuses) ? coverageFromProof.sampleStatuses : [],
+    },
+    extraction: {
+      lineagePersisted: Number(
+        extractionFromProof.lineagePersisted || extractionFromRow.lineagePersisted || 0
+      ),
+      logos: Number(extractionFromProof.logos || extractionFromRow.logos || 0),
+      images: Number(extractionFromProof.images || extractionFromRow.images || 0),
+      fonts: Number(extractionFromProof.fonts || extractionFromRow.fonts || 0),
+      designTokens: Number(
+        extractionFromProof.designTokens || extractionFromRow.designTokens || 0
+      ),
+      stylesheets: Number(extractionFromProof.stylesheets || extractionFromRow.stylesheets || 0),
+    },
+    quality: {
+      warnings: Number(qualityFromProof.warnings || scanRun.warnings || 0),
+      failures: Number(qualityFromProof.failures || scanRun.failures || 0),
+      failClosed: Boolean(qualityFromProof.failClosed),
+    },
+  };
 }
 
 router.post('/auth/signup', async (req, res) => {
@@ -879,13 +930,96 @@ router.get(
         return res.status(404).json({ error: 'Scan run not found' });
       }
 
+      const runRecord = run as unknown as Record<string, unknown>;
+      const proof = buildPortalIntakeScanProof(runRecord);
+
       return res.json({
         ok: true,
         scanRun: run,
+        proof,
       });
     } catch (error: any) {
       const message = String(error?.message || '');
       return res.status(500).json({ error: message || 'Failed to load intake scan run' });
+    }
+  }
+);
+
+router.get(
+  '/workspaces/:workspaceId/intake/websites/asset-packs/latest',
+  requirePortalAuth,
+  requireWorkspaceMembership,
+  async (req, res) => {
+    try {
+      const workspaceId = safeString(req.params.workspaceId);
+      if (!workspaceId) {
+        return res.status(400).json({ error: 'workspaceId is required' });
+      }
+
+      const preferredScanRunIdRaw = Array.isArray(req.query.scanRunId) ? req.query.scanRunId[0] : req.query.scanRunId;
+      const preferredScanRunId = safeString(preferredScanRunIdRaw);
+      const packs = await getLatestWorkspaceWebsiteAssetPacks({
+        workspaceId,
+        ...(preferredScanRunId ? { preferredScanRunId } : {}),
+      });
+
+      return res.json({
+        ok: true,
+        packs,
+      });
+    } catch (error: any) {
+      const message = String(error?.message || '');
+      const status = message.toLowerCase().includes('required') ? 400 : 500;
+      return res.status(status).json({ ok: false, error: message || 'Failed to load website asset packs' });
+    }
+  }
+);
+
+router.get(
+  '/workspaces/:workspaceId/intake/websites/ambiguity-tasks',
+  requirePortalAuth,
+  requireWorkspaceMembership,
+  async (req, res) => {
+    try {
+      const workspaceId = safeString(req.params.workspaceId);
+      if (!workspaceId) {
+        return res.status(400).json({ error: 'workspaceId is required' });
+      }
+
+      const tasks = await listOpenBrandAssetAmbiguityTasks(workspaceId);
+      return res.json({
+        ok: true,
+        tasks,
+      });
+    } catch (error: any) {
+      const message = String(error?.message || '');
+      const status = message.toLowerCase().includes('required') ? 400 : 500;
+      return res.status(status).json({ ok: false, error: message || 'Failed to load ambiguity tasks' });
+    }
+  }
+);
+
+router.get(
+  '/workspaces/:workspaceId/intake/websites/assets/:assetId/provenance',
+  requirePortalAuth,
+  requireWorkspaceMembership,
+  async (req, res) => {
+    try {
+      const workspaceId = safeString(req.params.workspaceId);
+      const assetId = safeString(req.params.assetId);
+      if (!workspaceId || !assetId) {
+        return res.status(400).json({ error: 'workspaceId and assetId are required' });
+      }
+
+      const asset = await getWorkspaceWebsiteAssetProvenance({ workspaceId, assetId });
+      return res.json({
+        ok: true,
+        asset,
+      });
+    } catch (error: any) {
+      const message = String(error?.message || '');
+      const status = message.toLowerCase().includes('not found') ? 404 : 500;
+      return res.status(status).json({ ok: false, error: message || 'Failed to load asset provenance' });
     }
   }
 );

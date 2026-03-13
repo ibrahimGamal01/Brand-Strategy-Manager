@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma';
 import { searchRawDDG } from '../discovery/duckduckgo-search';
+import { getLatestWorkspaceWebsiteAssetPacks } from '../scraping/website-asset-packs';
 import { isProcessControlV2LiveResearchEnabled } from './feature-flags';
 
 export type ResearchAdapterMethod = 'NICHE_STANDARD' | 'BAT_CORE';
@@ -157,6 +158,101 @@ export async function collectResearchEvidence(params: {
         statusCode: snapshot.statusCode,
       },
     });
+  }
+
+  try {
+    const assetPacks = await getLatestWorkspaceWebsiteAssetPacks({
+      workspaceId: params.researchJobId,
+      maxRows: 500,
+      maxPerPack: 40,
+    });
+
+    const selectionCandidates = [
+      {
+        sourceType: 'website_asset_selection_logo',
+        selection: assetPacks.selection.primaryLogo,
+      },
+      {
+        sourceType: 'website_asset_selection_typography',
+        selection: assetPacks.selection.typography,
+      },
+      {
+        sourceType: 'website_asset_selection_palette',
+        selection: assetPacks.selection.colorPalette,
+      },
+    ];
+
+    for (const entry of selectionCandidates) {
+      if (!entry.selection) continue;
+      evidence.push({
+        sourceType: entry.sourceType,
+        refId: entry.selection.evidenceRefs[0] || entry.selection.value,
+        url: undefined,
+        title: entry.selection.label,
+        snippet: `Selected with confidence ${entry.selection.confidence.toFixed(2)}.`,
+        fetchedAt: new Date(),
+        metadata: {
+          value: entry.selection.value,
+          confidence: entry.selection.confidence,
+          evidenceRefs: entry.selection.evidenceRefs,
+          sourceScanRunId: assetPacks.sourceScanRunId,
+        },
+      });
+    }
+
+    const packEntries = Object.entries(assetPacks.packs) as Array<
+      [
+        keyof typeof assetPacks.packs,
+        {
+          items: Array<{
+            id: string;
+            assetType: string;
+            role: string;
+            normalizedAssetUrl: string;
+            pageUrl: string;
+            confidence: number;
+            discoveryRuleId: string;
+          }>;
+        },
+      ]
+    >;
+
+    for (const [packKey, pack] of packEntries) {
+      for (const item of pack.items.slice(0, 16)) {
+        evidence.push({
+          sourceType: `website_asset_${packKey}`,
+          refId: item.id,
+          url: item.pageUrl || undefined,
+          title: `${item.assetType} ${item.role || ''}`.trim() || `website asset (${packKey})`,
+          snippet: item.normalizedAssetUrl,
+          fetchedAt: new Date(),
+          metadata: {
+            packKey,
+            role: item.role,
+            confidence: item.confidence,
+            discoveryRuleId: item.discoveryRuleId,
+            normalizedAssetUrl: item.normalizedAssetUrl,
+            pageUrl: item.pageUrl,
+            sourceScanRunId: assetPacks.sourceScanRunId,
+          },
+        });
+      }
+    }
+
+    for (const ambiguity of assetPacks.ambiguities.slice(0, 6)) {
+      evidence.push({
+        sourceType: 'website_asset_ambiguity',
+        refId: ambiguity.toLowerCase().replace(/[^a-z0-9]+/g, '_'),
+        title: 'Brand asset ambiguity',
+        snippet: ambiguity,
+        fetchedAt: new Date(),
+        metadata: {
+          sourceScanRunId: assetPacks.sourceScanRunId,
+        },
+      });
+    }
+  } catch (error) {
+    console.warn('[ProcessControlV2] Failed to load website asset packs:', (error as Error)?.message || error);
   }
 
   const shouldRunLiveSearch = isProcessControlV2LiveResearchEnabled();

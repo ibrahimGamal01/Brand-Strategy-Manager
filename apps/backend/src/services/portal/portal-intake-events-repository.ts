@@ -22,7 +22,14 @@ export type PortalIntakeScanRunDiagnosticsRecord = {
   initiatedBy: string;
   targetsCompleted: number;
   snapshotsSaved: number;
+  pagesDiscovered: number;
+  pagesFetched: number;
   pagesPersisted: number;
+  uniquePathPatterns: number;
+  templateCoverageScore: number;
+  coverageStatus: string;
+  proof?: Record<string, unknown> | null;
+  assetStats?: Record<string, unknown> | null;
   warnings: number;
   failures: number;
   error: string | null;
@@ -87,7 +94,14 @@ export async function updatePortalIntakeScanRun(
     status?: PortalIntakeScanRunStatus;
     targetsCompleted?: number;
     snapshotsSaved?: number;
+    pagesDiscovered?: number;
+    pagesFetched?: number;
     pagesPersisted?: number;
+    uniquePathPatterns?: number;
+    templateCoverageScore?: number;
+    coverageStatus?: string;
+    proof?: Record<string, unknown> | null;
+    assetStats?: Record<string, unknown> | null;
     warnings?: number;
     failures?: number;
     error?: string | null;
@@ -100,7 +114,20 @@ export async function updatePortalIntakeScanRun(
       ...(data.status ? { status: data.status } : {}),
       ...(typeof data.targetsCompleted === 'number' ? { targetsCompleted: data.targetsCompleted } : {}),
       ...(typeof data.snapshotsSaved === 'number' ? { snapshotsSaved: data.snapshotsSaved } : {}),
+      ...(typeof data.pagesDiscovered === 'number' ? { pagesDiscovered: data.pagesDiscovered } : {}),
+      ...(typeof data.pagesFetched === 'number' ? { pagesFetched: data.pagesFetched } : {}),
       ...(typeof data.pagesPersisted === 'number' ? { pagesPersisted: data.pagesPersisted } : {}),
+      ...(typeof data.uniquePathPatterns === 'number' ? { uniquePathPatterns: data.uniquePathPatterns } : {}),
+      ...(typeof data.templateCoverageScore === 'number'
+        ? { templateCoverageScore: data.templateCoverageScore }
+        : {}),
+      ...(typeof data.coverageStatus === 'string' && data.coverageStatus.trim()
+        ? { coverageStatus: data.coverageStatus.trim() }
+        : {}),
+      ...(data.proof !== undefined ? { proofJson: data.proof ? toJson(data.proof) : Prisma.JsonNull } : {}),
+      ...(data.assetStats !== undefined
+        ? { assetStatsJson: data.assetStats ? toJson(data.assetStats) : Prisma.JsonNull }
+        : {}),
       ...(typeof data.warnings === 'number' ? { warnings: data.warnings } : {}),
       ...(typeof data.failures === 'number' ? { failures: data.failures } : {}),
       ...(data.error !== undefined ? { error: data.error } : {}),
@@ -200,7 +227,14 @@ export async function listPortalIntakeScanRunsWithEventCounts(options?: {
       initiatedBy: true,
       targetsCompleted: true,
       snapshotsSaved: true,
+      pagesDiscovered: true,
+      pagesFetched: true,
       pagesPersisted: true,
+      uniquePathPatterns: true,
+      templateCoverageScore: true,
+      coverageStatus: true,
+      proofJson: true,
+      assetStatsJson: true,
       warnings: true,
       failures: true,
       error: true,
@@ -224,7 +258,14 @@ export async function listPortalIntakeScanRunsWithEventCounts(options?: {
     initiatedBy: row.initiatedBy,
     targetsCompleted: row.targetsCompleted,
     snapshotsSaved: row.snapshotsSaved,
+    pagesDiscovered: row.pagesDiscovered,
+    pagesFetched: row.pagesFetched,
     pagesPersisted: row.pagesPersisted,
+    uniquePathPatterns: row.uniquePathPatterns,
+    templateCoverageScore: row.templateCoverageScore,
+    coverageStatus: row.coverageStatus,
+    proof: isRecord(row.proofJson) ? row.proofJson : null,
+    assetStats: isRecord(row.assetStatsJson) ? row.assetStatsJson : null,
     warnings: row.warnings,
     failures: row.failures,
     error: row.error,

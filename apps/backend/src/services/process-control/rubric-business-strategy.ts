@@ -149,6 +149,20 @@ export const BUSINESS_STRATEGY_RUBRIC: BusinessStrategySectionRubric[] = [
         question: 'What services/products should this strategy include?',
       },
       {
+        key: 'brandPrimaryLogo',
+        label: 'Primary logo',
+        severity: 'IMPORTANT',
+        question: 'Which detected logo should be treated as the primary brand mark?',
+        answerType: 'single_select',
+      },
+      {
+        key: 'brandTypography',
+        label: 'Primary typography',
+        severity: 'IMPORTANT',
+        question: 'Which typography family should strategy visuals prioritize?',
+        answerType: 'single_select',
+      },
+      {
         key: 'brandTone',
         label: 'Brand tone',
         severity: 'OPTIONAL',
@@ -220,6 +234,13 @@ export const BUSINESS_STRATEGY_RUBRIC: BusinessStrategySectionRubric[] = [
           { value: '90_days', label: '90 days' },
           { value: '180_days', label: '180 days' },
         ],
+      },
+      {
+        key: 'brandColorPalette',
+        label: 'Core color palette',
+        severity: 'IMPORTANT',
+        question: 'Which color palette should execution assets stay aligned with?',
+        answerType: 'single_select',
       },
       {
         key: 'autonomyLevel',

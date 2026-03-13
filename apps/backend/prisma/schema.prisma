@@ -152,6 +152,7 @@ model ResearchJob {
   processDecisionEvents          ProcessDecisionEvent[]
   processEscalationRecords       ProcessEscalationRecord[]
   processRunEvents               ProcessRunEvent[]
+  websiteAssetRecords            WebsiteAssetRecord[]
 
   @@map("research_jobs")
 }
@@ -242,7 +243,14 @@ model PortalIntakeScanRun {
   crawlSettingsJson Json?     @map("crawl_settings_json")
   targetsCompleted  Int       @default(0) @map("targets_completed")
   snapshotsSaved    Int       @default(0) @map("snapshots_saved")
+  pagesDiscovered   Int       @default(0) @map("pages_discovered")
+  pagesFetched      Int       @default(0) @map("pages_fetched")
   pagesPersisted    Int       @default(0) @map("pages_persisted")
+  uniquePathPatterns Int      @default(0) @map("unique_path_patterns")
+  templateCoverageScore Float @default(0) @map("template_coverage_score")
+  coverageStatus    String    @default("PENDING") @map("coverage_status")
+  proofJson         Json?     @map("proof_json")
+  assetStatsJson    Json?     @map("asset_stats_json")
   warnings          Int       @default(0)
   failures          Int       @default(0)
   error             String?
@@ -251,8 +259,9 @@ model PortalIntakeScanRun {
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
-  workspace ResearchJob             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  events    PortalIntakeScanEvent[]
+  workspace           ResearchJob          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  events              PortalIntakeScanEvent[]
+  websiteAssetRecords WebsiteAssetRecord[]
 
   @@index([workspaceId, createdAt(sort: Desc)])
   @@index([workspaceId, status, createdAt(sort: Desc)])
@@ -357,6 +366,7 @@ model WebPageSnapshot {
   id               String             @id @default(uuid())
   researchJobId    String             @map("research_job_id")
   webSourceId      String             @map("web_source_id")
+  scanRunId        String?            @map("scan_run_id")
   fetchedAt        DateTime           @default(now()) @map("fetched_at")
   fetcherUsed      WebFetcherMode     @default(AUTO) @map("fetcher_used")
   finalUrl         String?            @map("final_url")
@@ -377,12 +387,47 @@ model WebPageSnapshot {
   webSource        WebSource          @relation(fields: [webSourceId], references: [id], onDelete: Cascade)
   researchJob      ResearchJob        @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
   extractionRuns   WebExtractionRun[]
+  websiteAssetRecords WebsiteAssetRecord[]
 
   @@index([researchJobId, fetchedAt])
   @@index([webSourceId, fetchedAt])
+  @@index([scanRunId, fetchedAt])
   @@index([contentHash])
   @@index([isActive])
   @@map("web_page_snapshots")
+}
+
+model WebsiteAssetRecord {
+  id                 String             @id @default(uuid())
+  researchJobId      String             @map("research_job_id")
+  snapshotId         String             @map("snapshot_id")
+  scanRunId          String?            @map("scan_run_id")
+  lineageKey         String             @unique @map("lineage_key")
+  pageUrl            String             @map("page_url")
+  assetUrl           String             @map("asset_url")
+  normalizedAssetUrl String             @map("normalized_asset_url")
+  assetType          String             @map("asset_type")
+  role               String?            @map("role")
+  selectorPath       String?            @map("selector_path")
+  attributeName      String?            @map("attribute_name")
+  confidence         Float              @default(0)
+  mimeType           String?            @map("mime_type")
+  width              Int?
+  height             Int?
+  metadata           Json?
+  firstSeenAt        DateTime           @default(now()) @map("first_seen_at")
+  lastSeenAt         DateTime           @default(now()) @map("last_seen_at")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+  researchJob        ResearchJob        @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  snapshot           WebPageSnapshot    @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  scanRun            PortalIntakeScanRun? @relation(fields: [scanRunId], references: [id], onDelete: SetNull)
+
+  @@index([researchJobId, assetType, createdAt(sort: Desc)])
+  @@index([researchJobId, scanRunId, createdAt(sort: Desc)])
+  @@index([researchJobId, normalizedAssetUrl, createdAt(sort: Desc)])
+  @@index([snapshotId, createdAt(sort: Desc)])
+  @@map("website_asset_records")
 }
 
 model WebExtractionRecipe {

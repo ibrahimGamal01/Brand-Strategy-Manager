@@ -386,7 +386,14 @@ export async function fetchWorkspaceIntakeScanRun(workspaceId: string, scanRunId
       crawlSettingsJson?: unknown;
       targetsCompleted: number;
       snapshotsSaved: number;
+      pagesDiscovered?: number;
+      pagesFetched?: number;
       pagesPersisted: number;
+      uniquePathPatterns?: number;
+      templateCoverageScore?: number;
+      coverageStatus?: string;
+      proofJson?: unknown;
+      assetStatsJson?: unknown;
       warnings: number;
       failures: number;
       error?: string | null;
@@ -396,18 +403,192 @@ export async function fetchWorkspaceIntakeScanRun(workspaceId: string, scanRunId
       updatedAt: string;
     };
     proof?: {
-      crawlSettings?: { maxPages?: number; maxDepth?: number; mode?: string };
-      pagesDiscovered: number;
-      pagesPersisted: number;
-      snapshotsSaved: number;
-      uniquePaths: number;
-      sampleUrls: string[];
-      extraction: {
-        extractionRuns: number;
-        sampleSnapshotUrls: string[];
+      coverage: {
+        profile: "default" | "coverage_first" | string;
+        status: string;
+        pagesDiscovered: number;
+        pagesFetched: number;
+        pagesPersisted: number;
+        uniquePathPatterns: number;
+        templateCoverageScore: number;
+        thresholds?: {
+          minPagesPersisted?: number;
+          minPagesFetched?: number;
+          minTemplatePatterns?: number;
+        } | null;
+        sampleStatuses?: string[];
       };
-      warnings: number;
-      failures: number;
+      extraction: {
+        lineagePersisted: number;
+        logos: number;
+        images: number;
+        fonts: number;
+        designTokens: number;
+        stylesheets: number;
+      };
+      quality: {
+        warnings: number;
+        failures: number;
+        failClosed: boolean;
+      };
+    };
+  }>(response);
+}
+
+export type WebsiteAssetPackKey = "brand_identity" | "typography" | "imagery" | "design_tokens";
+
+export type WebsiteAssetPackItemDto = {
+  id: string;
+  packKey: WebsiteAssetPackKey;
+  assetType: string;
+  role: string;
+  assetUrl: string;
+  normalizedAssetUrl: string;
+  confidence: number;
+  mimeType: string | null;
+  width: number | null;
+  height: number | null;
+  pageUrl: string;
+  selectorPath: string | null;
+  attributeName: string | null;
+  discoveryRuleId: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  snapshotId: string;
+  scanRunId: string | null;
+};
+
+export type WebsiteAssetPacksDto = {
+  workspaceId: string;
+  generatedAt: string;
+  sourceScanRunId: string | null;
+  coverage: {
+    status: string;
+    pagesDiscovered: number;
+    pagesFetched: number;
+    pagesPersisted: number;
+    uniquePathPatterns: number;
+    templateCoverageScore: number;
+  };
+  extraction: {
+    totalAssets: number;
+    logos: number;
+    images: number;
+    typography: number;
+    designTokens: number;
+  };
+  packs: Record<
+    WebsiteAssetPackKey,
+    {
+      key: WebsiteAssetPackKey;
+      count: number;
+      items: WebsiteAssetPackItemDto[];
+    }
+  >;
+  selection: {
+    primaryLogo: { value: string; label: string; confidence: number; evidenceRefs: string[] } | null;
+    typography: { value: string; label: string; confidence: number; evidenceRefs: string[] } | null;
+    colorPalette: { value: string; label: string; confidence: number; evidenceRefs: string[] } | null;
+  };
+  ambiguities: string[];
+};
+
+export async function fetchWorkspaceWebsiteAssetPacks(
+  workspaceId: string,
+  options?: { scanRunId?: string }
+) {
+  const params = new URLSearchParams();
+  if (typeof options?.scanRunId === "string" && options.scanRunId.trim()) {
+    params.set("scanRunId", options.scanRunId.trim());
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(
+    `/api/portal/workspaces/${workspaceId}/intake/websites/asset-packs/latest${suffix}`,
+    {
+      method: "GET",
+      cache: "no-store",
+      credentials: "include",
+    }
+  );
+  return parseJson<{ ok: boolean; packs: WebsiteAssetPacksDto }>(response);
+}
+
+export async function listWorkspaceBrandAssetAmbiguityTasks(workspaceId: string) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/intake/websites/ambiguity-tasks`, {
+    method: "GET",
+    cache: "no-store",
+    credentials: "include",
+  });
+  return parseJson<{
+    ok: boolean;
+    tasks: Array<{
+      id: string;
+      processRunId: string;
+      sectionRunId: string | null;
+      sectionKey: string | null;
+      sectionTitle: string | null;
+      fieldKey: string;
+      question: string;
+      severity: ProcessQuestionSeverity;
+      status: ProcessQuestionStatus;
+      surfacesJson?: unknown;
+      answerJson?: unknown;
+      createdAt: string;
+      updatedAt: string;
+      runStage: ProcessRunStage;
+      runStatus: ProcessRunStatus;
+    }>;
+  }>(response);
+}
+
+export async function fetchWorkspaceWebsiteAssetProvenance(workspaceId: string, assetId: string) {
+  const response = await fetch(
+    `/api/portal/workspaces/${workspaceId}/intake/websites/assets/${assetId}/provenance`,
+    {
+      method: "GET",
+      cache: "no-store",
+      credentials: "include",
+    }
+  );
+  return parseJson<{
+    ok: boolean;
+    asset: {
+      id: string;
+      assetType: string;
+      role: string | null;
+      assetUrl: string;
+      normalizedAssetUrl: string;
+      confidence: number;
+      mimeType: string | null;
+      width: number | null;
+      height: number | null;
+      pageUrl: string;
+      selectorPath: string | null;
+      attributeName: string | null;
+      metadata?: unknown;
+      firstSeenAt: string;
+      lastSeenAt: string;
+      snapshot: {
+        id: string;
+        finalUrl: string | null;
+        fetchedAt: string;
+        statusCode: number | null;
+        fetcherUsed: string;
+        webSource: {
+          id: string;
+          url: string;
+          domain: string;
+          sourceType: string;
+          discoveredBy: string;
+        };
+      };
+      scanRun: {
+        id: string;
+        mode: string;
+        status: string;
+        coverageStatus: string;
+        templateCoverageScore: number;
+      } | null;
     };
   }>(response);
 }

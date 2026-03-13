@@ -10,12 +10,37 @@ export type PortalIntakeScanMode = 'quick' | 'standard' | 'deep';
 type CrawlSettings = {
   maxPages: number;
   maxDepth: number;
+  coverageProfile: 'default' | 'coverage_first';
+  minPagesPersisted: number;
+  minPagesFetched: number;
+  minTemplatePatterns: number;
 };
 
 const CRAWL_SETTINGS_BY_MODE: Record<PortalIntakeScanMode, CrawlSettings> = {
-  quick: { maxPages: 4, maxDepth: 1 },
-  standard: { maxPages: 20, maxDepth: 2 },
-  deep: { maxPages: 100, maxDepth: 3 },
+  quick: {
+    maxPages: 4,
+    maxDepth: 1,
+    coverageProfile: 'default',
+    minPagesPersisted: 0,
+    minPagesFetched: 0,
+    minTemplatePatterns: 0,
+  },
+  standard: {
+    maxPages: 20,
+    maxDepth: 2,
+    coverageProfile: 'default',
+    minPagesPersisted: 0,
+    minPagesFetched: 0,
+    minTemplatePatterns: 0,
+  },
+  deep: {
+    maxPages: 180,
+    maxDepth: 4,
+    coverageProfile: 'coverage_first',
+    minPagesPersisted: 35,
+    minPagesFetched: 40,
+    minTemplatePatterns: 14,
+  },
 };
 
 const activeScans = new Set<string>();
@@ -210,10 +235,21 @@ export type PortalIntakeWebsiteScanSummary = {
   queuedTargets: string[];
   targetsCompleted: number;
   snapshotsSaved: number;
+  pagesDiscovered: number;
+  pagesFetched: number;
   pagesPersisted: number;
+  uniquePathPatterns: number;
+  templateCoverageScore: number;
+  coverageStatus: string;
   warnings: number;
   failures: number;
+  proof?: Record<string, unknown>;
 };
+
+function clampCoverageScore(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
+}
 
 export async function scanPortalIntakeWebsites(
   workspaceId: string,
@@ -275,7 +311,23 @@ export async function scanPortalIntakeWebsites(
       status: 'FAILED',
       targetsCompleted: 0,
       snapshotsSaved: 0,
+      pagesDiscovered: 0,
+      pagesFetched: 0,
       pagesPersisted: 0,
+      uniquePathPatterns: 0,
+      templateCoverageScore: 0,
+      coverageStatus: 'FAILED',
+      proof: {
+        coverage: {
+          profile: crawlSettings.coverageProfile,
+          status: 'FAILED',
+          pagesDiscovered: 0,
+          pagesFetched: 0,
+          pagesPersisted: 0,
+          uniquePathPatterns: 0,
+          templateCoverageScore: 0,
+        },
+      },
       warnings: 1,
       failures: 1,
       error: 'No valid websites found to scan.',
@@ -288,7 +340,12 @@ export async function scanPortalIntakeWebsites(
       queuedTargets: [],
       targetsCompleted: 0,
       snapshotsSaved: 0,
+      pagesDiscovered: 0,
+      pagesFetched: 0,
       pagesPersisted: 0,
+      uniquePathPatterns: 0,
+      templateCoverageScore: 0,
+      coverageStatus: 'FAILED',
       warnings: 1,
       failures: 1,
     };
@@ -304,7 +361,12 @@ export async function scanPortalIntakeWebsites(
       status: 'CANCELLED',
       targetsCompleted: 0,
       snapshotsSaved: 0,
+      pagesDiscovered: 0,
+      pagesFetched: 0,
       pagesPersisted: 0,
+      uniquePathPatterns: 0,
+      templateCoverageScore: 0,
+      coverageStatus: 'CANCELLED',
       warnings: 1,
       failures: 0,
       error: 'Scan skipped because another scan is already running.',
@@ -317,7 +379,12 @@ export async function scanPortalIntakeWebsites(
       queuedTargets: targets,
       targetsCompleted: 0,
       snapshotsSaved: 0,
+      pagesDiscovered: 0,
+      pagesFetched: 0,
       pagesPersisted: 0,
+      uniquePathPatterns: 0,
+      templateCoverageScore: 0,
+      coverageStatus: 'CANCELLED',
       warnings: 1,
       failures: 0,
     };
@@ -334,9 +401,22 @@ export async function scanPortalIntakeWebsites(
 
   let targetsCompleted = 0;
   let snapshotsSaved = 0;
+  let pagesDiscovered = 0;
+  let pagesFetched = 0;
   let pagesPersisted = 0;
+  let uniquePathPatterns = 0;
+  let templateCoverageScore = 0;
+  let coverageSamples = 0;
   let warnings = 0;
   let failures = 0;
+  let lineagePersisted = 0;
+  let logoCount = 0;
+  let imageCount = 0;
+  let fontCount = 0;
+  let designTokenCount = 0;
+  let stylesheetCount = 0;
+  const coverageStatuses: string[] = [];
+  let coverageHoldTriggered = false;
   let terminalError: string | null = null;
 
   await publish('SCAN_STARTED', `Starting ${mode} scan for ${targets.length} website(s).`, {
@@ -363,8 +443,22 @@ export async function scanPortalIntakeWebsites(
           discoveredBy: initiatedBy,
           mode: 'AUTO',
           allowExternal: true,
+          scanRunId: resolvedScanRunId,
+          metadata: {
+            coverageProfile: crawlSettings.coverageProfile,
+            scanMode: mode,
+            policy: 'website_intelligence_v2',
+          },
         });
         snapshotsSaved += 1;
+        if (snapshot.lineageSummary) {
+          lineagePersisted += Number(snapshot.lineageSummary.persisted || 0);
+          logoCount += Number(snapshot.lineageSummary.logos || 0);
+          imageCount += Number(snapshot.lineageSummary.images || 0);
+          fontCount += Number(snapshot.lineageSummary.fonts || 0);
+          designTokenCount += Number(snapshot.lineageSummary.designTokens || 0);
+          stylesheetCount += Number(snapshot.lineageSummary.stylesheets || 0);
+        }
 
         await publish('SNAPSHOT_SAVED', `Saved homepage snapshot for ${target}.`, {
           target,
@@ -373,6 +467,7 @@ export async function scanPortalIntakeWebsites(
           blockedSuspected: snapshot.blockedSuspected,
           fetcherUsed: snapshot.fetcherUsed,
           statusCode: snapshot.statusCode,
+          ...(snapshot.lineageSummary ? { lineageSummary: snapshot.lineageSummary } : {}),
           ...(snapshot.fallbackReason ? { fallbackReason: snapshot.fallbackReason } : {}),
         });
 
@@ -384,10 +479,49 @@ export async function scanPortalIntakeWebsites(
           maxDepth: crawlSettings.maxDepth,
           mode: 'AUTO',
           allowExternal: true,
+          scanRunId: resolvedScanRunId,
+          coverageProfile: crawlSettings.coverageProfile,
         });
 
+        pagesDiscovered += Number(crawl.pagesDiscovered || 0);
+        pagesFetched += Number(crawl.pagesFetched || 0);
         pagesPersisted += Number(crawl.persisted || 0);
+        uniquePathPatterns += Number(crawl.uniquePathPatterns || 0);
+        templateCoverageScore =
+          coverageSamples === 0
+            ? clampCoverageScore(Number(crawl.templateCoverageScore || 0))
+            : clampCoverageScore(
+                (templateCoverageScore * coverageSamples + Number(crawl.templateCoverageScore || 0)) /
+                  (coverageSamples + 1)
+              );
+        coverageSamples += 1;
+        coverageStatuses.push(String(crawl.coverageStatus || 'NOT_EVALUATED'));
+        if (crawl.assetStats) {
+          lineagePersisted += Number(crawl.assetStats.lineagePersisted || 0);
+          logoCount += Number(crawl.assetStats.logos || 0);
+          imageCount += Number(crawl.assetStats.images || 0);
+          fontCount += Number(crawl.assetStats.fonts || 0);
+          designTokenCount += Number(crawl.assetStats.designTokens || 0);
+          stylesheetCount += Number(crawl.assetStats.stylesheets || 0);
+        }
         targetsCompleted += 1;
+
+        if (crawl.fallbackReason && crawlSettings.coverageProfile === 'coverage_first') {
+          failures += 1;
+          coverageHoldTriggered = true;
+          terminalError = `Coverage-first crawl degraded to fallback for ${target}: ${crawl.fallbackReason}`;
+          await publish('SCAN_FAILED', `Coverage-first hold triggered for ${target}.`, {
+            target,
+            reason: 'coverage_fallback_degraded',
+            fallbackReason: crawl.fallbackReason,
+            persisted: crawl.persisted,
+            pagesDiscovered: crawl.pagesDiscovered,
+            pagesFetched: crawl.pagesFetched,
+            coverageStatus: crawl.coverageStatus,
+            runId: crawl.runId,
+          });
+          break;
+        }
 
         if (crawl.fallbackReason) {
           warnings += 1;
@@ -397,6 +531,31 @@ export async function scanPortalIntakeWebsites(
             persisted: crawl.persisted,
             runId: crawl.runId,
           });
+        }
+
+        if (crawlSettings.coverageProfile === 'coverage_first' && String(crawl.coverageStatus || '') !== 'SUFFICIENT') {
+          failures += 1;
+          coverageHoldTriggered = true;
+          terminalError =
+            terminalError ||
+            `Coverage thresholds were not met for ${target}. status=${crawl.coverageStatus} persisted=${crawl.persisted} patterns=${crawl.uniquePathPatterns}`;
+          await publish('SCAN_FAILED', `Coverage-first thresholds not met for ${target}.`, {
+            target,
+            reason: 'coverage_threshold_not_met',
+            coverageStatus: crawl.coverageStatus,
+            pagesDiscovered: crawl.pagesDiscovered,
+            pagesFetched: crawl.pagesFetched,
+            pagesPersisted: crawl.persisted,
+            uniquePathPatterns: crawl.uniquePathPatterns,
+            templateCoverageScore: crawl.templateCoverageScore,
+            thresholds: {
+              minPagesPersisted: crawlSettings.minPagesPersisted,
+              minPagesFetched: crawlSettings.minPagesFetched,
+              minTemplatePatterns: crawlSettings.minTemplatePatterns,
+            },
+            runId: crawl.runId,
+          });
+          break;
         }
 
         if (Array.isArray(crawl.failures) && crawl.failures.length > 0) {
@@ -414,6 +573,14 @@ export async function scanPortalIntakeWebsites(
           persisted: crawl.persisted,
           runId: crawl.runId,
           summary: crawl.summary,
+          coverage: {
+            pagesDiscovered: crawl.pagesDiscovered,
+            pagesFetched: crawl.pagesFetched,
+            uniquePathPatterns: crawl.uniquePathPatterns,
+            templateCoverageScore: crawl.templateCoverageScore,
+            coverageStatus: crawl.coverageStatus,
+          },
+          assetStats: crawl.assetStats,
           ...(crawl.fallbackReason ? { fallbackReason: crawl.fallbackReason } : {}),
         });
       } catch (error) {
@@ -444,19 +611,71 @@ export async function scanPortalIntakeWebsites(
       targets,
       targetsCompleted,
       snapshotsSaved,
+      pagesDiscovered,
+      pagesFetched,
       pagesPersisted,
+      uniquePathPatterns,
+      templateCoverageScore,
       warnings,
       failures,
     }
   );
 
+  const coverageStatus =
+    crawlSettings.coverageProfile === 'coverage_first'
+      ? coverageHoldTriggered || failures > 0 || coverageStatuses.length === 0 || coverageStatuses.some((status) => status !== 'SUFFICIENT')
+        ? 'THIN'
+        : 'SUFFICIENT'
+      : 'NOT_EVALUATED';
+
+  const proofPayload = {
+    coverage: {
+      profile: crawlSettings.coverageProfile,
+      status: coverageStatus,
+      pagesDiscovered,
+      pagesFetched,
+      pagesPersisted,
+      uniquePathPatterns,
+      templateCoverageScore: clampCoverageScore(templateCoverageScore),
+      thresholds:
+        crawlSettings.coverageProfile === 'coverage_first'
+          ? {
+              minPagesPersisted: crawlSettings.minPagesPersisted,
+              minPagesFetched: crawlSettings.minPagesFetched,
+              minTemplatePatterns: crawlSettings.minTemplatePatterns,
+            }
+          : null,
+      sampleStatuses: coverageStatuses.slice(0, 8),
+    },
+    extraction: {
+      lineagePersisted,
+      logos: logoCount,
+      images: imageCount,
+      fonts: fontCount,
+      designTokens: designTokenCount,
+      stylesheets: stylesheetCount,
+    },
+    quality: {
+      warnings,
+      failures,
+      failClosed: crawlSettings.coverageProfile === 'coverage_first',
+    },
+  };
+
   const finalStatus: 'COMPLETED' | 'FAILED' =
-    failures > 0 && targetsCompleted === 0 ? 'FAILED' : 'COMPLETED';
+    coverageHoldTriggered || (failures > 0 && targetsCompleted === 0) ? 'FAILED' : 'COMPLETED';
   await updatePortalIntakeScanRun(resolvedScanRunId, {
     status: finalStatus,
     targetsCompleted,
     snapshotsSaved,
+    pagesDiscovered,
+    pagesFetched,
     pagesPersisted,
+    uniquePathPatterns,
+    templateCoverageScore: clampCoverageScore(templateCoverageScore),
+    coverageStatus,
+    proof: proofPayload,
+    assetStats: proofPayload.extraction,
     warnings,
     failures,
     error: finalStatus === 'FAILED' ? terminalError || 'Scan failed.' : null,
@@ -470,9 +689,15 @@ export async function scanPortalIntakeWebsites(
     queuedTargets: targets,
     targetsCompleted,
     snapshotsSaved,
+    pagesDiscovered,
+    pagesFetched,
     pagesPersisted,
+    uniquePathPatterns,
+    templateCoverageScore: clampCoverageScore(templateCoverageScore),
+    coverageStatus,
     warnings,
     failures,
+    proof: proofPayload,
   };
 }
 

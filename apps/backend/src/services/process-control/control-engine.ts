@@ -41,6 +41,13 @@ import {
   processControlV2DefaultMaxRetryWithEvidence,
 } from './feature-flags';
 import { planBusinessStrategyHeaders } from './header-planner';
+import {
+  BRAND_ASSET_FIELD_KEYS,
+  BRAND_ASSET_FIELD_KEY_SET,
+  buildBrandAssetQuestionOptionsFromPacks,
+  getLatestWorkspaceWebsiteAssetPacks,
+  type WebsiteAssetPacksResult,
+} from '../scraping/website-asset-packs';
 
 type ProcessRunRecord = Prisma.ProcessRunGetPayload<{
   include: {
@@ -440,6 +447,9 @@ const SECTION_INPUT_ALIASES: Record<string, string[]> = {
   autonomyLevel: ['autonomyLevel'],
   budgetSensitivity: ['budgetSensitivity'],
   competitorInspirationLinks: ['competitorInspirationLinks'],
+  brandPrimaryLogo: ['brandPrimaryLogo'],
+  brandTypography: ['brandTypography'],
+  brandColorPalette: ['brandColorPalette'],
 };
 
 type EvidenceRow = {
@@ -503,12 +513,67 @@ function inferLanguageFromEvidence(evidenceRows: EvidenceRow[]): string | null {
   return 'english';
 }
 
+function fieldHasAssetAmbiguity(fieldKey: string, packs: WebsiteAssetPacksResult | null): boolean {
+  if (!packs) return false;
+  if (fieldKey === BRAND_ASSET_FIELD_KEYS.logo) {
+    return packs.ambiguities.some((item) => /logo/i.test(normalizeText(item)));
+  }
+  if (fieldKey === BRAND_ASSET_FIELD_KEYS.typography) {
+    return packs.ambiguities.some((item) => /typography|font/i.test(normalizeText(item)));
+  }
+  return false;
+}
+
+function inferFieldFromAssetPacks(
+  fieldKey: string,
+  packs: WebsiteAssetPacksResult | null
+): { value: unknown; evidenceRefs: string[] } | null {
+  if (!packs) return null;
+  if (fieldHasAssetAmbiguity(fieldKey, packs)) return null;
+
+  if (fieldKey === BRAND_ASSET_FIELD_KEYS.logo && packs.selection.primaryLogo) {
+    return {
+      value: packs.selection.primaryLogo.value,
+      evidenceRefs: packs.selection.primaryLogo.evidenceRefs,
+    };
+  }
+
+  if (fieldKey === BRAND_ASSET_FIELD_KEYS.typography && packs.selection.typography) {
+    return {
+      value: packs.selection.typography.value,
+      evidenceRefs: packs.selection.typography.evidenceRefs,
+    };
+  }
+
+  if (fieldKey === BRAND_ASSET_FIELD_KEYS.colors && packs.selection.colorPalette) {
+    return {
+      value: packs.selection.colorPalette.value,
+      evidenceRefs: packs.selection.colorPalette.evidenceRefs,
+    };
+  }
+
+  return null;
+}
+
+function resolveBrandFieldQuestionOptions(
+  fieldKey: string,
+  packs: WebsiteAssetPacksResult | null
+): Array<{ value: string; label: string }> {
+  if (!packs || !BRAND_ASSET_FIELD_KEY_SET.has(fieldKey)) return [];
+  const optionsByField = buildBrandAssetQuestionOptionsFromPacks(packs);
+  if (fieldKey === BRAND_ASSET_FIELD_KEYS.logo) return optionsByField.brandPrimaryLogo;
+  if (fieldKey === BRAND_ASSET_FIELD_KEYS.typography) return optionsByField.brandTypography;
+  if (fieldKey === BRAND_ASSET_FIELD_KEYS.colors) return optionsByField.brandColorPalette;
+  return [];
+}
+
 function inferFieldFromEvidence(input: {
   fieldKey: string;
   availableInputs: Record<string, unknown>;
   evidenceRows: EvidenceRow[];
   discoveredCompetitors: CompetitorSeed[];
   clientDomain: string;
+  assetPacks: WebsiteAssetPacksResult | null;
 }): { value: unknown; evidenceRefs: string[] } | null {
   const aliases = SECTION_INPUT_ALIASES[input.fieldKey] || [];
   for (const alias of aliases) {
@@ -539,6 +604,11 @@ function inferFieldFromEvidence(input: {
         evidenceRefs: input.evidenceRows.slice(0, 4).map((row) => row.id),
       };
     }
+  }
+
+  const inferredFromAssets = inferFieldFromAssetPacks(input.fieldKey, input.assetPacks);
+  if (inferredFromAssets) {
+    return inferredFromAssets;
   }
 
   return null;
@@ -885,6 +955,11 @@ async function draftSections(
     },
   });
   const availableInputs = buildAvailableInputs(inputData, answeredTasks);
+  const assetPacks = await getLatestWorkspaceWebsiteAssetPacks({
+    workspaceId: run.researchJobId,
+    maxRows: 500,
+    maxPerPack: 40,
+  }).catch(() => null);
   const runtimeAnswersState: Record<string, unknown> = { ...asRecord(inputData.runtimeAnswers) };
   const clientDomain = extractDomain(inputData.website);
 
@@ -966,6 +1041,7 @@ async function draftSections(
           evidenceRows,
           discoveredCompetitors: workspace.discoveredCompetitors,
           clientDomain,
+          assetPacks,
         });
         if (!inferred || !hasUsableValue(inferred.value)) continue;
         availableInputs[field.key] = inferred.value;
@@ -1004,12 +1080,65 @@ async function draftSections(
             hydratedFields: Object.keys(hydratedAnswers),
           },
         });
+
+        const assetHydrated = Object.entries(hydratedAnswers).filter(([fieldKey]) =>
+          BRAND_ASSET_FIELD_KEY_SET.has(fieldKey)
+        );
+        for (const [fieldKey, value] of assetHydrated) {
+          await logDecisionEvent({
+            runId: run.id,
+            workspaceId: run.researchJobId,
+            stage: ProcessRunStage.SECTION_DRAFTING,
+            ruleId: `manager/asset_selection/${fieldKey}/v1`,
+            inputSnapshot: {
+              sectionKey: sectionRun.sectionKey,
+              sourceScanRunId: assetPacks?.sourceScanRunId || null,
+            },
+            evidenceRefs: [...evidenceRefs].slice(0, 12),
+            output: {
+              fieldKey,
+              chosenArtifact: value,
+            },
+          });
+        }
       }
 
       missing = contract.requiredInputs.filter((field) => !hasUsableValue(availableInputs[field.key]));
     }
 
     for (const field of missing) {
+      const severity =
+        field.severity === 'BLOCKER'
+          ? ProcessQuestionSeverity.BLOCKER
+          : field.severity === 'IMPORTANT'
+            ? ProcessQuestionSeverity.IMPORTANT
+            : ProcessQuestionSeverity.OPTIONAL;
+      const dynamicOptions = resolveBrandFieldQuestionOptions(field.key, assetPacks);
+      const resolvedOptions = dynamicOptions.length > 0 ? dynamicOptions : field.options;
+      const resolvedSuggestedAnswers =
+        field.suggestedAnswers.length > 0
+          ? field.suggestedAnswers
+          : resolvedOptions.map((option) => option.label).filter(Boolean).slice(0, 6);
+
+      if (BRAND_ASSET_FIELD_KEY_SET.has(field.key)) {
+        await logDecisionEvent({
+          runId: run.id,
+          workspaceId: run.researchJobId,
+          stage: ProcessRunStage.SECTION_DRAFTING,
+          ruleId: `manager/asset_ambiguity/${field.key}/v1`,
+          inputSnapshot: {
+            sectionKey: sectionRun.sectionKey,
+            sourceScanRunId: assetPacks?.sourceScanRunId || null,
+            ambiguityDetected: fieldHasAssetAmbiguity(field.key, assetPacks),
+          },
+          evidenceRefs: resolvedOptions.map((option) => option.value).slice(0, 12),
+          output: {
+            action: 'question_task_created',
+            optionCount: resolvedOptions.length,
+          },
+        });
+      }
+
       await ensureQuestionTask({
         runId: run.id,
         workspaceId: run.researchJobId,
@@ -1017,15 +1146,10 @@ async function draftSections(
         sourceSectionKey: contract.sectionSlug,
         fieldKey: field.key,
         question: field.question,
-        severity:
-          field.severity === 'BLOCKER'
-            ? ProcessQuestionSeverity.BLOCKER
-            : field.severity === 'IMPORTANT'
-              ? ProcessQuestionSeverity.IMPORTANT
-              : ProcessQuestionSeverity.OPTIONAL,
+        severity,
         answerType: field.answerType,
-        options: field.options,
-        suggestedAnswers: field.suggestedAnswers,
+        options: resolvedOptions,
+        suggestedAnswers: resolvedSuggestedAnswers,
         requestedBy: 'manager',
       });
     }
@@ -1122,6 +1246,11 @@ async function validateSections(run: ProcessRunRecord): Promise<{ blockerPending
     },
   });
   const availableInputs = buildAvailableInputs(inputData, answeredTasks);
+  const assetPacks = await getLatestWorkspaceWebsiteAssetPacks({
+    workspaceId: run.researchJobId,
+    maxRows: 500,
+    maxPerPack: 40,
+  }).catch(() => null);
 
   const sections = await prisma.processSectionRun.findMany({
     where: { processRunId: run.id },
@@ -1251,6 +1380,12 @@ async function validateSections(run: ProcessRunRecord): Promise<{ blockerPending
           : field.severity === 'IMPORTANT'
             ? ProcessQuestionSeverity.IMPORTANT
             : ProcessQuestionSeverity.OPTIONAL;
+      const dynamicOptions = resolveBrandFieldQuestionOptions(field.key, assetPacks);
+      const resolvedOptions = dynamicOptions.length > 0 ? dynamicOptions : field.options;
+      const resolvedSuggestedAnswers =
+        field.suggestedAnswers.length > 0
+          ? field.suggestedAnswers
+          : resolvedOptions.map((option) => option.label).filter(Boolean).slice(0, 6);
       await ensureQuestionTask({
         runId: run.id,
         workspaceId: run.researchJobId,
@@ -1260,8 +1395,8 @@ async function validateSections(run: ProcessRunRecord): Promise<{ blockerPending
         question: field.question,
         severity,
         answerType: field.answerType,
-        options: field.options,
-        suggestedAnswers: field.suggestedAnswers,
+        options: resolvedOptions,
+        suggestedAnswers: resolvedSuggestedAnswers,
       });
       if (BLOCKER_SEVERITIES.has(severity)) {
         blockerPending = true;
@@ -1489,6 +1624,42 @@ async function runFinalGate(run: ProcessRunRecord): Promise<{ ready: boolean; wa
       waitForInput: false,
       escalate: true,
       reason: `${ungroundedClaims.length} material claim(s) have no evidence lineage.`,
+    };
+  }
+
+  const [logoLineageCount, typographyLineageCount, colorLineageCount] = await Promise.all([
+    prisma.processEvidenceRecord.count({
+      where: {
+        processRunId: run.id,
+        sourceType: {
+          in: ['website_asset_selection_logo', 'website_asset_brand_identity'],
+        },
+      },
+    }),
+    prisma.processEvidenceRecord.count({
+      where: {
+        processRunId: run.id,
+        sourceType: {
+          in: ['website_asset_selection_typography', 'website_asset_typography'],
+        },
+      },
+    }),
+    prisma.processEvidenceRecord.count({
+      where: {
+        processRunId: run.id,
+        sourceType: {
+          in: ['website_asset_selection_palette', 'website_asset_design_tokens'],
+        },
+      },
+    }),
+  ]);
+
+  if (logoLineageCount === 0 || typographyLineageCount === 0 || colorLineageCount === 0) {
+    return {
+      ready: false,
+      waitForInput: false,
+      escalate: true,
+      reason: `Core website lineage missing (logo:${logoLineageCount}, typography:${typographyLineageCount}, design_tokens:${colorLineageCount}).`,
     };
   }
 
