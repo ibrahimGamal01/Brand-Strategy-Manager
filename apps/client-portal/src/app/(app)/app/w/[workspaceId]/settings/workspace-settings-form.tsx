@@ -41,7 +41,16 @@ export function WorkspaceSettingsForm({ workspaceId }: { workspaceId: string }) 
     setLinkedinLoading(true);
     try {
       const status = await getLinkedInIntegrationStatus(workspaceId);
-      setLinkedin(status);
+      setLinkedin({
+        ...status,
+        capabilities: status.capabilities || {
+          identity: false,
+          posts: false,
+          analytics: false,
+          share: false,
+          grantedScopes: [],
+        },
+      });
     } catch (loadError: unknown) {
       setLinkedin({
         available: false,
@@ -316,13 +325,13 @@ export function WorkspaceSettingsForm({ workspaceId }: { workspaceId: string }) 
                       : linkedin?.reasonMessage || "LinkedIn is not available in this environment."}
                   </p>
                   <p>
-                    <strong>Identity access:</strong> {linkedin?.capabilities.identity ? "Available" : "Not available"}
+                    <strong>Identity access:</strong> {linkedin?.capabilities?.identity ? "Available" : "Not available"}
                   </p>
                   <p>
-                    <strong>Post content access:</strong> {linkedin?.capabilities.posts ? "Available" : "Not approved for this LinkedIn app"}
+                    <strong>Post content access:</strong> {linkedin?.capabilities?.posts ? "Available" : "Not approved for this LinkedIn app"}
                   </p>
                   <p>
-                    <strong>Post analytics access:</strong> {linkedin?.capabilities.analytics ? "Available" : "Not approved for this LinkedIn app"}
+                    <strong>Post analytics access:</strong> {linkedin?.capabilities?.analytics ? "Available" : "Not approved for this LinkedIn app"}
                   </p>
                   <p>
                     <strong>Profile:</strong>{" "}
