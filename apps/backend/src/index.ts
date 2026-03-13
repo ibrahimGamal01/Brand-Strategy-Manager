@@ -237,6 +237,14 @@ async function startServer(): Promise<void> {
     } else {
       console.log('🔄 Continuous orchestration scheduler disabled on this instance');
     }
+
+    if (isEnvFlagEnabled('LINKEDIN_SYNC_ENABLED', true)) {
+      const { startLinkedInSyncScheduler } = require('./services/portal/portal-linkedin-scheduler');
+      startLinkedInSyncScheduler();
+      console.log('🔗 LinkedIn sync scheduler started');
+    } else {
+      console.log('🔗 LinkedIn sync scheduler disabled on this instance');
+    }
   });
 }
 
