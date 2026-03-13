@@ -48,6 +48,13 @@ export function WorkspaceSettingsForm({ workspaceId }: { workspaceId: string }) 
         featureEnabled: false,
         configured: false,
         status: "error",
+        capabilities: {
+          identity: false,
+          posts: false,
+          analytics: false,
+          share: false,
+          grantedScopes: [],
+        },
         reasonMessage: String((loadError as Error)?.message || "Failed to load LinkedIn status"),
       });
     } finally {
@@ -61,7 +68,7 @@ export function WorkspaceSettingsForm({ workspaceId }: { workspaceId: string }) 
 
   useEffect(() => {
     if (linkedinQueryStatus === "connected") {
-      setLinkedinMessage("LinkedIn connected. We refreshed your profile and started syncing posts.");
+      setLinkedinMessage("LinkedIn connected. We refreshed your LinkedIn identity and workspace profile data.");
       void refreshLinkedInStatus();
       router.replace(`/app/w/${workspaceId}/settings`);
     } else if (linkedinQueryStatus === "error") {
@@ -173,7 +180,8 @@ export function WorkspaceSettingsForm({ workspaceId }: { workspaceId: string }) 
     try {
       const result = await syncLinkedInIntegration(workspaceId);
       setLinkedinMessage(
-        `LinkedIn sync finished. ${result.postsUpserted} new posts, ${result.postsUpdated} updated posts, ${result.snapshotsWritten} analytics snapshots.`
+        result.message ||
+          `LinkedIn sync finished. ${result.postsUpserted} new posts, ${result.postsUpdated} updated posts, ${result.snapshotsWritten} analytics snapshots.`
       );
       await refreshLinkedInStatus();
     } catch (syncError: unknown) {
@@ -278,7 +286,7 @@ export function WorkspaceSettingsForm({ workspaceId }: { workspaceId: string }) 
             <p className="bat-chip">LinkedIn Integration</p>
             <h2 className="mt-3 text-xl font-semibold">Connect a user’s LinkedIn account</h2>
             <p className="mt-2 max-w-3xl text-sm md:text-base" style={{ color: "var(--bat-text-muted)" }}>
-              Pull the connected user’s LinkedIn name, recent post content, and post analytics into this workspace.
+              Connect LinkedIn at the workspace level. We always pull the member identity that LinkedIn allows, and we only sync posts and analytics when the LinkedIn app has those extra approved permissions.
             </p>
           </div>
           <span
@@ -308,6 +316,15 @@ export function WorkspaceSettingsForm({ workspaceId }: { workspaceId: string }) 
                       : linkedin?.reasonMessage || "LinkedIn is not available in this environment."}
                   </p>
                   <p>
+                    <strong>Identity access:</strong> {linkedin?.capabilities.identity ? "Available" : "Not available"}
+                  </p>
+                  <p>
+                    <strong>Post content access:</strong> {linkedin?.capabilities.posts ? "Available" : "Not approved for this LinkedIn app"}
+                  </p>
+                  <p>
+                    <strong>Post analytics access:</strong> {linkedin?.capabilities.analytics ? "Available" : "Not approved for this LinkedIn app"}
+                  </p>
+                  <p>
                     <strong>Profile:</strong>{" "}
                     {linkedin?.profile?.displayName || "No LinkedIn user connected yet"}
                   </p>
@@ -331,6 +348,11 @@ export function WorkspaceSettingsForm({ workspaceId }: { workspaceId: string }) 
                   {linkedin?.reasonMessage ? (
                     <p className="rounded-xl border px-3 py-2" style={{ borderColor: "var(--bat-border)" }}>
                       {linkedin.reasonMessage}
+                    </p>
+                  ) : null}
+                  {linkedin?.capabilities?.grantedScopes?.length ? (
+                    <p className="rounded-xl border px-3 py-2 text-xs" style={{ borderColor: "var(--bat-border)" }}>
+                      <strong>Granted scopes:</strong> {linkedin.capabilities.grantedScopes.join(", ")}
                     </p>
                   ) : null}
                 </div>

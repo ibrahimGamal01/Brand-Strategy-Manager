@@ -3,6 +3,7 @@ import {
   buildLinkedInAuthUrlForTests,
   decodeLinkedInOauthCookieForTests,
   encodeLinkedInOauthCookieForTests,
+  getLinkedInCapabilitiesForTests,
   getLinkedInStatusForTests,
 } from '../services/portal/portal-linkedin';
 
@@ -45,6 +46,23 @@ async function main() {
   assert.equal(getLinkedInStatusForTests({ status: 'syncing', featureEnabled: true, configured: true }), 'syncing');
   assert.equal(getLinkedInStatusForTests({ status: 'error', featureEnabled: true, configured: true }), 'error');
   assert.equal(getLinkedInStatusForTests({ status: 'active', featureEnabled: false, configured: false }), 'unavailable');
+
+  const limitedCapabilities = getLinkedInCapabilitiesForTests(['openid', 'profile', 'email']);
+  assert.equal(limitedCapabilities.canFetchIdentity, true);
+  assert.equal(limitedCapabilities.canReadPosts, false);
+  assert.equal(limitedCapabilities.canReadPostAnalytics, false);
+  assert.ok(limitedCapabilities.noticeMessage);
+
+  const fullCapabilities = getLinkedInCapabilitiesForTests([
+    'openid',
+    'profile',
+    'email',
+    'r_member_social',
+    'r_member_postAnalytics',
+  ]);
+  assert.equal(fullCapabilities.canReadPosts, true);
+  assert.equal(fullCapabilities.canReadPostAnalytics, true);
+  assert.equal(fullCapabilities.noticeMessage, undefined);
 
   console.log('LinkedIn integration helper tests passed');
 }

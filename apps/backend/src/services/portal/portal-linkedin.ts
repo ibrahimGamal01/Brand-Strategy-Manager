@@ -21,12 +21,21 @@ const DEFAULT_LINKEDIN_SCOPES = [
   'openid',
   'profile',
   'email',
-  'r_member_social',
-  'r_member_postAnalytics',
-  'r_member_profileAnalytics',
 ];
+const LINKEDIN_POST_READ_SCOPES = ['r_member_social'];
+const LINKEDIN_POST_ANALYTICS_SCOPES = ['r_member_postAnalytics'];
 
 type JsonRecord = Record<string, unknown>;
+
+type LinkedInCapabilities = {
+  canFetchIdentity: boolean;
+  canReadPosts: boolean;
+  canReadPostAnalytics: boolean;
+  canSharePosts: boolean;
+  grantedScopes: string[];
+  noticeCode?: string;
+  noticeMessage?: string;
+};
 
 type LinkedInFeatureState = {
   featureEnabled: boolean;
@@ -35,6 +44,7 @@ type LinkedInFeatureState = {
   reasonCode?: string;
   reasonMessage?: string;
   scopes: string[];
+  capabilities: LinkedInCapabilities;
 };
 
 type LinkedInOauthCookiePayload = {
@@ -79,6 +89,7 @@ type LinkedInSyncResult = {
   postsUpdated: number;
   snapshotsWritten: number;
   lastSyncedAt: string;
+  message?: string;
 };
 
 type LinkedInStatusPayload = {
@@ -95,6 +106,15 @@ type LinkedInStatusPayload = {
     | 'disconnected';
   reasonCode?: string;
   reasonMessage?: string;
+  capabilities: {
+    identity: boolean;
+    posts: boolean;
+    analytics: boolean;
+    share: boolean;
+    grantedScopes: string[];
+    noticeCode?: string;
+    noticeMessage?: string;
+  };
   profile?: {
     displayName: string | null;
     handle: string | null;
@@ -143,6 +163,41 @@ function getLinkedInScopes(): string[] {
   return configured ? normalizeLinkedInScopes(configured) : [...DEFAULT_LINKEDIN_SCOPES];
 }
 
+function hasAnyScope(scopes: string[], requiredScopes: string[]): boolean {
+  const granted = new Set(scopes.map((scope) => scope.trim()).filter(Boolean));
+  return requiredScopes.some((scope) => granted.has(scope));
+}
+
+function getLinkedInCapabilities(scopes: string[]): LinkedInCapabilities {
+  const grantedScopes = Array.from(new Set(scopes.map((scope) => scope.trim()).filter(Boolean)));
+  const canFetchIdentity =
+    grantedScopes.includes('openid') || grantedScopes.includes('profile') || grantedScopes.includes('email');
+  const canReadPosts = hasAnyScope(grantedScopes, LINKEDIN_POST_READ_SCOPES);
+  const canReadPostAnalytics = hasAnyScope(grantedScopes, LINKEDIN_POST_ANALYTICS_SCOPES);
+  const canSharePosts = grantedScopes.includes('w_member_social');
+
+  if (!canReadPosts || !canReadPostAnalytics) {
+    return {
+      canFetchIdentity,
+      canReadPosts,
+      canReadPostAnalytics,
+      canSharePosts,
+      grantedScopes,
+      noticeCode: 'LIMITED_MEMBER_ACCESS',
+      noticeMessage:
+        'LinkedIn connected successfully for profile identity. This app does not currently have LinkedIn approval to read member posts and post analytics for personal profiles.',
+    };
+  }
+
+  return {
+    canFetchIdentity,
+    canReadPosts,
+    canReadPostAnalytics,
+    canSharePosts,
+    grantedScopes,
+  };
+}
+
 function getLinkedInFeatureState(): LinkedInFeatureState {
   const featureEnabled = parseBoolean(process.env.LINKEDIN_FEATURE_ENABLED, false);
   const clientId = safeString(process.env.LINKEDIN_CLIENT_ID);
@@ -150,6 +205,7 @@ function getLinkedInFeatureState(): LinkedInFeatureState {
   const redirectUri = safeString(process.env.LINKEDIN_REDIRECT_URI);
   const encryptionKey = safeString(process.env.LINKEDIN_TOKEN_ENCRYPTION_KEY);
   const scopes = getLinkedInScopes();
+  const capabilities = getLinkedInCapabilities(scopes);
 
   if (!featureEnabled) {
     return {
@@ -159,6 +215,7 @@ function getLinkedInFeatureState(): LinkedInFeatureState {
       reasonCode: 'FEATURE_DISABLED',
       reasonMessage: 'LinkedIn integration is disabled in this environment.',
       scopes,
+      capabilities,
     };
   }
 
@@ -171,6 +228,7 @@ function getLinkedInFeatureState(): LinkedInFeatureState {
       reasonCode: 'MISSING_CONFIG',
       reasonMessage: 'LinkedIn app configuration is missing on the server.',
       scopes,
+      capabilities,
     };
   }
 
@@ -179,6 +237,7 @@ function getLinkedInFeatureState(): LinkedInFeatureState {
     configured,
     available: true,
     scopes,
+    capabilities,
   };
 }
 
@@ -871,6 +930,15 @@ export async function getLinkedInIntegrationStatus(input: {
       status: 'unavailable',
       reasonCode: featureState.reasonCode,
       reasonMessage: featureState.reasonMessage,
+      capabilities: {
+        identity: featureState.capabilities.canFetchIdentity,
+        posts: featureState.capabilities.canReadPosts,
+        analytics: featureState.capabilities.canReadPostAnalytics,
+        share: featureState.capabilities.canSharePosts,
+        grantedScopes: featureState.capabilities.grantedScopes,
+        noticeCode: featureState.capabilities.noticeCode,
+        noticeMessage: featureState.capabilities.noticeMessage,
+      },
     };
   }
 
@@ -893,8 +961,24 @@ export async function getLinkedInIntegrationStatus(input: {
       featureEnabled: featureState.featureEnabled,
       configured: featureState.configured,
       status: 'not_connected',
+      capabilities: {
+        identity: featureState.capabilities.canFetchIdentity,
+        posts: featureState.capabilities.canReadPosts,
+        analytics: featureState.capabilities.canReadPostAnalytics,
+        share: featureState.capabilities.canSharePosts,
+        grantedScopes: featureState.capabilities.grantedScopes,
+        noticeCode: featureState.capabilities.noticeCode,
+        noticeMessage: featureState.capabilities.noticeMessage,
+      },
+      reasonMessage: featureState.capabilities.noticeMessage,
     };
   }
+
+  const connectionScopes = Array.isArray(connection.scopesJson)
+    ? connection.scopesJson.map((value: unknown) => safeString(value)).filter(Boolean)
+    : featureState.scopes;
+  const capabilities = getLinkedInCapabilities(connectionScopes);
+  const reasonMessage = connection.lastSyncError || capabilities.noticeMessage || undefined;
 
   const importedPosts = connection.socialProfileId
     ? await prisma.socialPost.count({ where: { socialProfileId: connection.socialProfileId } })
@@ -912,7 +996,17 @@ export async function getLinkedInIntegrationStatus(input: {
     featureEnabled: featureState.featureEnabled,
     configured: featureState.configured,
     status: (connection.status === 'active' ? 'connected' : connection.status) as LinkedInStatusPayload['status'],
-    reasonMessage: connection.lastSyncError || undefined,
+    reasonCode: capabilities.noticeCode,
+    reasonMessage,
+    capabilities: {
+      identity: capabilities.canFetchIdentity,
+      posts: capabilities.canReadPosts,
+      analytics: capabilities.canReadPostAnalytics,
+      share: capabilities.canSharePosts,
+      grantedScopes: capabilities.grantedScopes,
+      noticeCode: capabilities.noticeCode,
+      noticeMessage: capabilities.noticeMessage,
+    },
     profile: {
       displayName: connection.displayName,
       handle: connection.socialProfile?.handle || null,
@@ -973,6 +1067,7 @@ function callbackRedirectUrl(req: Request, workspaceId: string, status: string, 
 
 export async function completeLinkedInOAuthCallback(req: Request, res: Response): Promise<void> {
   const featureState = getLinkedInFeatureState();
+  const capabilities = featureState.capabilities;
   const cookies = parseCookies(req.headers.cookie);
   const oauthCookie = decodeOauthCookie(cookies[LINKEDIN_COOKIE_NAME]);
   const requestedState = safeString(req.query.state);
@@ -1044,9 +1139,9 @@ export async function completeLinkedInOAuthCallback(req: Request, res: Response)
         refreshTokenExpiresAt: addMilliseconds(new Date(), Number(tokenPayload.refresh_token_expires_in)),
         scopesJson: getLinkedInScopes(),
         disconnectedAt: null,
-        lastSyncStatus: 'connected',
-        lastSyncError: null,
-        nextSyncAt: new Date(Date.now() + DAILY_SYNC_MS),
+        lastSyncStatus: capabilities.canReadPosts && capabilities.canReadPostAnalytics ? 'connected' : 'connected_identity_only',
+        lastSyncError: capabilities.noticeMessage || null,
+        nextSyncAt: capabilities.canReadPosts && capabilities.canReadPostAnalytics ? new Date(Date.now() + DAILY_SYNC_MS) : null,
       },
       create: {
         userId: oauthCookie.userId,
@@ -1065,8 +1160,9 @@ export async function completeLinkedInOAuthCallback(req: Request, res: Response)
         accessTokenExpiresAt: addMilliseconds(new Date(), Number(tokenPayload.expires_in)),
         refreshTokenExpiresAt: addMilliseconds(new Date(), Number(tokenPayload.refresh_token_expires_in)),
         scopesJson: getLinkedInScopes(),
-        lastSyncStatus: 'connected',
-        nextSyncAt: new Date(Date.now() + DAILY_SYNC_MS),
+        lastSyncStatus: capabilities.canReadPosts && capabilities.canReadPostAnalytics ? 'connected' : 'connected_identity_only',
+        lastSyncError: capabilities.noticeMessage || null,
+        nextSyncAt: capabilities.canReadPosts && capabilities.canReadPostAnalytics ? new Date(Date.now() + DAILY_SYNC_MS) : null,
       },
     });
 
@@ -1081,10 +1177,12 @@ export async function completeLinkedInOAuthCallback(req: Request, res: Response)
       data: { socialProfileId: socialProfile.id },
     });
 
-    try {
-      await syncLinkedInConnection({ workspaceId: oauthCookie.workspaceId, userId: oauthCookie.userId });
-    } catch (error) {
-      console.warn('[LinkedIn] Initial sync after callback failed:', error);
+    if (capabilities.canReadPosts && capabilities.canReadPostAnalytics) {
+      try {
+        await syncLinkedInConnection({ workspaceId: oauthCookie.workspaceId, userId: oauthCookie.userId });
+      } catch (error) {
+        console.warn('[LinkedIn] Initial sync after callback failed:', error);
+      }
     }
 
     clearOauthCookie(res);
@@ -1111,6 +1209,11 @@ export async function syncLinkedInConnection(input: { workspaceId: string; userI
     throw new Error('LinkedIn connection not found.');
   }
 
+  const connectionScopes = Array.isArray(connection.scopesJson)
+    ? connection.scopesJson.map((value: unknown) => safeString(value)).filter(Boolean)
+    : getLinkedInScopes();
+  const capabilities = getLinkedInCapabilities(connectionScopes);
+
   await prisma.portalLinkedInConnection.update({
     where: { id: connection.id },
     data: {
@@ -1129,6 +1232,53 @@ export async function syncLinkedInConnection(input: { workspaceId: string; userI
       identity,
       followersCount,
     });
+
+    if (!capabilities.canReadPosts || !capabilities.canReadPostAnalytics) {
+      const now = new Date();
+      await prisma.portalLinkedInConnection.update({
+        where: { id: connection.id },
+        data: {
+          status: 'active',
+          socialProfileId: socialProfile.id,
+          displayName: identity.displayName,
+          profileUrl: identity.profileUrl,
+          profileImageUrl: identity.profileImageUrl,
+          headline: identity.headline,
+          email: identity.email,
+          linkedinMemberId: identity.memberId,
+          linkedinMemberUrn: identity.memberUrn,
+          lastSyncedAt: now,
+          nextSyncAt: null,
+          lastSyncStatus: 'identity_refreshed',
+          lastSyncError: capabilities.noticeMessage || null,
+        },
+      });
+
+      await logConnectorRun({
+        researchJobId: input.workspaceId,
+        target: identity.memberUrn,
+        ok: true,
+        meta: {
+          identityOnly: true,
+          postsFetched: 0,
+          snapshotsWritten: 0,
+          grantedScopes: capabilities.grantedScopes,
+        },
+      });
+
+      return {
+        connectionId: connection.id,
+        connectionStatus: 'connected',
+        postsUpserted: 0,
+        postsUpdated: 0,
+        snapshotsWritten: 0,
+        lastSyncedAt: now.toISOString(),
+        message:
+          capabilities.noticeMessage ||
+          'LinkedIn identity refreshed. Member post content and analytics are not available to this app yet.',
+      };
+    }
+
     const posts = await fetchLinkedInPosts(accessToken, identity.memberUrn, INITIAL_SYNC_POST_LIMIT);
 
     let postsUpserted = 0;
@@ -1317,6 +1467,10 @@ export function buildLinkedInAuthUrlForTests(input: { clientId: string; redirect
 
 export function encodeLinkedInOauthCookieForTests(payload: LinkedInOauthCookiePayload): string {
   return encodeOauthCookie(payload);
+}
+
+export function getLinkedInCapabilitiesForTests(scopes: string[]): LinkedInCapabilities {
+  return getLinkedInCapabilities(scopes);
 }
 
 export function decodeLinkedInOauthCookieForTests(value: string): LinkedInOauthCookiePayload | null {

@@ -32,6 +32,15 @@ export interface LinkedInIntegrationStatus {
   status: "unavailable" | "not_connected" | "connected" | "syncing" | "action_required" | "error" | "disconnected";
   reasonCode?: string;
   reasonMessage?: string;
+  capabilities: {
+    identity: boolean;
+    posts: boolean;
+    analytics: boolean;
+    share: boolean;
+    grantedScopes: string[];
+    noticeCode?: string;
+    noticeMessage?: string;
+  };
   profile?: {
     displayName: string | null;
     handle: string | null;
@@ -167,6 +176,7 @@ export async function syncLinkedInIntegration(workspaceId: string) {
     postsUpdated: number;
     snapshotsWritten: number;
     lastSyncedAt: string;
+    message?: string;
   }>(response);
 }
 
