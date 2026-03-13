@@ -135,6 +135,8 @@ export function ProcessControlPanel({ workspaceId }: { workspaceId: string }) {
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [questionDrafts, setQuestionDrafts] = useState<Record<string, string>>({});
+  const [questionOptionDrafts, setQuestionOptionDrafts] = useState<Record<string, string>>({});
+  const [questionMultiOptionDrafts, setQuestionMultiOptionDrafts] = useState<Record<string, string[]>>({});
   const [draftSectionId, setDraftSectionId] = useState<string | null>(null);
   const [revisionDraft, setRevisionDraft] = useState("");
   const [revisionSummary, setRevisionSummary] = useState("");
@@ -643,6 +645,9 @@ export function ProcessControlPanel({ workspaceId }: { workspaceId: string }) {
               {questions.length ? (
                 questions.map((task) => {
                   const currentDraft = questionDrafts[task.id] || "";
+                  const currentSingleOption = questionOptionDrafts[task.id] || "";
+                  const currentMultiOptions = questionMultiOptionDrafts[task.id] || [];
+                  const optionList = Array.isArray(task.options) ? task.options : [];
                   return (
                     <article key={task.id} className="rounded-xl border border-zinc-200 bg-zinc-50 p-2">
                       <div className="flex flex-wrap items-center gap-1.5">
@@ -659,28 +664,100 @@ export function ProcessControlPanel({ workspaceId }: { workspaceId: string }) {
                       <p className="mt-1 text-sm text-zinc-900">{task.question}</p>
                       {task.status === "OPEN" ? (
                         <div className="mt-2 space-y-1.5">
-                          <textarea
-                            value={currentDraft}
-                            onChange={(event) =>
-                              setQuestionDrafts((previous) => ({
-                                ...previous,
-                                [task.id]: event.target.value,
-                              }))
-                            }
-                            rows={2}
-                            placeholder="Answer to unlock the next step..."
-                            className="w-full resize-y rounded-md border border-zinc-200 px-2 py-1.5 text-xs outline-none"
-                          />
+                          {task.answerType === "single_select" && optionList.length > 0 ? (
+                            <div className="space-y-1.5">
+                              {optionList.map((option) => (
+                                <label key={option.value} className="flex items-center gap-2 rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700">
+                                  <input
+                                    type="radio"
+                                    name={`question-${task.id}`}
+                                    value={option.value}
+                                    checked={currentSingleOption === option.value}
+                                    onChange={() =>
+                                      setQuestionOptionDrafts((previous) => ({
+                                        ...previous,
+                                        [task.id]: option.value,
+                                      }))
+                                    }
+                                  />
+                                  <span>{option.label}</span>
+                                </label>
+                              ))}
+                            </div>
+                          ) : task.answerType === "multi_select" && optionList.length > 0 ? (
+                            <div className="space-y-1.5">
+                              {optionList.map((option) => {
+                                const checked = currentMultiOptions.includes(option.value);
+                                return (
+                                  <label key={option.value} className="flex items-center gap-2 rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700">
+                                    <input
+                                      type="checkbox"
+                                      value={option.value}
+                                      checked={checked}
+                                      onChange={(event) => {
+                                        const enabled = event.target.checked;
+                                        setQuestionMultiOptionDrafts((previous) => {
+                                          const prior = previous[task.id] || [];
+                                          if (enabled) {
+                                            return {
+                                              ...previous,
+                                              [task.id]: Array.from(new Set([...prior, option.value])),
+                                            };
+                                          }
+                                          return {
+                                            ...previous,
+                                            [task.id]: prior.filter((entry) => entry !== option.value),
+                                          };
+                                        });
+                                      }}
+                                    />
+                                    <span>{option.label}</span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <textarea
+                              value={currentDraft}
+                              onChange={(event) =>
+                                setQuestionDrafts((previous) => ({
+                                  ...previous,
+                                  [task.id]: event.target.value,
+                                }))
+                              }
+                              rows={2}
+                              placeholder="Answer to unlock the next step..."
+                              className="w-full resize-y rounded-md border border-zinc-200 px-2 py-1.5 text-xs outline-none"
+                            />
+                          )}
                           <button
                             type="button"
                             onClick={() =>
                               runAction(`answer-${task.id}`, async () => {
-                                const answer = currentDraft.trim();
-                                if (!answer) {
-                                  throw new Error("Answer cannot be empty.");
+                                if (task.answerType === "single_select") {
+                                  const selectedOption = currentSingleOption.trim();
+                                  if (!selectedOption) {
+                                    throw new Error("Please select one option.");
+                                  }
+                                  await answerWorkspaceProcessQuestion(workspaceId, task.id, { selectedOption });
+                                  setQuestionOptionDrafts((previous) => ({ ...previous, [task.id]: "" }));
+                                } else if (task.answerType === "multi_select") {
+                                  const selectedOptions = currentMultiOptions
+                                    .map((entry) => entry.trim())
+                                    .filter(Boolean);
+                                  if (!selectedOptions.length) {
+                                    throw new Error("Please select at least one option.");
+                                  }
+                                  await answerWorkspaceProcessQuestion(workspaceId, task.id, { selectedOptions });
+                                  setQuestionMultiOptionDrafts((previous) => ({ ...previous, [task.id]: [] }));
+                                } else {
+                                  const answerText = currentDraft.trim();
+                                  if (!answerText) {
+                                    throw new Error("Answer cannot be empty.");
+                                  }
+                                  await answerWorkspaceProcessQuestion(workspaceId, task.id, { answerText });
+                                  setQuestionDrafts((previous) => ({ ...previous, [task.id]: "" }));
                                 }
-                                await answerWorkspaceProcessQuestion(workspaceId, task.id, answer);
-                                setQuestionDrafts((previous) => ({ ...previous, [task.id]: "" }));
                                 await refreshAll(task.processRunId);
                               })
                             }

@@ -32,34 +32,168 @@ export type ArtifactStandardPack = {
   sections: StandardSectionDefinition[];
 };
 
-function toDependencyChain<T extends { key: string; order: number }>(sections: T[]): string[] {
-  const sorted = [...sections].sort((a, b) => a.order - b.order);
-  const deps: string[] = [];
-  for (let index = 0; index < sorted.length; index += 1) {
-    const previous = sorted[index - 1];
-    if (previous) deps.push(previous.key);
-  }
-  return deps;
-}
+export type BusinessStrategyNichePackId =
+  | 'saas_growth'
+  | 'local_service'
+  | 'creator_brand'
+  | 'commerce_growth';
+
+export type BusinessStrategyNichePackDefinition = {
+  id: BusinessStrategyNichePackId;
+  label: string;
+  sectionKeys: string[];
+  signalKeywords: string[];
+};
+
+const BUSINESS_STRATEGY_CORE_SECTIONS: StandardSectionDefinition[] = BUSINESS_STRATEGY_RUBRIC
+  .map((section, index, source) => ({
+    key: section.key,
+    title: section.title,
+    framework: section.framework,
+    order: section.order,
+    minWords: section.minWords,
+    minEvidence: section.minEvidence,
+    requiredInputs: section.requiredInputs,
+    exitCriteria: section.exitCriteria,
+    dependsOn: index > 0 ? [source[index - 1].key] : [],
+  }))
+  .sort((a, b) => a.order - b.order);
+
+const BUSINESS_STRATEGY_NICHE_SECTIONS: StandardSectionDefinition[] = [
+  {
+    key: 'saas_growth_model',
+    title: 'SaaS Growth Model',
+    framework: 'Acquisition -> Activation -> Retention -> Expansion',
+    order: 31,
+    minWords: 170,
+    minEvidence: 2,
+    requiredInputs: [
+      {
+        key: 'pricingModel',
+        label: 'Pricing model',
+        severity: 'IMPORTANT',
+        question: 'What pricing model should this strategy optimize for?',
+        answerType: 'single_select',
+        options: [
+          { value: 'subscription', label: 'Subscription' },
+          { value: 'usage_based', label: 'Usage-based' },
+          { value: 'hybrid', label: 'Hybrid' },
+        ],
+      },
+    ],
+    exitCriteria: [
+      'Defines growth loop assumptions across the SaaS funnel',
+      'Includes measurable activation/retention checkpoints',
+    ],
+    dependsOn: ['go_to_market_execution'],
+  },
+  {
+    key: 'local_demand_capture',
+    title: 'Local Demand Capture',
+    framework: 'Local intent -> Offer fit -> Conversion path',
+    order: 32,
+    minWords: 150,
+    minEvidence: 2,
+    requiredInputs: [
+      {
+        key: 'operateWhere',
+        label: 'Primary service area',
+        severity: 'IMPORTANT',
+        question: 'Which local area should demand capture focus on first?',
+      },
+    ],
+    exitCriteria: [
+      'Prioritizes high-intent local demand channels',
+      'Defines trust and conversion assets for local buyers',
+    ],
+    dependsOn: ['market_context'],
+  },
+  {
+    key: 'creator_distribution_engine',
+    title: 'Creator Distribution Engine',
+    framework: 'Audience signal -> Content loop -> Monetization bridge',
+    order: 33,
+    minWords: 170,
+    minEvidence: 2,
+    requiredInputs: [
+      {
+        key: 'primaryChannel',
+        label: 'Primary channel',
+        severity: 'IMPORTANT',
+        question: 'Which primary channel should the creator distribution system prioritize?',
+        answerType: 'single_select',
+        options: [
+          { value: 'instagram', label: 'Instagram' },
+          { value: 'youtube', label: 'YouTube' },
+          { value: 'tiktok', label: 'TikTok' },
+          { value: 'linkedin', label: 'LinkedIn' },
+        ],
+      },
+    ],
+    exitCriteria: [
+      'Specifies repeatable publishing cadence and feedback loops',
+      'Connects distribution actions to monetization outcomes',
+    ],
+    dependsOn: ['go_to_market_execution'],
+  },
+  {
+    key: 'commerce_conversion_architecture',
+    title: 'Commerce Conversion Architecture',
+    framework: 'Traffic quality -> Product page -> Checkout lift',
+    order: 34,
+    minWords: 170,
+    minEvidence: 2,
+    requiredInputs: [
+      {
+        key: 'averageOrderValue',
+        label: 'Average order value',
+        severity: 'IMPORTANT',
+        question: 'What average order value range should this commerce strategy optimize?',
+      },
+    ],
+    exitCriteria: [
+      'Maps conversion blockers through the commerce funnel',
+      'Defines quick-win experiments for checkout and AOV lift',
+    ],
+    dependsOn: ['offer_and_positioning'],
+  },
+];
+
+const BUSINESS_STRATEGY_NICHE_PACKS: BusinessStrategyNichePackDefinition[] = [
+  {
+    id: 'saas_growth',
+    label: 'SaaS Growth',
+    sectionKeys: ['saas_growth_model'],
+    signalKeywords: ['saas', 'software', 'platform', 'product-led', 'subscription', 'b2b app'],
+  },
+  {
+    id: 'local_service',
+    label: 'Local Service',
+    sectionKeys: ['local_demand_capture'],
+    signalKeywords: ['local', 'clinic', 'agency', 'consulting', 'service business', 'real estate'],
+  },
+  {
+    id: 'creator_brand',
+    label: 'Creator Brand',
+    sectionKeys: ['creator_distribution_engine'],
+    signalKeywords: ['creator', 'influencer', 'content creator', 'media brand', 'personal brand'],
+  },
+  {
+    id: 'commerce_growth',
+    label: 'Commerce Growth',
+    sectionKeys: ['commerce_conversion_architecture'],
+    signalKeywords: ['ecommerce', 'e-commerce', 'dtc', 'shopify', 'retail', 'catalog'],
+  },
+];
 
 const BUSINESS_STRATEGY_PACK: ArtifactStandardPack = {
   artifactType: 'BUSINESS_STRATEGY',
   standardId: 'professor/business_strategy/bat-core',
   standardVersion: 2,
   professorMethod: 'Capstone strategy sequence (context -> diagnosis -> direction -> execution -> governance)',
-  sections: BUSINESS_STRATEGY_RUBRIC
-    .map((section, index, source) => ({
-      key: section.key,
-      title: section.title,
-      framework: section.framework,
-      order: section.order,
-      minWords: section.minWords,
-      minEvidence: section.minEvidence,
-      requiredInputs: section.requiredInputs,
-      exitCriteria: section.exitCriteria,
-      dependsOn: index > 0 ? [source[index - 1].key] : [],
-    }))
-    .sort((a, b) => a.order - b.order),
+  sections: [...BUSINESS_STRATEGY_CORE_SECTIONS, ...BUSINESS_STRATEGY_NICHE_SECTIONS].sort(
+    (a, b) => a.order - b.order
+  ),
 };
 
 const COMPETITOR_AUDIT_PACK: ArtifactStandardPack = {
@@ -436,6 +570,18 @@ export function getArtifactSection(pack: ArtifactStandardPack, sectionKey: strin
   const normalized = String(sectionKey || '').trim().toLowerCase();
   if (!normalized) return null;
   return pack.sections.find((section) => section.key.toLowerCase() === normalized) || null;
+}
+
+export function listBusinessStrategyCoreSectionKeys(): string[] {
+  return BUSINESS_STRATEGY_CORE_SECTIONS.map((section) => section.key);
+}
+
+export function listBusinessStrategyNichePacks(): BusinessStrategyNichePackDefinition[] {
+  return BUSINESS_STRATEGY_NICHE_PACKS.map((pack) => ({
+    ...pack,
+    sectionKeys: [...pack.sectionKeys],
+    signalKeywords: [...pack.signalKeywords],
+  }));
 }
 
 export function defaultSectionDependencies(pack: ArtifactStandardPack): Record<string, string[]> {

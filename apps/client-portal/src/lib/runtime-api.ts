@@ -453,6 +453,7 @@ export type ProcessRunStatus =
 
 export type ProcessQuestionSeverity = "BLOCKER" | "IMPORTANT" | "OPTIONAL";
 export type ProcessQuestionStatus = "OPEN" | "ANSWERED" | "DISMISSED";
+export type ProcessQuestionAnswerType = "single_select" | "multi_select" | "text";
 export type ProcessRequestMode = "single_doc" | "section_bundle" | "multi_doc_bundle";
 export type ProcessArtifactType =
   | "BUSINESS_STRATEGY"
@@ -521,6 +522,10 @@ export type ProcessQuestionTaskDto = {
   question: string;
   severity: ProcessQuestionSeverity;
   status: ProcessQuestionStatus;
+  answerType?: ProcessQuestionAnswerType;
+  options?: Array<{ value: string; label: string }>;
+  suggestedAnswers?: string[];
+  sourceSectionKey?: string | null;
   surfacesJson?: unknown;
   answerJson?: unknown;
   answeredAt?: string | null;
@@ -708,15 +713,35 @@ export async function listWorkspaceProcessQuestions(workspaceId: string, runId: 
   return parseJson<{ ok: boolean; questions: ProcessQuestionTaskDto[] }>(response);
 }
 
+export async function fetchWorkspaceActiveProcessQuestion(workspaceId: string) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/process-questions/active`, {
+    method: "GET",
+    cache: "no-store",
+    credentials: "include",
+  });
+  return parseJson<{ ok: boolean; question: ProcessQuestionTaskDto | null }>(response);
+}
+
 export async function answerWorkspaceProcessQuestion(
   workspaceId: string,
   taskId: string,
-  answer: unknown
+  answer:
+    | unknown
+    | {
+        answer?: unknown;
+        answerText?: string;
+        selectedOption?: string;
+        selectedOptions?: string[];
+      }
 ) {
+  const payload =
+    answer && typeof answer === "object" && !Array.isArray(answer)
+      ? (answer as Record<string, unknown>)
+      : { answer };
   const response = await fetch(`/api/portal/workspaces/${workspaceId}/question-tasks/${taskId}/answer`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ answer }),
+    body: JSON.stringify(payload),
     credentials: "include",
   });
   return parseJson<{ ok: boolean; run: ProcessRunDto }>(response);

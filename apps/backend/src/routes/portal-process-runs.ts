@@ -3,6 +3,7 @@ import {
   answerQuestionTask,
   createProcessRun,
   escalateProcessRun,
+  getActiveWorkspaceProcessQuestion,
   getProcessRun,
   getProcessRunPlan,
   listProcessRuns,
@@ -197,6 +198,22 @@ router.get('/process-runs/:runId/questions', async (req, res) => {
     return res.json({ ok: true, questions });
   } catch (error: any) {
     const message = String(error?.message || 'Failed to fetch question tasks');
+    const status = message.includes('not found') ? 404 : 500;
+    return res.status(status).json({ error: message });
+  }
+});
+
+router.get('/process-questions/active', async (req, res) => {
+  try {
+    const workspaceId = parseWorkspaceId(req);
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'workspaceId is required' });
+    }
+
+    const question = await getActiveWorkspaceProcessQuestion(workspaceId);
+    return res.json({ ok: true, question });
+  } catch (error: any) {
+    const message = String(error?.message || 'Failed to fetch active process question');
     const status = message.includes('not found') ? 404 : 500;
     return res.status(status).json({ error: message });
   }

@@ -1,8 +1,18 @@
+export type RubricFieldAnswerType = 'single_select' | 'multi_select' | 'text';
+
+export type RubricFieldOption = {
+  value: string;
+  label: string;
+};
+
 export type RubricFieldRequirement = {
   key: string;
   label: string;
   severity: 'BLOCKER' | 'IMPORTANT' | 'OPTIONAL';
   question: string;
+  answerType?: RubricFieldAnswerType;
+  options?: RubricFieldOption[];
+  suggestedAnswers?: string[];
 };
 
 export type BusinessStrategySectionRubric = {
@@ -30,6 +40,7 @@ export const BUSINESS_STRATEGY_RUBRIC: BusinessStrategySectionRubric[] = [
         label: 'Primary goal',
         severity: 'BLOCKER',
         question: 'What is the primary business goal for the next 90 days?',
+        suggestedAnswers: ['Increase qualified leads', 'Increase conversion rate', 'Improve retention'],
       },
       {
         key: 'oneSentenceDescription',
@@ -42,6 +53,7 @@ export const BUSINESS_STRATEGY_RUBRIC: BusinessStrategySectionRubric[] = [
         label: 'Target audience',
         severity: 'IMPORTANT',
         question: 'Who is the most important audience segment for this strategy?',
+        suggestedAnswers: ['Decision makers', 'Small business owners', 'Niche community segment'],
       },
     ],
     exitCriteria: [
@@ -189,18 +201,37 @@ export const BUSINESS_STRATEGY_RUBRIC: BusinessStrategySectionRubric[] = [
         label: 'Language',
         severity: 'IMPORTANT',
         question: 'What language should market-facing communication prioritize?',
+        answerType: 'single_select',
+        options: [
+          { value: 'english', label: 'English' },
+          { value: 'arabic', label: 'Arabic' },
+          { value: 'bilingual', label: 'Bilingual (English + Arabic)' },
+        ],
       },
       {
         key: 'planningHorizon',
         label: 'Planning horizon',
         severity: 'IMPORTANT',
         question: 'What planning horizon should this strategy prioritize?',
+        answerType: 'single_select',
+        options: [
+          { value: '30_days', label: '30 days' },
+          { value: '60_days', label: '60 days' },
+          { value: '90_days', label: '90 days' },
+          { value: '180_days', label: '180 days' },
+        ],
       },
       {
         key: 'autonomyLevel',
         label: 'Autonomy level',
         severity: 'OPTIONAL',
         question: 'Should execution be mostly assistive or mostly autonomous?',
+        answerType: 'single_select',
+        options: [
+          { value: 'assistive', label: 'Assistive' },
+          { value: 'hybrid', label: 'Hybrid' },
+          { value: 'autonomous', label: 'Autonomous' },
+        ],
       },
     ],
     exitCriteria: [
@@ -234,6 +265,12 @@ export const BUSINESS_STRATEGY_RUBRIC: BusinessStrategySectionRubric[] = [
         label: 'Budget sensitivity',
         severity: 'IMPORTANT',
         question: 'How budget-constrained is execution?',
+        answerType: 'single_select',
+        options: [
+          { value: 'high_constraint', label: 'High constraint' },
+          { value: 'moderate_constraint', label: 'Moderate constraint' },
+          { value: 'low_constraint', label: 'Low constraint' },
+        ],
       },
     ],
     exitCriteria: [

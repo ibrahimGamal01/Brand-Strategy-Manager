@@ -1,4 +1,5 @@
 import {
+  ProcessQuestionTask,
   ProcessEscalationStatus,
   ProcessGateStatus,
   ProcessQuestionSeverity,
@@ -39,6 +40,7 @@ import {
   processControlV2DefaultMaxRetries,
   processControlV2DefaultMaxRetryWithEvidence,
 } from './feature-flags';
+import { planBusinessStrategyHeaders } from './header-planner';
 
 type ProcessRunRecord = Prisma.ProcessRunGetPayload<{
   include: {
@@ -122,6 +124,9 @@ type SectionFieldRequirement = {
   label: string;
   severity: 'BLOCKER' | 'IMPORTANT' | 'OPTIONAL';
   question: string;
+  answerType: 'single_select' | 'multi_select' | 'text';
+  options: Array<{ value: string; label: string }>;
+  suggestedAnswers: string[];
 };
 
 type SectionContract = {
@@ -146,6 +151,29 @@ function normalizeSeverity(value: unknown): SectionFieldRequirement['severity'] 
   return 'OPTIONAL';
 }
 
+function normalizeAnswerType(value: unknown): SectionFieldRequirement['answerType'] {
+  const raw = normalizeText(value).toLowerCase();
+  if (raw === 'single_select' || raw === 'multi_select') return raw;
+  return 'text';
+}
+
+function parseQuestionOptions(value: unknown): Array<{ value: string; label: string }> {
+  if (!Array.isArray(value)) return [];
+  const normalized = value
+    .map((entry) => asRecord(entry))
+    .map((entry) => ({
+      value: normalizeText(entry.value),
+      label: normalizeText(entry.label) || normalizeText(entry.value),
+    }))
+    .filter((entry) => Boolean(entry.value));
+  return Array.from(new Map(normalized.map((entry) => [entry.value.toLowerCase(), entry])).values());
+}
+
+function parseSuggestedAnswers(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(value.map((entry) => normalizeText(entry)).filter(Boolean))).slice(0, 8);
+}
+
 function asStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.map((entry) => normalizeText(entry)).filter(Boolean);
@@ -161,6 +189,9 @@ function parseRequiredInputs(value: unknown): SectionFieldRequirement[] {
       severity: normalizeSeverity(entry.severity),
       question:
         normalizeText(entry.question) || `Please provide ${normalizeText(entry.label) || normalizeText(entry.key)}.`,
+      answerType: normalizeAnswerType(entry.answerType),
+      options: parseQuestionOptions(entry.options),
+      suggestedAnswers: parseSuggestedAnswers(entry.suggestedAnswers),
     }))
     .filter((entry) => Boolean(entry.key));
 }
@@ -309,9 +340,13 @@ async function ensureQuestionTask(params: {
   runId: string;
   workspaceId: string;
   sectionRunId?: string;
+  sourceSectionKey?: string;
   fieldKey: string;
   question: string;
   severity: ProcessQuestionSeverity;
+  answerType?: SectionFieldRequirement['answerType'];
+  options?: Array<{ value: string; label: string }>;
+  suggestedAnswers?: string[];
   requestedBy?: string;
 }): Promise<void> {
   const existing = await prisma.processQuestionTask.findFirst({
@@ -334,7 +369,13 @@ async function ensureQuestionTask(params: {
       question: params.question,
       severity: params.severity,
       status: ProcessQuestionStatus.OPEN,
-      surfacesJson: toJson([...QUESTION_SURFACES]),
+      surfacesJson: toJson({
+        surfaces: [...QUESTION_SURFACES],
+        answerType: normalizeAnswerType(params.answerType),
+        options: parseQuestionOptions(params.options),
+        suggestedAnswers: parseSuggestedAnswers(params.suggestedAnswers),
+        sourceSectionKey: normalizeText(params.sourceSectionKey) || null,
+      }),
       requestedBy: normalizeText(params.requestedBy) || 'system',
     },
   });
@@ -350,6 +391,10 @@ async function ensureQuestionTask(params: {
       fieldKey: params.fieldKey,
       severity: params.severity,
       surfaces: QUESTION_SURFACES,
+      answerType: normalizeAnswerType(params.answerType),
+      options: parseQuestionOptions(params.options),
+      suggestedAnswers: parseSuggestedAnswers(params.suggestedAnswers),
+      sourceSectionKey: normalizeText(params.sourceSectionKey) || null,
     },
   });
 }
@@ -374,6 +419,129 @@ function buildAvailableInputs(inputData: Record<string, unknown>, answeredTasks:
   }
 
   return merged;
+}
+
+const SECTION_INPUT_ALIASES: Record<string, string[]> = {
+  primaryGoal: ['primaryGoal', 'engineGoal', 'futureGoal'],
+  oneSentenceDescription: ['oneSentenceDescription', 'businessOverview', 'description'],
+  targetAudience: ['targetAudience', 'idealAudience'],
+  idealAudience: ['idealAudience', 'targetAudience'],
+  topProblems: ['topProblems', 'challenges'],
+  mainOffer: ['mainOffer', 'servicesList', 'productsServices'],
+  servicesList: ['servicesList', 'productsServices', 'mainOffer'],
+  questionsBeforeBuying: ['questionsBeforeBuying'],
+  resultsIn90Days: ['resultsIn90Days', 'primaryGoal'],
+  constraints: ['constraints', 'challenges'],
+  niche: ['niche', 'businessType'],
+  operateWhere: ['operateWhere', 'geoScope'],
+  wantClientsWhere: ['wantClientsWhere', 'geoScope'],
+  language: ['language'],
+  planningHorizon: ['planningHorizon'],
+  autonomyLevel: ['autonomyLevel'],
+  budgetSensitivity: ['budgetSensitivity'],
+  competitorInspirationLinks: ['competitorInspirationLinks'],
+};
+
+type EvidenceRow = {
+  id: string;
+  sourceType: string;
+  title: string | null;
+  snippet: string | null;
+  url: string | null;
+  fetchedAt: Date | null;
+};
+
+type CompetitorSeed = {
+  handle: string;
+  profileUrl: string | null;
+};
+
+function extractDomain(value: unknown): string {
+  const raw = normalizeText(value);
+  if (!raw) return '';
+  try {
+    const parsed = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+    return parsed.hostname.replace(/^www\./i, '').toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function inferCompetitorLinksFromEvidence(
+  evidenceRows: EvidenceRow[],
+  discoveredCompetitors: CompetitorSeed[],
+  clientDomain: string
+): string[] {
+  const directCompetitorLinks = discoveredCompetitors
+    .map((item) => normalizeText(item.profileUrl))
+    .filter(Boolean);
+  if (directCompetitorLinks.length > 0) {
+    return Array.from(new Set(directCompetitorLinks)).slice(0, 6);
+  }
+
+  const refs: string[] = [];
+  for (const row of evidenceRows) {
+    const candidate = normalizeText(row.url);
+    if (!candidate) continue;
+    const domain = extractDomain(candidate);
+    if (!domain) continue;
+    if (clientDomain && domain === clientDomain) continue;
+    if (/linkedin\.com/i.test(domain)) continue;
+    refs.push(candidate);
+  }
+  return Array.from(new Set(refs)).slice(0, 6);
+}
+
+function inferLanguageFromEvidence(evidenceRows: EvidenceRow[]): string | null {
+  const sample = evidenceRows
+    .map((row) => `${normalizeText(row.title)} ${normalizeText(row.snippet)}`.trim())
+    .filter(Boolean)
+    .slice(0, 8)
+    .join(' ');
+  if (!sample) return null;
+  if (/[\u0600-\u06FF]/.test(sample)) return 'arabic';
+  return 'english';
+}
+
+function inferFieldFromEvidence(input: {
+  fieldKey: string;
+  availableInputs: Record<string, unknown>;
+  evidenceRows: EvidenceRow[];
+  discoveredCompetitors: CompetitorSeed[];
+  clientDomain: string;
+}): { value: unknown; evidenceRefs: string[] } | null {
+  const aliases = SECTION_INPUT_ALIASES[input.fieldKey] || [];
+  for (const alias of aliases) {
+    if (alias === input.fieldKey) continue;
+    const candidate = input.availableInputs[alias];
+    if (!hasUsableValue(candidate)) continue;
+    return {
+      value: candidate,
+      evidenceRefs: [`input:${alias}`],
+    };
+  }
+
+  if (input.fieldKey === 'competitorInspirationLinks') {
+    const links = inferCompetitorLinksFromEvidence(input.evidenceRows, input.discoveredCompetitors, input.clientDomain);
+    if (links.length > 0) {
+      return {
+        value: links,
+        evidenceRefs: input.evidenceRows.filter((row) => normalizeText(row.url)).slice(0, 6).map((row) => row.id),
+      };
+    }
+  }
+
+  if (input.fieldKey === 'language') {
+    const language = inferLanguageFromEvidence(input.evidenceRows);
+    if (language) {
+      return {
+        value: language,
+        evidenceRefs: input.evidenceRows.slice(0, 4).map((row) => row.id),
+      };
+    }
+  }
+
+  return null;
 }
 
 function pickSectionEvidence(
@@ -690,7 +858,18 @@ async function draftSections(
 
   const workspace = await prisma.researchJob.findUnique({
     where: { id: run.researchJobId },
-    select: { inputData: true },
+    select: {
+      inputData: true,
+      discoveredCompetitors: {
+        where: { isActive: true },
+        orderBy: { relevanceScore: 'desc' },
+        take: 12,
+        select: {
+          handle: true,
+          profileUrl: true,
+        },
+      },
+    },
   });
 
   if (!workspace) throw new Error(`Workspace ${run.researchJobId} not found`);
@@ -706,6 +885,8 @@ async function draftSections(
     },
   });
   const availableInputs = buildAvailableInputs(inputData, answeredTasks);
+  const runtimeAnswersState: Record<string, unknown> = { ...asRecord(inputData.runtimeAnswers) };
+  const clientDomain = extractDomain(inputData.website);
 
   const evidenceRows = await prisma.processEvidenceRecord.findMany({
     where: {
@@ -774,12 +955,66 @@ async function draftSections(
       continue;
     }
 
-    const missing = contract.requiredInputs.filter((field) => !hasUsableValue(availableInputs[field.key]));
+    let missing = contract.requiredInputs.filter((field) => !hasUsableValue(availableInputs[field.key]));
+    if (missing.length > 0) {
+      const hydratedAnswers: Record<string, unknown> = {};
+      const evidenceRefs = new Set<string>();
+      for (const field of missing) {
+        const inferred = inferFieldFromEvidence({
+          fieldKey: field.key,
+          availableInputs,
+          evidenceRows,
+          discoveredCompetitors: workspace.discoveredCompetitors,
+          clientDomain,
+        });
+        if (!inferred || !hasUsableValue(inferred.value)) continue;
+        availableInputs[field.key] = inferred.value;
+        hydratedAnswers[field.key] = inferred.value;
+        for (const ref of inferred.evidenceRefs) {
+          const normalizedRef = normalizeText(ref);
+          if (normalizedRef) evidenceRefs.add(normalizedRef);
+        }
+      }
+
+      if (Object.keys(hydratedAnswers).length > 0) {
+        for (const [fieldKey, value] of Object.entries(hydratedAnswers)) {
+          runtimeAnswersState[fieldKey] = value;
+        }
+        await prisma.researchJob.update({
+          where: { id: run.researchJobId },
+          data: {
+            inputData: toJson({
+              ...inputData,
+              runtimeAnswers: runtimeAnswersState,
+            }),
+          },
+        });
+
+        await logDecisionEvent({
+          runId: run.id,
+          workspaceId: run.researchJobId,
+          stage: ProcessRunStage.SECTION_DRAFTING,
+          ruleId: 'manager/evidence_hydration/v1',
+          inputSnapshot: {
+            sectionKey: sectionRun.sectionKey,
+            missingBeforeHydration: missing.map((field) => field.key),
+          },
+          evidenceRefs: [...evidenceRefs],
+          output: {
+            hydratedFields: Object.keys(hydratedAnswers),
+          },
+        });
+      }
+
+      missing = contract.requiredInputs.filter((field) => !hasUsableValue(availableInputs[field.key]));
+    }
+
     for (const field of missing) {
       await ensureQuestionTask({
         runId: run.id,
         workspaceId: run.researchJobId,
         sectionRunId: sectionRun.id,
+        sourceSectionKey: contract.sectionSlug,
         fieldKey: field.key,
         question: field.question,
         severity:
@@ -788,6 +1023,9 @@ async function draftSections(
             : field.severity === 'IMPORTANT'
               ? ProcessQuestionSeverity.IMPORTANT
               : ProcessQuestionSeverity.OPTIONAL,
+        answerType: field.answerType,
+        options: field.options,
+        suggestedAnswers: field.suggestedAnswers,
         requestedBy: 'manager',
       });
     }
@@ -930,6 +1168,7 @@ async function validateSections(run: ProcessRunRecord): Promise<{ blockerPending
         runId: run.id,
         workspaceId: run.researchJobId,
         sectionRunId: sectionRun.id,
+        sourceSectionKey: contract.sectionSlug,
         fieldKey: `${sectionRun.sectionKey}__draft_missing`,
         question: `No draft exists yet for ${sectionRun.title}. Provide missing context so drafting can continue.`,
         severity: ProcessQuestionSeverity.BLOCKER,
@@ -1016,9 +1255,13 @@ async function validateSections(run: ProcessRunRecord): Promise<{ blockerPending
         runId: run.id,
         workspaceId: run.researchJobId,
         sectionRunId: sectionRun.id,
+        sourceSectionKey: contract.sectionSlug,
         fieldKey: field.key,
         question: field.question,
         severity,
+        answerType: field.answerType,
+        options: field.options,
+        suggestedAnswers: field.suggestedAnswers,
       });
       if (BLOCKER_SEVERITIES.has(severity)) {
         blockerPending = true;
@@ -1751,14 +1994,48 @@ export async function autoStartBusinessStrategyProcessRun(workspaceId: string, o
 
   if (existingActive) return;
 
+  const plannedHeaders = await planBusinessStrategyHeaders({
+    workspaceId: normalizedWorkspaceId,
+    objective: 'Draft a near-complete business strategy in the background.',
+  });
+
   const idempotencyKey = `auto-business-strategy-${new Date().toISOString().slice(0, 13)}-${normalizeText(options?.trigger) || 'intake'}`;
-  await createProcessRun({
+  const run = await createProcessRun({
     workspaceId: normalizedWorkspaceId,
     documentType: ProcessRunDocumentType.BUSINESS_STRATEGY,
-    objective: 'Draft a near-complete business strategy in the background.',
+    objective: plannedHeaders.objective,
+    requestMode: 'section_bundle',
+    targets: plannedHeaders.targets,
     idempotencyKey,
     startedBy: 'system:auto_start',
   });
+
+  const existingPlannerDecision = await prisma.processDecisionEvent.findFirst({
+    where: {
+      processRunId: run.id,
+      ruleId: plannedHeaders.ruleId,
+    },
+    select: { id: true },
+  });
+  if (!existingPlannerDecision) {
+    await prisma.processDecisionEvent.create({
+      data: {
+        processRunId: run.id,
+        researchJobId: normalizedWorkspaceId,
+        stage: ProcessRunStage.INTAKE_READY,
+        ruleId: plannedHeaders.ruleId,
+        inputSnapshotJson: toJson(plannedHeaders.inputSnapshot),
+        evidenceRefsJson: toJson(plannedHeaders.evidenceRefs),
+        outputJson: toJson({
+          objective: plannedHeaders.objective,
+          coreSectionKeys: plannedHeaders.coreSectionKeys,
+          nicheSectionKeys: plannedHeaders.nicheSectionKeys,
+          selectedNichePackId: plannedHeaders.selectedNichePackId,
+          targets: plannedHeaders.targets,
+        }),
+      },
+    });
+  }
 }
 
 export async function getProcessRun(workspaceId: string, runId: string): Promise<ProcessRunRecord> {
@@ -1944,12 +2221,155 @@ export async function escalateProcessRun(input: EscalateProcessRunInput): Promis
 
 export async function listProcessRunQuestions(workspaceId: string, runId: string) {
   const run = await loadRunStrict(workspaceId, runId);
-  return prisma.processQuestionTask.findMany({
+  const rows = await prisma.processQuestionTask.findMany({
     where: {
       processRunId: run.id,
     },
     orderBy: [{ status: 'asc' }, { createdAt: 'asc' }],
+    include: {
+      sectionRun: {
+        select: {
+          sectionKey: true,
+          requiredInputsJson: true,
+        },
+      },
+      processRun: {
+        select: {
+          id: true,
+          stage: true,
+          status: true,
+        },
+      },
+    },
   });
+
+  return rows.map((row) => mapQuestionTaskForPortal(row));
+}
+
+function parseQuestionMetaFromSurfacesJson(value: unknown): {
+  answerType: SectionFieldRequirement['answerType'];
+  options: Array<{ value: string; label: string }>;
+  suggestedAnswers: string[];
+  sourceSectionKey: string | null;
+} {
+  if (Array.isArray(value)) {
+    return {
+      answerType: 'text',
+      options: [],
+      suggestedAnswers: [],
+      sourceSectionKey: null,
+    };
+  }
+
+  const raw = asRecord(value);
+  return {
+    answerType: normalizeAnswerType(raw.answerType),
+    options: parseQuestionOptions(raw.options),
+    suggestedAnswers: parseSuggestedAnswers(raw.suggestedAnswers),
+    sourceSectionKey: normalizeText(raw.sourceSectionKey) || null,
+  };
+}
+
+function findFieldRequirementMeta(requiredInputsJson: unknown, fieldKey: string): SectionFieldRequirement | null {
+  const normalizedField = normalizeText(fieldKey);
+  if (!normalizedField) return null;
+  const fields = parseRequiredInputs(requiredInputsJson);
+  return fields.find((field) => field.key === normalizedField) || null;
+}
+
+function mapQuestionTaskForPortal(
+  task: ProcessQuestionTask & {
+    sectionRun?: { sectionKey: string; requiredInputsJson: Prisma.JsonValue | null } | null;
+    processRun?: { id: string; stage: ProcessRunStage; status: ProcessRunStatus } | null;
+  }
+) {
+  const fromSurfaces = parseQuestionMetaFromSurfacesJson(task.surfacesJson);
+  const fallbackFieldMeta = findFieldRequirementMeta(task.sectionRun?.requiredInputsJson, task.fieldKey);
+
+  return {
+    id: task.id,
+    answerType: fromSurfaces.answerType || fallbackFieldMeta?.answerType || 'text',
+    options: fromSurfaces.options.length ? fromSurfaces.options : fallbackFieldMeta?.options || [],
+    suggestedAnswers: fromSurfaces.suggestedAnswers.length
+      ? fromSurfaces.suggestedAnswers
+      : fallbackFieldMeta?.suggestedAnswers || [],
+    sourceSectionKey:
+      fromSurfaces.sourceSectionKey || normalizeText(task.sectionRun?.sectionKey) || null,
+    processRunId: task.processRunId,
+    sectionRunId: task.sectionRunId,
+    fieldKey: task.fieldKey,
+    question: task.question,
+    severity: task.severity,
+    status: task.status,
+    surfacesJson: task.surfacesJson,
+    answerJson: task.answerJson,
+    answeredAt: task.answeredAt,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+  };
+}
+
+export async function getActiveWorkspaceProcessQuestion(workspaceId: string) {
+  const normalizedWorkspaceId = normalizeText(workspaceId);
+  if (!normalizedWorkspaceId) {
+    throw new Error('workspaceId is required');
+  }
+
+  const rows = await prisma.processQuestionTask.findMany({
+    where: {
+      researchJobId: normalizedWorkspaceId,
+      status: ProcessQuestionStatus.OPEN,
+      severity: {
+        in: [ProcessQuestionSeverity.BLOCKER, ProcessQuestionSeverity.IMPORTANT],
+      },
+      processRun: {
+        stage: {
+          in: [
+            ProcessRunStage.INTAKE_READY,
+            ProcessRunStage.METHOD_SELECTED,
+            ProcessRunStage.RESEARCHING,
+            ProcessRunStage.SECTION_PLANNING,
+            ProcessRunStage.SECTION_DRAFTING,
+            ProcessRunStage.SECTION_VALIDATING,
+            ProcessRunStage.WAITING_USER,
+            ProcessRunStage.COMPOSING,
+            ProcessRunStage.FINAL_GATE,
+          ],
+        },
+        status: {
+          in: [ProcessRunStatus.RUNNING, ProcessRunStatus.WAITING_USER, ProcessRunStatus.PAUSED],
+        },
+      },
+    },
+    include: {
+      sectionRun: {
+        select: {
+          sectionKey: true,
+          requiredInputsJson: true,
+        },
+      },
+      processRun: {
+        select: {
+          id: true,
+          stage: true,
+          status: true,
+        },
+      },
+    },
+    orderBy: { createdAt: 'asc' },
+    take: 80,
+  });
+
+  if (rows.length === 0) return null;
+  const rank = { BLOCKER: 0, IMPORTANT: 1, OPTIONAL: 2 } as const;
+  rows.sort((left, right) => {
+    const leftRank = rank[left.severity as keyof typeof rank] ?? 9;
+    const rightRank = rank[right.severity as keyof typeof rank] ?? 9;
+    if (leftRank !== rightRank) return leftRank - rightRank;
+    return left.createdAt.getTime() - right.createdAt.getTime();
+  });
+
+  return mapQuestionTaskForPortal(rows[0]);
 }
 
 export async function answerQuestionTask(input: {

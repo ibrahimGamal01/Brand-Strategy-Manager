@@ -5,6 +5,8 @@ import { BUSINESS_STRATEGY_RUBRIC } from '../services/process-control/rubric-bus
 import { buildLinkedinActorQueries } from '../services/process-control/research-adapter';
 import { evaluateSectionPolicyGates, summarizeGateEvaluations } from '../services/process-control/quality-gates';
 import { compileProcessPlan, readPlanFromMetadata } from '../services/process-control/request-compiler';
+import { listBusinessStrategyCoreSectionKeys, listBusinessStrategyNichePacks } from '../services/process-control/standards-registry';
+import { parseQuestionAnswerContract } from '../services/process-control/contracts';
 
 async function main() {
   const highConfidence = selectMethod({
@@ -87,6 +89,39 @@ async function main() {
     )
   );
 
+  const coreSectionKeys = listBusinessStrategyCoreSectionKeys();
+  const nichePacks = listBusinessStrategyNichePacks();
+  assert.ok(coreSectionKeys.length >= 8);
+  assert.ok(nichePacks.length >= 1);
+  const firstNichePack = nichePacks[0];
+  assert.ok(firstNichePack.sectionKeys.length >= 1);
+  const corePlusNiche = compileProcessPlan({
+    objective: 'Scale this SaaS product',
+    requestMode: 'section_bundle',
+    targets: [
+      {
+        artifactType: 'BUSINESS_STRATEGY',
+        sections: [...coreSectionKeys, ...firstNichePack.sectionKeys],
+      },
+    ],
+  });
+  for (const sectionKey of coreSectionKeys) {
+    assert.ok(
+      corePlusNiche.sections.some(
+        (section) =>
+          section.artifactType === 'BUSINESS_STRATEGY' && section.sectionKey === sectionKey
+      )
+    );
+  }
+  for (const sectionKey of firstNichePack.sectionKeys) {
+    assert.ok(
+      corePlusNiche.sections.some(
+        (section) =>
+          section.artifactType === 'BUSINESS_STRATEGY' && section.sectionKey === sectionKey
+      )
+    );
+  }
+
   const hydratedPlan = readPlanFromMetadata({
     phase2: {
       requestMode: compiled.mode,
@@ -96,6 +131,13 @@ async function main() {
   });
   assert.ok(hydratedPlan);
   assert.equal(hydratedPlan?.planHash, compiled.planHash);
+
+  const textAnswerContract = parseQuestionAnswerContract({ answerText: 'English' });
+  assert.equal(textAnswerContract.answer, 'English');
+  const singleSelectContract = parseQuestionAnswerContract({ selectedOption: '90_days' });
+  assert.equal(singleSelectContract.answer, '90_days');
+  const multiSelectContract = parseQuestionAnswerContract({ selectedOptions: ['instagram', 'linkedin'] });
+  assert.deepEqual(multiSelectContract.answer, ['instagram', 'linkedin']);
 
   const linkedinQueries = buildLinkedinActorQueries({
     actorName: 'Ali Brand',

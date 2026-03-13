@@ -104,16 +104,54 @@ export function parseSectionRevisionContract(payload: unknown): SectionRevisionC
   };
 }
 
-export function parseQuestionAnswerContract(payload: unknown): { answer: unknown } {
+function normalizeStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(value.map((entry) => normalizeText(entry)).filter(Boolean))).slice(0, 20);
+}
+
+export function parseQuestionAnswerContract(payload: unknown): {
+  answer: unknown;
+  answerText?: string;
+  selectedOption?: string;
+  selectedOptions?: string[];
+} {
   const body = payload && typeof payload === 'object' && !Array.isArray(payload)
     ? (payload as Record<string, unknown>)
     : {};
 
-  if (!Object.prototype.hasOwnProperty.call(body, 'answer')) {
-    throw new Error('answer is required');
+  const answerText = normalizeText(body.answerText);
+  const selectedOption = normalizeText(body.selectedOption);
+  const selectedOptions = normalizeStringList(body.selectedOptions);
+
+  if (Object.prototype.hasOwnProperty.call(body, 'answer')) {
+    return {
+      answer: body.answer,
+      ...(answerText ? { answerText } : {}),
+      ...(selectedOption ? { selectedOption } : {}),
+      ...(selectedOptions.length ? { selectedOptions } : {}),
+    };
   }
 
-  return {
-    answer: body.answer,
-  };
+  if (selectedOptions.length > 0) {
+    return {
+      answer: selectedOptions,
+      selectedOptions,
+    };
+  }
+
+  if (selectedOption) {
+    return {
+      answer: selectedOption,
+      selectedOption,
+    };
+  }
+
+  if (answerText) {
+    return {
+      answer: answerText,
+      answerText,
+    };
+  }
+
+  throw new Error('answer is required');
 }
