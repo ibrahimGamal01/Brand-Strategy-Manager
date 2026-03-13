@@ -25,6 +25,29 @@ export interface PortalSignupResponse {
   debugVerificationToken?: string;
 }
 
+export interface LinkedInIntegrationStatus {
+  available: boolean;
+  featureEnabled: boolean;
+  configured: boolean;
+  status: "unavailable" | "not_connected" | "connected" | "syncing" | "action_required" | "error" | "disconnected";
+  reasonCode?: string;
+  reasonMessage?: string;
+  profile?: {
+    displayName: string | null;
+    handle: string | null;
+    profileUrl: string | null;
+    profileImageUrl: string | null;
+    headline: string | null;
+    email: string | null;
+  };
+  sync?: {
+    lastSyncedAt: string | null;
+    nextSyncAt: string | null;
+    importedPosts: number;
+    latestSnapshotAt: string | null;
+  };
+}
+
 async function parseJson<T>(response: Response): Promise<T> {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -112,4 +135,45 @@ export async function resendPortalVerification(email?: string) {
     body: JSON.stringify(email ? { email } : {}),
   });
   return parseJson<{ ok: boolean; alreadyVerified?: boolean; delivery?: { provider: string; id?: string } }>(response);
+}
+
+export async function getLinkedInIntegrationStatus(workspaceId: string) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/integrations/linkedin`, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+  });
+  return parseJson<LinkedInIntegrationStatus>(response);
+}
+
+export async function startLinkedInConnect(workspaceId: string) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/integrations/linkedin/connect/start`, {
+    method: "POST",
+    credentials: "include",
+  });
+  return parseJson<{ ok: boolean; authUrl: string }>(response);
+}
+
+export async function syncLinkedInIntegration(workspaceId: string) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/integrations/linkedin/sync`, {
+    method: "POST",
+    credentials: "include",
+  });
+  return parseJson<{
+    ok: boolean;
+    connectionId: string;
+    connectionStatus: string;
+    postsUpserted: number;
+    postsUpdated: number;
+    snapshotsWritten: number;
+    lastSyncedAt: string;
+  }>(response);
+}
+
+export async function disconnectLinkedInIntegration(workspaceId: string) {
+  const response = await fetch(`/api/portal/workspaces/${workspaceId}/integrations/linkedin/disconnect`, {
+    method: "POST",
+    credentials: "include",
+  });
+  return parseJson<{ ok: boolean; connectionStatus: string; dataRetained: boolean }>(response);
 }

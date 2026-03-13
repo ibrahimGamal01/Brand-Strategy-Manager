@@ -64,6 +64,7 @@
         "test:instagram-session-pool": "tsx src/scripts/test-instagram-session-pool.ts",
         "test:instagram-graphql-retry-guard": "tsx src/scripts/test-instagram-graphql-retry-guard.ts",
         "test:instagram-service-graphql-cooldown": "tsx src/scripts/test-instagram-service-graphql-cooldown.ts",
+        "test:linkedin-integration": "tsx src/scripts/test-linkedin-integration.ts",
         "test:instagram-reliability": "npm run test:instagram-session-pool && npm run test:instagram-graphql-retry-guard && npm run test:instagram-service-graphql-cooldown",
         "export:chat-training": "tsx -r dotenv/config src/scripts/export-chat-training-samples.ts",
         "test:camoufox": "tsx src/scripts/test-camoufox-integration.ts",

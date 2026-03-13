@@ -63,6 +63,13 @@ import {
   startPortalSignupEnrichment,
   syncPortalIntakeContinuousEnrichment,
 } from '../services/portal/portal-signup-enrichment';
+import {
+  completeLinkedInOAuthCallback,
+  disconnectLinkedInConnection,
+  getLinkedInIntegrationStatus,
+  startLinkedInOAuth,
+  syncLinkedInConnection,
+} from '../services/portal/portal-linkedin';
 import portalProcessRunsRouter from './portal-process-runs';
 import portalViralStudioRouter from './portal-viral-studio';
 
@@ -669,11 +676,105 @@ router.post('/auth/resend-verification', async (req, res) => {
   }
 });
 
+router.get('/integrations/linkedin/callback', async (req, res) => {
+  await completeLinkedInOAuthCallback(req, res);
+});
+
 router.get('/workspaces', requirePortalAuth, async (req, res) => {
   const session = (req as AuthedPortalRequest).portalSession!;
   return res.json({
     workspaces: toPortalWorkspacePayload(session.user as any),
   });
+});
+
+router.get('/workspaces/:workspaceId/integrations/linkedin', requirePortalAuth, requireWorkspaceMembership, async (req, res) => {
+  try {
+    const session = (req as AuthedPortalRequest).portalSession!;
+    const workspaceId = safeString(req.params.workspaceId);
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'workspaceId is required' });
+    }
+    const status = await getLinkedInIntegrationStatus({
+      workspaceId,
+      userId: session.user.id,
+    });
+    return res.json(status);
+  } catch (error: any) {
+    return res.status(500).json({ error: 'LINKEDIN_STATUS_FAILED', details: error?.message || String(error) });
+  }
+});
+
+router.post('/workspaces/:workspaceId/integrations/linkedin/connect/start', requirePortalAuth, requireWorkspaceMembership, async (req, res) => {
+  try {
+    const session = (req as AuthedPortalRequest).portalSession!;
+    const workspaceId = safeString(req.params.workspaceId);
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'workspaceId is required' });
+    }
+    const payload = await startLinkedInOAuth({
+      req,
+      res,
+      workspaceId,
+      userId: session.user.id,
+    });
+    return res.json({
+      ok: true,
+      ...payload,
+    });
+  } catch (error: any) {
+    const code = String(error?.code || '');
+    const status = code === 'FEATURE_DISABLED' || code === 'MISSING_CONFIG' ? 409 : 500;
+    return res.status(status).json({
+      ok: false,
+      error: code || 'LINKEDIN_CONNECT_START_FAILED',
+      details: error?.message || String(error),
+    });
+  }
+});
+
+router.post('/workspaces/:workspaceId/integrations/linkedin/sync', requirePortalAuth, requireWorkspaceMembership, async (req, res) => {
+  try {
+    const session = (req as AuthedPortalRequest).portalSession!;
+    const workspaceId = safeString(req.params.workspaceId);
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'workspaceId is required' });
+    }
+    const result = await syncLinkedInConnection({
+      workspaceId,
+      userId: session.user.id,
+    });
+    return res.json({
+      ok: true,
+      ...result,
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      ok: false,
+      error: 'LINKEDIN_SYNC_FAILED',
+      details: error?.message || String(error),
+    });
+  }
+});
+
+router.post('/workspaces/:workspaceId/integrations/linkedin/disconnect', requirePortalAuth, requireWorkspaceMembership, async (req, res) => {
+  try {
+    const session = (req as AuthedPortalRequest).portalSession!;
+    const workspaceId = safeString(req.params.workspaceId);
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'workspaceId is required' });
+    }
+    const result = await disconnectLinkedInConnection({
+      workspaceId,
+      userId: session.user.id,
+    });
+    return res.json(result);
+  } catch (error: any) {
+    return res.status(500).json({
+      ok: false,
+      error: 'LINKEDIN_DISCONNECT_FAILED',
+      details: error?.message || String(error),
+    });
+  }
 });
 
 router.get('/workspaces/:workspaceId/library', requirePortalAuth, requireWorkspaceMembership, async (req, res) => {
